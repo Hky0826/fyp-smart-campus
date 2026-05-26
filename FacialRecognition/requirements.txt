@@ -4,9 +4,9 @@ opencv-python
 scipy
 pandas
 deepface
-tensorflow-cpu
+tensorflow
 mtcnn
-cv2
+tf-keras
 
 # Install all dependencies:
 # pip install -r requirements.txt
