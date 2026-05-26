@@ -1,6 +1,6 @@
 # Requirements for FacialRecognition
 numpy
-opencv-python
+opencv-python-headless
 scipy
 pandas
 deepface
