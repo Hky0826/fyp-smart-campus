@@ -1,39 +1,53 @@
 # edge_db_setup.py  — run once on the edge device
 import sqlite3
 
-conn = sqlite3.connect("edge_local.db")   # creates the file if not exists
-cur = conn.cursor()
+def initialize_edge_db():
+    # Connects to or creates the local SQLite file
+    conn = sqlite3.connect("edge_local.db") 
+    cur = conn.cursor()
 
-cur.executescript("""
-    PRAGMA journal_mode = WAL;    -- better for concurrent reads
-    PRAGMA foreign_keys = ON;
+    # Execute the updated schema based on Section 7 of the proposal
+    cur.executescript("""
+        PRAGMA journal_mode = WAL;    -- Optimizes concurrent reads/writes
+        PRAGMA foreign_keys = ON;     -- Enforces relational constraints
 
-    -- Minimal user table for offline face matching
-    CREATE TABLE IF NOT EXISTS users (
-        user_id    INTEGER PRIMARY KEY,
-        full_name  TEXT NOT NULL,
-        role_name  TEXT NOT NULL
-    );
+        -- Table E.1: edge_users 
+        -- Stores flattened user profile and biometric vector for offline matching
+        CREATE TABLE IF NOT EXISTS edge_users (
+            user_id         INTEGER PRIMARY KEY NOT NULL,
+            role_name       TEXT NOT NULL,
+            face_vector     BLOB NOT NULL,
+            is_active       INTEGER NOT NULL DEFAULT 1,
+            last_synced_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
 
-    -- Synced face embeddings from MySQL (pulled during enrollment)
-    CREATE TABLE IF NOT EXISTS face_embeddings (
-        embedding_id   INTEGER PRIMARY KEY,
-        user_id        INTEGER NOT NULL REFERENCES users(user_id),
-        embedding_blob BLOB NOT NULL,
-        synced_at      TEXT DEFAULT (datetime('now'))
-    );
+        -- Table E.2: edge_auth_logs
+        -- Buffers local authentication events until pushed to the cloud
+        CREATE TABLE IF NOT EXISTS edge_auth_logs (
+            log_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id          INTEGER REFERENCES edge_users(user_id),
+            auth_status      TEXT NOT NULL,    -- 'SUCCESS', 'FAILED', or 'SPOOFING'
+            confidence_score REAL,
+            timestamp        DATETIME DEFAULT CURRENT_TIMESTAMP,
+            sync_status      INTEGER NOT NULL DEFAULT 0  -- 0 = pending, 1 = pushed
+        );
 
-    -- Local auth events buffered until cloud sync
-    CREATE TABLE IF NOT EXISTS auth_events_buffer (
-        id           INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id      INTEGER,
-        event_type   TEXT NOT NULL,
-        similarity   REAL,
-        logged_at    TEXT DEFAULT (datetime('now')),
-        synced       INTEGER DEFAULT 0    -- 0 = pending, 1 = pushed to MySQL
-    );
-""")
+        -- Table E.3: edge_device_info
+        -- Caches device context for JWT generation and spatial routing
+        CREATE TABLE IF NOT EXISTS edge_device_info (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id          TEXT NOT NULL,
+            device_name        TEXT NOT NULL,
+            location_id        INTEGER NOT NULL,
+            location_name      TEXT NOT NULL,
+            navigation_node_id TEXT,
+            last_cloud_sync    DATETIME
+        );
+    """)
 
-conn.commit()
-conn.close()
-print("Edge SQLite database ready.")
+    conn.commit()
+    conn.close()
+    print("Edge SQLite database schema successfully updated and ready.")
+
+if __name__ == "__main__":
+    initialize_edge_db()
