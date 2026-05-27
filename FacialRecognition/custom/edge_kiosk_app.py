@@ -16,6 +16,16 @@ import cv2
 import os
 import sys
 
+# Force Python to see the local `custom` folder as a root directory so sibling
+# packages like `backbones` resolve correctly on edge-device layouts.
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if CURRENT_DIR not in sys.path:
+    sys.path.insert(0, CURRENT_DIR)
+
+PROJECT_PARENT = os.path.abspath(os.path.join(CURRENT_DIR, '..'))
+if PROJECT_PARENT not in sys.path:
+    sys.path.insert(0, PROJECT_PARENT)
+
 if __package__:
     from .camera import CameraCapture
     from .detector import YuNetDetector
@@ -23,17 +33,13 @@ if __package__:
     from .storage import StorageManager
     from .matcher import Matcher
 else:
-    # When executed directly, ensure the local directory is on sys.path
-    script_dir = os.path.dirname(__file__)
-    if script_dir not in sys.path:
-        sys.path.insert(0, script_dir)
     from camera import CameraCapture
     from detector import YuNetDetector
     from embedder import EdgeFaceEmbedder
     from storage import StorageManager
     from matcher import Matcher
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = CURRENT_DIR
 
 # Model path placeholders - replace with real paths before running
 FACE_DETECTION_MODEL = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "models", "face_detection_yunet_2023mar_int8bq.onnx"))
