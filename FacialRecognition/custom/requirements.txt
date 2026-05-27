@@ -1,0 +1,16 @@
+torch
+# Requirements for FacialRecognition/custom
+# Core libraries used by modules in the `custom` folder (no versions)
+numpy
+opencv-python-headless
+scipy
+pandas
+deepface
+tensorflow
+mtcnn
+tf-keras
+onnxruntime
+
+# Notes:
+# - `sqlite3` is part of the Python standard library and does not need to be listed here.
+# - If you prefer only the headless OpenCV build, you can remove `opencv-python`.
