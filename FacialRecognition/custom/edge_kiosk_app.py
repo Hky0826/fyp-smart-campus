@@ -33,13 +33,14 @@ else:
     from storage import StorageManager
     from matcher import Matcher
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Model path placeholders - replace with real paths before running
-FACE_DETECTION_MODEL = "face_detection_yunet_2023mar_int8bq.onnx"
-EDGEFACE_MODEL = "edgeface_xxs.pt"
+FACE_DETECTION_MODEL = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "models", "face_detection_yunet_2023mar_int8bq.onnx"))
+EDGEFACE_MODEL = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "models", "edgeface_xxs.pt"))
 
 
-def main_loop(db_path: str = "edge_local.db", cam_index: int = 0, target_resolution: Tuple[int, int] = (640, 480)):
+def main_loop(db_path: str = "edge_local.db", cam_index: int = 4, target_resolution: Tuple[int, int] = (640, 480)):
     storage = StorageManager(db_path)
     storage.ensure_schema()
     db_embeddings = storage.load_embeddings()
