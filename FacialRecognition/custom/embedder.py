@@ -36,19 +36,53 @@ if _CURRENT_DIR not in sys.path:
     sys.path.insert(0, _CURRENT_DIR)
 
 try:
-    # Support both package and relative script execution seamlessly
-    # Try multiple import strategies so `backbones` is found in various run contexts
+    # Try multiple import strategies so `backbones` is found in various run contexts.
+    _get_model = None
+    _HAS_BACKBONES = False
+
+    # 1) Direct import from same folder (if FacialRecognition/custom is on PYTHONPATH)
     try:
         from backbones import get_model as _get_model
+        _HAS_BACKBONES = True
     except Exception:
+        pass
+
+    # 2) Relative package import when running as a package
+    if not _HAS_BACKBONES:
         try:
             from .backbones import get_model as _get_model
+            _HAS_BACKBONES = True
         except Exception:
-            # Final attempt: ensure current dir is on sys.path and import
-            if _CURRENT_DIR not in sys.path:
-                sys.path.insert(0, _CURRENT_DIR)
+            pass
+
+    # 3) Add project parent to sys.path and try again
+    if not _HAS_BACKBONES:
+        project_root = os.path.abspath(os.path.join(_CURRENT_DIR, '..'))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        try:
             from backbones import get_model as _get_model
-    _HAS_BACKBONES = True
+            _HAS_BACKBONES = True
+        except Exception:
+            pass
+
+    # 4) Last-resort: load module directly from file using importlib
+    if not _HAS_BACKBONES:
+        try:
+            import importlib.util
+            backbones_init = os.path.join(_CURRENT_DIR, 'backbones', '__init__.py')
+            if os.path.exists(backbones_init):
+                spec = importlib.util.spec_from_file_location('backbones', backbones_init)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                _get_model = getattr(mod, 'get_model', None)
+                if _get_model is not None:
+                    _HAS_BACKBONES = True
+        except Exception:
+            _HAS_BACKBONES = False
+
+    if not _HAS_BACKBONES:
+        _get_model = None
 except Exception:
     _HAS_BACKBONES = False
     _get_model = None
