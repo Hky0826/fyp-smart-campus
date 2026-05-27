@@ -37,10 +37,17 @@ if _CURRENT_DIR not in sys.path:
 
 try:
     # Support both package and relative script execution seamlessly
-    if __package__:
-        from .backbones import get_model as _get_model
-    else:
+    # Try multiple import strategies so `backbones` is found in various run contexts
+    try:
         from backbones import get_model as _get_model
+    except Exception:
+        try:
+            from .backbones import get_model as _get_model
+        except Exception:
+            # Final attempt: ensure current dir is on sys.path and import
+            if _CURRENT_DIR not in sys.path:
+                sys.path.insert(0, _CURRENT_DIR)
+            from backbones import get_model as _get_model
     _HAS_BACKBONES = True
 except Exception:
     _HAS_BACKBONES = False
@@ -122,10 +129,17 @@ class EdgeFaceEmbedder:
             state_dict = self._extract_state_dict(ckpt)
             
             if not _HAS_BACKBONES or _get_model is None:
-                raise RuntimeError(
-                    'Checkpoint appears to be a state dict. Add local backbones.get_model support '
-                    'or provide a TorchScript model.'
+                msg = (
+                    'Checkpoint appears to be a state dict. The embedder needs an architecture ' 
+                    'builder `backbones.get_model(model_name)` to load this state dict, or you must ' 
+                    'provide a TorchScript model (.pt/.pth) instead.\n'
+                    f'In this run, _HAS_BACKBONES={_HAS_BACKBONES}, model_name={self.model_name!r}.\n'
+                    'Possible fixes:\n'
+                    '- Ensure the `backbones` package is importable (add the containing folder to PYTHONPATH).\n'
+                    "- Run from the project root so relative imports work.\n"
+                    '- Or pass a TorchScript/traced model file to `EdgeFaceEmbedder`.'
                 )
+                raise RuntimeError(msg)
 
             if not self.model_name:
                 raise RuntimeError('Unable to infer model_name; please pass model_name explicitly')
