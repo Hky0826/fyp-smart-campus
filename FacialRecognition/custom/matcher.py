@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Sequence
 
 import numpy as np
 
@@ -32,3 +32,20 @@ class Matcher:
         if best_distance < self.threshold:
             return best_id, float(score)
         return None, float(score)
+
+    def find_best_matrix(
+        self,
+        live_emb: np.ndarray,
+        user_ids: Sequence[int],
+        db_matrix: np.ndarray,
+    ) -> Tuple[Optional[int], float]:
+        if db_matrix.size == 0 or len(user_ids) == 0:
+            return None, 0.0
+
+        similarities = db_matrix @ live_emb
+        best_idx = int(np.argmax(similarities))
+        best_similarity = float(similarities[best_idx])
+        best_distance = 1.0 - best_similarity
+        if best_distance < self.threshold:
+            return int(user_ids[best_idx]), best_similarity
+        return None, best_similarity

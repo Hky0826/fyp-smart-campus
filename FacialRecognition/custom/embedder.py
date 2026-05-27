@@ -10,7 +10,6 @@ This loader also supports standard state-dict checkpoints when a local
 
 from __future__ import annotations
 
-import gc
 import os
 import sys
 from typing import Tuple
@@ -237,7 +236,7 @@ class EdgeFaceEmbedder:
 
         if self._use_torch:
             x = torch.from_numpy(pre).to(self.torch_device)
-            with torch.no_grad():
+            with torch.inference_mode():
                 out = self.torch_model(x)
             emb = out.detach().cpu().numpy().reshape(-1)
         elif self._use_onnx:
@@ -250,7 +249,6 @@ class EdgeFaceEmbedder:
             del pre
         except Exception:
             pass
-        gc.collect()
 
         # L2 normalize
         norm = np.linalg.norm(emb) + 1e-10

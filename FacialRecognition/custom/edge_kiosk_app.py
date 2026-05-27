@@ -7,10 +7,10 @@ and runs the main capture/inference loop.
 from __future__ import annotations
 
 import time
-import gc
-from typing import Tuple, Optional
+from typing import Tuple
 
 import cv2
+import numpy as np
 
 # Flexible imports: support running as a script (no package) or as a package
 import os
@@ -49,7 +49,24 @@ EDGEFACE_MODEL = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "models", "edgef
 def main_loop(db_path: str = "edge_local.db", cam_index: int = 4, target_resolution: Tuple[int, int] = (640, 480)):
     storage = StorageManager(db_path)
     storage.ensure_schema()
-    db_embeddings = storage.load_embeddings()
+    last_db_refresh_time = 0.0
+    db_embeddings = []
+    db_user_ids = []
+    db_embedding_matrix = np.empty((0, 0), dtype=np.float32)
+
+    def refresh_db_cache() -> None:
+        nonlocal db_embeddings, db_user_ids, db_embedding_matrix, last_db_refresh_time
+        db_embeddings = storage.load_embeddings()
+        db_user_ids = [user_id for user_id, _ in db_embeddings]
+        if db_embeddings:
+            db_embedding_matrix = np.vstack([vec for _, vec in db_embeddings]).astype(np.float32, copy=False)
+            norms = np.linalg.norm(db_embedding_matrix, axis=1, keepdims=True) + 1e-10
+            db_embedding_matrix = db_embedding_matrix / norms
+        else:
+            db_embedding_matrix = np.empty((0, 0), dtype=np.float32)
+        last_db_refresh_time = time.time()
+
+    refresh_db_cache()
 
     camera = CameraCapture(index=cam_index, width=target_resolution[0], height=target_resolution[1])
     camera.open()
@@ -72,6 +89,7 @@ def main_loop(db_path: str = "edge_local.db", cam_index: int = 4, target_resolut
     frame_idx = 0
     last_event_time = 0.0
     cooldown_seconds = 3.0
+    db_refresh_seconds = 2.0
     heavy_interval = 10
 
     status_text = "Waiting for face..."
@@ -114,11 +132,12 @@ def main_loop(db_path: str = "edge_local.db", cam_index: int = 4, target_resolut
                             del crop
                         except Exception:
                             pass
-                        gc.collect()
 
-                        # refresh DB cache and match
-                        db_embeddings = storage.load_embeddings()
-                        matched_id, confidence = matcher.find_best(emb, db_embeddings)
+                        # refresh DB cache periodically, then match against a normalized matrix
+                        if (now - last_db_refresh_time) > db_refresh_seconds:
+                            refresh_db_cache()
+
+                        matched_id, confidence = matcher.find_best_matrix(emb, db_user_ids, db_embedding_matrix)
                         duration_ms = (time.time() - now) * 1000.0
                         if matched_id is not None:
                             status_text = f"AUTHORIZED {matched_id} {confidence:.3f}"
