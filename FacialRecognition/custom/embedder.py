@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import gc
 import os
+import sys
 from typing import Tuple
 
 import cv2
@@ -29,8 +30,13 @@ try:
 except Exception:
     _HAS_ONNXRT = False
 
+# FIX 1: Ensure Python can see the 'backbones' folder relative to this script
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _CURRENT_DIR not in sys.path:
+    sys.path.insert(0, _CURRENT_DIR)
+
 try:
-    # Support both package and script execution
+    # Support both package and relative script execution seamlessly
     if __package__:
         from .backbones import get_model as _get_model
     else:
@@ -51,8 +57,10 @@ class EdgeFaceEmbedder:
     ):
         self.model_path = model_path
         self.device = device
-        self.model_name = model_name
+        # FIX 2: Infer name before mapping fallback, otherwise filename matching fails if None
         self.checkpoint_path = checkpoint_path or model_path
+        self.model_name = model_name or self._infer_model_name(self.checkpoint_path)
+        
         self._use_torch = False
         self._use_onnx = False
         self.torch_model = None
@@ -88,7 +96,7 @@ class EdgeFaceEmbedder:
         """Initialize torch backend with TorchScript-first, then state-dict fallback."""
         dev = torch.device(self.device) if self.device is not None else torch.device('cpu')
 
-        # 1) Prefer TorchScript/traced artifacts (existing behavior)
+        # 1) Prefer TorchScript/traced artifacts
         try:
             self.torch_model = torch.jit.load(self.checkpoint_path, map_location=dev)
             self.torch_model.eval()
@@ -111,18 +119,18 @@ class EdgeFaceEmbedder:
 
         # If checkpoint is a state dict, load via backbones.get_model(model_name)
         if isinstance(ckpt, dict):
+            state_dict = self._extract_state_dict(ckpt)
+            
             if not _HAS_BACKBONES or _get_model is None:
                 raise RuntimeError(
                     'Checkpoint appears to be a state dict. Add local backbones.get_model support '
                     'or provide a TorchScript model.'
                 )
 
-            resolved_name = self.model_name or self._infer_model_name(self.checkpoint_path)
-            if not resolved_name:
+            if not self.model_name:
                 raise RuntimeError('Unable to infer model_name; please pass model_name explicitly')
 
-            model = _get_model(resolved_name)
-            state_dict = self._extract_state_dict(ckpt)
+            model = _get_model(self.model_name)
 
             try:
                 model.load_state_dict(state_dict, strict=True)
@@ -167,8 +175,7 @@ class EdgeFaceEmbedder:
 
     @staticmethod
     def preprocess(crop: np.ndarray, target: Tuple[int, int] = (112, 112)) -> np.ndarray:
-        # Equivalent to torchvision pipeline:
-        # Resize -> ToTensor -> Normalize(mean=.5,std=.5)
+        # Equivalent to torchvision pipeline: Resize -> ToTensor -> Normalize(mean=.5,std=.5)
         img = cv2.resize(crop, target, interpolation=cv2.INTER_LINEAR)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = img.astype(np.float32) / 255.0
@@ -181,7 +188,6 @@ class EdgeFaceEmbedder:
         pre = self.preprocess(crop)
 
         if self._use_torch:
-            # Convert to torch tensor and run model
             x = torch.from_numpy(pre).to(self.torch_device)
             with torch.no_grad():
                 out = self.torch_model(x)
@@ -192,7 +198,6 @@ class EdgeFaceEmbedder:
         else:
             raise RuntimeError('No backend available for embedding')
 
-        # Zero-image enforcement: delete preprocess buffer
         try:
             del pre
         except Exception:
