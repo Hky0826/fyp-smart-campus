@@ -43,8 +43,11 @@ def replace_linear_with_lowrank_recursive_2(model, rank_ratio=0.2):
             if module.bias is not None:
                 bias=True
             lowrank_module = LoRaLin(in_features, out_features, rank, bias)
-
-            setattr(model, name, lowrank_module)
+            # Support both attribute-style modules and containers like Sequential
+            try:
+                model._modules[name] = lowrank_module
+            except Exception:
+                setattr(model, name, lowrank_module)
         else:
             replace_linear_with_lowrank_recursive_2(module, rank_ratio)
 
@@ -62,9 +65,32 @@ class TimmFRWrapperV2(nn.Module):
         super().__init__()
         self.featdim = featdim
         self.model_name = model_name
-        
-        self.model = timm.create_model(self.model_name)
-        self.model.reset_classifier(self.featdim)
+        # Create timm model with conservative defaults (no pretrained weights)
+        try:
+            self.model = timm.create_model(self.model_name, pretrained=False)
+        except Exception:
+            # Fall back to a simpler create_model call if signature differs
+            self.model = timm.create_model(self.model_name)
+
+        # Try to reset the classifier to produce `featdim` outputs. Different
+        # timm versions expose different reset interfaces, so try several fallbacks.
+        try:
+            # common signature
+            self.model.reset_classifier(self.featdim)
+        except TypeError:
+            try:
+                self.model.reset_classifier(num_classes=self.featdim)
+            except Exception:
+                # Best-effort manual replacement for common attribute names
+                if hasattr(self.model, 'classifier') and hasattr(self.model.classifier, 'in_features'):
+                    in_f = self.model.classifier.in_features
+                    self.model.classifier = nn.Linear(in_f, self.featdim)
+                elif hasattr(self.model, 'head') and hasattr(self.model.head, 'in_features'):
+                    in_f = self.model.head.in_features
+                    self.model.head = nn.Linear(in_f, self.featdim)
+                elif hasattr(self.model, 'fc') and hasattr(self.model.fc, 'in_features'):
+                    in_f = self.model.fc.in_features
+                    self.model.fc = nn.Linear(in_f, self.featdim)
 
     def forward(self, x):
         x = self.model(x)
