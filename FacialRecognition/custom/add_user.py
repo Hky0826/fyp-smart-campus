@@ -1,12 +1,66 @@
-import cv2
-import sqlite3
 import json
+import os
+import sqlite3
+import sys
+
+import cv2
 import numpy as np
 from deepface import DeepFace
+
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+CUSTOM_DIR = os.path.join(CURRENT_DIR, "custom")
+for path in (CUSTOM_DIR, CURRENT_DIR):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+from camera import CameraCapture
 
 # --- Configuration ---
 DB_PATH = "edge_local.db"
 MODEL_NAME = "Facenet"
+
+
+def capture_frame_from_camera(camera_index=0, width=640, height=480):
+    """Capture a single frame using the same camera setup as the kiosk app."""
+
+    print("Opening camera... Press SPACE to capture, ESC to cancel")
+    camera = CameraCapture(index=camera_index, width=width, height=height)
+
+    try:
+        camera.open()
+    except Exception as exc:
+        print(f"Error: Could not open camera. {exc}")
+        return None
+
+    try:
+        while True:
+            ret, frame = camera.read()
+            if not ret or frame is None:
+                print("Failed to grab frame.")
+                return None
+
+            preview = cv2.flip(frame.copy(), 1)
+            cv2.putText(
+                preview,
+                "Press SPACE to capture, ESC to cancel",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 0),
+                2,
+            )
+            cv2.imshow("Capture Face", preview)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key == 32:
+                print("Face captured!")
+                return frame
+            if key == 27:
+                print("Capture cancelled.")
+                return None
+    finally:
+        camera.release()
+        cv2.destroyAllWindows()
 
 def add_user_with_embedding(full_name, role_name, image_source="camera"):
     """
@@ -22,36 +76,9 @@ def add_user_with_embedding(full_name, role_name, image_source="camera"):
     frame = None
     
     if image_source == "camera":
-        print("Opening camera... Press SPACE to capture, ESC to cancel")
-        cap = cv2.VideoCapture(0)
-        
-        if not cap.isOpened():
-            print("Error: Could not open camera.")
+        frame = capture_frame_from_camera()
+        if frame is None:
             return False
-        
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                print("Failed to grab frame.")
-                cap.release()
-                return False
-            
-            cv2.putText(frame, "Press SPACE to capture, ESC to cancel", (10, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.imshow('Capture Face', frame)
-            
-            key = cv2.waitKey(1) & 0xFF
-            if key == 32:  # SPACE
-                print("Face captured!")
-                break
-            elif key == 27:  # ESC
-                print("Capture cancelled.")
-                cap.release()
-                cv2.destroyAllWindows()
-                return False
-        
-        cap.release()
-        cv2.destroyAllWindows()
     
     else:
         # Load from file
@@ -108,9 +135,19 @@ def add_user_with_embedding(full_name, role_name, image_source="camera"):
         return False
 
 if __name__ == "__main__":
-    # Example 1: Add user from camera
-    print("=== Adding User from Camera ===")
-    add_user_with_embedding("John Doe", "Admin", image_source="camera")
-    
-    # Example 2: Add user from image file
-    # add_user_with_embedding("Jane Smith", "Staff", image_source="path/to/image.jpg")
+    # Interactive prompt: ask for full name and role, then capture from camera
+    print("=== Add User (interactive) ===")
+    try:
+        full_name = input("Full name: ").strip()
+        role_name = input("Role name (e.g. Admin, Staff): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("Input cancelled.")
+        sys.exit(1)
+
+    if not full_name:
+        print("Full name is required. Exiting.")
+        sys.exit(1)
+
+    success = add_user_with_embedding(full_name, role_name or "User", image_source="camera")
+    if not success:
+        print("Failed to add user.")
