@@ -25,7 +25,7 @@ FACE_DETECTION_MODEL = os.path.abspath(os.path.join(CURRENT_DIR, "..", "models",
 EDGEFACE_MODEL = os.path.abspath(os.path.join(CURRENT_DIR, "..", "models", "edgeface_xxs.pt"))
 
 
-def capture_frame_from_camera(camera_index=0, width=640, height=480):
+def capture_frame_from_camera(camera_index=4, width=640, height=480):
     """Capture a single frame using the same camera setup as the kiosk app."""
 
     print("Opening camera... Press SPACE to capture, ESC to cancel")
@@ -147,8 +147,8 @@ def add_user_with_embedding(role_name, image_source="camera"):
 
         # Insert the user record. Leave name NULL (prototype without full name)
         cur.execute(
-            "INSERT INTO edge_users (user_id, name, face_vector, active) VALUES (?, NULL, ?, 1)",
-            (next_id, emb_blob),
+            "INSERT INTO edge_users (user_id, role_name, face_vector, active) VALUES (?, ?, 1)",
+            (next_id, role_name, emb_blob),
         )
 
         conn.commit()
@@ -165,7 +165,8 @@ def add_user_with_embedding(role_name, image_source="camera"):
 if __name__ == "__main__":
     # Example 1: Add user from camera
     print("=== Adding User from Camera ===")
-    add_user_with_embedding("Admin", image_source="camera")
+    role_name = input("Enter role name for new user (e.g., Student, Staff): ").strip()
+    add_user_with_embedding(role_name, image_source="camera")
     
     # Example 2: Add user from image file
     # add_user_with_embedding("Jane Smith", "Staff", image_source="path/to/image.jpg")
