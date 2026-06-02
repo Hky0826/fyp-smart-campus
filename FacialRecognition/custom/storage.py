@@ -18,22 +18,23 @@ class StorageManager:
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS edge_users (
-                user_id INTEGER PRIMARY KEY,
-                name TEXT,
-                face_vector BLOB,
-                active INTEGER DEFAULT 1
+                user_id INTEGER PRIMARY KEY NOT NULL,
+                role_name TEXT NOT NULL,
+                face_vector BLOB NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                last_synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS edge_auth_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                auth_status TEXT,
+                log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER REFERENCES edge_users(user_id),
+                auth_status TEXT NOT NULL,
                 confidence_score REAL,
-                timestamp TEXT DEFAULT (datetime('now')),
-                sync_status INTEGER DEFAULT 0
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                sync_status INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -44,10 +45,15 @@ class StorageManager:
         conn = sqlite3.connect(self.db_path)
         cur = conn.cursor()
         try:
-            cur.execute("SELECT user_id, face_vector FROM edge_users WHERE active=1")
+            cur.execute("SELECT user_id, face_vector FROM edge_users WHERE is_active=1")
         except sqlite3.OperationalError:
-            conn.close()
-            return []
+            try:
+                # Fallback to the legacy schema (active column instead of is_active)
+                cur.execute("SELECT user_id, face_vector FROM edge_users WHERE active=1")
+            except sqlite3.OperationalError as e:
+                print(f"[ERROR] Failed to load embeddings: {e}")
+                conn.close()
+                return []
         rows = cur.fetchall()
         conn.close()
         out = []

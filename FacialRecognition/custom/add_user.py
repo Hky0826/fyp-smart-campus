@@ -145,9 +145,17 @@ def add_user_with_embedding(role_name, image_source="camera"):
         # Store embedding as float32 blob so StorageManager can read it back
         emb_blob = embedding.astype(np.float32).tobytes()
 
-        # Insert the user record. Leave name NULL (prototype without full name)
+        # Inspect table info to handle column name differences dynamically
+        cur.execute("PRAGMA table_info(edge_users)")
+        cols_info = cur.fetchall()
+        cols = [c[1] for c in cols_info]
+
+        name_col = "role_name" if "role_name" in cols else "name"
+        active_col = "is_active" if "is_active" in cols else "active"
+
+        # Insert the user record using correct column names and matching bindings
         cur.execute(
-            "INSERT INTO edge_users (user_id, role_name, face_vector, active) VALUES (?, ?, 1)",
+            f"INSERT INTO edge_users (user_id, {name_col}, face_vector, {active_col}) VALUES (?, ?, ?, 1)",
             (next_id, role_name, emb_blob),
         )
 
