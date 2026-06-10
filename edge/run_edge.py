@@ -37,10 +37,10 @@ def start_uvicorn(app, port):
 
 def main():
     # Configurations
-    CLOUD_URL = "http://10.172.101.3:8000"          # Central Cloud API gateway address
+    CLOUD_URL = "http://10.178.101.3:8000"          # Central Cloud API gateway address
     DEVICE_ID = "entry-gate-01"                  # Unique local hardware identifier
     DEVICE_NAME = "North Entry Gate Kiosk"       # Human-readable equipment label
-    LOCAL_IP = "10.172.101.2"                       # Local LAN IP address of this edge device
+    LOCAL_IP = "10.178.101.2"                       # Local LAN IP address of this edge device
     LOCAL_PORT = 8001                            # Port for receiving cloud deactivation pushes
     DB_PATH = os.path.join(SCRIPT_DIR, "device_local.db") # Shared SQLite DB path
     CAM_INDEX = 0                                # Camera input index (0 = default webcam, e.g. 4 for external)
