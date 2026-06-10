@@ -41,7 +41,7 @@ SCRIPT_DIR = CURRENT_DIR
 
 # Local model paths inside edge/models
 FACE_DETECTION_MODEL = os.path.abspath(os.path.join(SCRIPT_DIR, "models", "face_detection_yunet_2023mar_int8bq.onnx"))
-EDGEFACE_MODEL = os.path.abspath(os.path.join(SCRIPT_DIR, "models", "edgeface_xxs.pt"))
+EDGEFACE_MODEL = os.path.abspath(os.path.join(SCRIPT_DIR, "models", "edgeface_s_gamma_05.pt"))
 
 
 def main_loop(db_path: str = "device_local.db", cam_index: int = 0, target_resolution: Tuple[int, int] = (640, 480)):
