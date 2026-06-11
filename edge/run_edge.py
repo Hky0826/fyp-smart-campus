@@ -43,7 +43,7 @@ def main():
     LOCAL_IP = "10.178.101.2"                       # Local LAN IP address of this edge device
     LOCAL_PORT = 8001                            # Port for receiving cloud deactivation pushes
     DB_PATH = os.path.join(SCRIPT_DIR, "device_local.db") # Shared SQLite DB path
-    CAM_INDEX = 0                                # Camera input index (0 = default webcam, e.g. 4 for external)
+    CAM_INDEX = 4                                # Camera input index (0 = default webcam, e.g. 4 for external)
 
     logger.info("Initializing unified Edge Service...")
     logger.info(f"Device: {DEVICE_ID} ({DEVICE_NAME}) | Cloud URL: {CLOUD_URL}")
