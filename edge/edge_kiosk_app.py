@@ -93,8 +93,8 @@ def main_loop(db_path: str = "device_local.db", cam_index: int = 0, target_resol
 
     frame_idx = 0
     last_event_time = 0.0
-    cooldown_seconds = 3.0
-    db_refresh_seconds = 2.0
+    cooldown_seconds = 2.0
+    db_refresh_seconds = 30.0
     heavy_interval = 10
 
     status_text = "Waiting for face..."
@@ -103,6 +103,10 @@ def main_loop(db_path: str = "device_local.db", cam_index: int = 0, target_resol
 
     try:
         while True:
+            now = time.time()
+            if (now - last_db_refresh_time) > db_refresh_seconds:
+                refresh_db_cache()
+
             ret, frame = camera.read()
             if not ret or frame is None:
                 time.sleep(0.01)
@@ -177,9 +181,6 @@ def main_loop(db_path: str = "device_local.db", cam_index: int = 0, target_resol
                             del crop
                         except Exception:
                             pass
-
-                        if (now - last_db_refresh_time) > db_refresh_seconds:
-                            refresh_db_cache()
 
                         matched_id, confidence = matcher.find_best_matrix(emb, db_user_ids, db_embedding_matrix)
                         duration_ms = (time.time() - now) * 1000.0
