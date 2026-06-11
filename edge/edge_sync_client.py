@@ -436,9 +436,50 @@ class DownstreamSyncWorker:
         self._thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
+        try:
+            self.perform_startup_cleanup()
+        except Exception as e:
+            logger.error(f"Error performing startup cleanup: {str(e)}")
         self.running = True
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
+
+    def perform_startup_cleanup(self) -> None:
+        """
+        Queries all user IDs currently in the cloud database and deletes any
+        locally cached users that no longer exist on the cloud database.
+        """
+        url = f"{self.cloud_url}/api/sync/downstream/user-ids"
+        try:
+            logger.info("Syncing cloud database baseline for deleted users at startup...")
+            response = requests.get(url, timeout=10.0)
+            if response.status_code == 200:
+                cloud_user_ids = set(response.json())
+                
+                # Query local user IDs from SQLite
+                local_user_ids = []
+                with self.db.lock:
+                    conn = self.db._get_connection()
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute("SELECT user_id FROM device_users")
+                        local_user_ids = [row[0] for row in cursor.fetchall()]
+                    except Exception as e:
+                        logger.error(f"Failed to query local user IDs during startup cleanup: {e}")
+                    finally:
+                        conn.close()
+                
+                # Find IDs that exist locally but not on the cloud
+                orphaned_ids = [uid for uid in local_user_ids if uid not in cloud_user_ids]
+                if orphaned_ids:
+                    logger.info(f"Startup clean: found {len(orphaned_ids)} orphaned users locally. Deleting: {orphaned_ids}")
+                    self.db.delete_users_locally(orphaned_ids)
+                else:
+                    logger.info("Startup clean: local database is in sync with cloud users (no orphaned users).")
+            else:
+                logger.warning(f"Could not perform startup cleanup, cloud returned code {response.status_code}")
+        except Exception as e:
+            logger.error(f"Network error during startup user validation: {e}")
 
     def stop(self) -> None:
         self.running = False
