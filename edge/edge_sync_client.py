@@ -46,6 +46,10 @@ class AbstractEdgeDB(ABC):
         pass
 
     @abstractmethod
+    def delete_users_locally(self, user_ids: List[int]) -> None:
+        pass
+
+    @abstractmethod
     def get_last_sync_timestamp(self) -> Optional[str]:
         pass
 
@@ -275,6 +279,25 @@ class SQLiteEdgeDB(AbstractEdgeDB):
             finally:
                 conn.close()
 
+    def delete_users_locally(self, user_ids: List[int]) -> None:
+        if not user_ids:
+            return
+        with self.lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            try:
+                placeholders = ",".join("?" for _ in user_ids)
+                cursor.execute(f"DELETE FROM device_users WHERE user_id IN ({placeholders})", user_ids)
+                cursor.execute(f"DELETE FROM device_user_roles WHERE user_id IN ({placeholders})", user_ids)
+                conn.commit()
+                logger.info(f"Deleted {len(user_ids)} users from local database: {user_ids}")
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"Failed to delete local users: {str(e)}")
+                raise e
+            finally:
+                conn.close()
+
     def get_last_sync_timestamp(self) -> Optional[str]:
         with self.lock:
             conn = self._get_connection()
@@ -448,6 +471,11 @@ class DownstreamSyncWorker:
             self.db.save_roles_delta(data.get("roles", []))
             self.db.save_users_delta(data.get("users", []))
             self.db.save_rbac_delta(data.get("node_rbac", []))
+            
+            # Execute local deletions
+            deleted_ids = data.get("deleted_user_ids", [])
+            if deleted_ids:
+                self.db.delete_users_locally(deleted_ids)
 
             new_timestamp = data.get("timestamp")
             if new_timestamp:

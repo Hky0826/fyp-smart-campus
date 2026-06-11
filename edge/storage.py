@@ -42,14 +42,14 @@ class StorageManager:
         conn.commit()
         conn.close()
 
-    def load_embeddings(self) -> List[Tuple[int, np.ndarray]]:
+    def load_embeddings(self) -> List[Tuple[int, np.ndarray, int]]:
         """
-        Loads user face vectors for active profiles from the unified device_users table.
+        Loads user face vectors from the unified device_users table.
         """
         conn = sqlite3.connect(self.db_path)
         cur = conn.cursor()
         try:
-            cur.execute("SELECT user_id, face_vector FROM device_users WHERE is_active = 1")
+            cur.execute("SELECT user_id, face_vector, is_active FROM device_users")
             rows = cur.fetchall()
         except sqlite3.OperationalError as e:
             print(f"[ERROR] Failed to load embeddings: {e}")
@@ -58,12 +58,12 @@ class StorageManager:
         
         conn.close()
         out = []
-        for user_id, blob in rows:
+        for user_id, blob, is_active in rows:
             if blob is None or len(blob) == 0:
                 continue
             # Reconstruct numpy vector array from SQLite binary BLOB
             vec = np.frombuffer(blob, dtype=np.float32)
-            out.append((int(user_id), vec))
+            out.append((int(user_id), vec, int(is_active)))
         return out
 
     def log_event(self, user_id: Optional[int], auth_status: str, confidence_score: float) -> None:

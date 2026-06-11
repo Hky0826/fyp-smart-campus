@@ -54,14 +54,16 @@ def main_loop(db_path: str = "device_local.db", cam_index: int = 0, target_resol
     last_db_refresh_time = 0.0
     db_embeddings = []
     db_user_ids = []
+    db_user_active_map = {}
     db_embedding_matrix = np.empty((0, 0), dtype=np.float32)
 
     def refresh_db_cache() -> None:
-        nonlocal db_embeddings, db_user_ids, db_embedding_matrix, last_db_refresh_time
+        nonlocal db_embeddings, db_user_ids, db_embedding_matrix, db_user_active_map, last_db_refresh_time
         db_embeddings = storage.load_embeddings()
-        db_user_ids = [user_id for user_id, _ in db_embeddings]
+        db_user_ids = [user_id for user_id, _, _ in db_embeddings]
+        db_user_active_map = {user_id: is_active for user_id, _, is_active in db_embeddings}
         if db_embeddings:
-            db_embedding_matrix = np.vstack([vec for _, vec in db_embeddings]).astype(np.float32, copy=False)
+            db_embedding_matrix = np.vstack([vec for _, vec, _ in db_embeddings]).astype(np.float32, copy=False)
             norms = np.linalg.norm(db_embedding_matrix, axis=1, keepdims=True) + 1e-10
             db_embedding_matrix = db_embedding_matrix / norms
         else:
@@ -182,10 +184,18 @@ def main_loop(db_path: str = "device_local.db", cam_index: int = 0, target_resol
                         matched_id, confidence = matcher.find_best_matrix(emb, db_user_ids, db_embedding_matrix)
                         duration_ms = (time.time() - now) * 1000.0
                         if matched_id is not None:
-                            status_text = f"AUTHORIZED {matched_id} {confidence:.3f}"
-                            status_color = (0, 255, 0)
-                            storage.log_event(matched_id, 'SUCCESS', confidence)
-                            print(f"Auth SUCCESS id={matched_id} score={confidence:.4f} time_ms={duration_ms:.1f}")
+                            is_active = db_user_active_map.get(matched_id, 1)
+                            if is_active == 0:
+                                status_text = f"DENIED {matched_id} (DEACTIVATED)"
+                                status_color = (0, 0, 255)
+                                storage.log_event(matched_id, 'FAILED', confidence)
+                                print(f"Auth DENIED id={matched_id} (DEACTIVATED) score={confidence:.4f} time_ms={duration_ms:.1f}")
+                                print("deny entry since the account has been deactivated")
+                            else:
+                                status_text = f"AUTHORIZED {matched_id} {confidence:.3f}"
+                                status_color = (0, 255, 0)
+                                storage.log_event(matched_id, 'SUCCESS', confidence)
+                                print(f"Auth SUCCESS id={matched_id} score={confidence:.4f} time_ms={duration_ms:.1f}")
                         else:
                             status_text = f"UNAUTHORIZED {confidence:.3f}"
                             status_color = (0, 0, 255)
