@@ -67,7 +67,8 @@ def main():
     downstream_poller.start()
 
     # 4. Run uvicorn push notification server in a background thread
-    app = create_edge_app(db)
+    # Pass downstream_poller so the /api/edge/trigger-sync endpoint can call perform_sync() directly
+    app = create_edge_app(db, downstream_worker=downstream_poller)
     uvicorn_thread = threading.Thread(target=start_uvicorn, args=(app, LOCAL_PORT), daemon=True)
     uvicorn_thread.start()
     logger.info(f"Local push receiver listening on port {LOCAL_PORT} in background thread.")

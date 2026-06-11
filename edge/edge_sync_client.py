@@ -406,7 +406,16 @@ class DeactivatePayload(BaseModel):
     user_id: int
     is_active: int
 
-def create_edge_app(db: AbstractEdgeDB) -> FastAPI:
+
+def create_edge_app(db: AbstractEdgeDB, downstream_worker: Optional["DownstreamSyncWorker"] = None) -> FastAPI:
+    """Creates the FastAPI push-listener app for this edge device.
+    
+    Args:
+        db: The shared SQLite database instance.
+        downstream_worker: Optional reference to the DownstreamSyncWorker so that
+            incoming trigger-sync pushes from the cloud can immediately kick off
+            a delta pull without waiting for the next polling cycle.
+    """
     app = FastAPI(title="Edge Device Receiver Daemon")
     
     @app.post("/api/edge/deactivate")
@@ -418,7 +427,31 @@ def create_edge_app(db: AbstractEdgeDB) -> FastAPI:
             else:
                 return {"status": "not_found", "message": f"User {payload.user_id} not cached locally"}
         raise HTTPException(status_code=400, detail="Invalid sync command payload")
+
+    @app.post("/api/edge/trigger-sync")
+    def handle_trigger_sync():
+        """Immediately triggers a delta pull from the cloud.
         
+        Called by the cloud whenever a user record is updated (e.g. photo uploaded)
+        so the edge device picks up the change without waiting for the polling interval.
+        """
+        if downstream_worker is None:
+            logger.warning("Trigger-sync received but no DownstreamSyncWorker is wired.")
+            return {"status": "skipped", "message": "No downstream worker available"}
+        
+        # Run sync in a daemon thread so the HTTP response is returned immediately
+        def _run_sync():
+            try:
+                logger.info("Trigger-sync received from cloud — performing immediate delta pull...")
+                downstream_worker.perform_sync()
+                logger.info("Trigger-sync delta pull completed.")
+            except Exception as e:
+                logger.error(f"Error during trigger-sync delta pull: {str(e)}")
+        
+        t = threading.Thread(target=_run_sync, daemon=True)
+        t.start()
+        return {"status": "triggered", "message": "Immediate delta sync initiated"}
+
     return app
 
 
@@ -527,13 +560,23 @@ class DownstreamSyncWorker:
 
 class UpstreamSyncClient:
     """Threaded worker broadcasting keep-alive and replaying offline authentication loops."""
-    def __init__(self, db: AbstractEdgeDB, cloud_url: str, device_id: str, device_name: str, local_ip: str, local_port: int = 8000):
+    def __init__(
+        self,
+        db: AbstractEdgeDB,
+        cloud_url: str,
+        device_id: str,
+        device_name: str,
+        local_ip: str,
+        local_port: int = 8000,
+        log_push_interval_sec: int = 600  # Default: push auth logs every 10 minutes
+    ):
         self.db = db
         self.cloud_url = cloud_url.rstrip("/")
         self.device_id = device_id
         self.device_name = device_name
         self.local_ip = local_ip
         self.local_port = local_port
+        self.log_push_interval = log_push_interval_sec
         
         self.is_online = False
         self.running = False
@@ -584,7 +627,7 @@ class UpstreamSyncClient:
                     self.replay_pending_logs()
                 except Exception as e:
                     logger.error(f"Error in chronological log replay queue: {str(e)}")
-            time.sleep(5)
+            time.sleep(self.log_push_interval)  # Push auth logs on the configured interval (default: 10 min)
 
     def replay_pending_logs(self) -> None:
         pending_logs = self.db.get_unsynced_logs()
