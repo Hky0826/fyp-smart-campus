@@ -118,8 +118,7 @@ Set the database path if needed:
 export EDGE_HAILO_DB_PATH=/path/to/device_local.db
 ```
 
-If unset, the code uses `edge/device_local.db` when it exists, otherwise
-`edge_hailo/data/device_local.db`.
+If unset, the code uses `edge_hailo/data/device_local.db`.
 
 Supported basic schema:
 
@@ -134,39 +133,38 @@ embedding column. Template names such as `front`, `left_30`, `right_60`,
 
 ## Step 4: Run the Pipeline
 
-Access control on camera `/dev/video0`:
+Run access control and surveillance together on the default camera `/dev/video4`
+with local OpenCV display windows:
 
 ```bash
-python3 -m edge_hailo.src.pipelines.access_control --camera /dev/video0
+python3 -m edge_hailo.src.pipelines.run_both
 ```
 
-Access control with a local OpenCV preview window:
+Access control only on the default camera `/dev/video4` with display:
 
 ```bash
-python3 -m edge_hailo.src.pipelines.access_control --camera /dev/video0 --display
+python3 -m edge_hailo.src.pipelines.access_control
 ```
 
-Surveillance on camera `/dev/video1`:
+Surveillance only on the default camera `/dev/video4` with display:
 
 ```bash
-python3 -m edge_hailo.src.pipelines.surveillance --camera /dev/video1
+python3 -m edge_hailo.src.pipelines.surveillance
 ```
 
-Surveillance with a local OpenCV preview window:
+To use a different camera or run headless, pass explicit flags:
 
 ```bash
-python3 -m edge_hailo.src.pipelines.surveillance --camera /dev/video1 --display
+python3 -m edge_hailo.src.pipelines.run_both --camera /dev/video2 --no-display
 ```
 
-Camera sources can be `/dev/video0`, a numeric OpenCV index, RTSP URL, or video
+Camera sources can be `/dev/video4`, a numeric OpenCV index, RTSP URL, or video
 file path.
-If the old `edge/run_edge.py` works with `CAM_INDEX = 4`, use `--camera 4` here.
-The display window mirrors the camera by default like the old edge kiosk; pass
-`--no-mirror` to show the raw camera orientation. Press `q` in the OpenCV window
-to exit cleanly.
+The display window mirrors the camera by default; pass `--no-mirror` to show the
+raw camera orientation. Press `q` in an OpenCV window to exit cleanly.
 
 Display mode requires a local GUI session. If running over SSH, Docker, or a
-headless service, keep `--display` disabled or configure X11/Wayland forwarding
+headless service, use `--no-display` or configure X11/Wayland forwarding
 first. On the EdgeMind desktop session, `QT_QPA_PLATFORM=xcb` may be required
 before launching the pipeline.
 
@@ -211,8 +209,8 @@ accepts optional form field `target_user_id` for strict 1:1 verification.
 Docker is optional. Use it only when you want a containerized deployment. For
 simple testing on the EdgeMind device, running the pipeline directly is easier.
 
-The compose file exposes `/dev/hailo0`, `/dev/video0`, and `/dev/video1`, and
-mounts `edge_hailo/models` plus `edge_hailo/data`.
+The compose file exposes `/dev/hailo0` and `/dev/video4`, and mounts
+`edge_hailo/models` plus `edge_hailo/data`.
 
 The default Docker image is plain `python:3.11-slim`, so it does not include
 `hailo_platform`. Use one of the two options below.
@@ -268,7 +266,7 @@ Access control:
 
 - Detector: `models/access_control/scrfd_2.5g.hef`
 - Embedder: `models/access_control/arcface_mobilefacenet.hef`
-- Uses liveness/spoofing heuristic adapted from the old edge kiosk
+- Uses a liveness/spoofing heuristic for access decisions
 - Rejects frames with more than one face: `Only one user is allowed within the frame.`
 - Denies unknown, low-confidence, inactive, or liveness-failed users
 

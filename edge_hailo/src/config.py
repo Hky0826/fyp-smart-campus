@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-PROJECT_ROOT = PACKAGE_ROOT.parent
 MODEL_ROOT = PACKAGE_ROOT / "models"
+DEFAULT_CAMERA = "/dev/video4"
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -24,16 +24,12 @@ def default_database_path() -> Path:
     if configured:
         return Path(configured).expanduser()
 
-    old_edge_db = PROJECT_ROOT / "edge" / "device_local.db"
-    if old_edge_db.exists():
-        return old_edge_db
-
     return PACKAGE_ROOT / "data" / "device_local.db"
 
 
 @dataclass(frozen=True)
 class RuntimeConfig:
-    camera: str = os.getenv("EDGE_HAILO_CAMERA", "/dev/video0")
+    camera: str = os.getenv("EDGE_HAILO_CAMERA", DEFAULT_CAMERA)
     database_path: Path = default_database_path()
     recognition_enabled: bool = _bool_env("EDGE_HAILO_RECOGNITION_ENABLED", True)
     access_control_enabled: bool = _bool_env("EDGE_HAILO_ACCESS_CONTROL_ENABLED", True)
@@ -45,7 +41,7 @@ class RuntimeConfig:
 class AccessControlConfig(RuntimeConfig):
     detector_model_path: Path = MODEL_ROOT / "access_control" / "scrfd_2.5g.hef"
     embedding_model_path: Path = MODEL_ROOT / "access_control" / "arcface_mobilefacenet.hef"
-    camera: str = os.getenv("EDGE_HAILO_ACCESS_CAMERA", os.getenv("EDGE_HAILO_CAMERA", "/dev/video0"))
+    camera: str = os.getenv("EDGE_HAILO_ACCESS_CAMERA", os.getenv("EDGE_HAILO_CAMERA", DEFAULT_CAMERA))
     detection_threshold: float = float(os.getenv("EDGE_HAILO_ACCESS_DETECTION_THRESHOLD", "0.60"))
     # Tune with real camera footage. A strict threshold is safer for access decisions.
     recognition_threshold: float = float(os.getenv("EDGE_HAILO_ACCESS_RECOGNITION_THRESHOLD", "0.75"))
@@ -57,7 +53,7 @@ class AccessControlConfig(RuntimeConfig):
 class SurveillanceConfig(RuntimeConfig):
     detector_model_path: Path = MODEL_ROOT / "surveillance" / "scrfd_10g.hef"
     embedding_model_path: Path = MODEL_ROOT / "surveillance" / "arcface_r50.hef"
-    camera: str = os.getenv("EDGE_HAILO_SURVEILLANCE_CAMERA", os.getenv("EDGE_HAILO_CAMERA", "/dev/video1"))
+    camera: str = os.getenv("EDGE_HAILO_SURVEILLANCE_CAMERA", os.getenv("EDGE_HAILO_CAMERA", DEFAULT_CAMERA))
     detection_threshold: float = float(os.getenv("EDGE_HAILO_SURVEILLANCE_DETECTION_THRESHOLD", "0.55"))
     # Tune with real camera footage, including angled, up/down, and low-light views.
     recognition_threshold: float = float(os.getenv("EDGE_HAILO_SURVEILLANCE_RECOGNITION_THRESHOLD", "0.62"))

@@ -10,13 +10,13 @@ services:
     restart: unless-stopped
     environment:
       EDGE_HAILO_DB_PATH: /app/edge_hailo/data/device_local.db
-      EDGE_HAILO_ACCESS_CAMERA: /dev/video0
-      EDGE_HAILO_SURVEILLANCE_CAMERA: /dev/video1
+      EDGE_HAILO_CAMERA: /dev/video4
+      EDGE_HAILO_ACCESS_CAMERA: /dev/video4
+      EDGE_HAILO_SURVEILLANCE_CAMERA: /dev/video4
       EDGE_HAILO_REQUIRE_HAILORT: ${EDGE_HAILO_REQUIRE_HAILORT:-1}
     devices:
       - /dev/hailo0:/dev/hailo0
-      - /dev/video0:/dev/video0
-      - /dev/video1:/dev/video1
+      - /dev/video4:/dev/video4
     volumes:
       - ../models:/app/edge_hailo/models
       - ../data:/app/edge_hailo/data
