@@ -81,6 +81,20 @@ Install Python dependencies and HailoRT on the EdgeMind device:
 pip install -r edge_hailo/requirements.txt
 ```
 
+Then verify that the same Python interpreter can import the HailoRT bindings:
+
+```bash
+python -m edge_hailo.src.hailo.diagnostics
+```
+
+If this reports `hailo_platform_importable: false`, HailoRT is not installed in
+the Python environment used to start the pipeline. Install the HailoRT runtime
+and Python bindings from the EdgeMind/Hailo software package for that exact
+Python version, then run the diagnostic again. The package name is not listed in
+`requirements.txt` because HailoRT is device/OS/Python-version specific and is
+usually distributed with the Hailo/EdgeMind SDK rather than as a normal PyPI
+dependency.
+
 Access control:
 
 ```bash
@@ -123,6 +137,23 @@ docker compose -f edge_hailo/docker/docker-compose.face.yml up --build
 
 The compose file exposes `/dev/hailo0`, `/dev/video0`, and `/dev/video1`, and
 mounts `edge_hailo/models` plus `edge_hailo/data`.
+
+The default Docker image is plain `python:3.11-slim`, so it does not include
+`hailo_platform`. Use a HailoRT-enabled base image, or place the HailoRT Python
+wheel inside the build context and pass it as a build argument:
+
+```bash
+docker compose -f edge_hailo/docker/docker-compose.face.yml build \
+  --build-arg HAILORT_WHEEL=edge_hailo/vendor/hailort-<version>-cp311-<platform>.whl
+docker compose -f edge_hailo/docker/docker-compose.face.yml up
+```
+
+After the container starts, you can run:
+
+```bash
+docker compose -f edge_hailo/docker/docker-compose.face.yml exec edge-hailo-face \
+  python -m edge_hailo.src.hailo.diagnostics
+```
 
 ## Thresholds
 

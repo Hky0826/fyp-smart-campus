@@ -3,12 +3,24 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 from typing import Dict, Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+def hailort_import_error_message(exc: BaseException) -> str:
+    return (
+        "Could not import HailoRT Python bindings (`hailo_platform`). "
+        f"Python executable: {sys.executable}. "
+        f"Original import error: {exc!r}. "
+        "Install HailoRT for this exact Python environment on the EdgeMind device. "
+        "If you are running in Docker, the container image must also include the "
+        "HailoRT Python package; mapping /dev/hailo0 alone is not enough."
+    )
 
 
 class HailoModelRunner:
@@ -31,9 +43,7 @@ class HailoModelRunner:
                 VDevice,
             )
         except Exception as exc:  # pragma: no cover - depends on Hailo device image
-            raise RuntimeError(
-                "hailo_platform is not installed. Install HailoRT on the EdgeMind device."
-            ) from exc
+            raise RuntimeError(hailort_import_error_message(exc)) from exc
 
         self._InferVStreams = InferVStreams
         self._InputVStreamParams = InputVStreamParams

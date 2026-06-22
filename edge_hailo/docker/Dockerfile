@@ -1,4 +1,7 @@
-FROM python:3.11-slim
+ARG BASE_IMAGE=python:3.11-slim
+FROM ${BASE_IMAGE}
+
+ARG HAILORT_WHEEL=edge_hailo/docker/no-hailort-wheel.txt
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -12,6 +15,12 @@ RUN apt-get update \
 
 COPY edge_hailo/requirements.txt /app/edge_hailo/requirements.txt
 RUN pip install --no-cache-dir -r /app/edge_hailo/requirements.txt
+
+COPY ${HAILORT_WHEEL} /tmp/hailort-wheel
+RUN case "$HAILORT_WHEEL" in \
+      *.whl) pip install --no-cache-dir /tmp/hailort-wheel ;; \
+      *) echo "No HailoRT wheel supplied; image requires a HailoRT-enabled base image or wheel." ;; \
+    esac
 
 COPY edge_hailo /app/edge_hailo
 
