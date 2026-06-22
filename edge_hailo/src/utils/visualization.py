@@ -68,8 +68,9 @@ def _draw_access_control(display, result: dict, mirror: bool) -> None:
     if reason and not granted:
         _put_text(display, reason[:70], (10, 60), color)
 
+    label = identity if identity != "unknown" else "FACE"
     for bbox in _access_bboxes(result):
-        _draw_box(display, bbox, color, mirror=mirror, label=identity if identity != "unknown" else None)
+        _draw_box(display, bbox, color, mirror=mirror, label=label)
 
 
 def _draw_surveillance(display, result: dict, mirror: bool) -> None:
@@ -97,7 +98,7 @@ def _access_bboxes(result: dict) -> Iterable[Sequence[int]]:
 
 def _draw_box(display, bbox: Sequence[int], color, mirror: bool, label: str | None = None) -> None:
     x1, y1, x2, y2 = _normalise_bbox(display, bbox, mirror=mirror)
-    cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
+    cv2.rectangle(display, (x1, y1), (x2, y2), color, 3)
     if label:
         _put_text(display, label, (x1, max(20, y1 - 8)), color, scale=0.6, thickness=2)
 

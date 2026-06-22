@@ -19,9 +19,13 @@ def resize_bgr(frame: np.ndarray, size: Tuple[int, int]) -> np.ndarray:
 
 
 def preprocess_scrfd(frame: np.ndarray, input_size: Tuple[int, int] = (640, 640)) -> np.ndarray:
-    """BGR uint8 frame to NHWC float32 tensor in [0, 1]."""
+    """BGR uint8 frame to NHWC RGB float32 tensor.
+
+    Hailo SCRFD HEFs from the model zoo include input normalization in the
+    network, so the runtime input should remain in the 0..255 image range.
+    """
     resized = resize_bgr(frame, input_size)
-    tensor = resized.astype(np.float32) / 255.0
+    tensor = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32)
     return np.expand_dims(tensor, axis=0)
 
 
