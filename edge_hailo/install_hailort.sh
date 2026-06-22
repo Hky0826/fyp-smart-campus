@@ -97,7 +97,7 @@ PY
 system_python_candidates() {
   local current
   current="$(python_exec)"
-  for candidate in /usr/bin/python3 /usr/bin/python3.10 /usr/local/bin/python3 /usr/local/bin/python3.10; do
+  for candidate in /usr/bin/python3 /usr/bin/python3.11 /usr/bin/python3.10 /usr/local/bin/python3 /usr/local/bin/python3.11 /usr/local/bin/python3.10; do
     if [[ -x "${candidate}" && "${candidate}" != "${current}" ]]; then
       echo "${candidate}"
     fi
