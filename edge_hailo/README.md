@@ -140,19 +140,36 @@ mounts `edge_hailo/models` plus `edge_hailo/data`.
 
 The default Docker image is plain `python:3.11-slim`, so it does not include
 `hailo_platform`. Use a HailoRT-enabled base image, or place the HailoRT Python
-wheel inside the build context and pass it as a build argument:
+wheel inside the build context and pass it through `EDGE_HAILO_HAILORT_WHEEL`:
 
 ```bash
-docker compose -f edge_hailo/docker/docker-compose.face.yml build \
-  --build-arg HAILORT_WHEEL=edge_hailo/vendor/hailort-<version>-cp311-<platform>.whl
-docker compose -f edge_hailo/docker/docker-compose.face.yml up
+mkdir -p edge_hailo/vendor
+# Copy the HailoRT Python wheel into edge_hailo/vendor first.
+export EDGE_HAILO_HAILORT_WHEEL=edge_hailo/vendor/hailort-<version>-cp311-<platform>.whl
+docker compose -f edge_hailo/docker/docker-compose.face.yml up --build
 ```
 
-After the container starts, you can run:
+If EdgeMind provides a container image that already includes HailoRT, use it as
+the base image instead:
+
+```bash
+export EDGE_HAILO_BASE_IMAGE=<hailort-enabled-image>
+docker compose -f edge_hailo/docker/docker-compose.face.yml up --build
+```
+
+The container runs `python -m edge_hailo.src.hailo.diagnostics` before starting
+the API and exits early if `hailo_platform` is missing. To run the same check
+manually:
 
 ```bash
 docker compose -f edge_hailo/docker/docker-compose.face.yml exec edge-hailo-face \
   python -m edge_hailo.src.hailo.diagnostics
+```
+
+For a local API-only smoke test without HailoRT, disable the startup guard:
+
+```bash
+EDGE_HAILO_REQUIRE_HAILORT=0 docker compose -f edge_hailo/docker/docker-compose.face.yml up --build
 ```
 
 ## Thresholds

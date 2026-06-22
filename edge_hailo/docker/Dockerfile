@@ -23,6 +23,8 @@ RUN case "$HAILORT_WHEEL" in \
     esac
 
 COPY edge_hailo /app/edge_hailo
+RUN chmod +x /app/edge_hailo/docker/entrypoint.sh
 
 EXPOSE 8080
+ENTRYPOINT ["/app/edge_hailo/docker/entrypoint.sh"]
 CMD ["uvicorn", "edge_hailo.src.api.main:app", "--host", "0.0.0.0", "--port", "8080"]
