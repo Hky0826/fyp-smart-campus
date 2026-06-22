@@ -19,6 +19,7 @@ from ..face.matching import TemplateMatcher
 from ..face.types import DetectedFace
 from ..utils.logging import configure_logging
 from ..utils.timing import StageTimer
+from ..utils.visualization import close_display, show_pipeline_result
 
 
 logger = logging.getLogger(__name__)
@@ -137,6 +138,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run Hailo surveillance face recognition")
     parser.add_argument("--camera", default=None, help="Camera index, /dev/videoN, RTSP URL, or video file")
     parser.add_argument("--database", default=None, help="SQLite database path")
+    parser.add_argument("--display", action="store_true", help="Show an OpenCV camera window with overlays")
+    parser.add_argument("--window-name", default="Hailo Surveillance", help="OpenCV display window name")
+    parser.add_argument("--mirror", dest="mirror", action="store_true", default=True, help="Mirror the displayed frame")
+    parser.add_argument("--no-mirror", dest="mirror", action="store_false", help="Do not mirror the displayed frame")
     args = parser.parse_args()
 
     config = SurveillanceConfig(
@@ -156,8 +161,12 @@ def main() -> None:
                 continue
             result = pipeline.process_frame(frame)
             print(json.dumps(result, default=str))
+            if args.display and not show_pipeline_result(args.window_name, frame, result, mirror=args.mirror):
+                break
     finally:
         camera.release()
+        if args.display:
+            close_display()
 
 
 if __name__ == "__main__":

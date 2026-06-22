@@ -127,14 +127,35 @@ Access control on camera `/dev/video0`:
 python3 -m edge_hailo.src.pipelines.access_control --camera /dev/video0
 ```
 
+Access control with a local OpenCV preview window:
+
+```bash
+python3 -m edge_hailo.src.pipelines.access_control --camera /dev/video0 --display
+```
+
 Surveillance on camera `/dev/video1`:
 
 ```bash
 python3 -m edge_hailo.src.pipelines.surveillance --camera /dev/video1
 ```
 
+Surveillance with a local OpenCV preview window:
+
+```bash
+python3 -m edge_hailo.src.pipelines.surveillance --camera /dev/video1 --display
+```
+
 Camera sources can be `/dev/video0`, a numeric OpenCV index, RTSP URL, or video
 file path.
+If the old `edge/run_edge.py` works with `CAM_INDEX = 4`, use `--camera 4` here.
+The display window mirrors the camera by default like the old edge kiosk; pass
+`--no-mirror` to show the raw camera orientation. Press `q` in the OpenCV window
+to exit cleanly.
+
+Display mode requires a local GUI session. If running over SSH, Docker, or a
+headless service, keep `--display` disabled or configure X11/Wayland forwarding
+first. On the EdgeMind desktop session, `QT_QPA_PLATFORM=xcb` may be required
+before launching the pipeline.
 
 ## Step 5: Tune Thresholds
 

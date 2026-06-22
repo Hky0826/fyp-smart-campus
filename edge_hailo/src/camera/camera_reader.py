@@ -26,7 +26,14 @@ class CameraReader:
             raise RuntimeError("OpenCV is required for camera input")
         source = self._opencv_source(self.source)
         logger.info("Initializing camera source %s", self.source)
-        self.cap = cv2.VideoCapture(source)
+        if isinstance(source, int) and hasattr(cv2, "CAP_V4L2"):
+            self.cap = cv2.VideoCapture(source, cv2.CAP_V4L2)
+            if not self.cap.isOpened():
+                logger.warning("V4L2 camera open failed for %s; retrying with default backend", self.source)
+                self.cap.release()
+                self.cap = cv2.VideoCapture(source)
+        else:
+            self.cap = cv2.VideoCapture(source)
         if not self.cap.isOpened():
             raise RuntimeError(f"Failed to open camera source: {self.source}")
 

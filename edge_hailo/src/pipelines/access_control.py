@@ -20,6 +20,7 @@ from ..face.spoofing import MotionSpoofDetector, SpoofResult
 from ..face.types import DetectedFace
 from ..utils.logging import configure_logging
 from ..utils.timing import StageTimer
+from ..utils.visualization import close_display, show_pipeline_result
 
 
 logger = logging.getLogger(__name__)
@@ -52,22 +53,30 @@ class AccessControlPipeline:
         faces = self._detect(frame)
         timer.mark("detection")
         face_count = len(faces)
+        bboxes = [face.xyxy_int() for face in faces]
         logger.info("Access-control detected %s faces", face_count)
 
         if face_count == 0:
             timer.total()
-            return self._deny("No face detected", 0, metrics=timer.metrics)
+            return self._deny("No face detected", 0, metrics=timer.metrics, bboxes=bboxes)
 
         if face_count > 1:
             timer.total()
             logger.info(MULTIPLE_FACE_REASON)
-            return self._deny(MULTIPLE_FACE_REASON, face_count, metrics=timer.metrics)
+            return self._deny(MULTIPLE_FACE_REASON, face_count, metrics=timer.metrics, bboxes=bboxes)
 
         face = faces[0]
+        bbox = face.xyxy_int()
         quality = self.quality_checker.check(frame, face)
         if not quality.passed:
             timer.total()
-            return self._deny(f"Face quality check failed: {quality.reason}", face_count, metrics=timer.metrics)
+            return self._deny(
+                f"Face quality check failed: {quality.reason}",
+                face_count,
+                metrics=timer.metrics,
+                bbox=bbox,
+                bboxes=bboxes,
+            )
 
         if self.config.require_liveness:
             spoof_result = self.spoof_detector.check(frame, face)
@@ -82,6 +91,8 @@ class AccessControlPipeline:
                     spoofing_passed=False,
                     similarity=spoof_result.score,
                     metrics=timer.metrics,
+                    bbox=bbox,
+                    bboxes=bboxes,
                 )
 
         face_image = self.aligner.extract(frame, face)
@@ -123,6 +134,8 @@ class AccessControlPipeline:
                 similarity=match.similarity,
                 matched_template=match.matched_template,
                 metrics=timer.metrics,
+                bbox=bbox,
+                bboxes=bboxes,
             )
 
         if not match.is_active:
@@ -135,6 +148,8 @@ class AccessControlPipeline:
                 similarity=match.similarity,
                 matched_template=match.matched_template,
                 metrics=timer.metrics,
+                bbox=bbox,
+                bboxes=bboxes,
             )
 
         self._log_event(match.user_id, "SUCCESS", match.similarity)
@@ -149,6 +164,8 @@ class AccessControlPipeline:
             "matched_template": match.matched_template,
             "spoofing_passed": True,
             "face_count": face_count,
+            "bbox": bbox,
+            "bboxes": bboxes,
             "metrics": timer.metrics,
         }
 
@@ -179,8 +196,10 @@ class AccessControlPipeline:
         matched_template: Optional[str] = None,
         spoofing_passed: bool = True,
         metrics: Optional[dict] = None,
+        bbox: Optional[List[int]] = None,
+        bboxes: Optional[List[List[int]]] = None,
     ) -> dict:
-        return {
+        result = {
             "success": False,
             "mode": "access_control",
             "access_granted": False,
@@ -192,6 +211,11 @@ class AccessControlPipeline:
             "face_count": face_count,
             "metrics": metrics or {},
         }
+        if bbox is not None:
+            result["bbox"] = bbox
+        if bboxes is not None:
+            result["bboxes"] = bboxes
+        return result
 
     def _log_event(self, user_id: Optional[str], status: str, confidence: Optional[float]) -> None:
         log_method = getattr(self.repository, "log_auth_event", None)
@@ -214,6 +238,10 @@ def main() -> None:
     parser.add_argument("--camera", default=None, help="Camera index, /dev/videoN, RTSP URL, or video file")
     parser.add_argument("--database", default=None, help="SQLite database path")
     parser.add_argument("--target-user-id", default=None, help="Optional 1:1 verification user ID")
+    parser.add_argument("--display", action="store_true", help="Show an OpenCV camera window with overlays")
+    parser.add_argument("--window-name", default="Hailo Access Control", help="OpenCV display window name")
+    parser.add_argument("--mirror", dest="mirror", action="store_true", default=True, help="Mirror the displayed frame")
+    parser.add_argument("--no-mirror", dest="mirror", action="store_false", help="Do not mirror the displayed frame")
     args = parser.parse_args()
 
     config = AccessControlConfig(
@@ -233,8 +261,12 @@ def main() -> None:
                 continue
             result = pipeline.process_frame(frame, target_user_id=args.target_user_id)
             print(json.dumps(result, default=str))
+            if args.display and not show_pipeline_result(args.window_name, frame, result, mirror=args.mirror):
+                break
     finally:
         camera.release()
+        if args.display:
+            close_display()
 
 
 if __name__ == "__main__":
