@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
 from pathlib import Path
 from typing import Dict, Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+_VDEVICE_LOCK = threading.Lock()
+_INFER_LOCK = threading.Lock()
+_SHARED_VDEVICE = None
 
 
 def hailort_import_error_message(exc: BaseException) -> str:
@@ -52,7 +58,7 @@ class HailoModelRunner:
 
         logger.info("Loading Hailo model: %s", self.hef_path)
         self.hef = HEF(str(self.hef_path))
-        self.vdevice = VDevice()
+        self.vdevice = _get_shared_vdevice(VDevice)
         configure_params = ConfigureParams.create_from_hef(
             self.hef,
             interface=HailoStreamInterface.PCIe,
@@ -80,12 +86,29 @@ class HailoModelRunner:
         name = input_name or self.input_name
         inputs = {name: input_tensor.astype(np.float32, copy=False)}
         try:
-            with self.network_group.activate(self.network_group_params):
-                with self._InferVStreams(
-                    self.network_group,
-                    self.input_vstreams_params,
-                    self.output_vstreams_params,
-                ) as infer_pipeline:
-                    return infer_pipeline.infer(inputs)
+            with _INFER_LOCK:
+                with self.network_group.activate(self.network_group_params):
+                    with self._InferVStreams(
+                        self.network_group,
+                        self.input_vstreams_params,
+                        self.output_vstreams_params,
+                    ) as infer_pipeline:
+                        return infer_pipeline.infer(inputs)
         except Exception as exc:  # pragma: no cover
             raise RuntimeError(f"Hailo inference failed for {self.hef_path.name}: {exc}") from exc
+
+
+def _get_shared_vdevice(vdevice_cls):
+    global _SHARED_VDEVICE
+    with _VDEVICE_LOCK:
+        if _SHARED_VDEVICE is None:
+            try:
+                _SHARED_VDEVICE = vdevice_cls()
+            except Exception as exc:  # pragma: no cover - depends on Hailo device state
+                raise RuntimeError(
+                    "Failed to create Hailo VDevice. The accelerator may already be held by "
+                    "another process, or this process may be trying to allocate more VDevices "
+                    "than the hardware supports. Stop other edge_hailo/uvicorn/python Hailo "
+                    f"processes and retry. Original HailoRT error: {exc}"
+                ) from exc
+        return _SHARED_VDEVICE

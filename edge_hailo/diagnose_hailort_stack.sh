@@ -14,6 +14,10 @@ run() {
 
 section "Hailo device"
 run ls -l /dev/hailo0
+if command -v fuser >/dev/null 2>&1; then
+  run fuser -v /dev/hailo0
+fi
+run sh -c 'ps -ef | grep -E "edge_hailo|uvicorn|python" | grep -v grep'
 run lsmod
 if command -v modinfo >/dev/null 2>&1; then
   run modinfo hailo_pci

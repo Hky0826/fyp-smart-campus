@@ -67,6 +67,19 @@ The driver and user-space library must use the same HailoRT version. Prefer
 reinstalling the user-space `hailort` package to match the installed driver, or
 install matching vendor `.deb` files for both `hailort` and `hailort-pcie-driver`.
 
+If HailoRT reports `failed to create vdevice` or `there are not enough free
+devices`, first make sure no other process is holding the accelerator:
+
+```bash
+sudo fuser -v /dev/hailo0
+ps -ef | grep -E "edge_hailo|uvicorn|python" | grep -v grep
+```
+
+Stop any old API or pipeline process and rerun the direct pipeline. The direct
+pipeline code shares one Hailo VDevice between detector and embedder models, so
+this error usually means a previous process is still alive or another service is
+using `/dev/hailo0`.
+
 ## Step 2: Prepare the HEF Models
 
 Expected model placement:
