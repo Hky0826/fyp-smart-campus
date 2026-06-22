@@ -28,9 +28,15 @@ The script first runs `python3 -m edge_hailo.src.hailo.diagnostics`. If
 `hailo_platform_importable` is already `true`, it stops successfully. If it is
 `false`, the script tries these installation sources in order:
 
+- system Python HailoRT linked into the active `.venv`, when `/usr/bin/python3` can already import `hailo_platform`
 - `HAILORT_WHEEL=/path/to/hailort-...whl`
 - `HAILORT_DEB_DIR=/path/to/folder/with/debs`
 - apt packages exposed by the EdgeMind image, such as `hailo-all`, `hailort`, or `python3-hailort`
+
+If the diagnostic shows `hailo_device: true` but `hailo_platform_importable: false`
+inside `.venv/bin/python3`, the hardware driver is visible but the virtualenv is
+missing the Python binding. Rerun the helper while the venv is active; it will
+try to link the system HailoRT package into `.venv` automatically.
 
 Examples:
 

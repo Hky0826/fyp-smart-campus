@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
 PYTHON_BIN="${PYTHON:-python3}"
+PTH_FILE_NAME="edge_hailo_hailort_system.pth"
 
 if [[ "${EUID}" -eq 0 ]]; then
   SUDO_CMD=()
@@ -18,20 +19,45 @@ log() {
   echo "[edge_hailo][hailort] $*"
 }
 
+python_exec() {
+  "${PYTHON_BIN}" -c 'import sys; print(sys.executable)'
+}
+
+python_version() {
+  "${PYTHON_BIN}" -c 'import sys; print("{}.{}.{}".format(*sys.version_info[:3]))'
+}
+
+python_major_minor() {
+  local python_bin="$1"
+  "${python_bin}" -c 'import sys; print("{}.{}".format(*sys.version_info[:2]))'
+}
+
+in_virtualenv() {
+  "${PYTHON_BIN}" - <<'PY' >/dev/null 2>&1
+import sys
+raise SystemExit(0 if sys.prefix != getattr(sys, "base_prefix", sys.prefix) else 1)
+PY
+}
+
 run_diagnostics() {
   "${PYTHON_BIN}" -m edge_hailo.src.hailo.diagnostics || true
 }
 
-hailort_importable() {
-  "${PYTHON_BIN}" - <<'PY' >/dev/null 2>&1
+python_can_import_hailort() {
+  local python_bin="$1"
+  "${python_bin}" - <<'PY' >/dev/null 2>&1
 import importlib
 importlib.import_module("hailo_platform")
 PY
 }
 
+hailort_importable() {
+  python_can_import_hailort "${PYTHON_BIN}"
+}
+
 finish_if_ready() {
   if hailort_importable; then
-    log "hailo_platform is importable. HailoRT Python bindings are ready."
+    log "hailo_platform is importable in $(python_exec)."
     run_diagnostics
     if [[ ! -e /dev/hailo0 ]]; then
       log "Warning: /dev/hailo0 was not found. If this is the EdgeMind device, install/load the Hailo PCIe driver or reboot after installing HailoRT."
@@ -42,6 +68,83 @@ finish_if_ready() {
     fi
     exit 0
   fi
+}
+
+active_site_packages() {
+  "${PYTHON_BIN}" - <<'PY'
+import sysconfig
+print(sysconfig.get_paths()["purelib"])
+PY
+}
+
+system_hailort_package_dir() {
+  local system_python="$1"
+  "${system_python}" - <<'PY'
+from pathlib import Path
+import importlib.util
+
+spec = importlib.util.find_spec("hailo_platform")
+if spec is None or spec.origin is None:
+    raise SystemExit(1)
+origin = Path(spec.origin).resolve()
+if origin.name == "__init__.py":
+    print(origin.parent.parent)
+else:
+    print(origin.parent)
+PY
+}
+
+system_python_candidates() {
+  local current
+  current="$(python_exec)"
+  for candidate in /usr/bin/python3 /usr/bin/python3.10 /usr/local/bin/python3 /usr/local/bin/python3.10; do
+    if [[ -x "${candidate}" && "${candidate}" != "${current}" ]]; then
+      echo "${candidate}"
+    fi
+  done
+}
+
+bridge_system_hailort_into_venv() {
+  if ! in_virtualenv; then
+    return 1
+  fi
+
+  local system_python=""
+  local package_dir=""
+  local active_major_minor
+  active_major_minor="$(python_major_minor "${PYTHON_BIN}")"
+
+  for candidate in $(system_python_candidates); do
+    if [[ "$(python_major_minor "${candidate}")" != "${active_major_minor}" ]]; then
+      log "Skipping ${candidate}; it does not match active Python ${active_major_minor}."
+      continue
+    fi
+    if python_can_import_hailort "${candidate}"; then
+      system_python="${candidate}"
+      package_dir="$(system_hailort_package_dir "${candidate}")"
+      break
+    fi
+  done
+
+  if [[ -z "${system_python}" || -z "${package_dir}" || ! -d "${package_dir}" ]]; then
+    return 1
+  fi
+
+  local venv_site
+  venv_site="$(active_site_packages)"
+  mkdir -p "${venv_site}"
+
+  log "System Python can import hailo_platform: ${system_python}"
+  log "Adding HailoRT package path to active venv: ${package_dir}"
+  printf '%s\n' "${package_dir}" > "${venv_site}/${PTH_FILE_NAME}"
+
+  if hailort_importable; then
+    log "Linked system HailoRT into the active virtualenv."
+    return 0
+  fi
+
+  log "Created ${venv_site}/${PTH_FILE_NAME}, but hailo_platform is still not importable."
+  return 1
 }
 
 install_wheel() {
@@ -140,24 +243,39 @@ install_apt_packages() {
 cat <<EOF
 [edge_hailo][hailort] HailoRT installer helper
 [edge_hailo][hailort] Project root: ${PROJECT_ROOT}
-[edge_hailo][hailort] Python: $(${PYTHON_BIN} -c 'import sys; print(sys.executable)')
+[edge_hailo][hailort] Python: $(python_exec)
+[edge_hailo][hailort] Python version: $(python_version)
 EOF
+
+if in_virtualenv; then
+  log "Active Python is a virtualenv. The script will also check system Python for HailoRT and link it into this venv if needed."
+fi
 
 log "Running current diagnostics."
 run_diagnostics
 finish_if_ready
 
-log "hailo_platform is not importable yet. Trying installation sources."
+log "hailo_platform is not importable in the active Python yet. Trying installation sources."
+
+if bridge_system_hailort_into_venv; then
+  finish_if_ready
+fi
 
 if install_wheel; then
   finish_if_ready
 fi
 
 if install_debs; then
+  if bridge_system_hailort_into_venv; then
+    finish_if_ready
+  fi
   finish_if_ready
 fi
 
 if install_apt_packages; then
+  if bridge_system_hailort_into_venv; then
+    finish_if_ready
+  fi
   finish_if_ready
 fi
 
@@ -165,16 +283,27 @@ cat <<'EOF'
 
 [edge_hailo][hailort] Could not make hailo_platform importable automatically.
 
-What to do next:
-  1. Get the HailoRT package that matches the EdgeMind OS, CPU architecture, and Python version.
-  2. If you received a Python wheel, run:
-       HAILORT_WHEEL=/path/to/hailort-...whl bash edge_hailo/install_hailort.sh
-  3. If you received .deb files, run:
-       HAILORT_DEB_DIR=/path/to/deb/folder bash edge_hailo/install_hailort.sh
-  4. If your apt repository uses different package names, run:
-       HAILORT_APT_PACKAGES="package1 package2" bash edge_hailo/install_hailort.sh
+For your diagnostic shape, the most common cause is an isolated .venv:
+  hailo_device: true
+  python_executable: /path/to/project/.venv/bin/python3
+  hailo_platform_importable: false
 
-After installation, reboot the device if the Hailo driver was installed or updated:
+Try these checks on the EdgeMind device:
+  /usr/bin/python3 -c "import hailo_platform; print('system HailoRT OK')"
+  python3 -c "import sys; print(sys.executable); print(sys.prefix); print(getattr(sys, 'base_prefix', sys.prefix))"
+
+If system Python can import HailoRT, rerun this script while the venv is active:
+  bash edge_hailo/install_hailort.sh
+
+If system Python cannot import HailoRT, install the EdgeMind/HailoRT package first:
+  sudo apt update
+  sudo apt install hailo-all
+
+Or provide the vendor package explicitly:
+  HAILORT_WHEEL=/path/to/hailort-...whl bash edge_hailo/install_hailort.sh
+  HAILORT_DEB_DIR=/path/to/deb/folder bash edge_hailo/install_hailort.sh
+
+After installing or updating the Hailo driver, reboot:
   sudo reboot
 
 Then verify again:
