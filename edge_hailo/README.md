@@ -3,28 +3,56 @@
 Independent Hailo-based face-recognition pipelines for the EdgeMind device.
 This package does not import from the existing `edge` folder at runtime.
 
-## Pipelines
+## Step 1: Prepare the Device
 
-Access control:
+Run these commands on the EdgeMind device from the repository root:
 
-- Detector: `models/access_control/scrfd_2.5g.hef`
-- Embedder: `models/access_control/arcface_mobilefacenet.hef`
-- Uses liveness/spoofing heuristic adapted from the old edge kiosk
-- Rejects frames with more than one face:
-  `Only one user is allowed within the frame.`
-- Denies unknown, low-confidence, inactive, or liveness-failed users
+```bash
+cd /path/to/Code_FYP
+python3 --version
+```
 
-Surveillance:
+Install the normal Python dependencies:
 
-- Detector: `models/surveillance/scrfd_10g.hef`
-- Embedder: `models/surveillance/arcface_r50.hef`
-- Supports multiple faces per frame
-- Does not run spoofing/liveness checks
-- Reports identities, scores, boxes, matched template names, and timestamps
+```bash
+python3 -m pip install -r edge_hailo/requirements.txt
+```
 
-## Models
+Install or verify HailoRT with the helper script:
 
-Expected placement:
+```bash
+bash edge_hailo/install_hailort.sh
+```
+
+The script first runs `python3 -m edge_hailo.src.hailo.diagnostics`. If
+`hailo_platform_importable` is already `true`, it stops successfully. If it is
+`false`, the script tries these installation sources in order:
+
+- `HAILORT_WHEEL=/path/to/hailort-...whl`
+- `HAILORT_DEB_DIR=/path/to/folder/with/debs`
+- apt packages exposed by the EdgeMind image, such as `hailo-all`, `hailort`, or `python3-hailort`
+
+Examples:
+
+```bash
+HAILORT_WHEEL=/path/to/hailort-<version>-cp<python>-<platform>.whl \
+  bash edge_hailo/install_hailort.sh
+
+HAILORT_DEB_DIR=/path/to/hailort/debs \
+  bash edge_hailo/install_hailort.sh
+```
+
+The Python module is `hailo_platform`; it comes from HailoRT/pyHailoRT, not from
+a normal PyPI package named `hailo_platform`. Continue only when the diagnostic
+reports:
+
+```text
+hailo_platform_importable: true
+```
+
+## Step 2: Prepare the HEF Models
+
+Expected model placement:
 
 ```text
 edge_hailo/
@@ -37,7 +65,7 @@ edge_hailo/
       arcface_r50.hef
 ```
 
-Run:
+Run the model helper:
 
 ```bash
 bash edge_hailo/download_models.sh
@@ -49,12 +77,21 @@ provide in `SCRFD_25G_HEF_URL`, `ARCFACE_MOBILEFACENET_HEF_URL`,
 authenticated manual download or local compilation, place the files manually at
 the paths above.
 
-## Database
+## Step 3: Prepare the Database
 
 The pipeline reads already-created embeddings from SQLite table `device_users`.
 Enrollment is intentionally not implemented here.
 
-The existing edge schema is supported:
+Set the database path if needed:
+
+```bash
+export EDGE_HAILO_DB_PATH=/path/to/device_local.db
+```
+
+If unset, the code uses `edge/device_local.db` when it exists, otherwise
+`edge_hailo/data/device_local.db`.
+
+Supported basic schema:
 
 ```sql
 device_users(user_id INTEGER PRIMARY KEY, face_vector BLOB, is_active INTEGER)
@@ -65,114 +102,24 @@ multiple rows per user, a `template_name`/`pose` column, or JSON templates in an
 embedding column. Template names such as `front`, `left_30`, `right_60`,
 `slightly_up`, `slightly_down`, and `low_light` are returned when present.
 
-Set a database path with:
+## Step 4: Run the Pipeline
+
+Access control on camera `/dev/video0`:
 
 ```bash
-export EDGE_HAILO_DB_PATH=/path/to/device_local.db
+python3 -m edge_hailo.src.pipelines.access_control --camera /dev/video0
 ```
 
-If unset, the code uses `edge/device_local.db` when it exists.
-
-## Run
-
-Install Python dependencies and HailoRT on the EdgeMind device:
+Surveillance on camera `/dev/video1`:
 
 ```bash
-pip install -r edge_hailo/requirements.txt
-```
-
-Then verify that the same Python interpreter can import the HailoRT bindings:
-
-```bash
-python -m edge_hailo.src.hailo.diagnostics
-```
-
-If this reports `hailo_platform_importable: false`, HailoRT is not installed in
-the Python environment used to start the pipeline. Install the HailoRT runtime
-and Python bindings from the EdgeMind/Hailo software package for that exact
-Python version, then run the diagnostic again. The package name is not listed in
-`requirements.txt` because HailoRT is device/OS/Python-version specific and is
-usually distributed with the Hailo/EdgeMind SDK rather than as a normal PyPI
-dependency.
-
-Access control:
-
-```bash
-python -m edge_hailo.src.pipelines.access_control --camera /dev/video0
-```
-
-Surveillance:
-
-```bash
-python -m edge_hailo.src.pipelines.surveillance --camera /dev/video1
+python3 -m edge_hailo.src.pipelines.surveillance --camera /dev/video1
 ```
 
 Camera sources can be `/dev/video0`, a numeric OpenCV index, RTSP URL, or video
 file path.
 
-## API
-
-Run:
-
-```bash
-uvicorn edge_hailo.src.api.main:app --host 0.0.0.0 --port 8080
-```
-
-Endpoints:
-
-- `GET /health`
-- `POST /access-control/frame`
-- `POST /surveillance/frame`
-- `GET /models/status`
-- `GET /database/status`
-
-Frame endpoints accept multipart upload field `file`. Access control also
-accepts optional form field `target_user_id` for strict 1:1 verification.
-
-## Docker
-
-```bash
-docker compose -f edge_hailo/docker/docker-compose.face.yml up --build
-```
-
-The compose file exposes `/dev/hailo0`, `/dev/video0`, and `/dev/video1`, and
-mounts `edge_hailo/models` plus `edge_hailo/data`.
-
-The default Docker image is plain `python:3.11-slim`, so it does not include
-`hailo_platform`. Use a HailoRT-enabled base image, or place the HailoRT Python
-wheel inside the build context and pass it through `EDGE_HAILO_HAILORT_WHEEL`:
-
-```bash
-mkdir -p edge_hailo/vendor
-# Copy the HailoRT Python wheel into edge_hailo/vendor first.
-export EDGE_HAILO_HAILORT_WHEEL=edge_hailo/vendor/hailort-<version>-cp311-<platform>.whl
-docker compose -f edge_hailo/docker/docker-compose.face.yml up --build
-```
-
-If EdgeMind provides a container image that already includes HailoRT, use it as
-the base image instead:
-
-```bash
-export EDGE_HAILO_BASE_IMAGE=<hailort-enabled-image>
-docker compose -f edge_hailo/docker/docker-compose.face.yml up --build
-```
-
-The container runs `python -m edge_hailo.src.hailo.diagnostics` before starting
-the API and exits early if `hailo_platform` is missing. To run the same check
-manually:
-
-```bash
-docker compose -f edge_hailo/docker/docker-compose.face.yml exec edge-hailo-face \
-  python -m edge_hailo.src.hailo.diagnostics
-```
-
-For a local API-only smoke test without HailoRT, disable the startup guard:
-
-```bash
-EDGE_HAILO_REQUIRE_HAILORT=0 docker compose -f edge_hailo/docker/docker-compose.face.yml up --build
-```
-
-## Thresholds
+## Step 5: Tune Thresholds
 
 Similarity thresholds are configurable:
 
@@ -185,3 +132,99 @@ These values must be tuned using real camera footage from the target device.
 Access control should remain strict. Surveillance can use a separate threshold
 to improve recall for angled, non-frontal, up/down, and low-light views while
 still returning `unknown` below threshold.
+
+## Alternative: Run the API
+
+Use the API only if another service needs HTTP endpoints. The direct pipeline
+commands above are enough for normal device testing.
+
+Start the API:
+
+```bash
+uvicorn edge_hailo.src.api.main:app --host 0.0.0.0 --port 8080
+```
+
+Useful endpoints:
+
+- `GET /health`
+- `POST /access-control/frame`
+- `POST /surveillance/frame`
+- `GET /models/status`
+- `GET /database/status`
+
+Frame endpoints accept multipart upload field `file`. Access control also
+accepts optional form field `target_user_id` for strict 1:1 verification.
+
+## Alternative: Run with Docker
+
+Docker is optional. Use it only when you want a containerized deployment. For
+simple testing on the EdgeMind device, running the pipeline directly is easier.
+
+The compose file exposes `/dev/hailo0`, `/dev/video0`, and `/dev/video1`, and
+mounts `edge_hailo/models` plus `edge_hailo/data`.
+
+The default Docker image is plain `python:3.11-slim`, so it does not include
+`hailo_platform`. Use one of the two options below.
+
+### Docker Option A: HailoRT Wheel
+
+Copy the HailoRT Python wheel into the build context, then build and run:
+
+```bash
+mkdir -p edge_hailo/vendor
+# Copy the HailoRT Python wheel into edge_hailo/vendor first.
+export EDGE_HAILO_HAILORT_WHEEL=edge_hailo/vendor/hailort-<version>-cp311-<platform>.whl
+docker compose -f edge_hailo/docker/docker-compose.face.yml up --build
+```
+
+The wheel must match the container Python version. The default image uses Python
+3.11, so the wheel should be a `cp311` wheel.
+
+### Docker Option B: HailoRT Base Image
+
+If EdgeMind provides a container image that already includes HailoRT, use it as
+the base image:
+
+```bash
+export EDGE_HAILO_BASE_IMAGE=<hailort-enabled-image>
+docker compose -f edge_hailo/docker/docker-compose.face.yml up --build
+```
+
+### Docker Verification
+
+The container runs this check before starting the API:
+
+```bash
+python -m edge_hailo.src.hailo.diagnostics
+```
+
+To run the same check manually after the container starts:
+
+```bash
+docker compose -f edge_hailo/docker/docker-compose.face.yml exec edge-hailo-face \
+  python -m edge_hailo.src.hailo.diagnostics
+```
+
+For a local API-only smoke test without HailoRT, disable the startup guard:
+
+```bash
+EDGE_HAILO_REQUIRE_HAILORT=0 docker compose -f edge_hailo/docker/docker-compose.face.yml up --build
+```
+
+## Pipeline Behavior
+
+Access control:
+
+- Detector: `models/access_control/scrfd_2.5g.hef`
+- Embedder: `models/access_control/arcface_mobilefacenet.hef`
+- Uses liveness/spoofing heuristic adapted from the old edge kiosk
+- Rejects frames with more than one face: `Only one user is allowed within the frame.`
+- Denies unknown, low-confidence, inactive, or liveness-failed users
+
+Surveillance:
+
+- Detector: `models/surveillance/scrfd_10g.hef`
+- Embedder: `models/surveillance/arcface_r50.hef`
+- Supports multiple faces per frame
+- Does not run spoofing/liveness checks
+- Reports identities, scores, boxes, matched template names, and timestamps
