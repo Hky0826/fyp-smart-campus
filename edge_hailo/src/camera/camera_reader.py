@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover
 
 
 class CameraReader:
-    def __init__(self, source: str = "/dev/video4", width: int = 640, height: int = 480) -> None:
+    def __init__(self, source: str = "/dev/video4", width: int = 1920, height: int = 1080) -> None:
         self.source = source
         self.width = int(width)
         self.height = int(height)
