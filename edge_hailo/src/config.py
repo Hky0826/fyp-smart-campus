@@ -39,7 +39,7 @@ class RuntimeConfig:
 
 @dataclass(frozen=True)
 class AccessControlConfig(RuntimeConfig):
-    detector_model_path: Path = MODEL_ROOT / "access_control" / "scrfd_2.5g.hef"
+    detector_model_path: Path = MODEL_ROOT / "surveillance" / "scrfd_10g.hef"
     embedding_model_path: Path = MODEL_ROOT / "access_control" / "arcface_mobilefacenet.hef"
     camera: str = os.getenv("EDGE_HAILO_ACCESS_CAMERA", os.getenv("EDGE_HAILO_CAMERA", DEFAULT_CAMERA))
     detection_threshold: float = float(os.getenv("EDGE_HAILO_ACCESS_DETECTION_THRESHOLD", "0.60"))

@@ -61,6 +61,9 @@ class AccessControlLogicTests(unittest.TestCase):
     def setUp(self):
         self.frame = np.zeros((120, 120, 3), dtype=np.uint8)
 
+    def test_access_control_uses_stronger_detector(self):
+        self.assertEqual(AccessControlConfig().detector_model_path.name, "scrfd_10g.hef")
+
     def pipeline(self, faces, live_vector, templates, spoof_state="live", threshold=0.75):
         return AccessControlPipeline(
             detector=FakeDetector(faces),

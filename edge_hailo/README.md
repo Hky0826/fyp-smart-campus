@@ -88,10 +88,9 @@ Expected model placement:
 edge_hailo/
   models/
     access_control/
-      scrfd_2.5g.hef
       arcface_mobilefacenet.hef
     surveillance/
-      scrfd_10g.hef
+      scrfd_10g.hef  # shared detector for access control and surveillance
       arcface_r50.hef
 ```
 
@@ -102,10 +101,9 @@ bash edge_hailo/download_models.sh
 ```
 
 The script can copy HEFs from `HAILO_HEF_SOURCE_DIR` or download from URLs you
-provide in `SCRFD_25G_HEF_URL`, `ARCFACE_MOBILEFACENET_HEF_URL`,
-`SCRFD_10G_HEF_URL`, and `ARCFACE_R50_HEF_URL`. If your Hailo package requires
-authenticated manual download or local compilation, place the files manually at
-the paths above.
+provide in `ARCFACE_MOBILEFACENET_HEF_URL`, `SCRFD_10G_HEF_URL`, and
+`ARCFACE_R50_HEF_URL`. If your Hailo package requires authenticated manual
+download or local compilation, place the files manually at the paths above.
 
 ## Step 3: Prepare the Database
 
@@ -264,7 +262,7 @@ EDGE_HAILO_REQUIRE_HAILORT=0 docker compose -f edge_hailo/docker/docker-compose.
 
 Access control:
 
-- Detector: `models/access_control/scrfd_2.5g.hef`
+- Detector: `models/surveillance/scrfd_10g.hef`
 - Embedder: `models/access_control/arcface_mobilefacenet.hef`
 - Uses a liveness/spoofing heuristic for access decisions
 - Rejects frames with more than one face: `Only one user is allowed within the frame.`

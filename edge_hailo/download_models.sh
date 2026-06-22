@@ -45,7 +45,6 @@ ensure_model() {
   echo "Missing ${destination}/${filename}"
 }
 
-ensure_model "scrfd_2.5g.hef" "${ACCESS_DIR}" "SCRFD_25G_HEF_URL"
 ensure_model "arcface_mobilefacenet.hef" "${ACCESS_DIR}" "ARCFACE_MOBILEFACENET_HEF_URL"
 ensure_model "scrfd_10g.hef" "${SURVEILLANCE_DIR}" "SCRFD_10G_HEF_URL"
 ensure_model "arcface_r50.hef" "${SURVEILLANCE_DIR}" "ARCFACE_R50_HEF_URL"
@@ -53,16 +52,14 @@ ensure_model "arcface_r50.hef" "${SURVEILLANCE_DIR}" "ARCFACE_R50_HEF_URL"
 cat <<'EOF'
 
 Model placement required:
-  edge_hailo/models/access_control/scrfd_2.5g.hef
   edge_hailo/models/access_control/arcface_mobilefacenet.hef
-  edge_hailo/models/surveillance/scrfd_10g.hef
+  edge_hailo/models/surveillance/scrfd_10g.hef  # shared detector for access control and surveillance
   edge_hailo/models/surveillance/arcface_r50.hef
 
 If your Hailo Model Zoo package provides precompiled HEFs, set:
   HAILO_HEF_SOURCE_DIR=/path/to/hef/files
 
 If your organization has authenticated download URLs, set:
-  SCRFD_25G_HEF_URL=...
   ARCFACE_MOBILEFACENET_HEF_URL=...
   SCRFD_10G_HEF_URL=...
   ARCFACE_R50_HEF_URL=...
