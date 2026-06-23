@@ -64,6 +64,9 @@ class AccessControlLogicTests(unittest.TestCase):
     def test_access_control_uses_stronger_detector(self):
         self.assertEqual(AccessControlConfig().detector_model_path.name, "scrfd_10g.hef")
 
+    def test_access_control_uses_arcface_r50_embedder(self):
+        self.assertEqual(AccessControlConfig().embedding_model_path.name, "arcface_r50.hef")
+
     def pipeline(self, faces, live_vector, templates, spoof_state="live", threshold=0.75):
         return AccessControlPipeline(
             detector=FakeDetector(faces),

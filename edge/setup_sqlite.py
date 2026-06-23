@@ -17,7 +17,7 @@ except ModuleNotFoundError:  # Allows `python edge/setup_sqlite.py` from repo ro
 EDGE_ROOT = Path(__file__).resolve().parent
 SCHEMA_PATH = EDGE_ROOT / "setup_sqlite.sql"
 DEFAULT_DB_PATH = EDGE_ROOT / "data" / "device_local.db"
-DEFAULT_EMBEDDING_MODEL = "arcface_mobilefacenet"
+DEFAULT_EMBEDDING_MODEL = "arcface_r50"
 
 
 def default_database_path() -> Path:

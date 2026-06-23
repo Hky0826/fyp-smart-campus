@@ -30,12 +30,10 @@ def preprocess_scrfd(frame: np.ndarray, input_size: Tuple[int, int] = (640, 640)
 
 
 def preprocess_arcface(face_bgr: np.ndarray, input_size: Tuple[int, int] = (112, 112)) -> np.ndarray:
-    """BGR face crop to NCHW normalized RGB tensor expected by ArcFace-like models."""
+    """BGR face crop to NHWC RGB tensor expected by Hailo ArcFace HEFs."""
     if cv2 is None:
         raise RuntimeError("OpenCV is required for image preprocessing")
     img = cv2.resize(face_bgr, input_size, interpolation=cv2.INTER_LINEAR)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = img.astype(np.float32) / 255.0
-    img = (img - 0.5) / 0.5
-    img = np.transpose(img, (2, 0, 1))
+    img = img.astype(np.float32)
     return np.expand_dims(img, axis=0).astype(np.float32, copy=False)

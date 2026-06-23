@@ -88,11 +88,9 @@ Expected model placement:
 ```text
 edge/
   models/
-    access_control/
-      arcface_mobilefacenet.hef
     surveillance/
       scrfd_10g.hef  # shared detector for access control and surveillance
-      arcface_r50.hef
+      arcface_r50.hef  # shared embedder for access control and surveillance
 ```
 
 Run the model helper:
@@ -302,7 +300,7 @@ EDGE_REQUIRE_HAILORT=0 docker compose -f edge/docker/docker-compose.face.yml up 
 Access control:
 
 - Detector: `models/surveillance/scrfd_10g.hef`
-- Embedder: `models/access_control/arcface_mobilefacenet.hef`
+- Embedder: `models/surveillance/arcface_r50.hef`
 - Uses a liveness/spoofing heuristic for access decisions
 - Rejects frames with more than one face: `Only one user is allowed within the frame.`
 - Denies unknown, low-confidence, inactive, or liveness-failed users

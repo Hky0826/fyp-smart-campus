@@ -48,7 +48,7 @@ class RuntimeConfig:
 @dataclass(frozen=True)
 class AccessControlConfig(RuntimeConfig):
     detector_model_path: Path = MODEL_ROOT / "surveillance" / "scrfd_10g.hef"
-    embedding_model_path: Path = MODEL_ROOT / "access_control" / "arcface_mobilefacenet.hef"
+    embedding_model_path: Path = MODEL_ROOT / "surveillance" / "arcface_r50.hef"
     camera: str = os.getenv("EDGE_ACCESS_CAMERA", os.getenv("EDGE_CAMERA", DEFAULT_CAMERA))
     detection_threshold: float = float(os.getenv("EDGE_ACCESS_DETECTION_THRESHOLD", "0.60"))
     # Tune with real camera footage. A strict threshold is safer for access decisions.

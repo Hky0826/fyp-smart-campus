@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 from edge.src.hailo.postprocess_scrfd import postprocess_scrfd
-from edge.src.hailo.preprocess import preprocess_scrfd
+from edge.src.hailo.preprocess import preprocess_arcface, preprocess_scrfd
 
 
 class SCRFDPostprocessTests(unittest.TestCase):
@@ -11,6 +11,15 @@ class SCRFDPostprocessTests(unittest.TestCase):
         frame = np.array([[[10, 20, 30]]], dtype=np.uint8)
 
         tensor = preprocess_scrfd(frame, input_size=(1, 1))
+
+        self.assertEqual(tensor.dtype, np.float32)
+        self.assertEqual(tensor.shape, (1, 1, 1, 3))
+        np.testing.assert_allclose(tensor[0, 0, 0], [30.0, 20.0, 10.0])
+
+    def test_preprocess_keeps_arcface_pixels_in_hailo_range(self):
+        crop = np.array([[[10, 20, 30]]], dtype=np.uint8)
+
+        tensor = preprocess_arcface(crop, input_size=(1, 1))
 
         self.assertEqual(tensor.dtype, np.float32)
         self.assertEqual(tensor.shape, (1, 1, 1, 3))

@@ -22,7 +22,7 @@ from .utils.sync_key import generate_sync_key
 
 
 logger = logging.getLogger(__name__)
-DEFAULT_EMBEDDING_MODEL = "arcface_mobilefacenet"
+DEFAULT_EMBEDDING_MODEL = "arcface_r50"
 
 
 class SQLiteEdgeDB:
