@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import base64
+import datetime
+import json
 import logging
 import sqlite3
 import threading
+from array import array
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -14,8 +17,12 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from ..setup_sqlite import backfill_missing_sync_keys, initialize_sqlite_database, table_columns
+from .utils.sync_key import generate_sync_key
+
 
 logger = logging.getLogger(__name__)
+DEFAULT_EMBEDDING_MODEL = "arcface_mobilefacenet"
 
 
 class SQLiteEdgeDB:
@@ -35,91 +42,16 @@ class SQLiteEdgeDB:
 
     def initialize_schema(self) -> None:
         with self.lock:
-            conn = self._get_connection()
-            cursor = conn.cursor()
             try:
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS device_users (
-                        user_id INTEGER PRIMARY KEY NOT NULL,
-                        face_vector BLOB NOT NULL,
-                        is_active INTEGER DEFAULT 1 NOT NULL,
-                        last_synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    );
-                    """
-                )
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS device_roles (
-                        role_id INTEGER PRIMARY KEY NOT NULL,
-                        role_name TEXT NOT NULL,
-                        last_synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    );
-                    """
-                )
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS device_user_roles (
-                        user_id INTEGER NOT NULL,
-                        role_id INTEGER NOT NULL,
-                        last_synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (user_id, role_id),
-                        FOREIGN KEY (role_id) REFERENCES device_roles(role_id) ON DELETE CASCADE
-                    );
-                    """
-                )
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS device_auth_logs (
-                        log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        user_id INTEGER,
-                        auth_status TEXT NOT NULL,
-                        confidence_score REAL,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        sync_status INTEGER DEFAULT 0 NOT NULL,
-                        FOREIGN KEY (user_id) REFERENCES device_users(user_id) ON DELETE SET NULL
-                    );
-                    """
-                )
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS device_info (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        device_id TEXT NOT NULL,
-                        device_name TEXT NOT NULL,
-                        node_id INTEGER NOT NULL,
-                        location_name TEXT NOT NULL,
-                        last_cloud_sync DATETIME
-                    );
-                    """
-                )
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS device_node_rbac (
-                        node_id INTEGER NOT NULL,
-                        role_id INTEGER NOT NULL,
-                        last_synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (node_id, role_id)
-                    );
-                    """
-                )
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS sync_metadata (
-                        key TEXT PRIMARY KEY,
-                        val TEXT
-                    );
-                    """
-                )
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_auth_logs_sync ON device_auth_logs(sync_status);")
-                conn.commit()
+                initialize_sqlite_database(self.db_path)
                 logger.info("SQLite sync schema initialized at %s", self.db_path)
             except Exception:
-                conn.rollback()
                 logger.exception("Error initializing SQLite sync schema")
                 raise
-            finally:
-                conn.close()
+
+    @staticmethod
+    def _table_columns(cursor: sqlite3.Cursor, table_name: str) -> set[str]:
+        return table_columns(cursor, table_name)
 
     def save_users_delta(self, users: List[Dict[str, Any]]) -> None:
         if not users:
@@ -128,13 +60,15 @@ class SQLiteEdgeDB:
             conn = self._get_connection()
             cursor = conn.cursor()
             try:
+                user_columns = self._table_columns(cursor, "device_users")
                 for user in users:
                     user_id = user["user_id"]
                     is_active = int(user.get("is_active", 1))
-                    face_vector_b64 = user.get("face_vector_b64")
+                    embeddings_present = self._has_embedding_payload(user)
+                    embedding_records = self._embedding_records_from_user(user)
 
-                    if face_vector_b64:
-                        face_bytes = base64.b64decode(face_vector_b64)
+                    if "face_vector" in user_columns:
+                        legacy_face_vector = embedding_records[0]["embedding"] if embedding_records else b""
                         cursor.execute(
                             """
                             INSERT INTO device_users (user_id, face_vector, is_active, last_synced_at)
@@ -144,19 +78,43 @@ class SQLiteEdgeDB:
                                 is_active=excluded.is_active,
                                 last_synced_at=CURRENT_TIMESTAMP
                             """,
-                            (user_id, face_bytes, is_active),
+                            (user_id, legacy_face_vector, is_active),
                         )
                     else:
                         cursor.execute(
                             """
-                            INSERT INTO device_users (user_id, face_vector, is_active, last_synced_at)
-                            VALUES (?, x'', ?, CURRENT_TIMESTAMP)
+                            INSERT INTO device_users (user_id, is_active, last_synced_at)
+                            VALUES (?, ?, CURRENT_TIMESTAMP)
                             ON CONFLICT(user_id) DO UPDATE SET
                                 is_active=excluded.is_active,
                                 last_synced_at=CURRENT_TIMESTAMP
                             """,
                             (user_id, is_active),
                         )
+                    if embeddings_present:
+                        cursor.execute("DELETE FROM device_user_face_embeddings WHERE user_id = ?", (user_id,))
+                        for record in embedding_records:
+                            cursor.execute(
+                                """
+                                INSERT INTO device_user_face_embeddings (
+                                    user_id,
+                                    template_name,
+                                    model_name,
+                                    embedding,
+                                    last_synced_at
+                                )
+                                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                                ON CONFLICT(user_id, template_name, model_name) DO UPDATE SET
+                                    embedding=excluded.embedding,
+                                    last_synced_at=CURRENT_TIMESTAMP
+                                """,
+                                (
+                                    user_id,
+                                    record["template_name"],
+                                    record["model_name"],
+                                    record["embedding"],
+                                ),
+                            )
                 conn.commit()
                 logger.info("Processed delta update for %s users", len(users))
             except Exception:
@@ -165,6 +123,93 @@ class SQLiteEdgeDB:
                 raise
             finally:
                 conn.close()
+
+    @staticmethod
+    def _has_embedding_payload(user: Dict[str, Any]) -> bool:
+        return any(
+            key in user
+            for key in (
+                "face_vector_b64",
+                "embedding_b64",
+                "face_vector",
+                "embedding",
+                "embedding_blob",
+                "embeddings",
+                "face_embeddings",
+                "user_face_embeddings",
+                "templates",
+            )
+        )
+
+    @classmethod
+    def _embedding_records_from_user(cls, user: Dict[str, Any]) -> List[Dict[str, Any]]:
+        records = []
+        for payload in cls._iter_embedding_payloads(user):
+            record = cls._embedding_record_from_payload(payload)
+            if record is not None:
+                records.append(record)
+        return records
+
+    @staticmethod
+    def _iter_embedding_payloads(user: Dict[str, Any]) -> List[Dict[str, Any]]:
+        payloads: List[Dict[str, Any]] = []
+        direct_keys = {"face_vector_b64", "embedding_b64", "face_vector", "embedding", "embedding_blob"}
+        if direct_keys.intersection(user):
+            payloads.append(user)
+
+        for key in ("embeddings", "face_embeddings", "user_face_embeddings", "templates"):
+            value = user.get(key)
+            if value is None:
+                continue
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        payloads.append(item)
+                    else:
+                        payloads.append({"embedding": item})
+            elif isinstance(value, dict):
+                if direct_keys.intersection(value):
+                    payloads.append(value)
+                else:
+                    for template_name, embedding in value.items():
+                        if isinstance(embedding, dict):
+                            item = dict(embedding)
+                            item.setdefault("template_name", template_name)
+                            payloads.append(item)
+                        else:
+                            payloads.append({"template_name": template_name, "embedding": embedding})
+        return payloads
+
+    @classmethod
+    def _embedding_record_from_payload(cls, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        value = None
+        for key in ("embedding_b64", "face_vector_b64", "embedding_blob", "embedding", "face_vector"):
+            if key in payload:
+                value = payload[key]
+                break
+        embedding = cls._decode_embedding(value)
+        if not embedding:
+            return None
+        return {
+            "template_name": str(payload.get("template_name") or payload.get("template") or payload.get("pose") or "front"),
+            "model_name": str(payload.get("model_name") or DEFAULT_EMBEDDING_MODEL),
+            "embedding": embedding,
+        }
+
+    @staticmethod
+    def _decode_embedding(value: Any) -> Optional[bytes]:
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            return base64.b64decode(stripped, validate=True)
+        if isinstance(value, list):
+            return array("f", (float(item) for item in value)).tobytes()
+        return None
 
     def save_roles_delta(self, roles: List[Dict[str, Any]]) -> None:
         if not roles:
@@ -189,6 +234,42 @@ class SQLiteEdgeDB:
             except Exception:
                 conn.rollback()
                 logger.exception("Failed to commit roles delta")
+                raise
+            finally:
+                conn.close()
+
+    def save_user_roles_delta(self, user_roles: List[Dict[str, Any]]) -> None:
+        if not user_roles:
+            return
+        with self.lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            try:
+                saved_count = 0
+                for user_role in user_roles:
+                    user_id = user_role["user_id"]
+                    role_id = user_role["role_id"]
+                    cursor.execute("SELECT 1 FROM device_users WHERE user_id = ?", (user_id,))
+                    if cursor.fetchone() is None:
+                        continue
+                    cursor.execute("SELECT 1 FROM device_roles WHERE role_id = ?", (role_id,))
+                    if cursor.fetchone() is None:
+                        continue
+                    cursor.execute(
+                        """
+                        INSERT INTO device_user_roles (user_id, role_id, last_synced_at)
+                        VALUES (?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(user_id, role_id) DO UPDATE SET
+                            last_synced_at=CURRENT_TIMESTAMP
+                        """,
+                        (user_id, role_id),
+                    )
+                    saved_count += 1
+                conn.commit()
+                logger.info("Processed delta update for %s user-role assignments", saved_count)
+            except Exception:
+                conn.rollback()
+                logger.exception("Failed to commit user-role assignments delta")
                 raise
             finally:
                 conn.close()
@@ -314,10 +395,10 @@ class SQLiteEdgeDB:
                 ts = timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp)
                 cursor.execute(
                     """
-                    INSERT INTO device_auth_logs (user_id, auth_status, confidence_score, timestamp, sync_status)
-                    VALUES (?, ?, ?, ?, 0)
+                    INSERT INTO device_auth_logs (sync_key, user_id, auth_status, confidence_score, timestamp, sync_status)
+                    VALUES (?, ?, ?, ?, ?, 0)
                     """,
-                    (user_id, auth_status.upper(), confidence_score, ts),
+                    (generate_sync_key(), user_id, auth_status.upper(), confidence_score, ts),
                 )
                 conn.commit()
                 return int(cursor.lastrowid)
@@ -333,9 +414,22 @@ class SQLiteEdgeDB:
             conn = self._get_connection()
             cursor = conn.cursor()
             try:
+                backfill_missing_sync_keys(cursor, "device_auth_logs")
+                conn.commit()
                 cursor.execute(
                     """
-                    SELECT log_id, user_id, auth_status, confidence_score, timestamp
+                    SELECT
+                        log_id,
+                        sync_key,
+                        user_id,
+                        auth_status,
+                        confidence_score,
+                        face_count,
+                        reason,
+                        spoofing_checked,
+                        spoofing_passed,
+                        timestamp,
+                        image_path
                     FROM device_auth_logs
                     WHERE sync_status = 0
                     ORDER BY timestamp ASC
@@ -344,10 +438,16 @@ class SQLiteEdgeDB:
                 return [
                     {
                         "log_id": row[0],
-                        "user_id": row[1],
-                        "auth_status": row[2],
-                        "confidence_score": row[3],
-                        "timestamp": row[4],
+                        "sync_key": row[1],
+                        "user_id": row[2],
+                        "auth_status": row[3],
+                        "confidence_score": row[4],
+                        "face_count": row[5],
+                        "reason": row[6],
+                        "spoofing_checked": row[7],
+                        "spoofing_passed": row[8],
+                        "timestamp": row[9],
+                        "image_path": row[10],
                     }
                     for row in cursor.fetchall()
                 ]
@@ -368,7 +468,7 @@ class SQLiteEdgeDB:
                 cursor.execute(
                     f"""
                     UPDATE device_auth_logs
-                    SET sync_status = 1
+                    SET sync_status = 1, synced_at = CURRENT_TIMESTAMP
                     WHERE log_id IN ({placeholders})
                     """,
                     log_ids,
@@ -377,6 +477,139 @@ class SQLiteEdgeDB:
             except Exception:
                 conn.rollback()
                 logger.exception("Failed to commit local sync status update")
+                raise
+            finally:
+                conn.close()
+
+    def log_surveillance_event(
+        self,
+        user_id: Optional[int],
+        recognition_status: str,
+        confidence_score: Optional[float],
+        matched_template: Optional[str] = None,
+        face_count: int = 1,
+        bbox: Optional[Any] = None,
+        image_path: Optional[str] = None,
+        timestamp: Any = None,
+    ) -> int:
+        with self.lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            try:
+                ts = timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp or datetime.datetime.utcnow().isoformat())
+                bbox_value = bbox if isinstance(bbox, str) or bbox is None else json.dumps(bbox)
+                cursor.execute(
+                    """
+                    INSERT INTO device_surveillance_logs (
+                        sync_key,
+                        user_id,
+                        recognition_status,
+                        confidence_score,
+                        matched_template,
+                        face_count,
+                        bbox,
+                        timestamp,
+                        image_path,
+                        sync_status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    """,
+                    (
+                        generate_sync_key(),
+                        user_id,
+                        recognition_status.upper(),
+                        confidence_score,
+                        matched_template,
+                        int(face_count),
+                        bbox_value,
+                        ts,
+                        image_path,
+                    ),
+                )
+                conn.commit()
+                return int(cursor.lastrowid)
+            except Exception:
+                conn.rollback()
+                logger.exception("Failed to buffer surveillance log locally")
+                raise
+            finally:
+                conn.close()
+
+    def get_unsynced_surveillance_logs(self) -> List[Dict[str, Any]]:
+        with self.lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            try:
+                backfill_missing_sync_keys(cursor, "device_surveillance_logs")
+                conn.commit()
+                cursor.execute(
+                    """
+                    SELECT
+                        log_id,
+                        sync_key,
+                        user_id,
+                        recognition_status,
+                        confidence_score,
+                        matched_template,
+                        face_count,
+                        bbox,
+                        timestamp,
+                        image_path
+                    FROM device_surveillance_logs
+                    WHERE sync_status = 0
+                    ORDER BY timestamp ASC
+                    """
+                )
+                return [
+                    {
+                        "log_id": row[0],
+                        "sync_key": row[1],
+                        "user_id": row[2],
+                        "recognition_status": row[3],
+                        "confidence_score": row[4],
+                        "matched_template": row[5],
+                        "face_count": row[6],
+                        "bbox": self._decode_json_field(row[7]),
+                        "timestamp": row[8],
+                        "image_path": row[9],
+                    }
+                    for row in cursor.fetchall()
+                ]
+            except Exception:
+                logger.exception("Error fetching unsynced surveillance logs")
+                return []
+            finally:
+                conn.close()
+
+    @staticmethod
+    def _decode_json_field(value: Any) -> Any:
+        if not isinstance(value, str) or not value.strip():
+            return value
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+
+    def mark_surveillance_logs_as_synced(self, log_ids: List[int]) -> None:
+        if not log_ids:
+            return
+        with self.lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            try:
+                placeholders = ",".join("?" for _ in log_ids)
+                cursor.execute(
+                    f"""
+                    UPDATE device_surveillance_logs
+                    SET sync_status = 1, synced_at = CURRENT_TIMESTAMP
+                    WHERE log_id IN ({placeholders})
+                    """,
+                    log_ids,
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                logger.exception("Failed to commit local surveillance sync status update")
                 raise
             finally:
                 conn.close()
@@ -484,6 +717,7 @@ class DownstreamSyncWorker:
             data = response.json()
             self.db.save_roles_delta(data.get("roles", []))
             self.db.save_users_delta(data.get("users", []))
+            self.db.save_user_roles_delta(data.get("user_roles", data.get("device_user_roles", [])))
             self.db.save_rbac_delta(data.get("node_rbac", []))
 
             deleted_ids = data.get("deleted_user_ids", [])
@@ -498,7 +732,7 @@ class DownstreamSyncWorker:
 
 
 class UpstreamSyncClient:
-    """Sends device heartbeats and replays unsynced auth logs to the cloud."""
+    """Sends device heartbeats and replays unsynced edge logs to the cloud."""
 
     def __init__(
         self,
@@ -573,6 +807,10 @@ class UpstreamSyncClient:
             self._stop_event.wait(self.log_push_interval)
 
     def replay_pending_logs(self) -> None:
+        self.replay_pending_authentication_logs()
+        self.replay_pending_surveillance_logs()
+
+    def replay_pending_authentication_logs(self) -> None:
         pending_logs = self.db.get_unsynced_logs()
         if not pending_logs:
             return
@@ -582,11 +820,17 @@ class UpstreamSyncClient:
         for index, log in enumerate(pending_logs):
             payload_logs.append(
                 {
+                    "sync_key": log["sync_key"],
                     "user_id": log["user_id"],
                     "device_id": self.device_id,
                     "auth_status": log["auth_status"],
                     "confidence_score": log["confidence_score"],
+                    "face_count": log["face_count"],
+                    "reason": log["reason"],
+                    "spoofing_checked": log["spoofing_checked"],
+                    "spoofing_passed": log["spoofing_passed"],
                     "timestamp": log["timestamp"],
+                    "image_path": log["image_path"],
                 }
             )
             log_id_mapping[index] = log["log_id"]
@@ -606,6 +850,62 @@ class UpstreamSyncClient:
                 logger.info("Replay sync completed for %s auth logs", len(synced_ids))
         except Exception:
             logger.exception("Upstream transmission timeout during log replay")
+
+    def replay_pending_surveillance_logs(self) -> None:
+        pending_logs = self.db.get_unsynced_surveillance_logs()
+        if not pending_logs:
+            return
+
+        payload_logs = []
+        log_id_mapping = {}
+        for index, log in enumerate(pending_logs):
+            image_b64, image_filename = self._read_image_payload(log.get("image_path"))
+            payload_logs.append(
+                {
+                    "sync_key": log["sync_key"],
+                    "user_id": log["user_id"],
+                    "device_id": self.device_id,
+                    "recognition_status": log["recognition_status"],
+                    "confidence_score": log["confidence_score"],
+                    "matched_template": log["matched_template"],
+                    "face_count": log["face_count"],
+                    "bbox": log["bbox"],
+                    "timestamp": log["timestamp"],
+                    "image_path": log["image_path"],
+                    "image_b64": image_b64,
+                    "image_filename": image_filename,
+                }
+            )
+            log_id_mapping[index] = log["log_id"]
+
+        url = f"{self.cloud_url}/api/sync/upstream/surveillance-logs"
+        try:
+            response = requests.post(url, json={"logs": payload_logs}, timeout=30.0)
+            if response.status_code != 200:
+                logger.error("Cloud returned surveillance upstream sync HTTP %s", response.status_code)
+                return
+
+            result = response.json()
+            successful_indices = result.get("successful_indices", [])
+            synced_ids = [log_id_mapping[index] for index in successful_indices if index in log_id_mapping]
+            if synced_ids:
+                self.db.mark_surveillance_logs_as_synced(synced_ids)
+                logger.info("Replay sync completed for %s surveillance logs", len(synced_ids))
+        except Exception:
+            logger.exception("Upstream transmission timeout during surveillance log replay")
+
+    @staticmethod
+    def _read_image_payload(image_path: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+        if not image_path:
+            return None, None
+        path = Path(image_path).expanduser()
+        if not path.exists() or not path.is_file():
+            return None, path.name
+        try:
+            return base64.b64encode(path.read_bytes()).decode("ascii"), path.name
+        except OSError:
+            logger.exception("Failed to read surveillance snapshot %s", path)
+            return None, path.name
 
 
 class SyncEngine:

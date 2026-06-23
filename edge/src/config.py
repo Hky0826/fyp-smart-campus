@@ -66,3 +66,9 @@ class SurveillanceConfig(RuntimeConfig):
     # Tune with real camera footage, including angled, up/down, and low-light views.
     recognition_threshold: float = float(os.getenv("EDGE_SURVEILLANCE_RECOGNITION_THRESHOLD", "0.62"))
     min_face_size: int = int(os.getenv("EDGE_SURVEILLANCE_MIN_FACE_SIZE", "32"))
+    track_iou_threshold: float = float(os.getenv("EDGE_SURVEILLANCE_TRACK_IOU_THRESHOLD", "0.35"))
+    track_max_missing_frames: int = int(os.getenv("EDGE_SURVEILLANCE_TRACK_MAX_MISSING_FRAMES", "8"))
+    snapshot_enabled: bool = _bool_env("EDGE_SURVEILLANCE_SNAPSHOT_ENABLED", True)
+    snapshot_dir: Path = Path(
+        os.getenv("EDGE_SURVEILLANCE_SNAPSHOT_DIR", str(PACKAGE_ROOT / "data" / "surveillance_snapshots"))
+    ).expanduser()

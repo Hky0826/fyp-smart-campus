@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
 from .matching import FaceTemplate, count_templates_by_user
+from ..utils.sync_key import generate_sync_key
 
 
 logger = logging.getLogger(__name__)
@@ -22,12 +23,11 @@ class DeviceUserDatabaseError(RuntimeError):
 
 
 class DeviceUserRepository:
-    """Reads registered user embeddings from the local SQLite `device_users` table.
+    """Reads registered user embeddings from the local SQLite edge database.
 
-    The current edge sync schema stores one `face_vector` BLOB per user. This
-    loader also accepts richer future layouts where `device_users` contains
-    multiple rows per user, a `template_name` column, or a JSON mapping of
-    template names to vectors.
+    The updated schema stores one or more embeddings per user in
+    `device_user_face_embeddings`. Legacy `device_users.face_vector` layouts are
+    still read so existing persisted edge databases can be migrated safely.
     """
 
     EMBEDDING_COLUMNS = (
@@ -72,6 +72,25 @@ class DeviceUserRepository:
         conn = self._connect()
         try:
             columns = self._require_device_users(conn)
+            tables = self._table_names(conn)
+            if "device_user_face_embeddings" in tables:
+                rows = conn.execute(
+                    """
+                    SELECT
+                        u.user_id,
+                        u.is_active,
+                        e.template_name,
+                        e.embedding
+                    FROM device_user_face_embeddings e
+                    INNER JOIN device_users u ON u.user_id = e.user_id
+                    WHERE e.embedding IS NOT NULL AND length(e.embedding) > 0
+                    ORDER BY u.user_id, e.template_name, e.model_name
+                    """
+                ).fetchall()
+                templates = self._templates_from_embedding_rows(rows)
+                if templates or "face_vector" not in columns:
+                    return self._log_templates(templates)
+
             rows = conn.execute("SELECT * FROM device_users").fetchall()
         finally:
             conn.close()
@@ -85,6 +104,9 @@ class DeviceUserRepository:
             row_templates = self._templates_from_row(row, columns, embedding_columns)
             templates.extend(row_templates)
 
+        return self._log_templates(templates)
+
+    def _log_templates(self, templates: List[FaceTemplate]) -> List[FaceTemplate]:
         counts = count_templates_by_user(templates)
         logger.info("Loaded %s registered users and %s face templates", len(counts), len(templates))
         for user_id, count in counts.items():
@@ -106,20 +128,103 @@ class DeviceUserRepository:
             if "device_auth_logs" not in tables:
                 logger.warning("Cannot log auth event because device_auth_logs table is missing")
                 return
+            columns = self._table_columns(conn, "device_auth_logs")
             normalized_user_id: Optional[int]
             try:
                 normalized_user_id = None if user_id is None else int(user_id)
             except (TypeError, ValueError):
                 normalized_user_id = None
+            fields = ["user_id", "auth_status", "confidence_score", "sync_status"]
+            values: List[Any] = [normalized_user_id, auth_status.upper(), confidence_score, 0]
+            if "sync_key" in columns:
+                fields.insert(0, "sync_key")
+                values.insert(0, generate_sync_key())
             conn.execute(
-                "INSERT INTO device_auth_logs (user_id, auth_status, confidence_score, sync_status) VALUES (?, ?, ?, 0)",
-                (normalized_user_id, auth_status, confidence_score),
+                f"INSERT INTO device_auth_logs ({', '.join(fields)}) VALUES ({', '.join('?' for _ in fields)})",
+                values,
             )
             conn.commit()
         except sqlite3.Error as exc:
             logger.warning("Failed to log auth event: %s", exc)
         finally:
             conn.close()
+
+    def log_surveillance_event(
+        self,
+        user_id: Optional[str],
+        recognition_status: str,
+        confidence_score: Optional[float],
+        matched_template: Optional[str] = None,
+        face_count: int = 1,
+        bbox: Optional[List[int]] = None,
+        image_path: Optional[str] = None,
+        timestamp: Optional[str] = None,
+    ) -> None:
+        try:
+            conn = self._connect()
+        except FileNotFoundError:
+            logger.warning("Cannot log surveillance event because database is missing: %s", self.db_path)
+            return
+
+        try:
+            tables = {
+                row[0]
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            }
+            if "device_surveillance_logs" not in tables:
+                logger.warning("Cannot log surveillance event because device_surveillance_logs table is missing")
+                return
+
+            columns = self._table_columns(conn, "device_surveillance_logs")
+            try:
+                normalized_user_id = None if user_id is None else int(user_id)
+            except (TypeError, ValueError):
+                normalized_user_id = None
+
+            fields = [
+                "user_id",
+                "recognition_status",
+                "confidence_score",
+                "matched_template",
+                "face_count",
+                "bbox",
+                "image_path",
+                "sync_status",
+            ]
+            values: List[Any] = [
+                normalized_user_id,
+                recognition_status.upper(),
+                confidence_score,
+                matched_template,
+                int(face_count),
+                json.dumps(bbox) if bbox is not None else None,
+                image_path,
+                0,
+            ]
+            if "sync_key" in columns:
+                fields.insert(0, "sync_key")
+                values.insert(0, generate_sync_key())
+            if timestamp is not None and "timestamp" in columns:
+                fields.insert(-1, "timestamp")
+                values.insert(-1, timestamp)
+
+            conn.execute(
+                f"INSERT INTO device_surveillance_logs ({', '.join(fields)}) VALUES ({', '.join('?' for _ in fields)})",
+                values,
+            )
+            conn.commit()
+        except sqlite3.Error as exc:
+            logger.warning("Failed to log surveillance event: %s", exc)
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _table_names(conn: sqlite3.Connection) -> set[str]:
+        return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+
+    @staticmethod
+    def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
 
     @staticmethod
     def _require_device_users(conn: sqlite3.Connection) -> set[str]:
@@ -128,10 +233,30 @@ class DeviceUserRepository:
         ).fetchone()
         if table is None:
             raise DeviceUserDatabaseError("SQLite database is missing required table: device_users")
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(device_users)").fetchall()}
+        columns = DeviceUserRepository._table_columns(conn, "device_users")
         if "user_id" not in columns:
             raise DeviceUserDatabaseError("device_users is missing required column: user_id")
         return columns
+
+    def _templates_from_embedding_rows(self, rows: Iterable[sqlite3.Row]) -> List[FaceTemplate]:
+        templates: List[FaceTemplate] = []
+        for row in rows:
+            embedding = self._vector_from_blob(row["embedding"])
+            if embedding.size == 0:
+                logger.warning("Skipping empty embedding for user %s", row["user_id"])
+                continue
+            user_id = str(row["user_id"])
+            is_active = bool(int(row["is_active"])) if row["is_active"] is not None else True
+            templates.append(
+                FaceTemplate(
+                    user_id=user_id,
+                    identity=user_id,
+                    template_name=str(row["template_name"]),
+                    embedding=embedding,
+                    is_active=is_active,
+                )
+            )
+        return templates
 
     def _templates_from_row(
         self,

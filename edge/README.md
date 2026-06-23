@@ -108,34 +108,42 @@ download or local compilation, place the files manually at the paths above.
 
 ## Step 3: Prepare the Database
 
-The pipeline reads already-created embeddings from SQLite table `device_users`.
-Enrollment is intentionally not implemented here.
+The pipeline reads already-created embeddings from SQLite table
+`device_user_face_embeddings`, joined to `device_users` for active/inactive
+status. Enrollment is intentionally not implemented here.
 
 Set the database path if needed:
 
 ```bash
-export EDGE_DB_PATH=/path/to/device_local.db
+export EDGE_HAILO_DB_PATH=/path/to/device_local.db
 ```
 
 If unset, the code uses `edge/data/device_local.db`.
 
-Supported basic schema:
+Create or refresh the local schema with:
 
-```sql
-device_users(user_id INTEGER PRIMARY KEY, face_vector BLOB, is_active INTEGER)
+```bash
+python edge/setup_sqlite.py
 ```
 
-Richer multi-template layouts are also supported when `device_users` contains
-multiple rows per user, a `template_name`/`pose` column, or JSON templates in an
-embedding column. Template names such as `front`, `left_30`, `right_60`,
-`slightly_up`, `slightly_down`, and `low_light` are returned when present.
+To target a specific file without setting `EDGE_HAILO_DB_PATH`, run:
+
+```bash
+python edge/setup_sqlite.py --database /path/to/device_local.db
+```
+
+The runtime sync engine also uses the same setup code automatically when it
+starts. Each user can have multiple synced embeddings by template and model,
+for example `front`, `left_30`, `right_60`, `slightly_up`, `slightly_down`, and
+`low_light`.
 
 ## Step 4: Configure Synchronization
 
 The direct access-control, surveillance, and combined runners start the sync
 engine automatically. The sync engine initializes the local SQLite schema, pulls
-cloud deltas into `device_users`, sends device heartbeats, exposes the local
-push endpoints, and replays pending `device_auth_logs` upstream.
+cloud deltas into `device_users`, `device_user_face_embeddings`,
+`device_user_roles`, and `device_node_rbac`, sends device heartbeats, exposes
+the local push endpoints, and replays pending `device_auth_logs` upstream.
 
 Default sync configuration matches the old edge runner and can be overridden:
 
