@@ -1,0 +1,4 @@
+edge_legacy/
+edge/data/
+__pycache__/
+*.py[cod]
