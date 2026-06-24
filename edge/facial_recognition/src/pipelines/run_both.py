@@ -65,7 +65,7 @@ def main() -> None:
                 "access_control": access_result,
                 "surveillance": surveillance_result,
             }
-            print(json.dumps(result, default=str))
+            logger.debug(json.dumps(result, default=str))
 
             if args.display:
                 if not show_pipeline_result(args.access_window_name, frame, access_result, mirror=args.mirror):

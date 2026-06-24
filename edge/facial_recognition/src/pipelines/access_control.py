@@ -280,7 +280,7 @@ def main() -> None:
                 continue
             result = pipeline.process_frame(frame, target_user_id=args.target_user_id)
             audio_coordinator.handle_access_result(result)
-            print(json.dumps(result, default=str))
+            logger.debug(json.dumps(result, default=str))
             if args.display and not show_pipeline_result(args.window_name, frame, result, mirror=args.mirror):
                 break
     finally:

@@ -364,7 +364,7 @@ def main() -> None:
                 time.sleep(0.05)
                 continue
             result = pipeline.process_frame(frame)
-            print(json.dumps(result, default=str))
+            logger.debug(json.dumps(result, default=str))
             if args.display and not show_pipeline_result(args.window_name, frame, result, mirror=args.mirror):
                 break
     finally:
