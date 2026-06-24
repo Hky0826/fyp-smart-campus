@@ -6,9 +6,9 @@ from pathlib import Path
 
 import numpy as np
 
-from edge.src.face.database import DeviceUserRepository
-from edge.src.face.matching import FaceTemplate, TemplateMatcher
-from edge.src.sync import SQLiteEdgeDB
+from edge.facial_recognition.src.face.database import DeviceUserRepository
+from edge.facial_recognition.src.face.matching import FaceTemplate, TemplateMatcher
+from edge.facial_recognition.src.sync import SQLiteEdgeDB
 
 
 def remove_sqlite_files(db_path: Path):

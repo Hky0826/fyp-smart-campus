@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Optional
 
 try:
-    from edge.src.utils.sync_key import generate_sync_key
-except ModuleNotFoundError:  # Allows `python edge/setup_sqlite.py` from repo root.
+    from edge.facial_recognition.src.utils.sync_key import generate_sync_key
+except ModuleNotFoundError:  # Allows `python edge/facial_recognition/setup_sqlite.py` from repo root.
     from src.utils.sync_key import generate_sync_key
 
 
@@ -148,7 +148,7 @@ def main() -> None:
         "--database",
         "-d",
         default=None,
-        help="SQLite database path. Defaults to EDGE_HAILO_DB_PATH or edge/data/device_local.db.",
+        help="SQLite database path. Defaults to EDGE_HAILO_DB_PATH or edge/facial_recognition/data/device_local.db.",
     )
     args = parser.parse_args()
 

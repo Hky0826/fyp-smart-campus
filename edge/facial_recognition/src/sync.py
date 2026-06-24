@@ -742,7 +742,7 @@ class UpstreamSyncClient:
         device_name: str,
         local_ip: str,
         local_port: int = 8000,
-        log_push_interval_sec: int = 600,
+        log_push_interval_sec: int = 60,
     ) -> None:
         self.db = db
         self.cloud_url = cloud_url.rstrip("/")

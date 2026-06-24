@@ -2,12 +2,12 @@ import unittest
 
 import numpy as np
 
-from edge.src.config import AccessControlConfig
-from edge.src.face.matching import FaceTemplate
-from edge.src.face.quality import QualityResult
-from edge.src.face.spoofing import SpoofResult
-from edge.src.face.types import DetectedFace
-from edge.src.pipelines.access_control import AccessControlPipeline, MULTIPLE_FACE_REASON
+from edge.facial_recognition.src.config import AccessControlConfig
+from edge.facial_recognition.src.face.matching import FaceTemplate
+from edge.facial_recognition.src.face.quality import QualityResult
+from edge.facial_recognition.src.face.spoofing import SpoofResult
+from edge.facial_recognition.src.face.types import DetectedFace
+from edge.facial_recognition.src.pipelines.access_control import AccessControlPipeline, MULTIPLE_FACE_REASON
 
 
 class FakeDetector:

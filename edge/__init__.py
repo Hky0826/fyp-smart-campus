@@ -1,5 +1,1 @@
-"""Independent Hailo face-recognition package for EdgeMind devices."""
-
-__all__ = ["__version__"]
-
-__version__ = "0.1.0"
+"""Edge device packages for facial recognition and local audio I/O."""

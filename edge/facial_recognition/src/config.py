@@ -42,7 +42,7 @@ class RuntimeConfig:
     sync_local_ip: str = os.getenv("EDGE_SYNC_LOCAL_IP", "10.178.101.2")
     sync_local_port: int = int(os.getenv("EDGE_SYNC_LOCAL_PORT", "8001"))
     sync_downstream_poll_seconds: int = int(os.getenv("EDGE_SYNC_DOWNSTREAM_POLL_SECONDS", "30"))
-    sync_log_push_interval_seconds: int = int(os.getenv("EDGE_SYNC_LOG_PUSH_INTERVAL_SECONDS", "600"))
+    sync_log_push_interval_seconds: int = int(os.getenv("EDGE_SYNC_LOG_PUSH_INTERVAL_SECONDS", "60"))
 
 
 @dataclass(frozen=True)

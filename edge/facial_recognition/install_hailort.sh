@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
+PROJECT_ROOT="$(cd "${ROOT_DIR}/../.." && pwd)"
 PYTHON_BIN="${PYTHON:-python3}"
 PTH_FILE_NAME="edge_hailort_system.pth"
 
@@ -40,7 +40,7 @@ PY
 }
 
 run_diagnostics() {
-  "${PYTHON_BIN}" -m edge.src.hailo.diagnostics || true
+  "${PYTHON_BIN}" -m edge.facial_recognition.src.hailo.diagnostics || true
 }
 
 python_can_import_hailort() {
@@ -293,21 +293,21 @@ Try these checks on the EdgeMind device:
   python3 -c "import sys; print(sys.executable); print(sys.prefix); print(getattr(sys, 'base_prefix', sys.prefix))"
 
 If system Python can import HailoRT, rerun this script while the venv is active:
-  bash edge/install_hailort.sh
+  bash edge/facial_recognition/install_hailort.sh
 
 If system Python cannot import HailoRT, install the EdgeMind/HailoRT package first:
   sudo apt update
   sudo apt install hailo-all
 
 Or provide the vendor package explicitly:
-  HAILORT_WHEEL=/path/to/hailort-...whl bash edge/install_hailort.sh
-  HAILORT_DEB_DIR=/path/to/deb/folder bash edge/install_hailort.sh
+  HAILORT_WHEEL=/path/to/hailort-...whl bash edge/facial_recognition/install_hailort.sh
+  HAILORT_DEB_DIR=/path/to/deb/folder bash edge/facial_recognition/install_hailort.sh
 
 After installing or updating the Hailo driver, reboot:
   sudo reboot
 
 Then verify again:
-  python3 -m edge.src.hailo.diagnostics
+  python3 -m edge.facial_recognition.src.hailo.diagnostics
 EOF
 
 exit 1

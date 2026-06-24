@@ -13,8 +13,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY edge/requirements.txt /app/edge/requirements.txt
-RUN pip install --no-cache-dir -r /app/edge/requirements.txt
+COPY edge/facial_recognition/requirements.txt /app/edge/facial_recognition/requirements.txt
+RUN pip install --no-cache-dir -r /app/edge/facial_recognition/requirements.txt
 
 COPY ${HAILORT_WHEEL} /tmp/hailort-wheel
 RUN case "$HAILORT_WHEEL" in \
@@ -23,8 +23,8 @@ RUN case "$HAILORT_WHEEL" in \
     esac
 
 COPY edge /app/edge
-RUN chmod +x /app/edge/docker/entrypoint.sh
+RUN chmod +x /app/edge/facial_recognition/docker/entrypoint.sh
 
 EXPOSE 8080
-ENTRYPOINT ["/app/edge/docker/entrypoint.sh"]
-CMD ["uvicorn", "edge.src.api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+ENTRYPOINT ["/app/edge/facial_recognition/docker/entrypoint.sh"]
+CMD ["uvicorn", "edge.facial_recognition.src.api.main:app", "--host", "0.0.0.0", "--port", "8080"]

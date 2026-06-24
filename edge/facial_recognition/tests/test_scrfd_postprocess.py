@@ -2,8 +2,8 @@ import unittest
 
 import numpy as np
 
-from edge.src.hailo.postprocess_scrfd import postprocess_scrfd
-from edge.src.hailo.preprocess import preprocess_arcface, preprocess_scrfd
+from edge.facial_recognition.src.hailo.postprocess_scrfd import postprocess_scrfd
+from edge.facial_recognition.src.hailo.preprocess import preprocess_arcface, preprocess_scrfd
 
 
 class SCRFDPostprocessTests(unittest.TestCase):

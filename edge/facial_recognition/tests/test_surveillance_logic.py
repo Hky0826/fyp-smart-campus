@@ -2,10 +2,10 @@ import unittest
 
 import numpy as np
 
-from edge.src.config import SurveillanceConfig
-from edge.src.face.matching import FaceTemplate
-from edge.src.face.types import DetectedFace
-from edge.src.pipelines.surveillance import SurveillancePipeline
+from edge.facial_recognition.src.config import SurveillanceConfig
+from edge.facial_recognition.src.face.matching import FaceTemplate
+from edge.facial_recognition.src.face.types import DetectedFace
+from edge.facial_recognition.src.pipelines.surveillance import SurveillancePipeline
 
 
 class FakeDetector:

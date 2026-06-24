@@ -99,5 +99,5 @@ For your current error, prefer ${TARGET_VERSION} because the driver is ${TARGET_
 
 After reboot, verify:
    hailortcli --version
-   python3 -m edge.src.hailo.diagnostics
+   python3 -m edge.facial_recognition.src.hailo.diagnostics
 EOF

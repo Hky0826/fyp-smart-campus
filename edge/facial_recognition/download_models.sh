@@ -52,9 +52,9 @@ ensure_model "arcface_r50.hef" "${SURVEILLANCE_DIR}" "ARCFACE_R50_HEF_URL"
 cat <<'EOF'
 
 Model placement required:
-  edge/models/access_control/arcface_mobilefacenet.hef
-  edge/models/surveillance/scrfd_10g.hef  # shared detector for access control and surveillance
-  edge/models/surveillance/arcface_r50.hef
+  edge/facial_recognition/models/access_control/arcface_mobilefacenet.hef
+  edge/facial_recognition/models/surveillance/scrfd_10g.hef  # shared detector for access control and surveillance
+  edge/facial_recognition/models/surveillance/arcface_r50.hef
 
 If your Hailo Model Zoo package provides precompiled HEFs, set:
   HAILO_HEF_SOURCE_DIR=/path/to/hef/files

@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from edge.src.hailo import hailo_runner
-from edge.src.hailo.hailo_runner import HailoModelRunner
+from edge.facial_recognition.src.hailo import hailo_runner
+from edge.facial_recognition.src.hailo.hailo_runner import HailoModelRunner
 
 
 class FakeInfo:
