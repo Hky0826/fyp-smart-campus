@@ -96,12 +96,15 @@ The existing non-streaming endpoint remains available at `POST /api/chatbot/chat
 
 ## Run The Pipeline
 
-Configure the cloud URL and a valid face-auth JWT from the cloud authentication flow:
+Standalone audio can still be run with an explicit JWT. If
+`EDGE_AUDIO_CLOUD_API_URL` is unset, it defaults to
+`${EDGE_SYNC_CLOUD_URL}/api/chatbot/chat/stream`. If
+`EDGE_AUDIO_CLOUD_DEVICE_ID` is unset, it defaults to `EDGE_SYNC_DEVICE_ID`.
 
 ```bash
-export EDGE_AUDIO_CLOUD_API_URL=http://<cloud-host>:8000/api/chatbot/chat/stream
+export EDGE_SYNC_CLOUD_URL=http://<cloud-host>:8000
 export EDGE_AUDIO_CLOUD_BEARER_TOKEN=<face-auth-jwt>
-export EDGE_AUDIO_CLOUD_DEVICE_ID=entry-gate-01
+export EDGE_SYNC_DEVICE_ID=entry-gate-01
 ```
 
 Start the normal wake-word loop:
@@ -151,9 +154,9 @@ Whisper:
 
 Cloud:
 
-- `EDGE_AUDIO_CLOUD_API_URL`: default `http://10.178.101.3:8000/api/chatbot/chat/stream`.
-- `EDGE_AUDIO_CLOUD_BEARER_TOKEN`: JWT used in `Authorization`.
-- `EDGE_AUDIO_CLOUD_DEVICE_ID`: default `entry-gate-01`.
+- `EDGE_AUDIO_CLOUD_API_URL`: explicit stream URL. If unset, defaults to `${EDGE_SYNC_CLOUD_URL}/api/chatbot/chat/stream`.
+- `EDGE_AUDIO_CLOUD_BEARER_TOKEN`: fixed JWT used in `Authorization` for standalone audio runs.
+- `EDGE_AUDIO_CLOUD_DEVICE_ID`: device ID sent to the cloud. If unset, defaults to `EDGE_SYNC_DEVICE_ID`.
 - `EDGE_AUDIO_CLOUD_SESSION_ID`: optional JWT session id.
 - `EDGE_AUDIO_CLOUD_RETRIES`: default `2`.
 

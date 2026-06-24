@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 import requests
@@ -22,12 +23,29 @@ logger = logging.getLogger(__name__)
 class CloudClientError(RuntimeError):
     """Raised when the cloud chatbot stream cannot be consumed."""
 
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+@dataclass(frozen=True)
+class CloudChatCredentials:
+    """Runtime cloud chatbot credentials."""
+
+    bearer_token: str | None = None
+    session_id: int | None = None
+
 
 class CloudChatClient:
     """POST transcribed text to FastAPI and yield streamed response chunks."""
 
-    def __init__(self, config: AudioIOConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: AudioIOConfig | None = None,
+        credential_provider: Callable[[], CloudChatCredentials | Mapping[str, Any] | str | None] | None = None,
+    ) -> None:
         self.config = config or AudioIOConfig()
+        self.credential_provider = credential_provider
         self.last_response: dict[str, Any] | None = None
 
     def stream_chat(self, text: str) -> Iterator[str]:
@@ -51,12 +69,13 @@ class CloudChatClient:
 
     def _stream_once(self, text: str) -> Iterator[str]:
         headers = {"Accept": "text/event-stream", "Content-Type": "application/json"}
-        if self.config.cloud_bearer_token:
-            headers["Authorization"] = f"Bearer {self.config.cloud_bearer_token}"
+        credentials = self._credentials()
+        if credentials.bearer_token:
+            headers["Authorization"] = f"Bearer {credentials.bearer_token}"
 
         payload: dict[str, Any] = {"query": text, "device_id": self.config.cloud_device_id}
-        if self.config.cloud_session_id is not None:
-            payload["session_id"] = self.config.cloud_session_id
+        if credentials.session_id is not None:
+            payload["session_id"] = credentials.session_id
 
         timeout = (self.config.cloud_connect_timeout_seconds, self.config.cloud_read_timeout_seconds)
         try:
@@ -68,7 +87,7 @@ class CloudChatClient:
                 stream=True,
             ) as response:
                 if response.status_code >= 400:
-                    raise CloudClientError(self._error_message(response))
+                    raise CloudClientError(self._error_message(response), status_code=response.status_code)
                 yield from self._iter_sse(response)
         except requests.Timeout as exc:
             raise CloudClientError("Cloud chatbot request timed out") from exc
@@ -118,6 +137,32 @@ class CloudChatClient:
         if event_name == "error":
             message = payload.get("detail") if isinstance(payload, dict) else str(payload)
             raise CloudClientError(f"Cloud chatbot stream error: {message}")
+
+    def _credentials(self) -> CloudChatCredentials:
+        if self.credential_provider is not None:
+            provided = self.credential_provider()
+            credentials = self._coerce_credentials(provided)
+            if credentials.bearer_token or credentials.session_id is not None:
+                return credentials
+        return CloudChatCredentials(
+            bearer_token=self.config.cloud_bearer_token,
+            session_id=self.config.cloud_session_id,
+        )
+
+    @staticmethod
+    def _coerce_credentials(value: CloudChatCredentials | Mapping[str, Any] | str | None) -> CloudChatCredentials:
+        if value is None:
+            return CloudChatCredentials()
+        if isinstance(value, CloudChatCredentials):
+            return value
+        if isinstance(value, str):
+            return CloudChatCredentials(bearer_token=value)
+        token = value.get("bearer_token") or value.get("access_token") or value.get("token")
+        session_id = value.get("session_id")
+        return CloudChatCredentials(
+            bearer_token=str(token) if token else None,
+            session_id=int(session_id) if session_id is not None else None,
+        )
 
     @staticmethod
     def _error_message(response: requests.Response) -> str:

@@ -82,6 +82,14 @@ def _optional_str_env(name: str) -> str | None:
     return value.strip() if value and value.strip() else None
 
 
+def _cloud_stream_url() -> str:
+    configured = _optional_str_env("EDGE_AUDIO_CLOUD_API_URL")
+    if configured:
+        return configured
+    cloud_base_url = os.getenv("EDGE_SYNC_CLOUD_URL", "http://10.178.101.3:8000").rstrip("/")
+    return f"{cloud_base_url}/api/chatbot/chat/stream"
+
+
 def _audio_device_env(name: str) -> str | int | None:
     value = _optional_str_env(name)
     if value is None:
@@ -146,12 +154,9 @@ class AudioIOConfig:
     whisper_threads: int | None = _optional_int_env("EDGE_AUDIO_WHISPER_THREADS")
     whisper_timeout_seconds: int = _int_env("EDGE_AUDIO_WHISPER_TIMEOUT_SECONDS", 120)
 
-    cloud_api_url: str = os.getenv(
-        "EDGE_AUDIO_CLOUD_API_URL",
-        "http://10.178.101.3:8000/api/chatbot/chat/stream",
-    )
+    cloud_api_url: str = _cloud_stream_url()
     cloud_bearer_token: str | None = _optional_str_env("EDGE_AUDIO_CLOUD_BEARER_TOKEN")
-    cloud_device_id: str = os.getenv("EDGE_AUDIO_CLOUD_DEVICE_ID", "entry-gate-01")
+    cloud_device_id: str = os.getenv("EDGE_AUDIO_CLOUD_DEVICE_ID", os.getenv("EDGE_SYNC_DEVICE_ID", "entry-gate-01"))
     cloud_session_id: int | None = _optional_int_env("EDGE_AUDIO_CLOUD_SESSION_ID")
     cloud_connect_timeout_seconds: float = _float_env("EDGE_AUDIO_CLOUD_CONNECT_TIMEOUT_SECONDS", 5.0)
     cloud_read_timeout_seconds: float = _float_env("EDGE_AUDIO_CLOUD_READ_TIMEOUT_SECONDS", 90.0)

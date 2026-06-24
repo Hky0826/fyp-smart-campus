@@ -40,6 +40,11 @@ python3 -m edge.facial_recognition.src.pipelines.access_control
 python3 -m edge.facial_recognition.src.pipelines.surveillance
 ```
 
+The access-control runner starts the audio I/O wake-word chatbot automatically.
+After a successful face match, it requests a JWT from
+`${EDGE_SYNC_CLOUD_URL}/api/edge-auth/token` and shares that token with the
+audio chatbot client. Surveillance does not start audio.
+
 Run the optional facial API:
 
 ```bash
@@ -67,7 +72,7 @@ python -m edge.audio_io.download_models
 Run the audio pipeline:
 
 ```bash
-export EDGE_AUDIO_CLOUD_API_URL=http://<cloud-host>:8000/api/chatbot/chat/stream
+export EDGE_SYNC_CLOUD_URL=http://<cloud-host>:8000
 export EDGE_AUDIO_CLOUD_BEARER_TOKEN=<face-auth-jwt>
 python -m edge.audio_io.main
 ```

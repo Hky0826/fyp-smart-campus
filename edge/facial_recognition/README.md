@@ -181,6 +181,28 @@ Access control only on the default camera `/dev/video4` with display:
 python3 -m edge.facial_recognition.src.pipelines.access_control
 ```
 
+This access-control runner also starts `edge/audio_io` automatically. When face
+recognition grants access, the runner calls
+`POST ${EDGE_SYNC_CLOUD_URL}/api/edge-auth/token` with the matched `user_id` and
+`EDGE_SYNC_DEVICE_ID`, then shares the returned JWT with the audio chatbot
+client. After the wake word is heard, audio interactions use the most recent
+face-authenticated token.
+
+For public/visitor chatbot use before a face scan, set a reserved visitor user
+ID in the cloud and edge cache:
+
+```bash
+export EDGE_ACCESS_CHATBOT_VISITOR_USER_ID=<visitor-user-id>
+```
+
+If this is unset, access control tries the first active synced `VISITOR` user in
+SQLite. If no visitor user is available, protected chatbot requests prompt the
+speaker to scan their face. To run access control without audio:
+
+```bash
+python3 -m edge.facial_recognition.src.pipelines.access_control --no-audio
+```
+
 Surveillance only on the default camera `/dev/video4` with display:
 
 ```bash
@@ -216,6 +238,18 @@ These values must be tuned using real camera footage from the target device.
 Access control should remain strict. Surveillance can use a separate threshold
 to improve recall for angled, non-frontal, up/down, and low-light views while
 still returning `unknown` below threshold.
+
+Access-control audio settings:
+
+```bash
+export EDGE_ACCESS_AUDIO_ENABLED=1
+export EDGE_ACCESS_AUDIO_SKIP_MODEL_SETUP=0
+export EDGE_ACCESS_AUDIO_AUTH_TIMEOUT_SECONDS=45
+export EDGE_ACCESS_AUDIO_TOKEN_REFRESH_SECONDS=600
+export EDGE_ACCESS_AUDIO_TOKEN_RETRY_SECONDS=10
+export EDGE_ACCESS_CHATBOT_AUTO_VISITOR_TOKEN=1
+export EDGE_ACCESS_CHATBOT_VISITOR_USER_ID=<reserved-visitor-user-id>
+```
 
 ## Alternative: Run the API
 

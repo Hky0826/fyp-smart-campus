@@ -19,9 +19,9 @@ from ..face.quality import FaceQualityChecker
 from ..face.spoofing import MotionSpoofDetector, SpoofResult
 from ..face.types import DetectedFace
 from ..utils.logging import configure_logging
-from ..sync import SyncEngine
 from ..utils.timing import StageTimer
 from ..utils.visualization import close_display, show_pipeline_result
+from .access_audio import AccessControlAudioCoordinator
 
 
 logger = logging.getLogger(__name__)
@@ -235,10 +235,16 @@ def build_pipeline(config: AccessControlConfig) -> AccessControlPipeline:
 
 
 def main() -> None:
+    from ..sync import SyncEngine
+
     parser = argparse.ArgumentParser(description="Run Hailo access-control face recognition")
     parser.add_argument("--camera", default=None, help="Camera index, /dev/videoN, RTSP URL, or video file")
     parser.add_argument("--database", default=None, help="SQLite database path")
     parser.add_argument("--target-user-id", default=None, help="Optional 1:1 verification user ID")
+    audio_group = parser.add_mutually_exclusive_group()
+    audio_group.add_argument("--audio", dest="audio", action="store_true", default=None, help="Start audio I/O with access control")
+    audio_group.add_argument("--no-audio", dest="audio", action="store_false", help="Run access control without audio I/O")
+    parser.add_argument("--audio-skip-model-setup", action="store_true", help="Do not download or prepare audio models at startup")
     display_group = parser.add_mutually_exclusive_group()
     display_group.add_argument("--display", dest="display", action="store_true", default=True, help="Show an OpenCV camera window with overlays (default)")
     display_group.add_argument("--no-display", dest="display", action="store_false", help="Run without the OpenCV display window")
@@ -248,13 +254,20 @@ def main() -> None:
     args = parser.parse_args()
 
     defaults = AccessControlConfig()
-    config = AccessControlConfig(
-        camera=args.camera or defaults.camera,
-        database_path=args.database or defaults.database_path,
-    )
+    config_kwargs = {
+        "camera": args.camera or defaults.camera,
+        "database_path": args.database or defaults.database_path,
+    }
+    if args.audio is not None:
+        config_kwargs["audio_enabled"] = args.audio
+    if args.audio_skip_model_setup:
+        config_kwargs["audio_skip_model_setup"] = True
+    config = AccessControlConfig(**config_kwargs)
     configure_logging(config.log_level)
     sync_engine = SyncEngine.from_config(config)
     sync_engine.start()
+    audio_coordinator = AccessControlAudioCoordinator(config)
+    audio_coordinator.start()
     camera = CameraReader(config.camera)
     try:
         pipeline = build_pipeline(config)
@@ -266,11 +279,13 @@ def main() -> None:
                 time.sleep(0.05)
                 continue
             result = pipeline.process_frame(frame, target_user_id=args.target_user_id)
+            audio_coordinator.handle_access_result(result)
             print(json.dumps(result, default=str))
             if args.display and not show_pipeline_result(args.window_name, frame, result, mirror=args.mirror):
                 break
     finally:
         camera.release()
+        audio_coordinator.stop()
         sync_engine.stop()
         if args.display:
             close_display()

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from threading import Event
 
 try:
     from .audio_player import AudioPlaybackError, AudioPlayer
-    from .cloud_client import CloudChatClient, CloudClientError
+    from .cloud_client import CloudChatClient, CloudChatCredentials, CloudClientError
     from .config import AudioIOConfig
     from .download_models import ModelSetupError, ensure_assets
     from .recorder import SpeechRecorder
@@ -18,7 +19,7 @@ try:
     from .wake_word import WakeWordDetector
 except ImportError:  # Allows `python edge/audio_io/main.py` from repo root.
     from audio_player import AudioPlaybackError, AudioPlayer
-    from cloud_client import CloudChatClient, CloudClientError
+    from cloud_client import CloudChatClient, CloudChatCredentials, CloudClientError
     from config import AudioIOConfig
     from download_models import ModelSetupError, ensure_assets
     from recorder import SpeechRecorder
@@ -28,6 +29,21 @@ except ImportError:  # Allows `python edge/audio_io/main.py` from repo root.
 
 
 logger = logging.getLogger(__name__)
+
+_AUTH_PROMPT = "Please scan your face to continue."
+_AUTH_CONFIRMED_PROMPT = "Access confirmed."
+_AUTH_TIMEOUT_PROMPT = "Face verification timed out. Please try again."
+_AUTH_DENIAL_MARKERS = (
+    "access level",
+    "access denied",
+    "not authorized",
+    "permission",
+    "higher access",
+    "authenticate",
+    "re-authenticate",
+    "face recognition",
+    "no relevant documents found for your access level",
+)
 
 
 def configure_logging(level: str) -> None:
@@ -41,12 +57,18 @@ def configure_logging(level: str) -> None:
 class AudioInteractionPipeline:
     """Coordinate one wake-record-transcribe-chat-speak interaction loop."""
 
-    def __init__(self, config: AudioIOConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: AudioIOConfig | None = None,
+        credential_provider: Callable[[], CloudChatCredentials | dict | str | None] | None = None,
+        auth_required_handler: Callable[[str], bool] | None = None,
+    ) -> None:
         self.config = config or AudioIOConfig()
+        self.auth_required_handler = auth_required_handler
         self.wake_word = WakeWordDetector(self.config)
         self.recorder = SpeechRecorder(self.config)
         self.transcriber = WhisperCppTranscriber(self.config)
-        self.cloud = CloudChatClient(self.config)
+        self.cloud = CloudChatClient(self.config, credential_provider=credential_provider)
         self.tts = PiperTTS(self.config)
         self.player = AudioPlayer(self.config)
 
@@ -91,11 +113,62 @@ class AudioInteractionPipeline:
 
         logger.info("User transcript: %s", transcript)
         try:
-            response_chunks = self.cloud.stream_chat(transcript)
-            for audio_path in self.tts.synthesize_stream(response_chunks):
-                self.player.play_and_cleanup(audio_path)
+            response = self._chat_and_speak(transcript)
+            if self._response_requires_authentication(response):
+                self._retry_after_authentication(transcript)
         except (CloudClientError, PiperTTSError, AudioPlaybackError) as exc:
-            logger.error("Audio interaction failed: %s", exc)
+            if self._error_requires_authentication(exc):
+                self._retry_after_authentication(transcript)
+            else:
+                logger.error("Audio interaction failed: %s", exc)
+
+    def _chat_and_speak(self, transcript: str) -> dict | None:
+        response_chunks = self.cloud.stream_chat(transcript)
+        for audio_path in self.tts.synthesize_stream(response_chunks):
+            self.player.play_and_cleanup(audio_path)
+        return self.cloud.last_response
+
+    def _retry_after_authentication(self, transcript: str) -> None:
+        if self.auth_required_handler is None:
+            logger.info("Cloud requires authentication, but no authentication handler is configured")
+            return
+
+        self.speak_text(_AUTH_PROMPT)
+        if not self.auth_required_handler(transcript):
+            self.speak_text(_AUTH_TIMEOUT_PROMPT)
+            return
+
+        self.speak_text(_AUTH_CONFIRMED_PROMPT)
+        try:
+            self._chat_and_speak(transcript)
+        except (CloudClientError, PiperTTSError, AudioPlaybackError) as exc:
+            logger.error("Authenticated audio retry failed: %s", exc)
+
+    def speak_text(self, text: str) -> None:
+        """Speak a short local status message without contacting the cloud."""
+        try:
+            audio_path = self.tts.synthesize(text)
+            self.player.play_and_cleanup(audio_path)
+        except (PiperTTSError, AudioPlaybackError) as exc:
+            logger.warning("Could not play local prompt: %s", exc)
+
+    @staticmethod
+    def _response_requires_authentication(response: dict | None) -> bool:
+        if not response or response.get("access_granted") is not False:
+            return False
+        combined = " ".join(
+            str(response.get(key) or "")
+            for key in ("status_message", "answer")
+        ).lower()
+        return any(marker in combined for marker in _AUTH_DENIAL_MARKERS)
+
+    @staticmethod
+    def _error_requires_authentication(exc: BaseException) -> bool:
+        status_code = getattr(exc, "status_code", None)
+        if status_code in {401, 403}:
+            return True
+        message = str(exc).lower()
+        return any(marker in message for marker in _AUTH_DENIAL_MARKERS)
 
 
 def parse_args() -> argparse.Namespace:
