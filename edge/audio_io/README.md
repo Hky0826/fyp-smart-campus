@@ -21,6 +21,7 @@ edge/audio_io/
   tts_piper.py        Piper synthesis with sentence buffering
   audio_player.py     Local WAV playback command wrapper
   main.py             End-to-end orchestrator
+  smoke_test.py       No-JWT audio and chatbot reachability smoke test
   requirements.txt    Python dependencies
 ```
 
@@ -117,6 +118,60 @@ For a quick recording test without wake word detection:
 
 ```bash
 python -m edge.audio_io.main --once --skip-wake-word
+```
+
+## No-JWT Smoke Test
+
+Run this on the edge device to test local audio output and cloud chatbot
+reachability without setting `EDGE_AUDIO_CLOUD_BEARER_TOKEN`:
+
+```bash
+export EDGE_SYNC_CLOUD_URL=http://<cloud-host>:8000
+export EDGE_SYNC_DEVICE_ID=entry-gate-01
+python -m edge.audio_io.smoke_test
+```
+
+By default, this:
+
+- checks Piper TTS synthesis and local playback
+- calls unauthenticated `GET /api/chatbot/health`
+- attempts unauthenticated `POST /api/chatbot/chat/stream`
+
+If the stream returns 401 or 403, the smoke test reports it as an auth-required
+warning because the production RAG endpoint normally requires a JWT.
+
+To test the full RAG retrieval/generation path without a JWT, enable the
+public-only smoke endpoint on the cloud backend and restart it:
+
+```bash
+export RAG_ENABLE_PUBLIC_SMOKE_TEST=1
+```
+
+Then run this on the edge device:
+
+```bash
+python -m edge.audio_io.smoke_test --public-rag-smoke --query "Where is the library?"
+```
+
+That endpoint only retrieves documents with `PUBLIC` access level. To also test
+microphone recording and Whisper STT:
+
+```bash
+python -m edge.audio_io.smoke_test --record-stt
+```
+
+To include wake-word detection:
+
+```bash
+python -m edge.audio_io.smoke_test --wake-word --wake-timeout-seconds 30
+```
+
+Useful flags:
+
+```bash
+python -m edge.audio_io.smoke_test --skip-playback
+python -m edge.audio_io.smoke_test --setup-assets
+python -m edge.audio_io.smoke_test --require-unauth-chat-success
 ```
 
 ## Environment Variables
