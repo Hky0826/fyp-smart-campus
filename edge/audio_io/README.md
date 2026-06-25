@@ -76,7 +76,7 @@ The audio client expects the cloud FastAPI app to expose:
 
 ```text
 POST /api/chatbot/chat/stream
-Authorization: Bearer <JWT>
+Authorization: Bearer <JWT>  # optional; omitted requests use visitor/PUBLIC access
 Accept: text/event-stream
 Content-Type: application/json
 
@@ -97,15 +97,22 @@ The existing non-streaming endpoint remains available at `POST /api/chatbot/chat
 
 ## Run The Pipeline
 
-Standalone audio can still be run with an explicit JWT. If
-`EDGE_AUDIO_CLOUD_API_URL` is unset, it defaults to
-`${EDGE_SYNC_CLOUD_URL}/api/chatbot/chat/stream`. If
-`EDGE_AUDIO_CLOUD_DEVICE_ID` is unset, it defaults to `EDGE_SYNC_DEVICE_ID`.
+Standalone audio can run with or without an explicit JWT. Without
+`EDGE_AUDIO_CLOUD_BEARER_TOKEN`, the chatbot uses visitor/PUBLIC access. If a
+query needs protected documents, the cloud response asks the edge user to scan
+their face. If `EDGE_AUDIO_CLOUD_API_URL` is unset, it defaults to
+`${EDGE_SYNC_CLOUD_URL}/api/chatbot/chat/stream`. If `EDGE_AUDIO_CLOUD_DEVICE_ID`
+is unset, it defaults to `EDGE_SYNC_DEVICE_ID`.
 
 ```bash
 export EDGE_SYNC_CLOUD_URL=http://<cloud-host>:8000
-export EDGE_AUDIO_CLOUD_BEARER_TOKEN=<face-auth-jwt>
 export EDGE_SYNC_DEVICE_ID=entry-gate-01
+```
+
+Optionally provide a JWT for higher RBAC access:
+
+```bash
+export EDGE_AUDIO_CLOUD_BEARER_TOKEN=<face-auth-jwt>
 ```
 
 Start the normal wake-word loop:
@@ -137,24 +144,12 @@ By default, this:
 - calls unauthenticated `GET /api/chatbot/health`
 - attempts unauthenticated `POST /api/chatbot/chat/stream`
 
-If the stream returns 401 or 403, the smoke test reports it as an auth-required
-warning because the production RAG endpoint normally requires a JWT.
+Without JWT, the normal stream should answer from PUBLIC documents. If the
+question appears to require protected documents, the response asks for face
+authentication and the edge access-control integration retries after a successful
+scan.
 
-To test the full RAG retrieval/generation path without a JWT, enable the
-public-only smoke endpoint on the cloud backend and restart it:
-
-```bash
-export RAG_ENABLE_PUBLIC_SMOKE_TEST=1
-```
-
-Then run this on the edge device:
-
-```bash
-python -m edge.audio_io.smoke_test --public-rag-smoke --query "Where is the library?"
-```
-
-That endpoint only retrieves documents with `PUBLIC` access level. To also test
-microphone recording and Whisper STT:
+To also test microphone recording and Whisper STT:
 
 ```bash
 python -m edge.audio_io.smoke_test --record-stt

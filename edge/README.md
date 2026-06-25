@@ -73,9 +73,12 @@ Run the audio pipeline:
 
 ```bash
 export EDGE_SYNC_CLOUD_URL=http://<cloud-host>:8000
-export EDGE_AUDIO_CLOUD_BEARER_TOKEN=<face-auth-jwt>
 python -m edge.audio_io.main
 ```
+
+Without `EDGE_AUDIO_CLOUD_BEARER_TOKEN`, chatbot queries use visitor/PUBLIC
+access. A JWT is only needed when the chatbot needs documents above visitor
+access.
 
 For a local smoke run that records immediately instead of waiting for the wake word:
 
@@ -88,13 +91,6 @@ For a no-JWT smoke test of local audio and chatbot reachability:
 ```bash
 export EDGE_SYNC_CLOUD_URL=http://<cloud-host>:8000
 python -m edge.audio_io.smoke_test
-```
-
-For a full public-only RAG smoke test without JWT, set
-`RAG_ENABLE_PUBLIC_SMOKE_TEST=1` on the cloud backend and run:
-
-```bash
-python -m edge.audio_io.smoke_test --public-rag-smoke --query "Where is the library?"
 ```
 
 Detailed audio setup, environment variables, and hardware notes are in `edge/audio_io/README.md`.

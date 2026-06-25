@@ -6,7 +6,7 @@ import argparse
 import json
 import logging
 import time
-from typing import Any, List, Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence
 
 import numpy as np
 
@@ -39,6 +39,8 @@ class AccessControlPipeline:
         matcher: TemplateMatcher | None = None,
         spoof_detector: Any | None = None,
         quality_checker: Any | None = None,
+        clock: Callable[[], float] | None = None,
+        sleeper: Callable[[float], None] | None = None,
     ) -> None:
         self.config = config or AccessControlConfig()
         self.detector = detector
@@ -48,6 +50,9 @@ class AccessControlPipeline:
         self.matcher = matcher or TemplateMatcher(self.config.recognition_threshold)
         self.spoof_detector = spoof_detector or MotionSpoofDetector()
         self.quality_checker = quality_checker or FaceQualityChecker(self.config.min_face_size)
+        self._clock = clock or time.monotonic
+        self._sleep = sleeper or time.sleep
+        self._last_recognition_finished_at: float | None = None
 
     def process_frame(self, frame: np.ndarray, target_user_id: Optional[str] = None) -> dict:
         timer = StageTimer()
@@ -55,7 +60,6 @@ class AccessControlPipeline:
         timer.mark("detection")
         face_count = len(faces)
         bboxes = [face.xyxy_int() for face in faces]
-        logger.info("Access-control detected %s faces", face_count)
 
         if face_count == 0:
             timer.total()
@@ -63,112 +67,127 @@ class AccessControlPipeline:
 
         if face_count > 1:
             timer.total()
-            logger.info(MULTIPLE_FACE_REASON)
             return self._deny(MULTIPLE_FACE_REASON, face_count, metrics=timer.metrics, bboxes=bboxes)
 
-        face = faces[0]
-        bbox = face.xyxy_int()
-        quality = self.quality_checker.check(frame, face)
-        if not quality.passed:
-            timer.total()
-            return self._deny(
-                f"Face quality check failed: {quality.reason}",
-                face_count,
-                metrics=timer.metrics,
-                bbox=bbox,
-                bboxes=bboxes,
-            )
-
-        if self.config.require_liveness:
-            spoof_result = self.spoof_detector.check(frame, face)
-            logger.info("Access-control spoofing result: %s score=%.4f reason=%s", spoof_result.state, spoof_result.score, spoof_result.reason)
-            if spoof_result.state != "live":
-                reason = "Spoofing/liveness check failed." if spoof_result.state == "spoof" else "Liveness check inconclusive."
-                self._log_event(None, "SPOOFING", spoof_result.score)
+        self._wait_for_recognition_delay()
+        try:
+            face = faces[0]
+            bbox = face.xyxy_int()
+            quality = self.quality_checker.check(frame, face)
+            if not quality.passed:
                 timer.total()
                 return self._deny(
-                    reason,
+                    f"Face quality check failed: {quality.reason}",
                     face_count,
-                    spoofing_passed=False,
-                    similarity=spoof_result.score,
                     metrics=timer.metrics,
                     bbox=bbox,
                     bboxes=bboxes,
                 )
 
-        face_image = self.aligner.extract(frame, face)
-        embedding = self.embedder.embed(face_image)
-        timer.mark("recognition")
+            if self.config.require_liveness:
+                spoof_result = self.spoof_detector.check(frame, face)
+                logger.info("Access-control spoofing result: %s score=%.4f reason=%s", spoof_result.state, spoof_result.score, spoof_result.reason)
+                if spoof_result.state != "live":
+                    reason = "Spoofing/liveness check failed." if spoof_result.state == "spoof" else "Liveness check inconclusive."
+                    self._log_event(None, "SPOOFING", spoof_result.score)
+                    timer.total()
+                    return self._deny(
+                        reason,
+                        face_count,
+                        spoofing_passed=False,
+                        similarity=spoof_result.score,
+                        metrics=timer.metrics,
+                        bbox=bbox,
+                        bboxes=bboxes,
+                    )
 
-        templates = self.repository.load_templates()
-        if target_user_id is not None:
-            match = self.matcher.verify(
-                embedding,
-                templates,
-                target_user_id=str(target_user_id),
-                threshold=self.config.recognition_threshold,
-                include_inactive=True,
+            face_image = self.aligner.extract(frame, face)
+            embedding = self.embedder.embed(face_image)
+            timer.mark("recognition")
+
+            templates = self.repository.load_templates()
+            if target_user_id is not None:
+                match = self.matcher.verify(
+                    embedding,
+                    templates,
+                    target_user_id=str(target_user_id),
+                    threshold=self.config.recognition_threshold,
+                    include_inactive=True,
+                )
+            else:
+                match = self.matcher.match(
+                    embedding,
+                    templates,
+                    threshold=self.config.recognition_threshold,
+                    include_inactive=True,
+                )
+            timer.mark("database_matching")
+
+            logger.info(
+                "Access-control recognition result: identity=%s similarity=%.4f template=%s matched=%s",
+                match.identity,
+                match.similarity,
+                match.matched_template,
+                match.matched,
             )
-        else:
-            match = self.matcher.match(
-                embedding,
-                templates,
-                threshold=self.config.recognition_threshold,
-                include_inactive=True,
-            )
-        timer.mark("database_matching")
 
-        logger.info(
-            "Access-control recognition result: identity=%s similarity=%.4f template=%s matched=%s",
-            match.identity,
-            match.similarity,
-            match.matched_template,
-            match.matched,
-        )
+            if not match.matched:
+                self._log_event(None, "FAILED", match.similarity)
+                timer.total()
+                return self._deny(
+                    "Unknown face or low-confidence match",
+                    face_count,
+                    similarity=match.similarity,
+                    matched_template=match.matched_template,
+                    metrics=timer.metrics,
+                    bbox=bbox,
+                    bboxes=bboxes,
+                )
 
-        if not match.matched:
-            self._log_event(None, "FAILED", match.similarity)
+            if not match.is_active:
+                self._log_event(match.user_id, "FAILED", match.similarity)
+                timer.total()
+                return self._deny(
+                    "Matched user is inactive",
+                    face_count,
+                    identity=match.identity,
+                    similarity=match.similarity,
+                    matched_template=match.matched_template,
+                    metrics=timer.metrics,
+                    bbox=bbox,
+                    bboxes=bboxes,
+                )
+
+            self._log_event(match.user_id, "SUCCESS", match.similarity)
             timer.total()
-            return self._deny(
-                "Unknown face or low-confidence match",
-                face_count,
-                similarity=match.similarity,
-                matched_template=match.matched_template,
-                metrics=timer.metrics,
-                bbox=bbox,
-                bboxes=bboxes,
-            )
+            return {
+                "success": True,
+                "mode": "access_control",
+                "access_granted": True,
+                "identity": match.identity,
+                "user_id": match.user_id,
+                "similarity": match.similarity,
+                "matched_template": match.matched_template,
+                "spoofing_passed": True,
+                "face_count": face_count,
+                "bbox": bbox,
+                "bboxes": bboxes,
+                "metrics": timer.metrics,
+            }
+        finally:
+            self._mark_recognition_finished()
 
-        if not match.is_active:
-            self._log_event(match.user_id, "FAILED", match.similarity)
-            timer.total()
-            return self._deny(
-                "Matched user is inactive",
-                face_count,
-                identity=match.identity,
-                similarity=match.similarity,
-                matched_template=match.matched_template,
-                metrics=timer.metrics,
-                bbox=bbox,
-                bboxes=bboxes,
-            )
+    def _wait_for_recognition_delay(self) -> None:
+        delay_seconds = self.config.recognition_delay_seconds
+        if delay_seconds <= 0 or self._last_recognition_finished_at is None:
+            return
 
-        self._log_event(match.user_id, "SUCCESS", match.similarity)
-        timer.total()
-        return {
-            "success": True,
-            "mode": "access_control",
-            "access_granted": True,
-            "identity": match.identity,
-            "user_id": match.user_id,
-            "similarity": match.similarity,
-            "matched_template": match.matched_template,
-            "spoofing_passed": True,
-            "face_count": face_count,
-            "bbox": bbox,
-            "bboxes": bboxes,
-            "metrics": timer.metrics,
-        }
+        remaining_seconds = delay_seconds - (self._clock() - self._last_recognition_finished_at)
+        if remaining_seconds > 0:
+            self._sleep(remaining_seconds)
+
+    def _mark_recognition_finished(self) -> None:
+        self._last_recognition_finished_at = self._clock()
 
     def _detect(self, frame: np.ndarray) -> List[DetectedFace]:
         raw_faces = self.detector.detect(frame)
@@ -228,7 +247,11 @@ def build_pipeline(config: AccessControlConfig) -> AccessControlPipeline:
     from ..face.detection import HailoSCRFDDetector
     from ..face.embedding import HailoArcFaceEmbedder
 
-    detector = HailoSCRFDDetector(config.detector_model_path, confidence_threshold=config.detection_threshold)
+    detector = HailoSCRFDDetector(
+        config.detector_model_path,
+        confidence_threshold=config.detection_threshold,
+        log_empty_detections=False,
+    )
     embedder = HailoArcFaceEmbedder(config.embedding_model_path)
     repository = DeviceUserRepository(config.database_path)
     return AccessControlPipeline(detector, embedder, repository, config=config)

@@ -34,15 +34,17 @@ _AUTH_PROMPT = "Please scan your face to continue."
 _AUTH_CONFIRMED_PROMPT = "Access confirmed."
 _AUTH_TIMEOUT_PROMPT = "Face verification timed out. Please try again."
 _AUTH_DENIAL_MARKERS = (
-    "access level",
     "access denied",
     "not authorized",
+    "authentication required",
     "permission",
+    "protected document",
+    "scan your face",
+    "above visitor",
     "higher access",
     "authenticate",
     "re-authenticate",
     "face recognition",
-    "no relevant documents found for your access level",
 )
 
 

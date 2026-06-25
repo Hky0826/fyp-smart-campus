@@ -48,6 +48,19 @@ class FakeSpoof:
         return SpoofResult(self.state, 0.9, "test")
 
 
+class FakeClock:
+    def __init__(self, now=100.0):
+        self.now = now
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
 class AlwaysQuality:
     def check(self, frame, face):
         return QualityResult(True)
@@ -67,15 +80,32 @@ class AccessControlLogicTests(unittest.TestCase):
     def test_access_control_uses_arcface_r50_embedder(self):
         self.assertEqual(AccessControlConfig().embedding_model_path.name, "arcface_r50.hef")
 
-    def pipeline(self, faces, live_vector, templates, spoof_state="live", threshold=0.75):
+    def pipeline(
+        self,
+        faces,
+        live_vector,
+        templates,
+        spoof_state="live",
+        threshold=0.75,
+        recognition_delay_seconds=0.0,
+        clock=None,
+    ):
         return AccessControlPipeline(
             detector=FakeDetector(faces),
             embedder=FakeEmbedder(live_vector),
             repository=FakeRepository(templates),
-            config=AccessControlConfig(recognition_threshold=threshold),
+            config=AccessControlConfig(
+                recognition_threshold=threshold,
+                recognition_delay_seconds=recognition_delay_seconds,
+            ),
             spoof_detector=FakeSpoof(spoof_state),
             quality_checker=AlwaysQuality(),
+            clock=clock.monotonic if clock is not None else None,
+            sleeper=clock.sleep if clock is not None else None,
         )
+
+    def test_access_control_defaults_to_one_second_recognition_delay(self):
+        self.assertEqual(AccessControlConfig().recognition_delay_seconds, 1.0)
 
     def test_access_control_rejects_multiple_faces(self):
         pipeline = self.pipeline(
@@ -130,6 +160,24 @@ class AccessControlLogicTests(unittest.TestCase):
         self.assertTrue(result["access_granted"])
         self.assertEqual(result["identity"], "user_001")
         self.assertEqual(result["matched_template"], "left_30")
+
+    def test_access_control_delays_repeated_recognition_attempts(self):
+        clock = FakeClock()
+        pipeline = self.pipeline(
+            [face()],
+            [1.0, 0.0],
+            [FaceTemplate("user_001", np.array([1.0, 0.0]), "front")],
+            recognition_delay_seconds=1.0,
+            clock=clock,
+        )
+
+        first_result = pipeline.process_frame(self.frame)
+        clock.now += 0.25
+        second_result = pipeline.process_frame(self.frame)
+
+        self.assertTrue(first_result["access_granted"])
+        self.assertTrue(second_result["access_granted"])
+        self.assertEqual(clock.sleeps, [0.75])
 
 
 if __name__ == "__main__":

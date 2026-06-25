@@ -58,6 +58,7 @@ class AccessControlConfig(RuntimeConfig):
     detection_threshold: float = float(os.getenv("EDGE_ACCESS_DETECTION_THRESHOLD", "0.60"))
     # Tune with real camera footage. A strict threshold is safer for access decisions.
     recognition_threshold: float = float(os.getenv("EDGE_ACCESS_RECOGNITION_THRESHOLD", "0.75"))
+    recognition_delay_seconds: float = float(os.getenv("EDGE_ACCESS_RECOGNITION_DELAY_SECONDS", "1.0"))
     min_face_size: int = int(os.getenv("EDGE_ACCESS_MIN_FACE_SIZE", "48"))
     require_liveness: bool = _bool_env("EDGE_ACCESS_REQUIRE_LIVENESS", True)
     audio_enabled: bool = _bool_env("EDGE_ACCESS_AUDIO_ENABLED", True)
@@ -65,7 +66,7 @@ class AccessControlConfig(RuntimeConfig):
     audio_auth_timeout_seconds: float = float(os.getenv("EDGE_ACCESS_AUDIO_AUTH_TIMEOUT_SECONDS", "45"))
     audio_token_refresh_seconds: float = float(os.getenv("EDGE_ACCESS_AUDIO_TOKEN_REFRESH_SECONDS", "600"))
     audio_token_retry_seconds: float = float(os.getenv("EDGE_ACCESS_AUDIO_TOKEN_RETRY_SECONDS", "10"))
-    audio_auto_visitor_token: bool = _bool_env("EDGE_ACCESS_CHATBOT_AUTO_VISITOR_TOKEN", True)
+    audio_auto_visitor_token: bool = _bool_env("EDGE_ACCESS_CHATBOT_AUTO_VISITOR_TOKEN", False)
     audio_visitor_user_id: int | None = _optional_int_env("EDGE_ACCESS_CHATBOT_VISITOR_USER_ID")
 
 
