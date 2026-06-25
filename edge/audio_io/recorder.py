@@ -40,6 +40,11 @@ class SpeechRecorder:
             import sounddevice as sd
         except ImportError as exc:
             raise RuntimeError("sounddevice and numpy are required for recording.") from exc
+        except OSError as exc:
+            raise RuntimeError(
+                "PortAudio is required for microphone recording. Install it on the edge device with: "
+                "sudo apt update && sudo apt install -y libportaudio2 portaudio19-dev alsa-utils"
+            ) from exc
 
         blocksize = max(1, int(self.config.sample_rate * self.config.recording_block_ms / 1000))
         block_seconds = blocksize / self.config.sample_rate

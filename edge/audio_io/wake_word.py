@@ -57,6 +57,11 @@ class WakeWordDetector:
             import sounddevice as sd
         except ImportError as exc:
             raise RuntimeError("sounddevice and numpy are required for wake word detection.") from exc
+        except OSError as exc:
+            raise RuntimeError(
+                "PortAudio is required for wake word detection. Install it on the edge device with: "
+                "sudo apt update && sudo apt install -y libportaudio2 portaudio19-dev alsa-utils"
+            ) from exc
 
         model = self._load_model()
         blocksize = max(1, int(self.config.sample_rate * self.config.wake_word_frame_ms / 1000))

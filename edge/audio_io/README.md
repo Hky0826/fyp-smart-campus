@@ -29,15 +29,26 @@ Downloaded models, binaries, and temporary WAV files are intentionally ignored b
 
 ## Install Dependencies
 
+Linux audio capture and playback require system audio support before the Python
+`sounddevice` package can open the microphone. On Debian or Ubuntu-based images,
+install ALSA/PortAudio packages first:
+
+```bash
+sudo apt update
+sudo apt install -y libportaudio2 portaudio19-dev alsa-utils
+```
+
+Then install the Python dependencies:
+
 ```bash
 python3 -m pip install -r edge/audio_io/requirements.txt
 ```
 
-Linux audio capture and playback also require system audio support. On Debian or Ubuntu-based images, install ALSA/PortAudio packages if they are missing:
+If you see `PortAudio library not found`, install the system packages above and
+retry. You can confirm that PortAudio is visible to Python with:
 
 ```bash
-sudo apt update
-sudo apt install -y portaudio19-dev alsa-utils
+python3 -c "import sounddevice as sd; print(sd.query_devices())"
 ```
 
 ## Download Models And Binaries
