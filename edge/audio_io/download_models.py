@@ -146,10 +146,10 @@ def make_executable(path: Path) -> None:
 
 def find_binary(root: Path, names: Iterable[str]) -> Path | None:
     """Find a binary by filename under a directory."""
-    expected_names = set(names)
-    for path in root.rglob("*"):
-        if path.is_file() and path.name in expected_names:
-            return path
+    for name in names:
+        for path in root.rglob(name):
+            if path.is_file():
+                return path
     return None
 
 
@@ -226,7 +226,17 @@ def ensure_whisper_binary(config: AudioIOConfig) -> SetupResult:
 
     extract_dir = config.models_dir / "whisper"
     extract_archive(archive_path, extract_dir)
-    binary = find_binary(extract_dir, ("whisper-cli", "main", "whisper-cli.exe", "main.exe"))
+    binary = find_binary(
+        extract_dir,
+        (
+            "whisper-whisper-cli",
+            "whisper-whisper-cli.exe",
+            "whisper-cli",
+            "whisper-cli.exe",
+            "main",
+            "main.exe",
+        ),
+    )
     if binary is None:
         raise ModelSetupError(f"Could not find whisper.cpp CLI binary after extracting {archive_path}")
 

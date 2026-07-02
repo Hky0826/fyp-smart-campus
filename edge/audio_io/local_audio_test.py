@@ -25,6 +25,11 @@ except ImportError:  # Allows `python edge/audio_io/local_audio_test.py` from re
     from tts_piper import PiperTTS, PiperTTSError
     from wake_word import WakeWordDetector
 
+
+DEFAULT_TEST_MICROPHONE_DEVICE = 6
+DEFAULT_TEST_WHISPER_BINARY_NAME = "whisper-whisper-cli"
+
+
 def configure_logging(level: str) -> None:
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
@@ -48,6 +53,18 @@ def parse_args() -> argparse.Namespace:
         "--list-devices",
         action="store_true",
         help="Print PortAudio devices before running checks.",
+    )
+    parser.add_argument(
+        "--microphone-device",
+        default=DEFAULT_TEST_MICROPHONE_DEVICE,
+        type=_audio_device_arg,
+        help="PortAudio microphone device name or index used by this local test.",
+    )
+    parser.add_argument(
+        "--whisper-binary-path",
+        type=Path,
+        default=None,
+        help="whisper.cpp CLI binary path used by this local test.",
     )
     parser.add_argument(
         "--tts-text",
@@ -76,11 +93,25 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _audio_device_arg(value: str) -> str | int:
+    return int(value) if value.isdigit() else value
+
+
 def main() -> None:
     args = parse_args()
     configure_logging(args.log_level)
 
-    config = AudioIOConfig(cloud_bearer_token=None, cloud_session_id=None, cloud_retries=0)
+    base_config = AudioIOConfig(cloud_bearer_token=None, cloud_session_id=None, cloud_retries=0)
+    whisper_binary_path = args.whisper_binary_path or (
+        base_config.models_dir / "whisper" / DEFAULT_TEST_WHISPER_BINARY_NAME
+    )
+    config = AudioIOConfig(
+        cloud_bearer_token=None,
+        cloud_session_id=None,
+        cloud_retries=0,
+        microphone_device=args.microphone_device,
+        whisper_binary_path=whisper_binary_path,
+    )
     failures: list[str] = []
 
     print("Edge audio local hardware test")
@@ -88,6 +119,7 @@ def main() -> None:
     print(f"Wake word: {config.wake_word_name}")
     print(f"Microphone device: {config.microphone_device if config.microphone_device is not None else 'default'}")
     print(f"Sample rate: {config.sample_rate} Hz")
+    print(f"Whisper binary: {config.whisper_binary_path}")
 
     if args.list_devices:
         _run_step("audio devices", failures, _list_audio_devices)

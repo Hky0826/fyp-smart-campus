@@ -69,7 +69,7 @@ export EDGE_AUDIO_MODELS_DIR=/opt/edge-audio-models
 The setup handles:
 
 - openWakeWord model: uses `EDGE_AUDIO_OPENWAKEWORD_MODEL_URL` when provided, otherwise calls the openWakeWord package downloader for `EDGE_AUDIO_WAKE_WORD_NAME`.
-- whisper.cpp binary: downloads a platform release archive when the current CPU is supported, or uses `EDGE_AUDIO_WHISPER_BINARY_URL`.
+- whisper.cpp binary: downloads a platform release archive when the current CPU is supported, preferring `whisper-whisper-cli`, or uses `EDGE_AUDIO_WHISPER_BINARY_URL`.
 - Whisper tiny multilingual model: downloads `ggml-tiny.bin` from the whisper.cpp Hugging Face model repository.
 - Piper binary: downloads a platform release archive when the current CPU is supported, or uses `EDGE_AUDIO_PIPER_BINARY_URL`.
 - Piper voice model: downloads `en_US-lessac-medium.onnx` plus its `.onnx.json` config from the Piper voices repository.
@@ -149,6 +149,10 @@ chatbot client and does not call any cloud endpoint.
 python -m edge.audio_io.local_audio_test
 ```
 
+The local test defaults to PortAudio input device `6` and the
+`edge/audio_io/models/whisper/whisper-whisper-cli` binary. Override those when
+needed with `--microphone-device` or `--whisper-binary-path`.
+
 By default, this:
 
 - synthesizes and plays a local Piper TTS prompt
@@ -161,6 +165,7 @@ Useful flags:
 ```bash
 python -m edge.audio_io.local_audio_test --list-devices
 python -m edge.audio_io.local_audio_test --setup-assets
+python -m edge.audio_io.local_audio_test --microphone-device 6
 python -m edge.audio_io.local_audio_test --skip-wake-word
 python -m edge.audio_io.local_audio_test --skip-playback
 python -m edge.audio_io.local_audio_test --keep-audio-files
