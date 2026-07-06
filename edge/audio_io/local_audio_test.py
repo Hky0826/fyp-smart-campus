@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -12,18 +11,18 @@ try:
     from .audio_player import AudioPlaybackError, AudioPlayer
     from .config import AudioIOConfig
     from .download_models import ModelSetupError, ensure_assets
+    from .keyboard_activation import SpacebarActivationDetector
     from .recorder import SpeechRecorder
     from .stt_whisper import WhisperCppTranscriber
     from .tts_piper import PiperTTS, PiperTTSError
-    from .wake_word import WakeWordDetector
 except ImportError:  # Allows `python edge/audio_io/local_audio_test.py` from repo root.
     from audio_player import AudioPlaybackError, AudioPlayer
     from config import AudioIOConfig
     from download_models import ModelSetupError, ensure_assets
+    from keyboard_activation import SpacebarActivationDetector
     from recorder import SpeechRecorder
     from stt_whisper import WhisperCppTranscriber
     from tts_piper import PiperTTS, PiperTTSError
-    from wake_word import WakeWordDetector
 
 
 DEFAULT_TEST_MICROPHONE_DEVICE = 6
@@ -39,14 +38,14 @@ def configure_logging(level: str) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Test local microphone input, wake word detection, whisper.cpp STT, "
+            "Test local keyboard activation, microphone input, whisper.cpp STT, "
             "and Piper TTS without calling the chatbot or cloud."
         )
     )
     parser.add_argument(
         "--setup-assets",
         action="store_true",
-        help="Download or prepare local wake-word, STT, and TTS assets before checks.",
+        help="Download or prepare local STT and TTS assets before checks.",
     )
     parser.add_argument(
         "--list-devices",
@@ -67,21 +66,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--tts-text",
-        default="Edge audio local test. Please say the wake word after this message.",
+        default="Edge audio local test. Press the space bar after this message.",
         help="Text to synthesize for the TTS check.",
     )
     parser.add_argument("--skip-tts", action="store_true", help="Skip Piper TTS synthesis")
     parser.add_argument("--skip-playback", action="store_true", help="Do not play the synthesized TTS WAV")
     parser.add_argument(
-        "--skip-wake-word",
+        "--skip-activation",
         action="store_true",
-        help="Record immediately instead of waiting for the configured wake word.",
-    )
-    parser.add_argument(
-        "--wake-timeout-seconds",
-        type=float,
-        default=30.0,
-        help="Maximum time to wait for the wake word.",
+        help="Record immediately instead of waiting for the space bar.",
     )
     parser.add_argument(
         "--keep-audio-files",
@@ -113,7 +106,7 @@ def main() -> None:
 
     print("Edge audio local hardware test")
     print("Cloud chatbot: disabled")
-    print(f"Wake word: {config.wake_word_name}")
+    print("Activation: space bar")
     print(f"Microphone device: {config.microphone_device if config.microphone_device is not None else 'default'}")
     print(f"Sample rate: {config.sample_rate} Hz")
     print(f"Whisper binary: {config.whisper_binary_path}")
@@ -140,14 +133,14 @@ def main() -> None:
     else:
         print("[SKIP] tts/playback")
 
-    if not args.skip_wake_word:
+    if not args.skip_activation:
         _run_step(
-            "wake word",
+            "keyboard activation",
             failures,
-            lambda: _check_wake_word(config, args.wake_timeout_seconds),
+            _check_keyboard_activation,
         )
     else:
-        print("[SKIP] wake word")
+        print("[SKIP] keyboard activation")
 
     _run_step(
         "microphone/stt",
@@ -186,7 +179,7 @@ def _list_audio_devices() -> None:
 
 def _setup_assets(config: AudioIOConfig) -> None:
     try:
-        results = ensure_assets(config, include_wake_word=True)
+        results = ensure_assets(config)
     except ModelSetupError:
         raise
     for result in results:
@@ -208,19 +201,12 @@ def _check_tts(config: AudioIOConfig, text: str, play: bool, keep_audio_files: b
             path.unlink(missing_ok=True)
 
 
-def _check_wake_word(config: AudioIOConfig, timeout_seconds: float) -> None:
-    print(f"       say the wake word now: {config.wake_word_name}")
-    detector = WakeWordDetector(config)
-    stop_event = threading.Event()
-    timer = threading.Timer(timeout_seconds, stop_event.set)
-    timer.start()
-    try:
-        event = detector.wait_for_wake_word(stop_event)
-    finally:
-        timer.cancel()
+def _check_keyboard_activation() -> None:
+    print("       press SPACE to continue")
+    event = SpacebarActivationDetector().wait_for_spacebar()
     if event is None:
-        raise RuntimeError(f"wake word not detected within {timeout_seconds:.1f}s")
-    print(f"       detected {event.name} score={event.score:.3f}")
+        raise RuntimeError("space bar activation was not detected")
+    print("       detected space bar activation")
 
 
 def _check_microphone_stt(config: AudioIOConfig, keep_audio_files: bool) -> None:

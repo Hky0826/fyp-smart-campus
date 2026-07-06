@@ -185,38 +185,6 @@ def is_deprecated_whisper_wrapper(path: Path) -> bool:
     return "is deprecated" in output and "please use" in output
 
 
-def ensure_openwakeword_model(config: AudioIOConfig) -> SetupResult:
-    """Prepare the configured openWakeWord model."""
-    if config.wake_word_model_path.exists():
-        verify_file(config.wake_word_model_path, config.openwakeword_model_sha256)
-        return SetupResult("openWakeWord model", config.wake_word_model_path, True, "already present")
-
-    if config.openwakeword_model_url:
-        download_file(
-            config.openwakeword_model_url,
-            config.wake_word_model_path,
-            config.openwakeword_model_sha256,
-            min_size_bytes=1024,
-        )
-        return SetupResult("openWakeWord model", config.wake_word_model_path, True, "downloaded")
-
-    try:
-        from openwakeword.utils import download_models
-    except ImportError as exc:
-        raise ModelSetupError(
-            "openwakeword is not installed. Install edge/audio_io/requirements.txt first."
-        ) from exc
-
-    logger.info("Downloading openWakeWord package model: %s", config.wake_word_name)
-    download_models(model_names=[config.wake_word_name])
-    return SetupResult(
-        "openWakeWord model",
-        None,
-        True,
-        "prepared via openwakeword package downloader",
-    )
-
-
 def ensure_whisper_model(config: AudioIOConfig) -> SetupResult:
     """Download the whisper.cpp tiny multilingual model."""
     download_file(
@@ -309,7 +277,7 @@ def ensure_piper_voice(config: AudioIOConfig) -> list[SetupResult]:
     ]
 
 
-def ensure_assets(config: AudioIOConfig | None = None, include_wake_word: bool = False) -> list[SetupResult]:
+def ensure_assets(config: AudioIOConfig | None = None) -> list[SetupResult]:
     """Ensure all required local audio assets are available."""
     resolved_config = config or AudioIOConfig()
     resolved_config.models_dir.mkdir(parents=True, exist_ok=True)
@@ -320,8 +288,6 @@ def ensure_assets(config: AudioIOConfig | None = None, include_wake_word: bool =
         ensure_whisper_model(resolved_config),
         ensure_piper_binary(resolved_config),
     ]
-    if include_wake_word:
-        results.insert(0, ensure_openwakeword_model(resolved_config))
     results.extend(ensure_piper_voice(resolved_config))
     return results
 
@@ -329,17 +295,12 @@ def ensure_assets(config: AudioIOConfig | None = None, include_wake_word: bool =
 def main() -> None:
     """CLI entry point for preparing audio I/O assets."""
     parser = argparse.ArgumentParser(description="Download edge audio I/O models and local binaries")
-    parser.add_argument(
-        "--include-wake-word",
-        action="store_true",
-        help="Also prepare the legacy openWakeWord model used by local hardware tests",
-    )
     parser.add_argument("--log-level", default=None, help="Override EDGE_AUDIO_LOG_LEVEL for this setup run")
     args = parser.parse_args()
 
     config = AudioIOConfig()
     configure_logging(args.log_level or config.log_level)
-    results = ensure_assets(config, include_wake_word=args.include_wake_word)
+    results = ensure_assets(config)
     for result in results:
         path = str(result.path) if result.path else "package-managed"
         logger.info("%s: %s (%s)", result.name, result.message, path)

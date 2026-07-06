@@ -90,7 +90,7 @@ For a local smoke run that records immediately instead of waiting for the space 
 python -m edge.audio_io.main --once --skip-activation
 ```
 
-For a local-only hardware test of microphone, legacy wake word, STT, TTS, and playback:
+For a local-only hardware test of spacebar activation, microphone, STT, TTS, and playback:
 
 ```bash
 python -m edge.audio_io.local_audio_test

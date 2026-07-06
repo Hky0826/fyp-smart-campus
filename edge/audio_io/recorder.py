@@ -55,7 +55,7 @@ class SpeechRecorder:
         frames: list = []
         silent_count = 0
         started_at = time.monotonic()
-        logger.info("Recording speech after wake word")
+        logger.info("Recording speech after activation")
 
         with sd.InputStream(
             samplerate=self.config.sample_rate,

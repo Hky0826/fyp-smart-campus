@@ -15,14 +15,13 @@ edge/audio_io/
   config.py           Environment-driven runtime settings
   download_models.py  One-step model and binary setup
   keyboard_activation.py  Spacebar listener
-  wake_word.py        Legacy openWakeWord listener for hardware tests
   recorder.py         16 kHz mono WAV recording with silence detection
   stt_whisper.py      whisper.cpp tiny multilingual transcription
   cloud_client.py     FastAPI Server-Sent Events client
   tts_piper.py        Piper synthesis with sentence buffering
   audio_player.py     Local WAV playback command wrapper
   main.py             End-to-end orchestrator
-  local_audio_test.py Local wake word, mic/STT, and TTS hardware test
+  local_audio_test.py Local activation, mic/STT, and TTS hardware test
   smoke_test.py       No-JWT audio and chatbot reachability smoke test
   requirements.txt    Python dependencies
 ```
@@ -73,9 +72,6 @@ The setup handles:
 - Whisper tiny multilingual model: downloads `ggml-tiny.bin` from the whisper.cpp Hugging Face model repository.
 - Piper binary: downloads a platform release archive when the current CPU is supported, or uses `EDGE_AUDIO_PIPER_BINARY_URL`.
 - Piper voice model: downloads `en_US-lessac-medium.onnx` plus its `.onnx.json` config from the Piper voices repository.
-
-Pass `--include-wake-word` only when you also want to prepare the legacy
-openWakeWord model for local wake-word hardware tests.
 
 For stricter integrity checks, set SHA-256 variables before running setup:
 
@@ -147,7 +143,7 @@ python -m edge.audio_io.main --once --skip-activation
 ## Local Audio Hardware Test
 
 Run this on the edge device when you only want to test the local microphone,
-wake word, Whisper STT, Piper TTS, and playback. This script does not import the
+spacebar activation, Whisper STT, Piper TTS, and playback. This script does not import the
 chatbot client and does not call any cloud endpoint.
 
 ```bash
@@ -161,7 +157,7 @@ with `--microphone-device` or `--whisper-binary-path`.
 By default, this:
 
 - synthesizes and plays a local Piper TTS prompt
-- waits for the configured openWakeWord trigger
+- waits for spacebar activation
 - records one microphone utterance
 - transcribes that recording with whisper.cpp
 
@@ -171,7 +167,7 @@ Useful flags:
 python -m edge.audio_io.local_audio_test --list-devices
 python -m edge.audio_io.local_audio_test --setup-assets
 python -m edge.audio_io.local_audio_test --microphone-device 6
-python -m edge.audio_io.local_audio_test --skip-wake-word
+python -m edge.audio_io.local_audio_test --skip-activation
 python -m edge.audio_io.local_audio_test --skip-playback
 python -m edge.audio_io.local_audio_test --keep-audio-files
 ```
@@ -204,12 +200,6 @@ To also test microphone recording and Whisper STT:
 python -m edge.audio_io.smoke_test --record-stt
 ```
 
-To include wake-word detection:
-
-```bash
-python -m edge.audio_io.smoke_test --wake-word --wake-timeout-seconds 30
-```
-
 Useful flags:
 
 ```bash
@@ -228,13 +218,6 @@ Common settings:
 - `EDGE_AUDIO_MICROPHONE_DEVICE`: PortAudio device name or index.
 - `EDGE_AUDIO_SAMPLE_RATE`: default `16000`.
 - `EDGE_AUDIO_PLAYER_COMMAND`: playback command, default `aplay`.
-
-Legacy wake-word hardware test:
-
-- `EDGE_AUDIO_WAKE_WORD_NAME`: openWakeWord package model name, default `hey_jarvis_v0.1`.
-- `EDGE_AUDIO_WAKE_WORD_MODEL_PATH`: explicit ONNX model path.
-- `EDGE_AUDIO_WAKE_WORD_THRESHOLD`: detection threshold, default `0.5`.
-- `EDGE_AUDIO_OPENWAKEWORD_MODEL_URL`: optional direct model download URL.
 
 Recording:
 
@@ -272,6 +255,5 @@ Piper:
 
 - Use the tiny multilingual Whisper model; larger models are likely too slow for interactive use.
 - Limit Whisper threads to the number of available cores with `EDGE_AUDIO_WHISPER_THREADS` and test thermals under sustained load.
-- Keep wake word detection block sizes small but avoid very low thresholds that increase false positives and CPU wakeups.
 - Piper voices vary in latency; use a low or medium voice first and benchmark before changing voices.
 - Local playback uses `aplay` by default. Replace `EDGE_AUDIO_PLAYER_COMMAND` if the target image uses a different audio stack.

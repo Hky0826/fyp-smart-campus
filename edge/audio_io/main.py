@@ -91,11 +91,8 @@ class AudioInteractionPipeline:
         stop_event: Event | None = None,
         skip_activation: bool = False,
         once: bool = False,
-        skip_wake_word: bool | None = None,
     ) -> None:
         """Run the audio pipeline until interrupted or a stop event is set."""
-        if skip_wake_word is not None:
-            skip_activation = skip_wake_word
         self.prepare_assets()
         logger.info("Audio I/O pipeline started")
 
@@ -207,12 +204,6 @@ def parse_args() -> argparse.Namespace:
         "--skip-activation",
         action="store_true",
         help="Record immediately instead of waiting for the space bar",
-    )
-    parser.add_argument(
-        "--skip-wake-word",
-        dest="skip_activation",
-        action="store_true",
-        help=argparse.SUPPRESS,
     )
     parser.add_argument("--skip-model-setup", action="store_true", help="Do not run download_models before startup")
     parser.add_argument("--log-level", default=None, help="Override EDGE_AUDIO_LOG_LEVEL")

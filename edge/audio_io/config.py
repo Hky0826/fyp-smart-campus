@@ -115,7 +115,7 @@ def _default_piper_binary_url() -> str | None:
 
 @dataclass(frozen=True)
 class AudioIOConfig:
-    """Runtime settings for local wake word, STT, cloud chat, and TTS."""
+    """Runtime settings for local keyboard activation, STT, cloud chat, and TTS."""
 
     models_dir: Path = _models_dir()
     temp_dir: Path = _path_env("EDGE_AUDIO_TEMP_DIR", DEFAULT_TEMP_DIR)
@@ -124,16 +124,6 @@ class AudioIOConfig:
     microphone_device: str | int | None = _audio_device_env("EDGE_AUDIO_MICROPHONE_DEVICE")
     sample_rate: int = _int_env("EDGE_AUDIO_SAMPLE_RATE", 16000)
     channels: int = _int_env("EDGE_AUDIO_CHANNELS", 1)
-
-    wake_word_name: str = os.getenv("EDGE_AUDIO_WAKE_WORD_NAME", "hey_jarvis_v0.1")
-    wake_word_model_path: Path = _model_path_env(
-        "EDGE_AUDIO_WAKE_WORD_MODEL_PATH",
-        "openwakeword",
-        "hey_jarvis_v0.1.onnx",
-    )
-    wake_word_threshold: float = _float_env("EDGE_AUDIO_WAKE_WORD_THRESHOLD", 0.5)
-    wake_word_frame_ms: int = _int_env("EDGE_AUDIO_WAKE_WORD_FRAME_MS", 80)
-    wake_word_cooldown_seconds: float = _float_env("EDGE_AUDIO_WAKE_WORD_COOLDOWN_SECONDS", 1.5)
 
     recording_block_ms: int = _int_env("EDGE_AUDIO_RECORDING_BLOCK_MS", 100)
     min_record_seconds: float = _float_env("EDGE_AUDIO_MIN_RECORD_SECONDS", 0.6)
@@ -182,8 +172,6 @@ class AudioIOConfig:
 
     skip_model_setup: bool = _bool_env("EDGE_AUDIO_SKIP_MODEL_SETUP", False)
 
-    openwakeword_model_url: str | None = _optional_str_env("EDGE_AUDIO_OPENWAKEWORD_MODEL_URL")
-    openwakeword_model_sha256: str | None = _optional_str_env("EDGE_AUDIO_OPENWAKEWORD_MODEL_SHA256")
     whisper_binary_url: str | None = _optional_str_env("EDGE_AUDIO_WHISPER_BINARY_URL") or _default_whisper_binary_url()
     whisper_binary_sha256: str | None = _optional_str_env("EDGE_AUDIO_WHISPER_BINARY_SHA256") or _default_whisper_binary_sha256()
     whisper_model_url: str = os.getenv("EDGE_AUDIO_WHISPER_MODEL_URL", WHISPER_TINY_MODEL_URL)

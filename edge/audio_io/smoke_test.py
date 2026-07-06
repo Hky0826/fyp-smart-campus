@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import threading
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -18,7 +17,6 @@ try:
     from .recorder import SpeechRecorder
     from .stt_whisper import WhisperCppTranscriber
     from .tts_piper import PiperTTS, PiperTTSError
-    from .wake_word import WakeWordDetector
 except ImportError:  # Allows `python edge/audio_io/smoke_test.py` from repo root.
     from audio_player import AudioPlaybackError, AudioPlayer
     from cloud_client import CloudChatClient, CloudClientError
@@ -27,7 +25,6 @@ except ImportError:  # Allows `python edge/audio_io/smoke_test.py` from repo roo
     from recorder import SpeechRecorder
     from stt_whisper import WhisperCppTranscriber
     from tts_piper import PiperTTS, PiperTTSError
-    from wake_word import WakeWordDetector
 
 
 logger = logging.getLogger(__name__)
@@ -66,17 +63,6 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Record one utterance immediately and transcribe it with whisper.cpp",
     )
-    parser.add_argument(
-        "--wake-word",
-        action="store_true",
-        help="Listen for the configured wake word before continuing",
-    )
-    parser.add_argument(
-        "--wake-timeout-seconds",
-        type=float,
-        default=20.0,
-        help="Maximum wait time for --wake-word",
-    )
     parser.add_argument("--skip-cloud", action="store_true", help="Skip cloud chatbot checks")
     parser.add_argument(
         "--public-rag-smoke",
@@ -104,16 +90,9 @@ def main() -> None:
     print(f"Device ID: {config.cloud_device_id}")
 
     if args.setup_assets:
-        _run_step("asset setup", failures, lambda: _setup_assets(config, include_wake_word=args.wake_word))
+        _run_step("asset setup", failures, lambda: _setup_assets(config))
     else:
         print("[SKIP] asset setup (pass --setup-assets to download/prepare models)")
-
-    if args.wake_word:
-        _run_step(
-            "wake word",
-            failures,
-            lambda: _check_wake_word(config, args.wake_timeout_seconds),
-        )
 
     if not args.skip_tts:
         _run_step(
@@ -154,28 +133,14 @@ def _run_step(name: str, failures: list[str], action) -> None:
         print(f"[OK  ] {name}")
 
 
-def _setup_assets(config: AudioIOConfig, include_wake_word: bool = False) -> None:
+def _setup_assets(config: AudioIOConfig) -> None:
     try:
-        results = ensure_assets(config, include_wake_word=include_wake_word)
+        results = ensure_assets(config)
     except ModelSetupError:
         raise
     for result in results:
         path = str(result.path) if result.path else "package-managed"
         print(f"       asset ready: {result.name} ({path})")
-
-
-def _check_wake_word(config: AudioIOConfig, timeout_seconds: float) -> None:
-    detector = WakeWordDetector(config)
-    stop_event = threading.Event()
-    timer = threading.Timer(timeout_seconds, stop_event.set)
-    timer.start()
-    try:
-        event = detector.wait_for_wake_word(stop_event)
-    finally:
-        timer.cancel()
-    if event is None:
-        raise RuntimeError(f"wake word not detected within {timeout_seconds:.1f}s")
-    print(f"       detected {event.name} score={event.score:.3f}")
 
 
 def _check_tts(config: AudioIOConfig, text: str, play: bool) -> None:
