@@ -5,6 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import sys
+import threading
 import time
 from typing import Any, Callable, List, Optional, Sequence
 
@@ -27,6 +30,71 @@ from .access_audio import AccessControlAudioCoordinator
 logger = logging.getLogger(__name__)
 MULTIPLE_FACE_REASON = "Only one user is allowed within the frame."
 SPACE_KEY = ord(" ")
+QUIT_KEY = ord("q")
+
+
+class KeyboardControlListener:
+    """Listen for terminal space/q controls while the camera loop is running."""
+
+    def __init__(self, on_space: Callable[[], None], on_quit: Callable[[], None]) -> None:
+        self.on_space = on_space
+        self.on_quit = on_quit
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="access-control-keyboard")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=1)
+
+    def _run(self) -> None:
+        try:
+            if os.name == "nt":
+                self._run_windows()
+            else:
+                self._run_posix()
+        except Exception as exc:
+            logger.info("Terminal keyboard controls are unavailable: %s", exc)
+
+    def _handle_key(self, key: str) -> None:
+        if key == " ":
+            self.on_space()
+        elif key.lower() == "q":
+            self.on_quit()
+
+    def _run_windows(self) -> None:
+        import msvcrt
+
+        while not self._stop_event.is_set():
+            if msvcrt.kbhit():
+                self._handle_key(msvcrt.getwch())
+            time.sleep(0.05)
+
+    def _run_posix(self) -> None:
+        if not sys.stdin or not sys.stdin.isatty():
+            raise RuntimeError("interactive terminal is not attached")
+
+        import select
+        import termios
+        import tty
+
+        fd = sys.stdin.fileno()
+        original_settings = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            while not self._stop_event.is_set():
+                readable, _, _ = select.select([sys.stdin], [], [], 0.1)
+                if readable:
+                    self._handle_key(sys.stdin.read(1))
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, original_settings)
 
 
 class AccessControlPipeline:
@@ -292,16 +360,28 @@ def main() -> None:
     sync_engine.start()
     audio_coordinator = AccessControlAudioCoordinator(config)
     audio_coordinator.start()
+    stop_requested = threading.Event()
+
+    def activate_chatbot() -> None:
+        audio_coordinator.activate_chatbot()
+
+    def request_stop() -> None:
+        stop_requested.set()
+
+    keyboard_listener = KeyboardControlListener(activate_chatbot, request_stop)
+    keyboard_listener.start()
 
     def handle_display_key(key: int) -> None:
         if key == SPACE_KEY:
-            audio_coordinator.activate_chatbot()
+            activate_chatbot()
+        elif key == QUIT_KEY:
+            request_stop()
 
     camera = CameraReader(config.camera)
     try:
         pipeline = build_pipeline(config)
         camera.open()
-        while True:
+        while not stop_requested.is_set():
             ok, frame = camera.read()
             if not ok or frame is None:
                 logger.warning("Camera read failed")
@@ -319,6 +399,7 @@ def main() -> None:
             ):
                 break
     finally:
+        keyboard_listener.stop()
         camera.release()
         audio_coordinator.stop()
         sync_engine.stop()
