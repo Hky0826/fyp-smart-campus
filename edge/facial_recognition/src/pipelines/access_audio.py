@@ -92,6 +92,7 @@ class AccessControlAudioCoordinator:
         self._last_authenticated_refresh: float = 0.0
         self._last_token_attempts: dict[int, float] = {}
         self._auth_event = threading.Event()
+        self._chatbot_activation_event = threading.Event()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -104,14 +105,23 @@ class AccessControlAudioCoordinator:
 
         self._maybe_issue_visitor_token()
         self._stop_event.clear()
+        self._chatbot_activation_event.clear()
         self._thread = threading.Thread(target=self._run_audio, daemon=True, name="access-control-audio")
         self._thread.start()
         logger.info("Access-control audio I/O started")
 
     def stop(self) -> None:
         self._stop_event.set()
+        self._chatbot_activation_event.set()
         if self._thread:
             self._thread.join(timeout=3)
+
+    def activate_chatbot(self) -> None:
+        """Request one audio chatbot interaction."""
+        if not self.config.audio_enabled:
+            return
+        self._chatbot_activation_event.set()
+        logger.info("Chatbot activation requested from space bar")
 
     def handle_access_result(self, result: dict[str, Any]) -> None:
         if not result.get("access_granted"):
@@ -166,6 +176,7 @@ class AccessControlAudioCoordinator:
                 audio_config,
                 credential_provider=self.credential_provider,
                 auth_required_handler=self.wait_for_face_authentication,
+                activation_event=self._chatbot_activation_event,
             )
             pipeline.run_forever(stop_event=self._stop_event)
         except Exception:

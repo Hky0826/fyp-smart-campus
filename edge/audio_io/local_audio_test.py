@@ -186,7 +186,7 @@ def _list_audio_devices() -> None:
 
 def _setup_assets(config: AudioIOConfig) -> None:
     try:
-        results = ensure_assets(config)
+        results = ensure_assets(config, include_wake_word=True)
     except ModelSetupError:
         raise
     for result in results:

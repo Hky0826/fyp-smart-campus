@@ -3,7 +3,7 @@
 This package adds local voice interaction for the edge device:
 
 ```text
-wake word -> record speech -> whisper.cpp STT -> FastAPI RAG stream -> Piper TTS -> local playback
+space bar -> record speech -> whisper.cpp STT -> FastAPI RAG stream -> Piper TTS -> local playback
 ```
 
 It is independent from `edge/facial_recognition/` and can be started on its own.
@@ -14,7 +14,8 @@ It is independent from `edge/facial_recognition/` and can be started on its own.
 edge/audio_io/
   config.py           Environment-driven runtime settings
   download_models.py  One-step model and binary setup
-  wake_word.py        openWakeWord listener
+  keyboard_activation.py  Spacebar listener
+  wake_word.py        Legacy openWakeWord listener for hardware tests
   recorder.py         16 kHz mono WAV recording with silence detection
   stt_whisper.py      whisper.cpp tiny multilingual transcription
   cloud_client.py     FastAPI Server-Sent Events client
@@ -68,11 +69,13 @@ export EDGE_AUDIO_MODELS_DIR=/opt/edge-audio-models
 
 The setup handles:
 
-- openWakeWord model: uses `EDGE_AUDIO_OPENWAKEWORD_MODEL_URL` when provided, otherwise calls the openWakeWord package downloader for `EDGE_AUDIO_WAKE_WORD_NAME`.
 - whisper.cpp binary: downloads a platform release archive when the current CPU is supported, preferring the real `whisper-cli` binary over deprecated compatibility stubs, or uses `EDGE_AUDIO_WHISPER_BINARY_URL`.
 - Whisper tiny multilingual model: downloads `ggml-tiny.bin` from the whisper.cpp Hugging Face model repository.
 - Piper binary: downloads a platform release archive when the current CPU is supported, or uses `EDGE_AUDIO_PIPER_BINARY_URL`.
 - Piper voice model: downloads `en_US-lessac-medium.onnx` plus its `.onnx.json` config from the Piper voices repository.
+
+Pass `--include-wake-word` only when you also want to prepare the legacy
+openWakeWord model for local wake-word hardware tests.
 
 For stricter integrity checks, set SHA-256 variables before running setup:
 
@@ -127,16 +130,18 @@ Optionally provide a JWT for higher RBAC access:
 export EDGE_AUDIO_CLOUD_BEARER_TOKEN=<face-auth-jwt>
 ```
 
-Start the normal wake-word loop:
+Start the normal spacebar-activated loop:
 
 ```bash
 python -m edge.audio_io.main
 ```
 
-For a quick recording test without wake word detection:
+Press the space bar in the terminal to start each chatbot recording.
+
+For a quick recording test without waiting for spacebar activation:
 
 ```bash
-python -m edge.audio_io.main --once --skip-wake-word
+python -m edge.audio_io.main --once --skip-activation
 ```
 
 ## Local Audio Hardware Test
@@ -224,7 +229,7 @@ Common settings:
 - `EDGE_AUDIO_SAMPLE_RATE`: default `16000`.
 - `EDGE_AUDIO_PLAYER_COMMAND`: playback command, default `aplay`.
 
-Wake word:
+Legacy wake-word hardware test:
 
 - `EDGE_AUDIO_WAKE_WORD_NAME`: openWakeWord package model name, default `hey_jarvis_v0.1`.
 - `EDGE_AUDIO_WAKE_WORD_MODEL_PATH`: explicit ONNX model path.

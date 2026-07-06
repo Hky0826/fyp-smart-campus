@@ -26,6 +26,7 @@ from .access_audio import AccessControlAudioCoordinator
 
 logger = logging.getLogger(__name__)
 MULTIPLE_FACE_REASON = "Only one user is allowed within the frame."
+SPACE_KEY = ord(" ")
 
 
 class AccessControlPipeline:
@@ -291,6 +292,11 @@ def main() -> None:
     sync_engine.start()
     audio_coordinator = AccessControlAudioCoordinator(config)
     audio_coordinator.start()
+
+    def handle_display_key(key: int) -> None:
+        if key == SPACE_KEY:
+            audio_coordinator.activate_chatbot()
+
     camera = CameraReader(config.camera)
     try:
         pipeline = build_pipeline(config)
@@ -304,7 +310,13 @@ def main() -> None:
             result = pipeline.process_frame(frame, target_user_id=args.target_user_id)
             audio_coordinator.handle_access_result(result)
             logger.debug(json.dumps(result, default=str))
-            if args.display and not show_pipeline_result(args.window_name, frame, result, mirror=args.mirror):
+            if args.display and not show_pipeline_result(
+                args.window_name,
+                frame,
+                result,
+                mirror=args.mirror,
+                key_handler=handle_display_key,
+            ):
                 break
     finally:
         camera.release()

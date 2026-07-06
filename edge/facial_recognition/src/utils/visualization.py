@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Iterable, Sequence
 
 try:
@@ -15,7 +16,13 @@ RED = (0, 0, 255)
 YELLOW = (0, 255, 255)
 
 
-def show_pipeline_result(window_name: str, frame, result: dict, mirror: bool = True) -> bool:
+def show_pipeline_result(
+    window_name: str,
+    frame,
+    result: dict,
+    mirror: bool = True,
+    key_handler: Callable[[int], None] | None = None,
+) -> bool:
     """Render a pipeline result and return False when the user presses q."""
     if cv2 is None:
         raise RuntimeError("OpenCV is required for display output")
@@ -23,6 +30,8 @@ def show_pipeline_result(window_name: str, frame, result: dict, mirror: bool = T
     display = draw_pipeline_result(frame, result, mirror=mirror)
     cv2.imshow(window_name, display)
     key = cv2.waitKey(1) & 0xFF
+    if key_handler is not None and key != 0xFF:
+        key_handler(key)
     return key != ord("q")
 
 

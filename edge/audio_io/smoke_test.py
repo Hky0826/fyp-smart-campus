@@ -104,7 +104,7 @@ def main() -> None:
     print(f"Device ID: {config.cloud_device_id}")
 
     if args.setup_assets:
-        _run_step("asset setup", failures, lambda: _setup_assets(config))
+        _run_step("asset setup", failures, lambda: _setup_assets(config, include_wake_word=args.wake_word))
     else:
         print("[SKIP] asset setup (pass --setup-assets to download/prepare models)")
 
@@ -154,9 +154,9 @@ def _run_step(name: str, failures: list[str], action) -> None:
         print(f"[OK  ] {name}")
 
 
-def _setup_assets(config: AudioIOConfig) -> None:
+def _setup_assets(config: AudioIOConfig, include_wake_word: bool = False) -> None:
     try:
-        results = ensure_assets(config)
+        results = ensure_assets(config, include_wake_word=include_wake_word)
     except ModelSetupError:
         raise
     for result in results:

@@ -5,7 +5,7 @@ The edge code is split into independent runtime areas:
 ```text
 edge/
   facial_recognition/   Hailo face-recognition, access-control, surveillance, sync, and local API code
-  audio_io/             Wake word, recording, whisper.cpp STT, cloud streaming, Piper TTS, and playback
+  audio_io/             Spacebar activation, recording, whisper.cpp STT, cloud streaming, Piper TTS, and playback
   README.md             This folder overview
 ```
 
@@ -40,7 +40,9 @@ python3 -m edge.facial_recognition.src.pipelines.access_control
 python3 -m edge.facial_recognition.src.pipelines.surveillance
 ```
 
-The access-control runner starts the audio I/O wake-word chatbot automatically.
+The access-control runner starts the audio I/O chatbot automatically. Press the
+space bar while the access-control OpenCV window is focused to start one
+chatbot recording.
 After a successful face match, it requests a JWT from
 `${EDGE_SYNC_CLOUD_URL}/api/edge-auth/token` and shares that token with the
 audio chatbot client. Surveillance does not start audio.
@@ -63,7 +65,7 @@ Install dependencies:
 python3 -m pip install -r edge/audio_io/requirements.txt
 ```
 
-Download local wake word, STT, and TTS assets:
+Download local STT and TTS assets:
 
 ```bash
 python -m edge.audio_io.download_models
@@ -76,17 +78,19 @@ export EDGE_SYNC_CLOUD_URL=http://<cloud-host>:8000
 python -m edge.audio_io.main
 ```
 
+Press the space bar in the terminal to start each chatbot recording.
+
 Without `EDGE_AUDIO_CLOUD_BEARER_TOKEN`, chatbot queries use visitor/PUBLIC
 access. A JWT is only needed when the chatbot needs documents above visitor
 access.
 
-For a local smoke run that records immediately instead of waiting for the wake word:
+For a local smoke run that records immediately instead of waiting for the space bar:
 
 ```bash
-python -m edge.audio_io.main --once --skip-wake-word
+python -m edge.audio_io.main --once --skip-activation
 ```
 
-For a local-only hardware test of microphone, wake word, STT, TTS, and playback:
+For a local-only hardware test of microphone, legacy wake word, STT, TTS, and playback:
 
 ```bash
 python -m edge.audio_io.local_audio_test
