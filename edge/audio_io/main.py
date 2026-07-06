@@ -109,8 +109,11 @@ class AudioInteractionPipeline:
 
     def _wait_for_activation(self, stop_event: Event | None = None) -> bool:
         if self.activation_event is None:
-            event = self.keyboard_activation.wait_for_spacebar(stop_event)
-            return event is not None
+            print("Press SPACE to activate the chatbot, or q to quit.", flush=True)
+            event = self.keyboard_activation.wait_for_key({" ", "q"}, stop_event)
+            if event is None:
+                return False
+            return event.key != "q"
 
         logger.info("Waiting for space bar activation from access-control display")
         while stop_event is None or not stop_event.is_set():
