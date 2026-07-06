@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import stat
+import subprocess
 import tarfile
 import tempfile
 import urllib.request
@@ -167,6 +168,23 @@ def install_binary_reference(source: Path, target: Path) -> None:
     make_executable(target)
 
 
+def is_deprecated_whisper_wrapper(path: Path) -> bool:
+    """Return True when a whisper binary is only the upstream deprecation stub."""
+    try:
+        result = subprocess.run(
+            [str(path), "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    return "is deprecated" in output and "please use" in output
+
+
 def ensure_openwakeword_model(config: AudioIOConfig) -> SetupResult:
     """Prepare the configured openWakeWord model."""
     if config.wake_word_model_path.exists():
@@ -214,7 +232,14 @@ def ensure_whisper_binary(config: AudioIOConfig) -> SetupResult:
     """Download and expose the whisper.cpp CLI binary."""
     if config.whisper_binary_path.exists():
         make_executable(config.whisper_binary_path)
-        return SetupResult("whisper.cpp binary", config.whisper_binary_path, True, "already present")
+        if not is_deprecated_whisper_wrapper(config.whisper_binary_path):
+            return SetupResult("whisper.cpp binary", config.whisper_binary_path, True, "already present")
+        logger.warning(
+            "Existing whisper.cpp binary is a deprecated wrapper and will be replaced: %s",
+            config.whisper_binary_path,
+        )
+        config.whisper_binary_path.unlink(missing_ok=True)
+
     if not config.whisper_binary_url:
         raise ModelSetupError(
             "No whisper.cpp binary URL is configured for this platform. Set EDGE_AUDIO_WHISPER_BINARY_URL."
@@ -229,8 +254,6 @@ def ensure_whisper_binary(config: AudioIOConfig) -> SetupResult:
     binary = find_binary(
         extract_dir,
         (
-            "whisper-whisper-cli",
-            "whisper-whisper-cli.exe",
             "whisper-cli",
             "whisper-cli.exe",
             "main",

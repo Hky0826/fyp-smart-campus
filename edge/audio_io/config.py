@@ -144,7 +144,7 @@ class AudioIOConfig:
     whisper_binary_path: Path = _model_path_env(
         "EDGE_AUDIO_WHISPER_BINARY_PATH",
         "whisper",
-        "whisper-whisper-cli",
+        "whisper-cli",
     )
     whisper_model_path: Path = _model_path_env(
         "EDGE_AUDIO_WHISPER_MODEL_PATH",

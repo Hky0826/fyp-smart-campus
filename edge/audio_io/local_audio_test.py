@@ -27,7 +27,6 @@ except ImportError:  # Allows `python edge/audio_io/local_audio_test.py` from re
 
 
 DEFAULT_TEST_MICROPHONE_DEVICE = 6
-DEFAULT_TEST_WHISPER_BINARY_NAME = "whisper-whisper-cli"
 
 
 def configure_logging(level: str) -> None:
@@ -102,9 +101,7 @@ def main() -> None:
     configure_logging(args.log_level)
 
     base_config = AudioIOConfig(cloud_bearer_token=None, cloud_session_id=None, cloud_retries=0)
-    whisper_binary_path = args.whisper_binary_path or (
-        base_config.models_dir / "whisper" / DEFAULT_TEST_WHISPER_BINARY_NAME
-    )
+    whisper_binary_path = args.whisper_binary_path or base_config.whisper_binary_path
     config = AudioIOConfig(
         cloud_bearer_token=None,
         cloud_session_id=None,
