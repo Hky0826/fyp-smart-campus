@@ -30,13 +30,12 @@ Downloaded models, binaries, and temporary WAV files are intentionally ignored b
 
 ## Install Dependencies
 
-Linux audio capture and playback require system audio support before the Python
-`sounddevice` package can open the microphone. On Debian or Ubuntu-based images,
-install ALSA/PortAudio packages first:
+Linux audio capture and playback require ALSA tools. On Debian or Ubuntu-based
+images, install them first:
 
 ```bash
 sudo apt update
-sudo apt install -y libportaudio2 portaudio19-dev alsa-utils
+sudo apt install -y alsa-utils
 ```
 
 Then install the Python dependencies:
@@ -45,11 +44,10 @@ Then install the Python dependencies:
 python3 -m pip install -r edge/audio_io/requirements.txt
 ```
 
-If you see `PortAudio library not found`, install the system packages above and
-retry. You can confirm that PortAudio is visible to Python with:
+You can list available ALSA capture devices with:
 
 ```bash
-python3 -c "import sounddevice as sd; print(sd.query_devices())"
+arecord -l
 ```
 
 ## Download Models And Binaries
@@ -150,9 +148,9 @@ chatbot client and does not call any cloud endpoint.
 python -m edge.audio_io.local_audio_test
 ```
 
-The local test defaults to PortAudio input device `6` and the
+The local test defaults to the system's default ALSA capture device and the
 `edge/audio_io/models/whisper/whisper-cli` binary. Override those when needed
-with `--microphone-device` or `--whisper-binary-path`.
+with `--alsa-capture-device` or `--whisper-binary-path`.
 
 By default, this:
 
@@ -166,7 +164,7 @@ Useful flags:
 ```bash
 python -m edge.audio_io.local_audio_test --list-devices
 python -m edge.audio_io.local_audio_test --setup-assets
-python -m edge.audio_io.local_audio_test --microphone-device 6
+python -m edge.audio_io.local_audio_test --alsa-capture-device plughw:1,0
 python -m edge.audio_io.local_audio_test --skip-activation
 python -m edge.audio_io.local_audio_test --skip-playback
 python -m edge.audio_io.local_audio_test --keep-audio-files
@@ -215,12 +213,15 @@ Common settings:
 - `EDGE_AUDIO_LOG_LEVEL`: logging level, default `INFO`.
 - `EDGE_AUDIO_MODELS_DIR`: model and binary directory, default `edge/audio_io/models`.
 - `EDGE_AUDIO_TEMP_DIR`: temporary WAV directory, default `edge/audio_io/tmp`.
-- `EDGE_AUDIO_MICROPHONE_DEVICE`: PortAudio device name or index.
 - `EDGE_AUDIO_SAMPLE_RATE`: default `16000`.
 - `EDGE_AUDIO_PLAYER_COMMAND`: playback command, default `aplay`.
 
 Recording:
 
+- `EDGE_AUDIO_RECORDING_BACKEND`: recording backend, default `arecord` on Linux and `sounddevice` on Windows.
+- `EDGE_AUDIO_RECORDER_COMMAND`: recording command for the `arecord` backend, default `arecord`.
+- `EDGE_AUDIO_ALSA_CAPTURE_DEVICE`: optional ALSA capture device such as `hw:1,0` or `plughw:1,0`.
+- `EDGE_AUDIO_MICROPHONE_DEVICE`: optional PortAudio device name or index, used only with `EDGE_AUDIO_RECORDING_BACKEND=sounddevice`.
 - `EDGE_AUDIO_MAX_RECORD_SECONDS`: default `12`.
 - `EDGE_AUDIO_MIN_RECORD_SECONDS`: default `0.6`.
 - `EDGE_AUDIO_SILENCE_DURATION_SECONDS`: default `1.2`.

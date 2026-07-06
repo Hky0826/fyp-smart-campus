@@ -113,6 +113,10 @@ def _default_piper_binary_url() -> str | None:
     return PIPER_BINARY_URLS.get(_machine_key())
 
 
+def _default_recording_backend() -> str:
+    return os.getenv("EDGE_AUDIO_RECORDING_BACKEND", "sounddevice" if os.name == "nt" else "arecord").strip().lower()
+
+
 @dataclass(frozen=True)
 class AudioIOConfig:
     """Runtime settings for local keyboard activation, STT, cloud chat, and TTS."""
@@ -126,6 +130,9 @@ class AudioIOConfig:
     channels: int = _int_env("EDGE_AUDIO_CHANNELS", 1)
 
     recording_block_ms: int = _int_env("EDGE_AUDIO_RECORDING_BLOCK_MS", 100)
+    recording_backend: str = _default_recording_backend()
+    audio_recorder_command: str = os.getenv("EDGE_AUDIO_RECORDER_COMMAND", "arecord")
+    alsa_capture_device: str | None = _optional_str_env("EDGE_AUDIO_ALSA_CAPTURE_DEVICE")
     min_record_seconds: float = _float_env("EDGE_AUDIO_MIN_RECORD_SECONDS", 0.6)
     max_record_seconds: float = _float_env("EDGE_AUDIO_MAX_RECORD_SECONDS", 12.0)
     silence_duration_seconds: float = _float_env("EDGE_AUDIO_SILENCE_DURATION_SECONDS", 1.2)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -23,9 +25,6 @@ except ImportError:  # Allows `python edge/audio_io/local_audio_test.py` from re
     from recorder import SpeechRecorder
     from stt_whisper import WhisperCppTranscriber
     from tts_piper import PiperTTS, PiperTTSError
-
-
-DEFAULT_TEST_MICROPHONE_DEVICE = 6
 
 
 def configure_logging(level: str) -> None:
@@ -54,9 +53,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--microphone-device",
-        default=DEFAULT_TEST_MICROPHONE_DEVICE,
+        default=None,
         type=_audio_device_arg,
-        help="PortAudio microphone device name or index used by this local test.",
+        help="PortAudio microphone device name or index, used only with EDGE_AUDIO_RECORDING_BACKEND=sounddevice.",
+    )
+    parser.add_argument(
+        "--alsa-capture-device",
+        default=None,
+        help="ALSA capture device for arecord, for example hw:1,0 or plughw:1,0.",
     )
     parser.add_argument(
         "--whisper-binary-path",
@@ -100,6 +104,7 @@ def main() -> None:
         cloud_session_id=None,
         cloud_retries=0,
         microphone_device=args.microphone_device,
+        alsa_capture_device=args.alsa_capture_device or base_config.alsa_capture_device,
         whisper_binary_path=whisper_binary_path,
     )
     failures: list[str] = []
@@ -107,7 +112,9 @@ def main() -> None:
     print("Edge audio local hardware test")
     print("Cloud chatbot: disabled")
     print("Activation: space bar")
-    print(f"Microphone device: {config.microphone_device if config.microphone_device is not None else 'default'}")
+    print(f"Recording backend: {config.recording_backend}")
+    print(f"ALSA capture device: {config.alsa_capture_device or 'default'}")
+    print(f"PortAudio device: {config.microphone_device if config.microphone_device is not None else 'default'}")
     print(f"Sample rate: {config.sample_rate} Hz")
     print(f"Whisper binary: {config.whisper_binary_path}")
 
@@ -164,17 +171,12 @@ def _run_step(name: str, failures: list[str], action: Callable[[], None]) -> Non
 
 
 def _list_audio_devices() -> None:
-    try:
-        import sounddevice as sd
-    except ImportError as exc:
-        raise RuntimeError("sounddevice is required to list audio devices.") from exc
-    except OSError as exc:
-        raise RuntimeError(
-            "PortAudio is required to list audio devices. Install it on the edge device with: "
-            "sudo apt update && sudo apt install -y libportaudio2 portaudio19-dev alsa-utils"
-        ) from exc
-
-    print(sd.query_devices())
+    if shutil.which("arecord") is None:
+        raise RuntimeError("arecord is required to list ALSA capture devices. Install alsa-utils first.")
+    result = subprocess.run(["arecord", "-l"], check=False, capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "arecord -l failed")
+    print(result.stdout)
 
 
 def _setup_assets(config: AudioIOConfig) -> None:
