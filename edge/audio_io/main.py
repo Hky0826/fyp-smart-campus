@@ -1,8 +1,9 @@
-"""Run the local audio interaction pipeline on the edge device."""
+"""Run the audio I/O pipeline on the edge device: record, send, receive, play."""
 
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -10,42 +11,27 @@ from threading import Event
 
 try:
     from .audio_player import AudioPlaybackError, AudioPlayer
-    from .cloud_client import CloudChatClient, CloudChatCredentials, CloudClientError
+    from .cloud_audio_client import (
+        CloudAudioClient,
+        CloudAudioClientError,
+        CloudChatCredentials,
+    )
     from .config import AudioIOConfig
-    from .download_models import ModelSetupError, ensure_assets
     from .keyboard_activation import SpacebarActivationDetector
-    from .recorder import SpeechRecorder
-    from .stt_whisper import WhisperCppTranscriber
-    from .tts_piper import PiperTTS, PiperTTSError
+    from .recorder import AudioRecorder, RecordingResult
 except ImportError:  # Allows `python edge/audio_io/main.py` from repo root.
     from audio_player import AudioPlaybackError, AudioPlayer
-    from cloud_client import CloudChatClient, CloudChatCredentials, CloudClientError
+    from cloud_audio_client import (
+        CloudAudioClient,
+        CloudAudioClientError,
+        CloudChatCredentials,
+    )
     from config import AudioIOConfig
-    from download_models import ModelSetupError, ensure_assets
     from keyboard_activation import SpacebarActivationDetector
-    from recorder import SpeechRecorder
-    from stt_whisper import WhisperCppTranscriber
-    from tts_piper import PiperTTS, PiperTTSError
+    from recorder import AudioRecorder, RecordingResult
 
 
 logger = logging.getLogger(__name__)
-
-_AUTH_PROMPT = "Please scan your face to continue."
-_AUTH_CONFIRMED_PROMPT = "Access confirmed."
-_AUTH_TIMEOUT_PROMPT = "Face verification timed out. Please try again."
-_AUTH_DENIAL_MARKERS = (
-    "access denied",
-    "not authorized",
-    "authentication required",
-    "permission",
-    "protected document",
-    "scan your face",
-    "above visitor",
-    "higher access",
-    "authenticate",
-    "re-authenticate",
-    "face recognition",
-)
 
 
 def configure_logging(level: str) -> None:
@@ -57,7 +43,12 @@ def configure_logging(level: str) -> None:
 
 
 class AudioInteractionPipeline:
-    """Coordinate one activate-record-transcribe-chat-speak interaction loop."""
+    """Record audio -> send to cloud -> receive text+audio -> play audio.
+
+    This is the core interaction loop for the edge device. It waits for
+    keyboard activation (space bar), records audio, uploads it to the
+    cloud chatbot API, and plays back the received audio response.
+    """
 
     def __init__(
         self,
@@ -70,21 +61,9 @@ class AudioInteractionPipeline:
         self.auth_required_handler = auth_required_handler
         self.activation_event = activation_event
         self.keyboard_activation = SpacebarActivationDetector()
-        self.recorder = SpeechRecorder(self.config)
-        self.transcriber = WhisperCppTranscriber(self.config)
-        self.cloud = CloudChatClient(self.config, credential_provider=credential_provider)
-        self.tts = PiperTTS(self.config)
+        self.recorder = AudioRecorder(self.config)
+        self.cloud = CloudAudioClient(self.config, credential_provider=credential_provider)
         self.player = AudioPlayer(self.config)
-
-    def prepare_assets(self) -> None:
-        """Download required models and binaries unless disabled by configuration."""
-        if self.config.skip_model_setup:
-            logger.info("Skipping model setup because EDGE_AUDIO_SKIP_MODEL_SETUP is enabled")
-            return
-        results = ensure_assets(self.config)
-        for result in results:
-            path = str(result.path) if result.path else "package-managed"
-            logger.info("Asset ready: %s (%s)", result.name, path)
 
     def run_forever(
         self,
@@ -92,8 +71,13 @@ class AudioInteractionPipeline:
         skip_activation: bool = False,
         once: bool = False,
     ) -> None:
-        """Run the audio pipeline until interrupted or a stop event is set."""
-        self.prepare_assets()
+        """Run the audio pipeline until interrupted or a stop event is set.
+
+        Args:
+            stop_event: Optional threading.Event to signal shutdown.
+            skip_activation: If True, start recording immediately.
+            once: If True, run one interaction and exit.
+        """
         logger.info("Audio I/O pipeline started")
 
         while stop_event is None or not stop_event.is_set():
@@ -104,7 +88,77 @@ class AudioInteractionPipeline:
             if once:
                 break
 
+    def handle_interaction(self) -> None:
+        """Record, upload to cloud, receive response, and play audio.
+
+        This method orchestrates one complete interaction cycle:
+        1. Record audio from the microphone
+        2. Upload the WAV to the cloud chatbot API
+        3. Handle the response status
+        4. Play back received audio if present
+        """
+        recording_path: Path | None = None
+        try:
+            # Step 1: Record audio
+            recording = self.recorder.record()
+            recording_path = recording.path
+            logger.info("Recorded %.2fs of audio", recording.duration_seconds)
+
+            # Step 2: Upload to cloud
+            response = self.cloud.send_audio(recording_path)
+
+            # Step 3: Handle response
+            if response.status == "blocked":
+                logger.info("Query blocked: %s", response.error_message or "potential injection detected")
+                if response.text:
+                    logger.info("Response text: %s", response.text)
+                return
+
+            if response.status == "auth_required":
+                logger.info("Authentication required, triggering face auth flow")
+                if self.auth_required_handler:
+                    self._retry_after_authentication(recording_path)
+                return
+
+            if response.status == "no_access":
+                logger.info("No relevant documents found for access level")
+                if response.text:
+                    logger.info("Response text: %s", response.text)
+                return
+
+            if response.status in ("ok", "validation_failed"):
+                if response.text:
+                    logger.info("Response text: %s", response.text)
+
+                # Step 4: Play audio response if available
+                if response.audio_bytes:
+                    self.player.play_pcm(response.audio_bytes)
+                elif response.text:
+                    logger.info("No audio response to play (text-only response)")
+
+                return
+
+            if response.status == "error":
+                logger.error("Cloud returned error: %s", response.error_message or "unknown error")
+                return
+
+        except CloudAudioClientError as exc:
+            if exc.status_code in (401, 403) and self.auth_required_handler:
+                self._retry_after_authentication(recording_path)
+            else:
+                logger.error("Cloud communication failed: %s", exc)
+        except AudioPlaybackError as exc:
+            logger.error("Audio playback failed: %s", exc)
+        finally:
+            if recording_path is not None:
+                recording_path.unlink(missing_ok=True)
+
     def _wait_for_activation(self, stop_event: Event | None = None) -> bool:
+        """Wait for space bar press or external activation event.
+
+        Returns:
+            True if activation received, False if stop requested.
+        """
         if self.activation_event is None:
             print("Press SPACE to activate the chatbot, or q to quit.", flush=True)
             event = self.keyboard_activation.wait_for_key({" ", "q"}, stop_event)
@@ -121,101 +175,47 @@ class AudioInteractionPipeline:
                 return True
         return False
 
-    def handle_interaction(self) -> None:
-        """Handle one user utterance and speak the cloud chatbot response."""
-        recording_path: Path | None = None
-        try:
-            recording = self.recorder.record()
-            recording_path = recording.path
-            transcript = self.transcriber.transcribe(recording.path)
-        finally:
-            if recording_path is not None:
-                recording_path.unlink(missing_ok=True)
+    def _retry_after_authentication(self, recording_path: Path | None = None) -> None:
+        """Retry the audio query after face authentication succeeds.
 
-        if not transcript:
-            logger.info("No speech text detected; returning to activation wait")
-            return
-
-        logger.info("User transcript: %s", transcript)
-        try:
-            response = self._chat_and_speak(transcript)
-            if self._response_requires_authentication(response):
-                self._retry_after_authentication(transcript)
-        except (CloudClientError, PiperTTSError, AudioPlaybackError) as exc:
-            if self._error_requires_authentication(exc):
-                self._retry_after_authentication(transcript)
-            else:
-                logger.error("Audio interaction failed: %s", exc)
-
-    def _chat_and_speak(self, transcript: str) -> dict | None:
-        response_chunks = self.cloud.stream_chat(transcript)
-        for audio_path in self.tts.synthesize_stream(response_chunks):
-            self.player.play_and_cleanup(audio_path)
-        return self.cloud.last_response
-
-    def _retry_after_authentication(self, transcript: str) -> None:
+        Logs the authentication requirement and re-uploads the recorded
+        audio after authentication completes.
+        """
         if self.auth_required_handler is None:
             logger.info("Cloud requires authentication, but no authentication handler is configured")
             return
 
-        self.speak_text(_AUTH_PROMPT)
-        if not self.auth_required_handler(transcript):
-            self.speak_text(_AUTH_TIMEOUT_PROMPT)
-            return
-
-        self.speak_text(_AUTH_CONFIRMED_PROMPT)
-        try:
-            self._chat_and_speak(transcript)
-        except (CloudClientError, PiperTTSError, AudioPlaybackError) as exc:
-            logger.error("Authenticated audio retry failed: %s", exc)
-
-    def speak_text(self, text: str) -> None:
-        """Speak a short local status message without contacting the cloud."""
-        try:
-            audio_path = self.tts.synthesize(text)
-            self.player.play_and_cleanup(audio_path)
-        except (PiperTTSError, AudioPlaybackError) as exc:
-            logger.warning("Could not play local prompt: %s", exc)
-
-    @staticmethod
-    def _response_requires_authentication(response: dict | None) -> bool:
-        if not response or response.get("access_granted") is not False:
-            return False
-        combined = " ".join(
-            str(response.get(key) or "")
-            for key in ("status_message", "answer")
-        ).lower()
-        return any(marker in combined for marker in _AUTH_DENIAL_MARKERS)
-
-    @staticmethod
-    def _error_requires_authentication(exc: BaseException) -> bool:
-        status_code = getattr(exc, "status_code", None)
-        if status_code in {401, 403}:
-            return True
-        message = str(exc).lower()
-        return any(marker in message for marker in _AUTH_DENIAL_MARKERS)
+        logger.info("Authentication required — triggering face auth flow")
+        # We can no longer do local TTS; just log and let the handler manage UI
+        if recording_path and recording_path.exists():
+            try:
+                response = self.cloud.send_audio(recording_path)
+                if response.audio_bytes:
+                    self.player.play_pcm(response.audio_bytes)
+                elif response.text:
+                    logger.info("Authenticated response text: %s", response.text)
+            except (CloudAudioClientError, AudioPlaybackError) as exc:
+                logger.error("Authenticated retry failed: %s", exc)
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments for local testing and runtime use."""
-    parser = argparse.ArgumentParser(description="Run the edge local audio I/O pipeline")
+    parser = argparse.ArgumentParser(description="Run the edge audio I/O pipeline")
     parser.add_argument("--once", action="store_true", help="Run one interaction and exit")
     parser.add_argument(
         "--skip-activation",
         action="store_true",
         help="Record immediately instead of waiting for the space bar",
     )
-    parser.add_argument("--skip-model-setup", action="store_true", help="Do not run download_models before startup")
     parser.add_argument("--log-level", default=None, help="Override EDGE_AUDIO_LOG_LEVEL")
     return parser.parse_args()
 
 
 def main() -> None:
     """CLI entry point for the edge audio I/O pipeline."""
+    faulthandler.enable(all_threads=True)
     args = parse_args()
     config = AudioIOConfig()
-    if args.skip_model_setup:
-        config = AudioIOConfig(skip_model_setup=True)
 
     configure_logging(args.log_level or config.log_level)
     pipeline = AudioInteractionPipeline(config)
@@ -223,9 +223,6 @@ def main() -> None:
         pipeline.run_forever(skip_activation=args.skip_activation, once=args.once)
     except KeyboardInterrupt:
         logger.info("Audio I/O pipeline stopped by user")
-    except ModelSetupError as exc:
-        logger.error("Model setup failed: %s", exc)
-        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

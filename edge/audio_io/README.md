@@ -1,117 +1,132 @@
-# Edge Audio I/O Pipeline
+# Edge Audio I/O Terminal
 
-This package adds local voice interaction for the edge device:
+Thin audio terminal for the edge device. Records microphone audio, uploads it
+to the cloud chatbot API, receives a text + audio response, and plays the audio
+response through the speaker.
+
+There is **no local STT and no local TTS** — all speech understanding and speech
+generation happens in the cloud via the Gemini audio pipeline.
 
 ```text
-space bar -> record speech -> whisper.cpp STT -> FastAPI RAG stream -> Piper TTS -> local playback
+space bar -> record 16kHz mono WAV -> multipart POST to cloud -> receive text + base64 PCM -> play 24kHz audio
 ```
 
-It is independent from `edge/facial_recognition/` and can be started on its own.
+## Architecture
+
+This module is one half of the two-step Gemini audio pipeline. The edge device
+handles only the physical I/O:
+
+1. **Record**: Capture 16 kHz mono int16 PCM audio from the microphone using
+   sounddevice (PortAudio). Silence detection automatically stops recording
+   when the user finishes speaking.
+2. **Upload**: Send the recorded WAV file as a multipart HTTP POST to the cloud
+   audio API endpoint.
+3. **Receive**: Parse the JSON response which contains validated text, optional
+   base64-encoded PCM audio (24 kHz mono), cited sources, and a status field.
+4. **Play**: Decode the base64 audio and play it through the default output
+   device using sounddevice.
+
+The cloud side (in `cloud/RagChatbot/`) handles audio query extraction, prompt
+injection detection, RBAC-filtered retrieval, response generation via Gemini,
+and response validation.
 
 ## Folder Contents
 
 ```text
 edge/audio_io/
-  config.py           Environment-driven runtime settings
-  download_models.py  One-step model and binary setup
-  keyboard_activation.py  Spacebar listener
-  recorder.py         16 kHz mono WAV recording with silence detection
-  stt_whisper.py      whisper.cpp tiny multilingual transcription
-  cloud_client.py     FastAPI Server-Sent Events client
-  tts_piper.py        Piper synthesis with sentence buffering
-  audio_player.py     Local WAV playback command wrapper
-  main.py             End-to-end orchestrator
-  local_audio_test.py Local activation, mic/STT, and TTS hardware test
-  smoke_test.py       No-JWT audio and chatbot reachability smoke test
-  requirements.txt    Python dependencies
+  __init__.py             Exports AudioIOConfig
+  config.py               Environment-driven runtime settings (AudioIOConfig dataclass)
+  recorder.py             16 kHz mono WAV recording with RMS-based silence detection (sounddevice)
+  audio_player.py         PCM and WAV playback through default output device (sounddevice)
+  cloud_audio_client.py   Multipart HTTP client for the cloud chatbot audio API
+  keyboard_activation.py  Space bar listener for activation
+  main.py                 End-to-end orchestrator: AudioInteractionPipeline
+  requirements.txt        Python dependencies
+  README.md               This file
 ```
 
-Downloaded models, binaries, and temporary WAV files are intentionally ignored by Git.
+Temporary WAV recording files are stored under `tmp/` (gitignored).
 
-## Install Dependencies
+## Dependencies
 
-Linux audio capture and playback require ALSA tools. On Debian or Ubuntu-based
-images, install them first:
+Python packages (see `requirements.txt`):
+
+- `numpy>=1.26,<2` — PCM audio buffer manipulation
+- `requests>=2.31` — HTTP client for cloud API communication
+- `sounddevice>=0.4.6` — PortAudio wrapper for microphone capture and speaker playback
+
+On Linux, PortAudio and ALSA must also be installed:
 
 ```bash
 sudo apt update
-sudo apt install -y alsa-utils
+sudo apt install -y libportaudio2 portaudio19-dev alsa-utils
 ```
 
-Then install the Python dependencies:
+## Environment Variables
 
-```bash
-python3 -m pip install -r edge/audio_io/requirements.txt
-```
+All settings are driven by environment variables, read at startup by
+`AudioIOConfig`.
 
-You can list available ALSA capture devices with:
+### General
 
-```bash
-arecord -l
-```
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `EDGE_AUDIO_LOG_LEVEL` | `INFO` | Logging verbosity |
+| `EDGE_AUDIO_TEMP_DIR` | `edge/audio_io/tmp` | Temporary WAV file directory |
 
-## Download Models And Binaries
+### Recording
 
-Run the setup CLI after installing Python dependencies:
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `EDGE_AUDIO_MICROPHONE_DEVICE` | (none) | PortAudio device name or index; `None` = system default |
+| `EDGE_AUDIO_SAMPLE_RATE` | `16000` | Recording sample rate in Hz |
+| `EDGE_AUDIO_CHANNELS` | `1` | Number of recording channels |
+| `EDGE_AUDIO_RECORDING_BLOCK_MS` | `100` | Block size for stream reads (milliseconds) |
+| `EDGE_AUDIO_RECORDING_BACKEND` | `sounddevice` | Recording backend (only `sounddevice` is supported) |
+| `EDGE_AUDIO_MIN_RECORD_SECONDS` | `0.6` | Minimum recording duration before silence stops capture |
+| `EDGE_AUDIO_MAX_RECORD_SECONDS` | `12.0` | Maximum recording duration (hard limit) |
+| `EDGE_AUDIO_SILENCE_DURATION_SECONDS` | `1.2` | Consecutive silence required before auto-stop |
+| `EDGE_AUDIO_SILENCE_RMS_THRESHOLD` | `500.0` | RMS amplitude below which audio is considered silence |
 
-```bash
-python -m edge.audio_io.download_models
-```
+### Cloud API
 
-Assets are stored under `edge/audio_io/models/` by default. Override this with:
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `EDGE_AUDIO_CLOUD_API_URL` | `{EDGE_SYNC_CLOUD_URL}/api/chatbot/chat/audio` | Cloud audio endpoint URL |
+| `EDGE_AUDIO_CLOUD_BEARER_TOKEN` | (none) | JWT bearer token; omitted = visitor/PUBLIC access |
+| `EDGE_AUDIO_CLOUD_DEVICE_ID` | `{EDGE_SYNC_DEVICE_ID}` or `entry-gate-01` | Device identifier sent with each request |
+| `EDGE_AUDIO_CLOUD_SESSION_ID` | (none) | Existing JWT session ID hint |
+| `EDGE_AUDIO_CLOUD_CONNECT_TIMEOUT_SECONDS` | `5.0` | HTTP connection timeout |
+| `EDGE_AUDIO_CLOUD_READ_TIMEOUT_SECONDS` | `90.0` | HTTP read timeout (generation can take tens of seconds) |
+| `EDGE_AUDIO_CLOUD_RETRIES` | `2` | Number of retries on transient network failure |
+| `EDGE_AUDIO_CLOUD_RETRY_BACKOFF_SECONDS` | `1.0` | Base backoff between retries (multiplied by attempt number) |
 
-```bash
-export EDGE_AUDIO_MODELS_DIR=/opt/edge-audio-models
-```
+### Playback
 
-The setup handles:
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `EDGE_AUDIO_OUTPUT_SAMPLE_RATE` | `24000` | Expected output sample rate from cloud audio (Hz) |
 
-- whisper.cpp binary: downloads a platform release archive when the current CPU is supported, preferring the real `whisper-cli` binary over deprecated compatibility stubs, or uses `EDGE_AUDIO_WHISPER_BINARY_URL`.
-- Whisper tiny multilingual model: downloads `ggml-tiny.bin` from the whisper.cpp Hugging Face model repository.
-- Piper binary: downloads a platform release archive when the current CPU is supported, or uses `EDGE_AUDIO_PIPER_BINARY_URL`.
-- Piper voice model: downloads `en_US-lessac-medium.onnx` plus its `.onnx.json` config from the Piper voices repository.
+Also inherited from the broader edge environment:
 
-For stricter integrity checks, set SHA-256 variables before running setup:
+- `EDGE_SYNC_CLOUD_URL` — base URL used when `EDGE_AUDIO_CLOUD_API_URL` is not set
+- `EDGE_SYNC_DEVICE_ID` — fallback device identifier
 
-```bash
-export EDGE_AUDIO_WHISPER_MODEL_SHA256=<sha256>
-export EDGE_AUDIO_PIPER_BINARY_SHA256=<sha256>
-export EDGE_AUDIO_PIPER_VOICE_MODEL_SHA256=<sha256>
-```
-
-## Required Cloud Endpoint
-
-The audio client expects the cloud FastAPI app to expose:
+## CLI Arguments
 
 ```text
-POST /api/chatbot/chat/stream
-Authorization: Bearer <JWT>  # optional; omitted requests use visitor/PUBLIC access
-Accept: text/event-stream
-Content-Type: application/json
-
-{"query":"Where is the library?","device_id":"entry-gate-01"}
+python edge/audio_io/main.py [--once] [--skip-activation] [--log-level LEVEL]
 ```
 
-The endpoint streams Server-Sent Events:
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--once` | `False` | Run one interaction and exit (useful for testing) |
+| `--skip-activation` | `False` | Start recording immediately without waiting for space bar |
+| `--log-level` | (env default) | Override `EDGE_AUDIO_LOG_LEVEL` |
 
-```text
-event: chunk
-data: {"text":"Sentence-sized answer text."}
+## How to Run
 
-event: done
-data: {"answer":"...","citations":[],"access_granted":true,"status_message":null,"response_time_ms":1234,"query_id":42}
-```
-
-The existing non-streaming endpoint remains available at `POST /api/chatbot/chat`.
-
-## Run The Pipeline
-
-Standalone audio can run with or without an explicit JWT. Without
-`EDGE_AUDIO_CLOUD_BEARER_TOKEN`, the chatbot uses visitor/PUBLIC access. If a
-query needs protected documents, the cloud response asks the edge user to scan
-their face. If `EDGE_AUDIO_CLOUD_API_URL` is unset, it defaults to
-`${EDGE_SYNC_CLOUD_URL}/api/chatbot/chat/stream`. If `EDGE_AUDIO_CLOUD_DEVICE_ID`
-is unset, it defaults to `EDGE_SYNC_DEVICE_ID`.
+Set the cloud endpoint and device identifier:
 
 ```bash
 export EDGE_SYNC_CLOUD_URL=http://<cloud-host>:8000
@@ -130,131 +145,98 @@ Start the normal spacebar-activated loop:
 python -m edge.audio_io.main
 ```
 
-Press the space bar in the terminal to start each chatbot recording.
+Press the space bar in the terminal to start each chatbot recording. Press `q`
+and then space to quit.
 
-For a quick recording test without waiting for spacebar activation:
+For a quick single interaction without waiting for the space bar (useful for
+smoke testing):
 
 ```bash
 python -m edge.audio_io.main --once --skip-activation
 ```
 
-## Local Audio Hardware Test
-
-Run this on the edge device when you only want to test the local microphone,
-spacebar activation, Whisper STT, Piper TTS, and playback. This script does not import the
-chatbot client and does not call any cloud endpoint.
+Alternatively, run directly from the repo root:
 
 ```bash
-python -m edge.audio_io.local_audio_test
+python edge/audio_io/main.py --once
 ```
 
-The local test defaults to the system's default ALSA capture device and the
-`edge/audio_io/models/whisper/whisper-cli` binary. Override those when needed
-with `--alsa-capture-device` or `--whisper-binary-path`.
+## Cloud Endpoint
 
-By default, this:
+The edge module expects the cloud FastAPI app to expose:
 
-- synthesizes and plays a local Piper TTS prompt
-- waits for spacebar activation
-- records one microphone utterance
-- transcribes that recording with whisper.cpp
+```text
+POST /api/chatbot/chat/audio
+Authorization: Bearer <JWT>  # optional; omitted = visitor/PUBLIC access
+Content-Type: multipart/form-data
 
-Useful flags:
-
-```bash
-python -m edge.audio_io.local_audio_test --list-devices
-python -m edge.audio_io.local_audio_test --setup-assets
-python -m edge.audio_io.local_audio_test --alsa-capture-device plughw:1,0
-python -m edge.audio_io.local_audio_test --skip-activation
-python -m edge.audio_io.local_audio_test --skip-playback
-python -m edge.audio_io.local_audio_test --keep-audio-files
+Fields:
+  audio       WAV file (16 kHz, mono, 16-bit) — required
+  device_id   String identifier — optional
+  session_id  Integer session hint — optional
 ```
 
-## No-JWT Smoke Test
+Success response (HTTP 200):
 
-Run this on the edge device to test local audio output and cloud chatbot
-reachability without setting `EDGE_AUDIO_CLOUD_BEARER_TOKEN`:
-
-```bash
-export EDGE_SYNC_CLOUD_URL=http://<cloud-host>:8000
-export EDGE_SYNC_DEVICE_ID=entry-gate-01
-python -m edge.audio_io.smoke_test
+```json
+{
+  "text_response": "The library is open from 8am to 10pm on weekdays.",
+  "audio_response": "<base64-encoded 24kHz mono PCM>",
+  "sources": [
+    {
+      "chunk_id": 12,
+      "document_id": 3,
+      "document_title": "Library Hours",
+      "chunk_index": 0,
+      "access_level": "PUBLIC",
+      "excerpt": "The library is open from 8am to 10pm..."
+    }
+  ],
+  "status": "ok",
+  "access_granted": true,
+  "error_message": null,
+  "response_time_ms": 2400,
+  "query_id": 9921
+}
 ```
 
-By default, this:
+### Status Field Semantics
 
-- checks Piper TTS synthesis and local playback
-- calls unauthenticated `GET /api/chatbot/health`
-- attempts unauthenticated `POST /api/chatbot/chat/stream`
+| Status | Meaning | Audio Response | Sources |
+|--------|---------|----------------|---------|
+| `ok` | Normal success | base64 PCM audio | cited chunks |
+| `blocked` | Prompt injection detected in extracted query | `null` | `[]` |
+| `no_access` | No RBAC access to matching documents | `null` | `[]` |
+| `auth_required` | JWT missing/invalid for protected content | `null` | `[]` |
+| `validation_failed` | Response text/citations failed validation | `null` | `[]` |
+| `error` | Internal failure (Gemini, audio decode, etc.) | `null` | `[]` |
 
-Without JWT, the normal stream should answer from PUBLIC documents. If the
-question appears to require protected documents, the response asks for face
-authentication and the edge access-control integration retries after a successful
-scan.
+## Error Handling
 
-To also test microphone recording and Whisper STT:
+- **Microphone failure**: If PortAudio or the microphone device is unavailable,
+  the pipeline logs the error and exits.
+- **Network failure**: The cloud client retries with exponential backoff
+  (`EDGE_AUDIO_CLOUD_RETRIES` x `EDGE_AUDIO_CLOUD_RETRY_BACKOFF_SECONDS`).
+  After exhausting retries, the error is logged.
+- **Cloud error (4xx/5xx)**: Raised as `CloudAudioClientError` with the HTTP
+  status code. 401/403 responses trigger the `auth_required_handler` if
+  configured.
+- **Gemini failure**: The cloud returns `status:"error"` with a generic message;
+  the edge logs it and returns to the activation state.
+- **Playback failure**: `AudioPlaybackError` is raised and logged.
+- **Empty audio response**: If the cloud returns text without audio, the text is
+  logged and the pipeline returns to activation.
 
-```bash
-python -m edge.audio_io.smoke_test --record-stt
-```
+## Comparison with Legacy Module
 
-Useful flags:
+The legacy module (`edge/audio_io_legacy/`) used local whisper.cpp STT and Piper
+TTS, with SSE streaming from the cloud. The new module removes all local ML
+dependencies:
 
-```bash
-python -m edge.audio_io.smoke_test --skip-playback
-python -m edge.audio_io.smoke_test --setup-assets
-python -m edge.audio_io.smoke_test --require-unauth-chat-success
-```
-
-## Environment Variables
-
-Common settings:
-
-- `EDGE_AUDIO_LOG_LEVEL`: logging level, default `INFO`.
-- `EDGE_AUDIO_MODELS_DIR`: model and binary directory, default `edge/audio_io/models`.
-- `EDGE_AUDIO_TEMP_DIR`: temporary WAV directory, default `edge/audio_io/tmp`.
-- `EDGE_AUDIO_SAMPLE_RATE`: default `16000`.
-- `EDGE_AUDIO_PLAYER_COMMAND`: playback command, default `aplay`.
-
-Recording:
-
-- `EDGE_AUDIO_RECORDING_BACKEND`: recording backend, default `arecord` on Linux and `sounddevice` on Windows.
-- `EDGE_AUDIO_RECORDER_COMMAND`: recording command for the `arecord` backend, default `arecord`.
-- `EDGE_AUDIO_ALSA_CAPTURE_DEVICE`: optional ALSA capture device such as `hw:1,0` or `plughw:1,0`.
-- `EDGE_AUDIO_MICROPHONE_DEVICE`: optional PortAudio device name or index, used only with `EDGE_AUDIO_RECORDING_BACKEND=sounddevice`.
-- `EDGE_AUDIO_MAX_RECORD_SECONDS`: default `12`.
-- `EDGE_AUDIO_MIN_RECORD_SECONDS`: default `0.6`.
-- `EDGE_AUDIO_SILENCE_DURATION_SECONDS`: default `1.2`.
-- `EDGE_AUDIO_SILENCE_RMS_THRESHOLD`: default `500`.
-
-Whisper:
-
-- `EDGE_AUDIO_WHISPER_BINARY_PATH`: whisper.cpp CLI path.
-- `EDGE_AUDIO_WHISPER_BINARY_URL`: archive URL when the platform default is not suitable.
-- `EDGE_AUDIO_WHISPER_MODEL_PATH`: `ggml-tiny.bin` path.
-- `EDGE_AUDIO_WHISPER_THREADS`: optional thread count.
-- `EDGE_AUDIO_WHISPER_TIMEOUT_SECONDS`: default `120`.
-
-Cloud:
-
-- `EDGE_AUDIO_CLOUD_API_URL`: explicit stream URL. If unset, defaults to `${EDGE_SYNC_CLOUD_URL}/api/chatbot/chat/stream`.
-- `EDGE_AUDIO_CLOUD_BEARER_TOKEN`: fixed JWT used in `Authorization` for standalone audio runs.
-- `EDGE_AUDIO_CLOUD_DEVICE_ID`: device ID sent to the cloud. If unset, defaults to `EDGE_SYNC_DEVICE_ID`.
-- `EDGE_AUDIO_CLOUD_SESSION_ID`: optional JWT session id.
-- `EDGE_AUDIO_CLOUD_RETRIES`: default `2`.
-
-Piper:
-
-- `EDGE_AUDIO_PIPER_BINARY_PATH`: Piper executable path.
-- `EDGE_AUDIO_PIPER_BINARY_URL`: archive URL when the platform default is not suitable.
-- `EDGE_AUDIO_PIPER_VOICE_MODEL_PATH`: voice `.onnx` path.
-- `EDGE_AUDIO_PIPER_TIMEOUT_SECONDS`: default `60`.
-- `EDGE_AUDIO_TTS_MIN_CHUNK_CHARS`: default `40`.
-- `EDGE_AUDIO_TTS_MAX_CHUNK_CHARS`: default `240`.
-
-## ARM Cortex-A53 Notes
-
-- Use the tiny multilingual Whisper model; larger models are likely too slow for interactive use.
-- Limit Whisper threads to the number of available cores with `EDGE_AUDIO_WHISPER_THREADS` and test thermals under sustained load.
-- Piper voices vary in latency; use a low or medium voice first and benchmark before changing voices.
-- Local playback uses `aplay` by default. Replace `EDGE_AUDIO_PLAYER_COMMAND` if the target image uses a different audio stack.
+| Aspect | Legacy (`audio_io_legacy`) | New (`audio_io`) |
+|--------|---------------------------|------------------|
+| Speech-to-text | Local whisper.cpp | Cloud Gemini (audio query extraction) |
+| Text-to-speech | Local Piper TTS | Cloud Gemini (response generation) |
+| Cloud protocol | SSE streaming | One-shot HTTP multipart |
+| Model downloads | Required (whisper + Piper) | None |
+| Files | 12 Python files + README | 7 Python files + README |

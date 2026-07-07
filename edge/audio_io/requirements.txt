@@ -1,2 +1,3 @@
 numpy>=1.26,<2
 requests>=2.31
+sounddevice>=0.4.6
