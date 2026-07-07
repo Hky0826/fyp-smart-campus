@@ -1,0 +1,29 @@
+# Cloud backend runtime dependencies
+
+# FastAPI application server
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+python-multipart>=0.0.18
+python-dotenv>=1.0.0
+
+# Validation and auth
+pydantic[email]>=2.0
+pyjwt>=2.8.0
+bcrypt>=4.0.0
+passlib[bcrypt]>=1.7.4
+
+# Database and sync
+sqlalchemy>=2.0.0
+mysql-connector-python>=8.4.0
+requests>=2.31.0
+
+# RAG chatbot
+google-generativeai>=0.7.0
+google-genai>=1.0.0
+
+# Cloud-side facial recognition utilities
+numpy>=1.26
+opencv-python>=4.8.0
+onnxruntime>=1.17.0
+torch>=2.0.0
+timm>=0.9.0

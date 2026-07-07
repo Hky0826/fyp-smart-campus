@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Campus Admin Portal</title>
+    <meta name="description" content="Smart Campus unified administration portal for managing users, knowledge base, IoT devices, and scheduling.">
+    <!-- Tailwind CSS Play CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            50: 'rgb(var(--slate-50) / <alpha-value>)',
+                            100: 'rgb(var(--slate-100) / <alpha-value>)',
+                            200: 'rgb(var(--slate-200) / <alpha-value>)',
+                            300: 'rgb(var(--slate-300) / <alpha-value>)',
+                            400: 'rgb(var(--slate-400) / <alpha-value>)',
+                            500: 'rgb(var(--slate-500) / <alpha-value>)',
+                            600: 'rgb(var(--slate-600) / <alpha-value>)',
+                            700: 'rgb(var(--slate-700) / <alpha-value>)',
+                            800: 'rgb(var(--slate-800) / <alpha-value>)',
+                            850: 'rgb(var(--slate-850) / <alpha-value>)',
+                            900: 'rgb(var(--slate-900) / <alpha-value>)',
+                            950: 'rgb(var(--slate-950) / <alpha-value>)',
+                        },
+                        indigo: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            200: '#c7d2fe',
+                            300: '#a5b4fc',
+                            400: '#818cf8',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            800: '#3730a3',
+                            900: '#312e81',
+                            950: '#1e1b4b',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Fonts: Plus Jakarta Sans + Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --slate-50: 248 250 252;
+            --slate-100: 241 245 249;
+            --slate-200: 226 232 240;
+            --slate-300: 203 213 225;
+            --slate-400: 148 163 184;
+            --slate-500: 100 116 139;
+            --slate-600: 71 85 105;
+            --slate-700: 51 65 85;
+            --slate-800: 30 41 59;
+            --slate-850: 23 32 51;
+            --slate-900: 15 23 42;
+            --slate-950: 2 6 23;
+        }
+        :root.light {
+            --slate-50: 15 23 42;
+            --slate-100: 15 23 42;
+            --slate-200: 30 41 59;
+            --slate-300: 51 65 85;
+            --slate-400: 71 85 105;
+            --slate-500: 100 116 139;
+            --slate-600: 100 116 139;
+            --slate-700: 71 85 105;
+            --slate-800: 226 232 240;
+            --slate-850: 241 245 249;
+            --slate-900: 248 250 252;
+            --slate-950: 255 255 255;
+        }
+        /* Keep sidebar dark in both modes */
+        aside, aside * {
+            --slate-50: 248 250 252;
+            --slate-100: 241 245 249;
+            --slate-200: 226 232 240;
+            --slate-300: 203 213 225;
+            --slate-400: 148 163 184;
+            --slate-500: 100 116 139;
+            --slate-600: 71 85 105;
+            --slate-700: 51 65 85;
+            --slate-800: 30 41 59;
+            --slate-850: 23 32 51;
+            --slate-900: 15 23 42;
+            --slate-950: 2 6 23;
+        }
+        body {
+            font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+            background-color: rgb(var(--slate-900));
+            color: rgb(var(--slate-100));
+        }
+        /* Clean Tables */
+        table {
+            border-collapse: collapse !important;
+        }
+        table th {
+            border-bottom: 1px solid rgba(var(--slate-800), 1) !important;
+        }
+        table tbody tr {
+            border-bottom: 1px solid rgba(var(--slate-800), 0.5) !important;
+        }
+        table tbody tr:last-child {
+            border-bottom: none !important;
+        }
+        /* Custom scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(var(--slate-700), 0.5);
+            border-radius: 6px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(var(--slate-600), 0.8);
+        }
+        /* Smooth transitions globally */
+        * {
+            transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+            transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+            transition-duration: 200ms;
+        }
+    </style>
+    <!-- React & Babel Standalone CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js" crossorigin></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.23.5/babel.min.js"></script>
+    <!-- Lucide Icons CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/lucide@0.321.0/dist/umd/lucide.min.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 overflow-x-hidden antialiased selection:bg-indigo-500/30">
+
+    <div id="root"></div>
+
+    <!-- React Components -->
+    <script src="/static/components/Icon.js?v=10" type="text/babel"></script>
+    <script src="/static/components/Toast.js?v=10" type="text/babel"></script>
+    <script src="/static/components/StatCard.js?v=10" type="text/babel"></script>
+    <script src="/static/components/SectionHeader.js?v=10" type="text/babel"></script>
+    <script src="/static/components/Forms.js?v=10" type="text/babel"></script>
+    <script src="/static/components/App.js?v=10" type="text/babel"></script>
+
+    <!-- Bootstrap -->
+    <script type="text/babel">
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
