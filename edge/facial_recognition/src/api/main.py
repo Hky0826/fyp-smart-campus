@@ -8,6 +8,7 @@ from typing import Optional
 
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi import Depends
 from pydantic import BaseModel, Field
@@ -18,6 +19,7 @@ from ..pipelines.access_control import build_pipeline as build_access_pipeline
 from ..pipelines.surveillance import build_pipeline as build_surveillance_pipeline
 from ..utils.logging import configure_logging
 from .chatbot_client import ChatbotClient, ChatbotClientError
+from .kiosk import create_kiosk_router
 
 try:
     import cv2
@@ -29,6 +31,18 @@ logger = logging.getLogger(__name__)
 configure_logging("INFO")
 
 app = FastAPI(title="Edge Hailo Face Recognition", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Bearer token extractor for the chatbot proxy
 _bearer_scheme = HTTPBearer(auto_error=False)
@@ -63,6 +77,15 @@ def surveillance_pipeline():
 def _chatbot_client() -> ChatbotClient:
     """Return a shared ChatbotClient instance backed by the runtime config."""
     return ChatbotClient(runtime_config())
+
+
+app.include_router(
+    create_kiosk_router(
+        runtime_config=runtime_config,
+        access_pipeline=access_pipeline,
+        chatbot_client=_chatbot_client,
+    )
+)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -213,4 +236,3 @@ def chatbot_chat(
             status_code=500,
             detail="An unexpected error occurred while contacting the chatbot service.",
         )
-
