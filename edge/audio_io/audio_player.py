@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import sounddevice as sd
 
 try:
     from .config import AudioIOConfig
@@ -23,10 +23,10 @@ class AudioPlaybackError(RuntimeError):
 
 
 class AudioPlayer:
-    """Play PCM audio data through the default output device using sounddevice.
+    """Play PCM audio data through the configured output device.
 
     Supports raw PCM bytes (24 kHz mono int16) and WAV file playback.
-    Uses ``sounddevice.play()`` for simple blocking playback.
+    Uses ALSA on Linux by default and sounddevice elsewhere.
     """
 
     def __init__(self, config: Optional[AudioIOConfig] = None, sample_rate: int = 24000) -> None:
@@ -46,7 +46,20 @@ class AudioPlayer:
             logger.warning("No audio data to play")
             return
 
+        if self.config.playback_backend == "alsa":
+            self._play_pcm_alsa(pcm_bytes)
+            return
+        if self.config.playback_backend != "sounddevice":
+            raise AudioPlaybackError(
+                f"Unsupported playback backend: {self.config.playback_backend}. "
+                "Use 'alsa' or 'sounddevice'."
+            )
+        self._play_pcm_sounddevice(pcm_bytes)
+
+    def _play_pcm_sounddevice(self, pcm_bytes: bytes) -> None:
         try:
+            import sounddevice as sd
+
             audio_array: np.ndarray = np.frombuffer(pcm_bytes, dtype=np.int16)
             if audio_array.size == 0:
                 logger.warning("Empty audio array, skipping playback")
@@ -57,6 +70,46 @@ class AudioPlayer:
             logger.info("Played %d PCM samples at %d Hz", audio_array.size, self.sample_rate)
         except Exception as exc:
             raise AudioPlaybackError(f"Failed to play PCM audio: {exc}") from exc
+
+    def _play_pcm_alsa(self, pcm_bytes: bytes) -> None:
+        if len(pcm_bytes) % 2 != 0:
+            raise AudioPlaybackError("PCM audio byte length is not aligned to int16 samples")
+
+        command = [
+            "aplay",
+            "-q",
+            "-f",
+            "S16_LE",
+            "-r",
+            str(self.sample_rate),
+            "-c",
+            "1",
+            "-t",
+            "raw",
+        ]
+        if self.config.speaker_device is not None:
+            command.extend(["-D", _alsa_device_name(self.config.speaker_device)])
+
+        try:
+            result = subprocess.run(
+                command,
+                input=pcm_bytes,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise AudioPlaybackError(
+                "ALSA playback backend requires aplay. Install it on the edge device with: "
+                "sudo apt update && sudo apt install -y alsa-utils"
+            ) from exc
+
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="ignore").strip()
+            raise AudioPlaybackError(f"ALSA playback failed: {stderr or 'aplay exited with an error'}")
+
+        samples = len(pcm_bytes) // 2
+        logger.info("Played %d PCM samples at %d Hz with ALSA", samples, self.sample_rate)
 
     def play_wav(self, wav_path: str | Path) -> None:
         """Play a WAV file through the default output device.
@@ -71,12 +124,23 @@ class AudioPlayer:
         if not path.exists():
             raise AudioPlaybackError(f"Audio file does not exist: {path}")
 
+        if self.config.playback_backend == "alsa":
+            self._play_wav_alsa(path)
+            return
+        if self.config.playback_backend != "sounddevice":
+            raise AudioPlaybackError(
+                f"Unsupported playback backend: {self.config.playback_backend}. "
+                "Use 'alsa' or 'sounddevice'."
+            )
+
         try:
             import soundfile as sf
+            import sounddevice as sd
         except ImportError:
             # Fallback: read WAV with wave module and play raw PCM
             try:
                 import wave
+                import sounddevice as sd
 
                 with wave.open(str(path), "rb") as wf:
                     frames = wf.readframes(wf.getnframes())
@@ -107,3 +171,34 @@ class AudioPlayer:
             self.play_wav(path)
         finally:
             path.unlink(missing_ok=True)
+
+    def _play_wav_alsa(self, path: Path) -> None:
+        command = ["aplay", "-q"]
+        if self.config.speaker_device is not None:
+            command.extend(["-D", _alsa_device_name(self.config.speaker_device)])
+        command.append(str(path))
+
+        try:
+            result = subprocess.run(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise AudioPlaybackError(
+                "ALSA playback backend requires aplay. Install it on the edge device with: "
+                "sudo apt update && sudo apt install -y alsa-utils"
+            ) from exc
+
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="ignore").strip()
+            raise AudioPlaybackError(f"ALSA WAV playback failed: {stderr or 'aplay exited with an error'}")
+
+        logger.info("Played WAV file with ALSA: %s", path)
+
+
+def _alsa_device_name(device: str | int) -> str:
+    if isinstance(device, int):
+        return f"hw:{device}"
+    return str(device)

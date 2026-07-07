@@ -16,15 +16,17 @@ space bar -> record 16kHz mono WAV -> multipart POST to cloud -> receive text + 
 This module is one half of the two-step Gemini audio pipeline. The edge device
 handles only the physical I/O:
 
-1. **Record**: Capture 16 kHz mono int16 PCM audio from the microphone using
-   sounddevice (PortAudio). Silence detection automatically stops recording
-   when the user finishes speaking.
+1. **Record**: Capture 16 kHz mono int16 PCM audio from the microphone. Linux
+   uses ALSA (`arecord`) by default; other platforms use sounddevice
+   (PortAudio). Silence detection automatically stops recording when the user
+   finishes speaking.
 2. **Upload**: Send the recorded WAV file as a multipart HTTP POST to the cloud
    audio API endpoint.
 3. **Receive**: Parse the JSON response which contains validated text, optional
    base64-encoded PCM audio (24 kHz mono), cited sources, and a status field.
 4. **Play**: Decode the base64 audio and play it through the default output
-   device using sounddevice.
+   device. Linux uses ALSA (`aplay`) by default; other platforms use
+   sounddevice.
 
 The cloud side (in `cloud/RagChatbot/`) handles audio query extraction, prompt
 injection detection, RBAC-filtered retrieval, response generation via Gemini,
@@ -36,8 +38,8 @@ and response validation.
 edge/audio_io/
   __init__.py             Exports AudioIOConfig
   config.py               Environment-driven runtime settings (AudioIOConfig dataclass)
-  recorder.py             16 kHz mono WAV recording with RMS-based silence detection (sounddevice)
-  audio_player.py         PCM and WAV playback through default output device (sounddevice)
+  recorder.py             16 kHz mono WAV recording with RMS-based silence detection
+  audio_player.py         PCM and WAV playback through configured output device
   cloud_audio_client.py   Multipart HTTP client for the cloud chatbot audio API
   keyboard_activation.py  Space bar listener for activation
   main.py                 End-to-end orchestrator: AudioInteractionPipeline
@@ -53,13 +55,18 @@ Python packages (see `requirements.txt`):
 
 - `numpy>=1.26,<2` — PCM audio buffer manipulation
 - `requests>=2.31` — HTTP client for cloud API communication
-- `sounddevice>=0.4.6` — PortAudio wrapper for microphone capture and speaker playback
+- `sounddevice>=0.4.6` — PortAudio wrapper for microphone capture and speaker playback when the `sounddevice` backend is selected
 
-On Linux, PortAudio and ALSA must also be installed:
+On Linux, ALSA must be installed. PortAudio is only needed if you explicitly
+select the `sounddevice` backend:
 
 ```bash
 sudo apt update
-sudo apt install -y libportaudio2 portaudio19-dev alsa-utils
+sudo apt install -y alsa-utils
+
+# Optional, only for EDGE_AUDIO_RECORDING_BACKEND=sounddevice
+# or EDGE_AUDIO_PLAYBACK_BACKEND=sounddevice:
+sudo apt install -y libportaudio2 portaudio19-dev
 ```
 
 ## Environment Variables
@@ -78,15 +85,19 @@ All settings are driven by environment variables, read at startup by
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `EDGE_AUDIO_MICROPHONE_DEVICE` | (none) | PortAudio device name or index; `None` = system default |
+| `EDGE_AUDIO_MICROPHONE_DEVICE` | (none) | ALSA or PortAudio input device; unset = system default |
 | `EDGE_AUDIO_SAMPLE_RATE` | `16000` | Recording sample rate in Hz |
 | `EDGE_AUDIO_CHANNELS` | `1` | Number of recording channels |
 | `EDGE_AUDIO_RECORDING_BLOCK_MS` | `100` | Block size for stream reads (milliseconds) |
-| `EDGE_AUDIO_RECORDING_BACKEND` | `sounddevice` | Recording backend (only `sounddevice` is supported) |
+| `EDGE_AUDIO_RECORDING_BACKEND` | `alsa` on Linux, `sounddevice` elsewhere | Recording backend (`alsa` or `sounddevice`) |
 | `EDGE_AUDIO_MIN_RECORD_SECONDS` | `0.6` | Minimum recording duration before silence stops capture |
 | `EDGE_AUDIO_MAX_RECORD_SECONDS` | `12.0` | Maximum recording duration (hard limit) |
 | `EDGE_AUDIO_SILENCE_DURATION_SECONDS` | `1.2` | Consecutive silence required before auto-stop |
 | `EDGE_AUDIO_SILENCE_RMS_THRESHOLD` | `500.0` | RMS amplitude below which audio is considered silence |
+
+For the Linux ALSA backend, `EDGE_AUDIO_MICROPHONE_DEVICE` should be an ALSA
+device string such as `default`, `plughw:1,0`, or `hw:2,0`. If unset, ALSA uses
+the system default capture device.
 
 ### Cloud API
 
@@ -105,7 +116,13 @@ All settings are driven by environment variables, read at startup by
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `EDGE_AUDIO_SPEAKER_DEVICE` | (none) | ALSA or PortAudio output device; unset = system default |
+| `EDGE_AUDIO_PLAYBACK_BACKEND` | `alsa` on Linux, `sounddevice` elsewhere | Playback backend (`alsa` or `sounddevice`) |
 | `EDGE_AUDIO_OUTPUT_SAMPLE_RATE` | `24000` | Expected output sample rate from cloud audio (Hz) |
+
+For the Linux ALSA backend, `EDGE_AUDIO_SPEAKER_DEVICE` should be an ALSA
+device string such as `default`, `plughw:1,0`, or `hw:2,0`. If unset, ALSA uses
+the system default playback device.
 
 Also inherited from the broader edge environment:
 

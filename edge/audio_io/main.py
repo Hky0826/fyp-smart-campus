@@ -149,6 +149,8 @@ class AudioInteractionPipeline:
                 logger.error("Cloud communication failed: %s", exc)
         except AudioPlaybackError as exc:
             logger.error("Audio playback failed: %s", exc)
+        except RuntimeError as exc:
+            logger.error("Audio interaction failed: %s", exc)
         finally:
             if recording_path is not None:
                 recording_path.unlink(missing_ok=True)

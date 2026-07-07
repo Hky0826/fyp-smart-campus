@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,6 +51,12 @@ def _audio_device_env(name: str) -> str | int | None:
     return int(value) if value.isdigit() else value
 
 
+def _default_audio_backend() -> str:
+    if sys.platform.startswith("linux"):
+        return "alsa"
+    return "sounddevice"
+
+
 def _cloud_audio_url() -> str:
     configured = _optional_str_env("EDGE_AUDIO_CLOUD_API_URL")
     if configured:
@@ -70,7 +77,7 @@ class AudioIOConfig:
     channels: int = _int_env("EDGE_AUDIO_CHANNELS", 1)
 
     recording_block_ms: int = _int_env("EDGE_AUDIO_RECORDING_BLOCK_MS", 100)
-    recording_backend: str = os.getenv("EDGE_AUDIO_RECORDING_BACKEND", "sounddevice").strip().lower()
+    recording_backend: str = os.getenv("EDGE_AUDIO_RECORDING_BACKEND", _default_audio_backend()).strip().lower()
     min_record_seconds: float = _float_env("EDGE_AUDIO_MIN_RECORD_SECONDS", 0.6)
     max_record_seconds: float = _float_env("EDGE_AUDIO_MAX_RECORD_SECONDS", 12.0)
     silence_duration_seconds: float = _float_env("EDGE_AUDIO_SILENCE_DURATION_SECONDS", 1.2)
@@ -85,4 +92,6 @@ class AudioIOConfig:
     cloud_retries: int = _int_env("EDGE_AUDIO_CLOUD_RETRIES", 2)
     cloud_retry_backoff_seconds: float = _float_env("EDGE_AUDIO_CLOUD_RETRY_BACKOFF_SECONDS", 1.0)
 
+    speaker_device: str | int | None = _audio_device_env("EDGE_AUDIO_SPEAKER_DEVICE")
+    playback_backend: str = os.getenv("EDGE_AUDIO_PLAYBACK_BACKEND", _default_audio_backend()).strip().lower()
     output_sample_rate: int = _int_env("EDGE_AUDIO_OUTPUT_SAMPLE_RATE", 24000)
