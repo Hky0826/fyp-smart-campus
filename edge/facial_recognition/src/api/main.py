@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi import Depends
 from pydantic import BaseModel, Field
@@ -29,6 +31,10 @@ except Exception:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 configure_logging("INFO")
+
+_EDGE_ROOT = Path(__file__).resolve().parents[3]
+_KIOSK_UI_DIST = _EDGE_ROOT / "ui" / "access_control_frontend" / "dist"
+_KIOSK_UI_INDEX = _KIOSK_UI_DIST / "index.html"
 
 app = FastAPI(title="Edge Hailo Face Recognition", version="0.1.0")
 app.add_middleware(
@@ -86,6 +92,51 @@ app.include_router(
         chatbot_client=_chatbot_client,
     )
 )
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    return RedirectResponse(url="/ui/")
+
+
+@app.get("/ui", include_in_schema=False)
+def kiosk_ui_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/ui/")
+
+
+@app.get("/ui/{full_path:path}", include_in_schema=False)
+def kiosk_ui(full_path: str = ""):
+    """Serve the built kiosk UI without requiring npm on the edge device."""
+    if not _KIOSK_UI_INDEX.exists():
+        return HTMLResponse(
+            """
+            <!doctype html>
+            <html lang="en">
+              <head><meta charset="utf-8"><title>Kiosk UI not built</title></head>
+              <body style="font-family: sans-serif; margin: 2rem;">
+                <h1>Kiosk UI bundle not found</h1>
+                <p>Build the frontend on a development machine, then copy
+                <code>edge/ui/access_control_frontend/dist</code> to this edge device.</p>
+              </body>
+            </html>
+            """,
+            status_code=503,
+        )
+
+    if full_path:
+        candidate = (_KIOSK_UI_DIST / full_path).resolve()
+        if _is_path_inside(candidate, _KIOSK_UI_DIST.resolve()) and candidate.is_file():
+            return FileResponse(candidate)
+
+    return FileResponse(_KIOSK_UI_INDEX)
+
+
+def _is_path_inside(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
