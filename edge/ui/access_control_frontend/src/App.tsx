@@ -19,12 +19,11 @@ import type { ChatMessage, KioskStateResponse } from './api/types'
 import { CAMERA_FRAME_INTERVAL_MS } from './app/config'
 import { deriveKioskMode } from './app/kioskStateMachine'
 
-type CameraTask = 'access' | 'chat' | null
-
 function App() {
   const [state, setState] = useState<KioskStateResponse | null>(null)
   const [nowMs, setNowMs] = useState(Date.now())
-  const [cameraTask, setCameraTask] = useState<CameraTask>(null)
+  const [chatVerificationActive, setChatVerificationActive] = useState(false)
+  const [cameraReady, setCameraReady] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [draft, setDraft] = useState('')
@@ -32,15 +31,28 @@ function App() {
   const [offline, setOffline] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const frameInFlightRef = useRef(false)
 
   const mode = deriveKioskMode(state, {
-    chatVerificationActive: cameraTask === 'chat',
+    chatVerificationActive,
     nowMs
   })
 
   const session = state?.active_chat_session ?? null
   const accessAttempt = state?.active_access_attempt ?? null
   const cloudOnline = state?.device.cloud_chatbot === 'ok'
+  const ownerMissing = session?.presence_state === 'OWNER_TEMPORARILY_MISSING'
+  const absentSecondsRemaining = useMemo(() => {
+    const terminateSeconds = state?.timings.owner_absent_terminate_seconds ?? 10
+    if (!session?.locked || !session.owner_absent_since) {
+      return terminateSeconds
+    }
+    const absentSinceMs = Date.parse(session.owner_absent_since)
+    if (!Number.isFinite(absentSinceMs)) {
+      return terminateSeconds
+    }
+    return Math.max(0, Math.ceil(terminateSeconds - (nowMs - absentSinceMs) / 1000))
+  }, [nowMs, session?.locked, session?.owner_absent_since, state?.timings.owner_absent_terminate_seconds])
 
   const refreshState = useCallback(async () => {
     try {
@@ -68,25 +80,10 @@ function App() {
     return () => window.clearInterval(timer)
   }, [])
 
-  const stopCamera = useCallback(() => {
-    streamRef.current?.getTracks().forEach((track) => track.stop())
-    streamRef.current = null
-    if (videoRef.current) {
-      videoRef.current.srcObject = null
-    }
-  }, [])
-
   useEffect(() => {
-    if (!cameraTask) {
-      stopCamera()
-      return
-    }
-
     let cancelled = false
-    let intervalId: number | null = null
 
-    async function startCameraLoop() {
-      setCameraError(null)
+    async function startCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -106,76 +103,93 @@ function App() {
           videoRef.current.srcObject = stream
           await videoRef.current.play()
         }
-
-        const submitFrame = async () => {
-          if (cancelled || !videoRef.current) {
-            return
-          }
-          const frame = await captureFrame(videoRef.current)
-          if (!frame) {
-            return
-          }
-          try {
-            if (cameraTask === 'access') {
-              const response = await kioskClient.verifyAccessFrame(frame)
-              setState((current) => mergeAccessAttempt(current, response.attempt))
-              if (response.attempt.completed_at) {
-                setCameraTask(null)
-              }
-            } else {
-              const response = await kioskClient.verifyChatOwnerFrame(frame)
-              setState((current) => mergeChatSession(current, response.session))
-              setCameraTask(null)
-              setChatError(null)
-            }
-          } catch (error) {
-            if (cameraTask === 'chat') {
-              setChatError(error instanceof Error ? error.message : 'Verification failed.')
-              setCameraTask(null)
-            } else {
-              setCameraError(error instanceof Error ? error.message : 'Access verification failed.')
-              setCameraTask(null)
-            }
-          }
-        }
-
-        await submitFrame()
-        intervalId = window.setInterval(submitFrame, CAMERA_FRAME_INTERVAL_MS)
+        setCameraReady(true)
+        setCameraError(null)
       } catch (error) {
+        setCameraReady(false)
         setCameraError(error instanceof Error ? error.message : 'Camera is unavailable.')
-        setCameraTask(null)
       }
     }
 
-    startCameraLoop()
+    startCamera()
 
     return () => {
       cancelled = true
-      if (intervalId) {
-        window.clearInterval(intervalId)
-      }
-      stopCamera()
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
     }
-  }, [cameraTask, stopCamera])
+  }, [])
 
-  async function handleRequestAccess() {
-    setBusy(true)
-    setCameraError(null)
-    try {
-      await kioskClient.stopChatAudio()
-      const response = await kioskClient.requestAccess()
-      setState((current) => mergeAccessAttempt(current, response.attempt))
-      setCameraTask('access')
-    } catch (error) {
-      setCameraError(error instanceof Error ? error.message : 'Could not start access verification.')
-    } finally {
-      setBusy(false)
+  useEffect(() => {
+    if (!cameraReady || offline) {
+      return
     }
-  }
+
+    const intervalId = window.setInterval(async () => {
+      if (frameInFlightRef.current || !videoRef.current) {
+        return
+      }
+
+      const frame = await captureFrame(videoRef.current)
+      if (!frame) {
+        return
+      }
+
+      frameInFlightRef.current = true
+      try {
+        if (chatVerificationActive) {
+          const response = await kioskClient.verifyChatOwnerFrame(frame)
+          setState((current) => mergeChatSession(current, response.session))
+          setChatVerificationActive(false)
+          setChatError(null)
+          return
+        }
+
+        if (session) {
+          const presence = await kioskClient.verifyChatPresenceFrame(frame)
+          if (presence.ended) {
+            setState((current) => (current ? { ...current, active_chat_session: null } : current))
+            setChatError(null)
+            return
+          }
+          const presenceSession = presence.session
+          if (presenceSession) {
+            setState((current) => mergeChatSession(current, presenceSession))
+          }
+
+          if (!presence.owner_present) {
+            const accessResponse = await kioskClient.verifyAccessFrame(frame)
+            setState((current) => mergeAccessAttempt(current, accessResponse.attempt))
+          }
+          return
+        }
+
+        const accessResponse = await kioskClient.verifyAccessFrame(frame)
+        setState((current) => mergeAccessAttempt(current, accessResponse.attempt))
+      } catch (error) {
+        if (chatVerificationActive) {
+          setChatError(error instanceof Error ? error.message : 'Face verification failed.')
+          setChatVerificationActive(false)
+        } else {
+          setCameraError(error instanceof Error ? error.message : 'Frame processing failed.')
+        }
+      } finally {
+        frameInFlightRef.current = false
+      }
+    }, CAMERA_FRAME_INTERVAL_MS)
+
+    return () => window.clearInterval(intervalId)
+  }, [cameraReady, chatVerificationActive, offline, session])
 
   async function handleStartChat() {
     setChatError(null)
-    setCameraTask('chat')
+    setCameraError(null)
+    try {
+      await kioskClient.stopChatAudio()
+    } catch {
+      // Browser text chat can still start even if there is no audio output to stop.
+    }
+    setChatVerificationActive(true)
   }
 
   async function handleSendMessage(event: FormEvent) {
@@ -212,14 +226,13 @@ function App() {
   const statusText = useMemo(() => {
     if (offline) return 'Edge API offline'
     if (!state) return 'Connecting'
+    if (!cameraReady) return 'Camera unavailable'
     if (!cloudOnline) return 'Cloud chatbot offline'
-    return 'Ready'
-  }, [cloudOnline, offline, state])
+    return session ? 'Chatbot mode' : 'Door monitoring'
+  }, [cameraReady, cloudOnline, offline, session, state])
 
   return (
     <main className="kiosk-shell">
-      <video ref={videoRef} className="camera-preview" playsInline muted />
-
       <header className="top-bar">
         <div className="brand-mark">
           <Shield size={24} aria-hidden="true" />
@@ -228,7 +241,7 @@ function App() {
             <span>{state?.device.device_id ?? 'edge device'}</span>
           </div>
         </div>
-        <StatusPill online={!offline} label={statusText} />
+        <StatusPill online={!offline && cameraReady} label={statusText} />
       </header>
 
       <section className="main-grid">
@@ -237,16 +250,19 @@ function App() {
             <DoorOpen size={28} aria-hidden="true" />
             <div>
               <h1>Door Access</h1>
-              <p>{accessSubtitle(mode, accessAttempt)}</p>
+              <p>{accessSubtitle(mode, accessAttempt, Boolean(session))}</p>
             </div>
           </div>
 
-          <button className="primary-action" onClick={handleRequestAccess} disabled={busy || cameraTask !== null}>
-            <DoorOpen size={32} aria-hidden="true" />
-            <span>Request Access</span>
-          </button>
+          <div className="camera-stage">
+            <video ref={videoRef} className="camera-feed" playsInline muted />
+            <div className="camera-badge">
+              <Video size={18} aria-hidden="true" />
+              <span>{session && !session.locked ? 'Chatbot owner tracking' : 'Continuous access scan'}</span>
+            </div>
+          </div>
 
-          <AccessStatus mode={mode} reason={accessAttempt?.reason ?? cameraError} />
+          <AccessStatus mode={mode} attempt={accessAttempt} reason={cameraError} />
         </section>
 
         <section className={`chat-panel ${session?.locked ? 'is-locked' : ''}`}>
@@ -254,15 +270,15 @@ function App() {
             <MessageSquare size={24} aria-hidden="true" />
             <div>
               <h2>Campus Assistant</h2>
-              <p>{chatSubtitle(session, cloudOnline)}</p>
+              <p>{chatSubtitle(session, cloudOnline, chatVerificationActive)}</p>
             </div>
           </div>
 
           {!session && (
             <div className="chat-empty">
-              <button className="secondary-action" onClick={handleStartChat} disabled={cameraTask !== null || !cloudOnline}>
-                <Video size={22} aria-hidden="true" />
-                <span>Verify For Chat</span>
+              <button className="secondary-action" onClick={handleStartChat} disabled={chatVerificationActive || !cloudOnline || !cameraReady}>
+                <MessageSquare size={22} aria-hidden="true" />
+                <span>Start Chatbot</span>
               </button>
             </div>
           )}
@@ -270,12 +286,8 @@ function App() {
           {session?.locked && (
             <div className="locked-state">
               <Lock size={36} aria-hidden="true" />
-              <strong>Previous chatbot session locked.</strong>
-              <span>Verify your identity to start a new session.</span>
-              <button className="secondary-action" onClick={handleStartChat} disabled={cameraTask !== null || !cloudOnline}>
-                <Video size={20} aria-hidden="true" />
-                <span>Verify Identity</span>
-              </button>
+              <strong>{ownerMissing ? 'Owner temporarily away.' : 'Previous chatbot session locked.'}</strong>
+              <span>Session will close after {absentSecondsRemaining} seconds unless the verified user returns.</span>
             </div>
           )}
 
@@ -286,11 +298,11 @@ function App() {
                 <input
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
-                  disabled={busy || mode === 'access-verifying'}
+                  disabled={busy}
                   maxLength={2000}
                   aria-label="Chat message"
                 />
-                <button type="submit" className="icon-button" disabled={!draft.trim() || busy || mode === 'access-verifying'}>
+                <button type="submit" className="icon-button" disabled={!draft.trim() || busy}>
                   <Send size={22} aria-hidden="true" />
                 </button>
                 <button type="button" className="icon-button" disabled title="Voice chat">
@@ -303,19 +315,16 @@ function App() {
             </>
           )}
 
+          {chatVerificationActive && (
+            <div className="inline-info">
+              <Video size={20} aria-hidden="true" />
+              <span>Look at the camera to verify chatbot identity.</span>
+            </div>
+          )}
+
           {chatError && <div className="inline-alert">{chatError}</div>}
         </section>
       </section>
-
-      {(mode === 'access-verifying' || mode === 'chat-verifying') && (
-        <div className="priority-overlay">
-          <div className="scan-frame">
-            <Video size={48} aria-hidden="true" />
-            <h2>{mode === 'access-verifying' ? 'Verifying Access' : 'Verifying Identity'}</h2>
-            <p>{mode === 'access-verifying' ? 'Chatbot interaction is paused.' : 'Face verification required.'}</p>
-          </div>
-        </div>
-      )}
 
       {offline && (
         <div className="system-banner">
@@ -339,12 +348,21 @@ function StatusPill({ online, label }: { online: boolean; label: string }) {
   )
 }
 
-function AccessStatus({ mode, reason }: { mode: string; reason?: string | null }) {
+function AccessStatus({
+  mode,
+  attempt,
+  reason
+}: {
+  mode: string
+  attempt?: KioskStateResponse['active_access_attempt']
+  reason?: string | null
+}) {
   if (mode === 'access-granted') {
     return (
       <div className="access-result granted">
         <CheckCircle2 size={34} aria-hidden="true" />
         <strong>Access Granted</strong>
+        <span>Door unlock request accepted by edge access control.</span>
       </div>
     )
   }
@@ -353,7 +371,7 @@ function AccessStatus({ mode, reason }: { mode: string; reason?: string | null }
       <div className="access-result denied">
         <XCircle size={34} aria-hidden="true" />
         <strong>Access Denied</strong>
-        {reason && <span>{reason}</span>}
+        {attempt?.reason && <span>{attempt.reason}</span>}
       </div>
     )
   }
@@ -365,7 +383,7 @@ function AccessStatus({ mode, reason }: { mode: string; reason?: string | null }
       </div>
     )
   }
-  return <div className="access-idle">Awaiting access request</div>
+  return <div className="access-idle">Monitoring the entrance continuously</div>
 }
 
 function ChatHistory({ messages }: { messages: ChatMessage[] }) {
@@ -384,17 +402,19 @@ function ChatHistory({ messages }: { messages: ChatMessage[] }) {
   )
 }
 
-function accessSubtitle(mode: string, attempt: KioskStateResponse['active_access_attempt']) {
-  if (mode === 'access-verifying') return 'Face verification in progress'
-  if (attempt?.access_decision === 'GRANTED') return 'Entry decision confirmed'
-  if (attempt?.access_decision === 'DENIED') return 'Entry request denied'
-  return 'Primary access control surface'
+function accessSubtitle(mode: string, attempt: KioskStateResponse['active_access_attempt'], hasSession: boolean) {
+  if (hasSession && mode === 'chat-active') return 'Paused while verified user uses chatbot'
+  if (mode === 'chat-locked') return 'Owner away; door access remains active'
+  if (mode === 'access-granted') return 'Entry decision confirmed'
+  if (mode === 'access-denied' && attempt?.face_count) return 'Entry request denied'
+  return 'Continuous face recognition is active'
 }
 
-function chatSubtitle(session: KioskStateResponse['active_chat_session'], cloudOnline: boolean) {
+function chatSubtitle(session: KioskStateResponse['active_chat_session'], cloudOnline: boolean, verifying: boolean) {
   if (!cloudOnline) return 'Cloud retrieval unavailable'
-  if (!session) return 'Identity required'
-  if (session.locked) return 'Owner absent'
+  if (verifying) return 'Verifying identity'
+  if (!session) return 'Press to start'
+  if (session.locked) return 'Waiting for owner return'
   return session.full_name || session.username || 'Authenticated'
 }
 

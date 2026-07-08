@@ -36,6 +36,7 @@ export interface ChatSessionView {
   roles: string[]
   cloud_session_id?: number | null
   owner_face_track_id?: string | null
+  owner_absent_since?: string | null
   last_owner_seen_at?: string | null
   last_interaction_at: string
   presence_state: PresenceState
@@ -79,4 +80,10 @@ export interface ChatMessageResponse {
   status_message?: string | null
   response_time_ms?: number | null
   query_id?: number | null
+}
+
+export interface ChatPresenceResponse {
+  session?: ChatSessionView | null
+  owner_present: boolean
+  ended: boolean
 }

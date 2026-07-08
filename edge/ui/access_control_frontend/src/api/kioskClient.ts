@@ -2,6 +2,7 @@ import { API_BASE_URL } from '../app/config'
 import type {
   AccessRequestResponse,
   ChatMessageResponse,
+  ChatPresenceResponse,
   ChatVerifyResponse,
   KioskStateResponse
 } from './types'
@@ -50,6 +51,15 @@ export const kioskClient = {
     const body = new FormData()
     body.append('file', frame, 'chat-owner-frame.jpg')
     return requestJson<ChatVerifyResponse>('/kiosk/chat/verify/frame', {
+      method: 'POST',
+      body
+    })
+  },
+
+  verifyChatPresenceFrame: (frame: Blob) => {
+    const body = new FormData()
+    body.append('file', frame, 'chat-presence-frame.jpg')
+    return requestJson<ChatPresenceResponse>('/kiosk/chat/presence/frame', {
       method: 'POST',
       body
     })

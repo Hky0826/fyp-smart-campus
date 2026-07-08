@@ -19,6 +19,7 @@ from ..config import AccessControlConfig, SurveillanceConfig, RuntimeConfig
 from ..face.database import DeviceUserDatabaseError, DeviceUserRepository
 from ..pipelines.access_control import build_pipeline as build_access_pipeline
 from ..pipelines.surveillance import build_pipeline as build_surveillance_pipeline
+from ..sync import SyncEngine
 from ..utils.logging import configure_logging
 from .chatbot_client import ChatbotClient, ChatbotClientError
 from .kiosk import create_kiosk_router
@@ -35,6 +36,7 @@ configure_logging("INFO")
 _EDGE_ROOT = Path(__file__).resolve().parents[3]
 _KIOSK_UI_DIST = _EDGE_ROOT / "ui" / "access_control_frontend" / "dist"
 _KIOSK_UI_INDEX = _KIOSK_UI_DIST / "index.html"
+_sync_engine: SyncEngine | None = None
 
 app = FastAPI(title="Edge Hailo Face Recognition", version="0.1.0")
 app.add_middleware(
@@ -92,6 +94,38 @@ app.include_router(
         chatbot_client=_chatbot_client,
     )
 )
+
+
+@app.on_event("startup")
+def start_sync_engine() -> None:
+    """Start cloud sync for kiosk/API deployments.
+
+    Direct pipeline runners already start SyncEngine themselves. The kiosk UI
+    runs through this FastAPI app, so the API process must also own sync.
+    """
+    global _sync_engine
+    if _sync_engine is not None:
+        return
+
+    config = access_config()
+    _sync_engine = SyncEngine.from_config(config)
+    _sync_engine.start()
+    logger.info(
+        "Edge sync configured: enabled=%s cloud_url=%s device_id=%s db=%s",
+        config.sync_enabled,
+        config.sync_cloud_url,
+        config.sync_device_id,
+        config.database_path,
+    )
+
+
+@app.on_event("shutdown")
+def stop_sync_engine() -> None:
+    global _sync_engine
+    if _sync_engine is None:
+        return
+    _sync_engine.stop()
+    _sync_engine = None
 
 
 @app.get("/", include_in_schema=False)
@@ -158,6 +192,24 @@ def _is_path_inside(path: Path, parent: Path) -> bool:
 @app.get("/health")
 def health() -> dict:
     return {"success": True, "service": "edge", "status": "ok"}
+
+
+@app.get("/sync/status")
+def sync_status() -> dict:
+    config = access_config()
+    return {
+        "success": True,
+        "enabled": config.sync_enabled,
+        "running": bool(_sync_engine and _sync_engine._running),
+        "cloud_url": config.sync_cloud_url,
+        "device_id": config.sync_device_id,
+        "device_name": config.sync_device_name,
+        "database_path": str(config.database_path),
+        "local_ip": config.sync_local_ip,
+        "local_port": config.sync_local_port,
+        "downstream_poll_seconds": config.sync_downstream_poll_seconds,
+        "log_push_interval_seconds": config.sync_log_push_interval_seconds,
+    }
 
 
 @app.get("/models/status")

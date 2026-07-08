@@ -43,9 +43,9 @@ AccessDecision = Literal["PENDING", "VERIFYING", "GRANTED", "DENIED", "ERROR"]
 
 
 class KioskTimingConfig(BaseModel):
-    owner_missing_grace_seconds: int = Field(default=5)
+    owner_missing_grace_seconds: int = Field(default=10)
     owner_absent_lock_seconds: int = Field(default=10)
-    owner_absent_terminate_seconds: int = Field(default=45)
+    owner_absent_terminate_seconds: int = Field(default=10)
     access_result_hold_seconds: int = Field(default=4)
 
 
@@ -71,6 +71,7 @@ class ChatSessionView(BaseModel):
     roles: list[str] = Field(default_factory=list)
     cloud_session_id: Optional[int] = None
     owner_face_track_id: Optional[str] = None
+    owner_absent_since: Optional[str] = None
     last_owner_seen_at: Optional[str] = None
     last_interaction_at: str
     presence_state: PresenceState
@@ -106,6 +107,12 @@ class ChatVerifyResponse(BaseModel):
     session: ChatSessionView
 
 
+class ChatPresenceResponse(BaseModel):
+    session: Optional[ChatSessionView] = None
+    owner_present: bool
+    ended: bool = False
+
+
 class ChatMessageRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
 
@@ -125,6 +132,7 @@ class _StoredChatSession:
     view: ChatSessionView
     token: EdgeAuthToken
     history: list[ChatMessage] = field(default_factory=list)
+    owner_absent_since: dt.datetime | None = None
 
 
 class KioskStateStore:
@@ -189,10 +197,14 @@ class KioskStateStore:
             if self._chat_session is not None and granted:
                 chat_user_id = self._chat_session.view.authenticated_user_id
                 if detected_user_id == chat_user_id:
+                    self._chat_session.owner_absent_since = None
+                    self._chat_session.view.owner_absent_since = None
                     self._chat_session.view.presence_state = "OWNER_PRESENT"
                     self._chat_session.view.last_owner_seen_at = now
                     self._chat_session.view.locked = False
                 else:
+                    self._chat_session.owner_absent_since = dt.datetime.now(dt.timezone.utc)
+                    self._chat_session.view.owner_absent_since = now
                     self._chat_session.view.presence_state = "DIFFERENT_PERSON_PRESENT"
                     self._chat_session.view.locked = True
 
@@ -207,6 +219,7 @@ class KioskStateStore:
             full_name=full_name,
             roles=list(token.roles),
             cloud_session_id=token.session_id,
+            owner_absent_since=None,
             last_owner_seen_at=now,
             last_interaction_at=now,
             presence_state="OWNER_PRESENT",
@@ -221,6 +234,10 @@ class KioskStateStore:
         with self._lock:
             if self._chat_session is None:
                 return None
+            now = dt.datetime.now(dt.timezone.utc)
+            if self._chat_session.owner_absent_since is None:
+                self._chat_session.owner_absent_since = now
+                self._chat_session.view.owner_absent_since = now.isoformat()
             self._chat_session.view.presence_state = presence_state
             self._chat_session.view.locked = True
             return self._safe_chat_view_locked()
@@ -246,6 +263,8 @@ class KioskStateStore:
                 ChatMessage(role="assistant", content=answer, created_at=now, citations=citations)
             )
             self._chat_session.view.last_interaction_at = now
+            self._chat_session.owner_absent_since = None
+            self._chat_session.view.owner_absent_since = None
             self._chat_session.view.presence_state = "OWNER_PRESENT"
             self._chat_session.view.last_owner_seen_at = now
             return self._safe_chat_view_locked() or self._chat_session.view
@@ -257,6 +276,48 @@ class KioskStateStore:
             if self._chat_session.view.locked:
                 raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Chatbot session is locked.")
             return self._chat_session.token
+
+    def current_chat_user_id(self) -> int | None:
+        with self._lock:
+            if self._chat_session is None:
+                return None
+            return self._chat_session.view.authenticated_user_id
+
+    def update_owner_presence(self, owner_present: bool) -> ChatPresenceResponse:
+        now = dt.datetime.now(dt.timezone.utc)
+        now_text = now.isoformat()
+        with self._lock:
+            if self._chat_session is None:
+                return ChatPresenceResponse(owner_present=False, ended=True)
+
+            if owner_present:
+                self._chat_session.owner_absent_since = None
+                self._chat_session.view.owner_absent_since = None
+                self._chat_session.view.presence_state = "OWNER_PRESENT"
+                self._chat_session.view.last_owner_seen_at = now_text
+                self._chat_session.view.locked = False
+                return ChatPresenceResponse(
+                    session=self._safe_chat_view_locked(),
+                    owner_present=True,
+                    ended=False,
+                )
+
+            if self._chat_session.owner_absent_since is None:
+                self._chat_session.owner_absent_since = now
+                self._chat_session.view.owner_absent_since = now_text
+
+            elapsed = (now - self._chat_session.owner_absent_since).total_seconds()
+            if elapsed >= self.timings.owner_absent_terminate_seconds:
+                self._chat_session = None
+                return ChatPresenceResponse(owner_present=False, ended=True)
+
+            self._chat_session.view.presence_state = "OWNER_TEMPORARILY_MISSING"
+            self._chat_session.view.locked = True
+            return ChatPresenceResponse(
+                session=self._safe_chat_view_locked(),
+                owner_present=False,
+                ended=False,
+            )
 
     def _safe_chat_view_locked(self) -> ChatSessionView | None:
         if self._chat_session is None:
@@ -336,6 +397,22 @@ def create_kiosk_router(
             ) from exc
 
         return ChatVerifyResponse(session=store.start_chat_session(token))
+
+    @router.post("/chat/presence/frame", response_model=ChatPresenceResponse)
+    async def verify_chat_owner_presence(file: UploadFile = File(...)) -> ChatPresenceResponse:
+        owner_user_id = store.current_chat_user_id()
+        if owner_user_id is None:
+            return ChatPresenceResponse(owner_present=False, ended=True)
+
+        frame = await _decode_upload(file)
+        try:
+            result = access_pipeline().process_frame(frame, target_user_id=str(owner_user_id))
+        except Exception as exc:
+            logger.exception("Kiosk chatbot owner presence check failed")
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+        owner_present = bool(result.get("access_granted")) and _optional_int(result.get("user_id")) == owner_user_id
+        return store.update_owner_presence(owner_present)
 
     @router.post("/chat/message", response_model=ChatMessageResponse)
     def send_chat_message(body: ChatMessageRequest) -> ChatMessageResponse:

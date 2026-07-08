@@ -20,16 +20,16 @@ export function deriveKioskMode(state: KioskStateResponse | null, local: LocalUi
     return 'offline'
   }
 
+  if (local.chatVerificationActive) {
+    return 'chat-verifying'
+  }
+
   const attempt = state.active_access_attempt
   if (attempt && !attempt.completed_at) {
     return 'access-verifying'
   }
-  if (attempt && isRecentAttempt(attempt, state.timings.access_result_hold_seconds, local.nowMs)) {
+  if (attempt && attempt.face_count > 0 && isRecentAttempt(attempt, state.timings.access_result_hold_seconds, local.nowMs)) {
     return attempt.access_decision === 'GRANTED' ? 'access-granted' : 'access-denied'
-  }
-
-  if (local.chatVerificationActive) {
-    return 'chat-verifying'
   }
 
   const session = state.active_chat_session
