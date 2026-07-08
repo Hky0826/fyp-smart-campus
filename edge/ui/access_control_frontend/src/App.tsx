@@ -11,6 +11,7 @@ import {
   Shield,
   Video,
   WifiOff,
+  X,
   XCircle
 } from 'lucide-react'
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -22,6 +23,7 @@ import { deriveKioskMode } from './app/kioskStateMachine'
 function App() {
   const [state, setState] = useState<KioskStateResponse | null>(null)
   const [nowMs, setNowMs] = useState(Date.now())
+  const [chatExpanded, setChatExpanded] = useState(false)
   const [chatVerificationActive, setChatVerificationActive] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
@@ -40,7 +42,8 @@ function App() {
 
   const session = state?.active_chat_session ?? null
   const accessAttempt = state?.active_access_attempt ?? null
-  const cloudOnline = state?.device.cloud_chatbot === 'ok'
+  const syncConnected = state?.device.cloud_sync === 'connected'
+  const cloudChatbotOnline = state?.device.cloud_chatbot === 'ok'
   const ownerMissing = session?.presence_state === 'OWNER_TEMPORARILY_MISSING'
   const absentSecondsRemaining = useMemo(() => {
     const terminateSeconds = state?.timings.owner_absent_terminate_seconds ?? 10
@@ -84,8 +87,17 @@ function App() {
     let cancelled = false
 
     async function startCamera() {
+      const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices)
+      if (!getUserMedia) {
+        setCameraReady(false)
+        setCameraError(
+          'Camera API is unavailable in this browser context. Open the kiosk locally in Chromium at http://127.0.0.1:8080/ui/ and allow camera access.'
+        )
+        return
+      }
+
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+        const stream = await getUserMedia({
           video: {
             facingMode: 'user',
             width: { ideal: 1280 },
@@ -149,9 +161,11 @@ function App() {
           const presence = await kioskClient.verifyChatPresenceFrame(frame)
           if (presence.ended) {
             setState((current) => (current ? { ...current, active_chat_session: null } : current))
+            setChatExpanded(false)
             setChatError(null)
             return
           }
+
           const presenceSession = presence.session
           if (presenceSession) {
             setState((current) => mergeChatSession(current, presenceSession))
@@ -180,6 +194,13 @@ function App() {
 
     return () => window.clearInterval(intervalId)
   }, [cameraReady, chatVerificationActive, offline, session])
+
+  async function handleOpenChat() {
+    setChatExpanded(true)
+    if (!session && !chatVerificationActive) {
+      await handleStartChat()
+    }
+  }
 
   async function handleStartChat() {
     setChatError(null)
@@ -218,21 +239,28 @@ function App() {
     try {
       await kioskClient.endChat()
       setState((current) => (current ? { ...current, active_chat_session: null } : current))
+      setChatExpanded(false)
     } finally {
       setBusy(false)
     }
   }
 
-  const statusText = useMemo(() => {
+  const cameraStatusText = useMemo(() => {
     if (offline) return 'Edge API offline'
     if (!state) return 'Connecting'
     if (!cameraReady) return 'Camera unavailable'
-    if (!cloudOnline) return 'Cloud chatbot offline'
-    return session ? 'Chatbot mode' : 'Door monitoring'
-  }, [cameraReady, cloudOnline, offline, session, state])
+    if (session && !session.locked) return 'Chatbot owner tracking'
+    if (session?.locked) return 'Door access active'
+    return 'Continuous access recognition'
+  }, [cameraReady, offline, session, state])
 
   return (
     <main className="kiosk-shell">
+      <section className="camera-fullscreen">
+        <video ref={videoRef} className="camera-feed" playsInline muted />
+        <div className="camera-shade" />
+      </section>
+
       <header className="top-bar">
         <div className="brand-mark">
           <Shield size={24} aria-hidden="true" />
@@ -241,90 +269,97 @@ function App() {
             <span>{state?.device.device_id ?? 'edge device'}</span>
           </div>
         </div>
-        <StatusPill online={!offline && cameraReady} label={statusText} />
+        <div className="status-row">
+          <StatusPill online={!offline && cameraReady} label={cameraStatusText} />
+          <StatusPill online={Boolean(syncConnected)} label={`Sync ${state?.device.cloud_sync ?? 'unknown'}`} />
+        </div>
       </header>
 
-      <section className="main-grid">
-        <section className="access-panel">
-          <div className="section-heading">
-            <DoorOpen size={28} aria-hidden="true" />
-            <div>
-              <h1>Door Access</h1>
-              <p>{accessSubtitle(mode, accessAttempt, Boolean(session))}</p>
-            </div>
+      <section className="access-hud">
+        <div className="section-heading">
+          <DoorOpen size={28} aria-hidden="true" />
+          <div>
+            <h1>Door Access</h1>
+            <p>{accessSubtitle(mode, accessAttempt, Boolean(session && !session.locked))}</p>
           </div>
+        </div>
+        <AccessStatus mode={mode} attempt={accessAttempt} reason={cameraError} />
+      </section>
 
-          <div className="camera-stage">
-            <video ref={videoRef} className="camera-feed" playsInline muted />
-            <div className="camera-badge">
-              <Video size={18} aria-hidden="true" />
-              <span>{session && !session.locked ? 'Chatbot owner tracking' : 'Continuous access scan'}</span>
-            </div>
-          </div>
+      <button className="chat-launcher" onClick={handleOpenChat} disabled={!cameraReady || offline}>
+        <MessageSquare size={28} aria-hidden="true" />
+        <span>{session ? 'Chatbot' : 'Start Chat'}</span>
+      </button>
 
-          <AccessStatus mode={mode} attempt={accessAttempt} reason={cameraError} />
-        </section>
-
-        <section className={`chat-panel ${session?.locked ? 'is-locked' : ''}`}>
-          <div className="section-heading compact">
-            <MessageSquare size={24} aria-hidden="true" />
-            <div>
-              <h2>Campus Assistant</h2>
-              <p>{chatSubtitle(session, cloudOnline, chatVerificationActive)}</p>
-            </div>
-          </div>
-
-          {!session && (
-            <div className="chat-empty">
-              <button className="secondary-action" onClick={handleStartChat} disabled={chatVerificationActive || !cloudOnline || !cameraReady}>
-                <MessageSquare size={22} aria-hidden="true" />
-                <span>Start Chatbot</span>
+      {chatExpanded && (
+        <section className="chat-overlay">
+          <div className="chat-window">
+            <div className="chat-header">
+              <div className="section-heading compact">
+                <MessageSquare size={24} aria-hidden="true" />
+                <div>
+                  <h2>Campus Assistant</h2>
+                  <p>{chatSubtitle(session, cloudChatbotOnline, chatVerificationActive)}</p>
+                </div>
+              </div>
+              <button className="icon-button dark" onClick={() => setChatExpanded(false)} title="Collapse chat">
+                <X size={22} aria-hidden="true" />
               </button>
             </div>
-          )}
 
-          {session?.locked && (
-            <div className="locked-state">
-              <Lock size={36} aria-hidden="true" />
-              <strong>{ownerMissing ? 'Owner temporarily away.' : 'Previous chatbot session locked.'}</strong>
-              <span>Session will close after {absentSecondsRemaining} seconds unless the verified user returns.</span>
-            </div>
-          )}
-
-          {session && !session.locked && (
-            <>
-              <ChatHistory messages={session.conversation_history} />
-              <form className="chat-input-row" onSubmit={handleSendMessage}>
-                <input
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  disabled={busy}
-                  maxLength={2000}
-                  aria-label="Chat message"
-                />
-                <button type="submit" className="icon-button" disabled={!draft.trim() || busy}>
-                  <Send size={22} aria-hidden="true" />
+            {!session && !chatVerificationActive && (
+              <div className="chat-empty">
+                <button className="secondary-action" onClick={handleStartChat} disabled={!cameraReady}>
+                  <Video size={22} aria-hidden="true" />
+                  <span>Verify Identity</span>
                 </button>
-                <button type="button" className="icon-button" disabled title="Voice chat">
-                  <Mic size={22} aria-hidden="true" />
-                </button>
-                <button type="button" className="icon-button" onClick={handleEndChat} disabled={busy} title="End chat">
-                  <LogOut size={22} aria-hidden="true" />
-                </button>
-              </form>
-            </>
-          )}
+              </div>
+            )}
 
-          {chatVerificationActive && (
-            <div className="inline-info">
-              <Video size={20} aria-hidden="true" />
-              <span>Look at the camera to verify chatbot identity.</span>
-            </div>
-          )}
+            {chatVerificationActive && (
+              <div className="chat-empty">
+                <Video size={40} aria-hidden="true" />
+                <strong>Look at the camera</strong>
+                <span>Verifying chatbot identity.</span>
+              </div>
+            )}
 
-          {chatError && <div className="inline-alert">{chatError}</div>}
+            {session?.locked && (
+              <div className="locked-state">
+                <Lock size={42} aria-hidden="true" />
+                <strong>{ownerMissing ? 'Owner temporarily away.' : 'Previous chatbot session locked.'}</strong>
+                <span>Session closes in {absentSecondsRemaining} seconds unless the verified user returns.</span>
+              </div>
+            )}
+
+            {session && !session.locked && (
+              <>
+                <ChatHistory messages={session.conversation_history} />
+                <form className="chat-input-row" onSubmit={handleSendMessage}>
+                  <input
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    disabled={busy}
+                    maxLength={2000}
+                    aria-label="Chat message"
+                  />
+                  <button type="submit" className="icon-button" disabled={!draft.trim() || busy}>
+                    <Send size={22} aria-hidden="true" />
+                  </button>
+                  <button type="button" className="icon-button" disabled title="Voice chat">
+                    <Mic size={22} aria-hidden="true" />
+                  </button>
+                  <button type="button" className="icon-button" onClick={handleEndChat} disabled={busy} title="End chat">
+                    <LogOut size={22} aria-hidden="true" />
+                  </button>
+                </form>
+              </>
+            )}
+
+            {chatError && <div className="inline-alert">{chatError}</div>}
+          </div>
         </section>
-      </section>
+      )}
 
       {offline && (
         <div className="system-banner">
@@ -362,7 +397,6 @@ function AccessStatus({
       <div className="access-result granted">
         <CheckCircle2 size={34} aria-hidden="true" />
         <strong>Access Granted</strong>
-        <span>Door unlock request accepted by edge access control.</span>
       </div>
     )
   }
@@ -383,7 +417,7 @@ function AccessStatus({
       </div>
     )
   }
-  return <div className="access-idle">Monitoring the entrance continuously</div>
+  return <div className="access-idle">Monitoring entrance continuously</div>
 }
 
 function ChatHistory({ messages }: { messages: ChatMessage[] }) {
@@ -402,8 +436,8 @@ function ChatHistory({ messages }: { messages: ChatMessage[] }) {
   )
 }
 
-function accessSubtitle(mode: string, attempt: KioskStateResponse['active_access_attempt'], hasSession: boolean) {
-  if (hasSession && mode === 'chat-active') return 'Paused while verified user uses chatbot'
+function accessSubtitle(mode: string, attempt: KioskStateResponse['active_access_attempt'], activeChatOwnerPresent: boolean) {
+  if (activeChatOwnerPresent) return 'Access scan pauses while the verified chatbot owner is present'
   if (mode === 'chat-locked') return 'Owner away; door access remains active'
   if (mode === 'access-granted') return 'Entry decision confirmed'
   if (mode === 'access-denied' && attempt?.face_count) return 'Entry request denied'
@@ -411,8 +445,8 @@ function accessSubtitle(mode: string, attempt: KioskStateResponse['active_access
 }
 
 function chatSubtitle(session: KioskStateResponse['active_chat_session'], cloudOnline: boolean, verifying: boolean) {
-  if (!cloudOnline) return 'Cloud retrieval unavailable'
   if (verifying) return 'Verifying identity'
+  if (!cloudOnline) return 'Chatbot cloud unavailable'
   if (!session) return 'Press to start'
   if (session.locked) return 'Waiting for owner return'
   return session.full_name || session.username || 'Authenticated'

@@ -51,7 +51,9 @@ class KioskTimingConfig(BaseModel):
 
 class KioskDeviceStatus(BaseModel):
     edge_api: str
+    cloud_sync: str
     cloud_chatbot: str
+    sync_cloud_url: str
     device_id: str
     device_name: str
 
@@ -150,12 +152,14 @@ class KioskStateStore:
         self._access_attempt: AccessAttemptView | None = None
         self._chat_session: _StoredChatSession | None = None
 
-    def state(self, cloud_status: str) -> KioskStateResponse:
+    def state(self, cloud_status: str, sync_status: str = "unknown") -> KioskStateResponse:
         with self._lock:
             return KioskStateResponse(
                 device=KioskDeviceStatus(
                     edge_api="ok",
+                    cloud_sync=sync_status,
                     cloud_chatbot=cloud_status,
+                    sync_cloud_url=self.config.sync_cloud_url,
                     device_id=self.config.sync_device_id,
                     device_name=self.config.sync_device_name,
                 ),
@@ -337,19 +341,20 @@ def create_kiosk_router(
     runtime_config: Callable[[], RuntimeConfig],
     access_pipeline: Callable[[], Any],
     chatbot_client: Callable[[], ChatbotClient],
+    sync_status: Callable[[], str] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/kiosk", tags=["Edge Kiosk UI"])
     store = KioskStateStore(runtime_config())
 
     @router.get("/state", response_model=KioskStateResponse)
     def get_state() -> KioskStateResponse:
-        return store.state(_cloud_status(chatbot_client))
+        return store.state(_cloud_status(chatbot_client), _sync_status(sync_status))
 
     @router.get("/events")
     async def events() -> StreamingResponse:
         async def stream():
             while True:
-                state = store.state(_cloud_status(chatbot_client))
+                state = store.state(_cloud_status(chatbot_client), _sync_status(sync_status))
                 yield f"event: state\ndata: {state.model_dump_json()}\n\n"
                 await asyncio.sleep(2)
 
@@ -482,6 +487,16 @@ def _cloud_status(chatbot_client: Callable[[], ChatbotClient]) -> str:
     except Exception:
         return "unreachable"
     return str(result.get("status") or "ok")
+
+
+def _sync_status(provider: Callable[[], str] | None) -> str:
+    if provider is None:
+        return "unknown"
+    try:
+        return provider()
+    except Exception:
+        logger.exception("Could not read kiosk sync status")
+        return "unknown"
 
 
 def _utc_now() -> str:

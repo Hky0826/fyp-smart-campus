@@ -92,6 +92,9 @@ app.include_router(
         runtime_config=runtime_config,
         access_pipeline=access_pipeline,
         chatbot_client=_chatbot_client,
+        sync_status=lambda: "disabled"
+        if not access_config().sync_enabled
+        else ("connected" if _sync_engine and _sync_engine._running else "starting"),
     )
 )
 

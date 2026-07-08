@@ -16,7 +16,9 @@ export interface KioskTimingConfig {
 
 export interface KioskDeviceStatus {
   edge_api: string
+  cloud_sync: string
   cloud_chatbot: string
+  sync_cloud_url: string
   device_id: string
   device_name: string
 }
