@@ -43,9 +43,9 @@ AccessDecision = Literal["PENDING", "VERIFYING", "GRANTED", "DENIED", "ERROR"]
 
 
 class KioskTimingConfig(BaseModel):
-    owner_missing_grace_seconds: int = Field(default=10)
-    owner_absent_lock_seconds: int = Field(default=10)
-    owner_absent_terminate_seconds: int = Field(default=10)
+    owner_missing_grace_seconds: int = Field(default=2)
+    owner_absent_lock_seconds: int = Field(default=2)
+    owner_absent_terminate_seconds: int = Field(default=2)
     access_result_hold_seconds: int = Field(default=4)
 
 
@@ -67,7 +67,7 @@ class ChatMessage(BaseModel):
 
 class ChatSessionView(BaseModel):
     session_id: str
-    authenticated_user_id: int
+    authenticated_user_id: Optional[int] = None
     username: Optional[str] = None
     full_name: Optional[str] = None
     roles: list[str] = Field(default_factory=list)
@@ -101,6 +101,7 @@ class KioskStateResponse(BaseModel):
     timings: KioskTimingConfig
     active_chat_session: Optional[ChatSessionView] = None
     active_access_attempt: Optional[AccessAttemptView] = None
+    chat_recoverable: bool = False
 
 
 class AccessRequestResponse(BaseModel):
@@ -110,6 +111,7 @@ class AccessRequestResponse(BaseModel):
 class ChatVerifyResponse(BaseModel):
     session: ChatSessionView
     bboxes: list[list[int]] = Field(default_factory=list)
+    reopened: bool = False
 
 
 class ChatPresenceResponse(BaseModel):
@@ -136,7 +138,8 @@ class ChatMessageResponse(BaseModel):
 @dataclass
 class _StoredChatSession:
     view: ChatSessionView
-    token: EdgeAuthToken
+    token: EdgeAuthToken | None = None
+    owner_embedding: np.ndarray | None = None
     history: list[ChatMessage] = field(default_factory=list)
     owner_absent_since: dt.datetime | None = None
 
@@ -155,6 +158,7 @@ class KioskStateStore:
         self._lock = threading.Lock()
         self._access_attempt: AccessAttemptView | None = None
         self._chat_session: _StoredChatSession | None = None
+        self._recoverable_chat_session: _StoredChatSession | None = None
 
     def state(self, cloud_status: str, sync_status: str = "unknown") -> KioskStateResponse:
         with self._lock:
@@ -170,6 +174,7 @@ class KioskStateStore:
                 timings=self.timings,
                 active_chat_session=self._safe_chat_view_locked(),
                 active_access_attempt=self._access_attempt,
+                chat_recoverable=self._recoverable_chat_session is not None,
             )
 
     def start_access_attempt(self) -> AccessAttemptView:
@@ -220,24 +225,36 @@ class KioskStateStore:
 
             return attempt
 
-    def start_chat_session(self, token: EdgeAuthToken, full_name: str | None = None) -> ChatSessionView:
+    def start_chat_session(
+        self,
+        token: EdgeAuthToken | None = None,
+        full_name: str | None = None,
+        owner_embedding: np.ndarray | None = None,
+    ) -> ChatSessionView:
         now = _utc_now()
         view = ChatSessionView(
             session_id=str(uuid.uuid4()),
-            authenticated_user_id=token.user_id,
-            username=token.username,
+            authenticated_user_id=token.user_id if token else None,
+            username=token.username if token else None,
             full_name=full_name,
-            roles=list(token.roles),
-            cloud_session_id=token.session_id,
+            roles=list(token.roles) if token else [],
+            cloud_session_id=token.session_id if token else None,
             owner_absent_since=None,
             last_owner_seen_at=now,
             last_interaction_at=now,
             presence_state="OWNER_PRESENT",
-            expires_at=_format_datetime(token.expires_at),
+            expires_at=_format_datetime(token.expires_at) if token else None,
             locked=False,
         )
+        history = [ChatMessage(role="assistant", content="Hi, how may I help you?", created_at=now)]
         with self._lock:
-            self._chat_session = _StoredChatSession(view=view, token=token, history=[])
+            self._chat_session = _StoredChatSession(
+                view=view,
+                token=token,
+                owner_embedding=_copy_embedding(owner_embedding),
+                history=history,
+            )
+            self._recoverable_chat_session = None
             return self._safe_chat_view_locked() or view
 
     def lock_chat_session(self, presence_state: PresenceState = "OWNER_TEMPORARILY_MISSING") -> ChatSessionView | None:
@@ -279,7 +296,7 @@ class KioskStateStore:
             self._chat_session.view.last_owner_seen_at = now
             return self._safe_chat_view_locked() or self._chat_session.view
 
-    def current_token(self) -> EdgeAuthToken:
+    def current_token(self) -> EdgeAuthToken | None:
         with self._lock:
             if self._chat_session is None:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No active chatbot session.")
@@ -292,6 +309,18 @@ class KioskStateStore:
             if self._chat_session is None:
                 return None
             return self._chat_session.view.authenticated_user_id
+
+    def current_owner_embedding(self) -> np.ndarray | None:
+        with self._lock:
+            if self._chat_session is None:
+                return None
+            return _copy_embedding(self._chat_session.owner_embedding)
+
+    def recoverable_owner_embedding(self) -> np.ndarray | None:
+        with self._lock:
+            if self._recoverable_chat_session is None:
+                return None
+            return _copy_embedding(self._recoverable_chat_session.owner_embedding)
 
     def update_owner_presence(self, owner_present: bool, bboxes: list[list[int]] | None = None) -> ChatPresenceResponse:
         now = dt.datetime.now(dt.timezone.utc)
@@ -320,16 +349,41 @@ class KioskStateStore:
 
             elapsed = (now - self._chat_session.owner_absent_since).total_seconds()
             if elapsed >= self.timings.owner_absent_terminate_seconds:
+                self._recoverable_chat_session = self._chat_session
+                self._recoverable_chat_session.view.owner_absent_since = now_text
+                self._recoverable_chat_session.view.presence_state = "OWNER_LEFT"
+                self._recoverable_chat_session.view.locked = False
                 self._chat_session = None
                 return ChatPresenceResponse(owner_present=False, ended=True, bboxes=frame_bboxes)
 
             self._chat_session.view.presence_state = "OWNER_TEMPORARILY_MISSING"
-            self._chat_session.view.locked = True
+            self._chat_session.view.locked = False
             return ChatPresenceResponse(
                 session=self._safe_chat_view_locked(),
                 owner_present=False,
                 ended=False,
                 bboxes=frame_bboxes,
+            )
+
+    def reopen_chat_session(self, bboxes: list[list[int]] | None = None) -> ChatPresenceResponse:
+        now = dt.datetime.now(dt.timezone.utc)
+        now_text = now.isoformat()
+        with self._lock:
+            if self._recoverable_chat_session is None:
+                return ChatPresenceResponse(owner_present=False, ended=True, bboxes=bboxes or [])
+
+            self._chat_session = self._recoverable_chat_session
+            self._recoverable_chat_session = None
+            self._chat_session.owner_absent_since = None
+            self._chat_session.view.owner_absent_since = None
+            self._chat_session.view.presence_state = "OWNER_PRESENT"
+            self._chat_session.view.last_owner_seen_at = now_text
+            self._chat_session.view.locked = False
+            return ChatPresenceResponse(
+                session=self._safe_chat_view_locked(),
+                owner_present=True,
+                ended=False,
+                bboxes=bboxes or [],
             )
 
     def _safe_chat_view_locked(self) -> ChatSessionView | None:
@@ -391,42 +445,54 @@ def create_kiosk_router(
     async def verify_chat_owner(file: UploadFile = File(...)) -> ChatVerifyResponse:
         frame = await _decode_upload(file)
         try:
-            result = access_pipeline().process_frame(frame)
+            pipeline = access_pipeline()
+            result = pipeline.describe_faces(frame, include_embeddings=True)
         except Exception as exc:
             logger.exception("Kiosk chatbot owner verification failed")
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
-        if not result.get("access_granted") or result.get("user_id") is None:
-            reason = result.get("reason") or "Face verification failed."
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=reason)
+        owner_face = _first_face_with_embedding(result)
+        if owner_face is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No usable face detected.")
 
-        token_client = EdgeAuthTokenClient(runtime_config().sync_cloud_url, runtime_config().sync_device_id)
-        try:
-            token = token_client.issue_token(result["user_id"])
-        except Exception as exc:
-            logger.warning("Chatbot token issuance failed for user_id=%s: %s", result.get("user_id"), exc)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Cloud authentication is unavailable. Try again when connectivity is restored.",
-            ) from exc
-
-        return ChatVerifyResponse(session=store.start_chat_session(token), bboxes=_result_bboxes(result))
+        owner_embedding = owner_face["embedding"]
+        token = _try_issue_registered_token(pipeline, owner_embedding, runtime_config())
+        return ChatVerifyResponse(
+            session=store.start_chat_session(token=token, owner_embedding=owner_embedding),
+            bboxes=_result_bboxes(result),
+        )
 
     @router.post("/chat/presence/frame", response_model=ChatPresenceResponse)
     async def verify_chat_owner_presence(file: UploadFile = File(...)) -> ChatPresenceResponse:
-        owner_user_id = store.current_chat_user_id()
-        if owner_user_id is None:
+        owner_embedding = store.current_owner_embedding()
+        if owner_embedding is None:
             return ChatPresenceResponse(owner_present=False, ended=True)
 
         frame = await _decode_upload(file)
         try:
-            result = access_pipeline().process_frame(frame, target_user_id=str(owner_user_id))
+            owner_present, bboxes = _detect_owner_presence(access_pipeline(), frame, owner_embedding)
         except Exception as exc:
             logger.exception("Kiosk chatbot owner presence check failed")
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
-        owner_present = bool(result.get("access_granted")) and _optional_int(result.get("user_id")) == owner_user_id
-        return store.update_owner_presence(owner_present, _result_bboxes(result))
+        return store.update_owner_presence(owner_present, bboxes)
+
+    @router.post("/chat/reopen/frame", response_model=ChatPresenceResponse)
+    async def reopen_chat_owner(file: UploadFile = File(...)) -> ChatPresenceResponse:
+        owner_embedding = store.recoverable_owner_embedding()
+        if owner_embedding is None:
+            return ChatPresenceResponse(owner_present=False, ended=True)
+
+        frame = await _decode_upload(file)
+        try:
+            owner_present, bboxes = _detect_owner_presence(access_pipeline(), frame, owner_embedding)
+        except Exception as exc:
+            logger.exception("Kiosk chatbot owner recovery check failed")
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+        if owner_present:
+            return store.reopen_chat_session(bboxes)
+        return ChatPresenceResponse(owner_present=False, ended=False, bboxes=bboxes)
 
     @router.post("/chat/message", response_model=ChatMessageResponse)
     def send_chat_message(body: ChatMessageRequest) -> ChatMessageResponse:
@@ -434,9 +500,9 @@ def create_kiosk_router(
         try:
             response = chatbot_client().chat(
                 query=body.query,
-                jwt_token=token.access_token,
+                jwt_token=token.access_token if token else None,
                 device_id=runtime_config().sync_device_id,
-                session_id=token.session_id,
+                session_id=token.session_id if token else None,
             )
         except ChatbotClientError as exc:
             status_code = exc.status_code or status.HTTP_502_BAD_GATEWAY
@@ -514,6 +580,60 @@ def _utc_now() -> str:
 
 def _format_datetime(value: dt.datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _copy_embedding(value: np.ndarray | None) -> np.ndarray | None:
+    if value is None:
+        return None
+    return np.asarray(value, dtype=np.float32).copy()
+
+
+def _first_face_with_embedding(result: dict[str, Any]) -> dict[str, Any] | None:
+    faces = result.get("faces")
+    if not isinstance(faces, list):
+        return None
+    for face in faces:
+        if isinstance(face, dict) and face.get("embedding") is not None:
+            return face
+    return None
+
+
+def _try_issue_registered_token(pipeline: Any, owner_embedding: np.ndarray, config: RuntimeConfig) -> EdgeAuthToken | None:
+    try:
+        templates = pipeline.repository.load_templates()
+        match = pipeline.matcher.match(
+            owner_embedding,
+            templates,
+            threshold=pipeline.config.recognition_threshold,
+            include_inactive=True,
+        )
+    except Exception as exc:
+        logger.warning("Could not match chatbot owner against registered templates: %s", exc)
+        return None
+
+    if not match.matched or not match.is_active or match.user_id is None:
+        return None
+
+    token_client = EdgeAuthTokenClient(config.sync_cloud_url, config.sync_device_id)
+    try:
+        return token_client.issue_token(match.user_id)
+    except Exception as exc:
+        logger.warning("Chatbot token issuance failed for user_id=%s: %s", match.user_id, exc)
+        return None
+
+
+def _detect_owner_presence(pipeline: Any, frame: np.ndarray, owner_embedding: np.ndarray) -> tuple[bool, list[list[int]]]:
+    result = pipeline.describe_faces(frame, include_embeddings=True)
+    threshold = float(getattr(pipeline.config, "recognition_threshold", 0.55))
+    owner_present = False
+    for face in result.get("faces", []):
+        if not isinstance(face, dict) or face.get("embedding") is None:
+            continue
+        similarity = pipeline.matcher.cosine_similarity(owner_embedding, face["embedding"])
+        if similarity >= threshold:
+            owner_present = True
+            break
+    return owner_present, _result_bboxes(result)
 
 
 def _optional_int(value: Any) -> int | None:

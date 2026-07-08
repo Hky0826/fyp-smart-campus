@@ -80,7 +80,7 @@ class ChatbotClient:
     def chat(
         self,
         query: str,
-        jwt_token: str,
+        jwt_token: Optional[str] = None,
         device_id: Optional[str] = None,
         session_id: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -107,13 +107,9 @@ class ChatbotClient:
         Raises:
             ChatbotClientError: On network failure, auth error, or server error.
         """
-        if not jwt_token:
-            raise ChatbotClientError("No JWT token provided for chatbot request.")
-
-        headers = {
-            "Authorization": f"Bearer {jwt_token}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
+        if jwt_token:
+            headers["Authorization"] = f"Bearer {jwt_token}"
 
         payload: Dict[str, Any] = {"query": query}
         if device_id:

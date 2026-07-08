@@ -246,6 +246,37 @@ class AccessControlPipeline:
         finally:
             self._mark_recognition_finished()
 
+    def describe_faces(self, frame: np.ndarray, include_embeddings: bool = False) -> dict:
+        """Return detected face boxes, optionally with embeddings, without access gating."""
+        timer = StageTimer()
+        faces = self._detect(frame)
+        timer.mark("detection")
+        descriptions: list[dict[str, Any]] = []
+
+        for face in sorted(faces, key=lambda item: item.width() * item.height(), reverse=True):
+            item: dict[str, Any] = {
+                "bbox": face.xyxy_int(),
+                "confidence": float(face.confidence),
+            }
+            if include_embeddings:
+                quality = self.quality_checker.check(frame, face)
+                item["quality_passed"] = quality.passed
+                item["quality_reason"] = quality.reason
+                if quality.passed:
+                    face_image = self.aligner.extract(frame, face)
+                    item["embedding"] = self.embedder.embed(face_image)
+            descriptions.append(item)
+
+        if include_embeddings:
+            timer.mark("embedding")
+        timer.total()
+        return {
+            "face_count": len(faces),
+            "bboxes": [item["bbox"] for item in descriptions],
+            "faces": descriptions,
+            "metrics": timer.metrics,
+        }
+
     def _wait_for_recognition_delay(self) -> None:
         delay_seconds = self.config.recognition_delay_seconds
         if delay_seconds <= 0 or self._last_recognition_finished_at is None:

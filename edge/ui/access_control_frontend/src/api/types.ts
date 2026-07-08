@@ -32,7 +32,7 @@ export interface ChatMessage {
 
 export interface ChatSessionView {
   session_id: string
-  authenticated_user_id: number
+  authenticated_user_id?: number | null
   username?: string | null
   full_name?: string | null
   roles: string[]
@@ -66,6 +66,7 @@ export interface KioskStateResponse {
   timings: KioskTimingConfig
   active_chat_session?: ChatSessionView | null
   active_access_attempt?: AccessAttemptView | null
+  chat_recoverable: boolean
 }
 
 export interface AccessRequestResponse {
@@ -75,6 +76,7 @@ export interface AccessRequestResponse {
 export interface ChatVerifyResponse {
   session: ChatSessionView
   bboxes: number[][]
+  reopened: boolean
 }
 
 export interface ChatMessageResponse {

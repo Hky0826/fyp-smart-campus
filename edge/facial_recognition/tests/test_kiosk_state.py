@@ -59,13 +59,14 @@ class KioskStateTests(unittest.TestCase):
         first_missing = store.update_owner_presence(False)
         self.assertFalse(first_missing.ended)
         self.assertIsNotNone(first_missing.session)
-        self.assertTrue(first_missing.session.locked)
+        self.assertFalse(first_missing.session.locked)
 
         store._chat_session.owner_absent_since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=2)
         expired = store.update_owner_presence(False)
 
         self.assertTrue(expired.ended)
         self.assertIsNone(store.state("ok").active_chat_session)
+        self.assertTrue(store.state("ok").chat_recoverable)
 
 
 if __name__ == "__main__":

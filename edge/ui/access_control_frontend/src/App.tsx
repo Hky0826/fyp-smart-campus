@@ -1,20 +1,9 @@
 import {
   AlertTriangle,
-  CheckCircle2,
-  DoorOpen,
-  Lock,
-  LogOut,
   MessageSquare,
-  Mic,
-  RefreshCcw,
-  Send,
-  Shield,
-  Video,
-  WifiOff,
-  X,
-  XCircle
+  X
 } from 'lucide-react'
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { kioskClient, subscribeToKioskState } from './api/kioskClient'
 import type { ChatMessage, KioskStateResponse } from './api/types'
 import { CAMERA_FRAME_INTERVAL_MS } from './app/config'
@@ -27,8 +16,6 @@ function App() {
   const [chatVerificationActive, setChatVerificationActive] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [draft, setDraft] = useState('')
   const [chatError, setChatError] = useState<string | null>(null)
   const [offline, setOffline] = useState(false)
   const [videoLayout, setVideoLayout] = useState({ width: 0, height: 0, videoWidth: 0, videoHeight: 0 })
@@ -43,18 +30,8 @@ function App() {
   })
 
   const session = state?.active_chat_session ?? null
-  const syncConnected = state?.device.cloud_sync === 'connected'
-  const absentSecondsRemaining = useMemo(() => {
-    const terminateSeconds = state?.timings.owner_absent_terminate_seconds ?? 10
-    if (!session?.locked || !session.owner_absent_since) {
-      return terminateSeconds
-    }
-    const absentSinceMs = Date.parse(session.owner_absent_since)
-    if (!Number.isFinite(absentSinceMs)) {
-      return terminateSeconds
-    }
-    return Math.max(0, Math.ceil(terminateSeconds - (nowMs - absentSinceMs) / 1000))
-  }, [nowMs, session?.locked, session?.owner_absent_since, state?.timings.owner_absent_terminate_seconds])
+  const chatRecoverable = Boolean(state?.chat_recoverable)
+  const chatCameraMinimized = chatExpanded && Boolean(session) && !chatVerificationActive
 
   const refreshState = useCallback(async () => {
     try {
@@ -173,7 +150,7 @@ function App() {
           const presence = await kioskClient.verifyChatPresenceFrame(frame)
           setFaceBoxes(presence.bboxes)
           if (presence.ended) {
-            setState((current) => (current ? { ...current, active_chat_session: null } : current))
+            setState((current) => (current ? { ...current, active_chat_session: null, chat_recoverable: true } : current))
             setChatExpanded(false)
             setChatError(null)
             return
@@ -192,6 +169,18 @@ function App() {
           return
         }
 
+        if (chatRecoverable) {
+          const recovery = await kioskClient.reopenChatFrame(frame)
+          setFaceBoxes(recovery.bboxes)
+          const recoverySession = recovery.session
+          if (recovery.owner_present && recoverySession) {
+            setState((current) => mergeChatSession(current, recoverySession))
+            setChatExpanded(true)
+            setChatError(null)
+            return
+          }
+        }
+
         const accessResponse = await kioskClient.verifyAccessFrame(frame)
         setState((current) => mergeAccessAttempt(current, accessResponse.attempt))
         setFaceBoxes(accessResponse.attempt.bboxes)
@@ -208,7 +197,7 @@ function App() {
     }, CAMERA_FRAME_INTERVAL_MS)
 
     return () => window.clearInterval(intervalId)
-  }, [cameraReady, chatVerificationActive, offline, session])
+  }, [cameraReady, chatRecoverable, chatVerificationActive, offline, session])
 
   async function handleOpenChat() {
     setChatExpanded(true)
@@ -228,67 +217,12 @@ function App() {
     }
   }
 
-  async function handleSendMessage(event: FormEvent) {
-    event.preventDefault()
-    const query = draft.trim()
-    if (!query || busy || session?.locked) {
-      return
-    }
-
-    setBusy(true)
-    setChatError(null)
-    setDraft('')
-    try {
-      const response = await kioskClient.sendChatMessage(query)
-      setState((current) => mergeChatSession(current, response.session))
-    } catch (error) {
-      setDraft(query)
-      setChatError(error instanceof Error ? error.message : 'Message failed.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function handleEndChat() {
-    setBusy(true)
-    try {
-      await kioskClient.endChat()
-      setState((current) => (current ? { ...current, active_chat_session: null } : current))
-      setChatExpanded(false)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const cameraStatusText = useMemo(() => {
-    if (offline) return 'Edge API offline'
-    if (!state) return 'Connecting'
-    if (!cameraReady) return 'Camera unavailable'
-    if (session && !session.locked) return 'Chatbot owner tracking'
-    if (session?.locked) return 'Door access active'
-    return 'Continuous access recognition'
-  }, [cameraReady, offline, session, state])
-
   return (
-    <main className="kiosk-shell">
-      <section className="camera-fullscreen">
+    <main className={`kiosk-shell ${accessBorderClass(mode)} ${chatCameraMinimized ? 'has-minimized-camera' : ''}`}>
+      <section className={`camera-fullscreen ${chatCameraMinimized ? 'is-minimized' : ''}`}>
         <video ref={videoRef} className="camera-feed" playsInline muted />
         <FaceBoxes boxes={faceBoxes} layout={videoLayout} />
         <div className="camera-shade" />
-      </section>
-
-      <header className="top-bar">
-        <div className="brand-mark" title={state?.device.device_name ?? 'Door Access Kiosk'}>
-          <Shield size={24} aria-label="Device" />
-        </div>
-        <div className="status-row">
-          <StatusPill online={!offline && cameraReady} label={cameraStatusText} />
-          <StatusPill online={Boolean(syncConnected)} label="Sync" />
-        </div>
-      </header>
-
-      <section className="access-hud">
-        <AccessStatus mode={mode} reason={cameraError} />
       </section>
 
       <button className="chat-launcher" onClick={handleOpenChat} disabled={!cameraReady || offline} title="Chatbot">
@@ -305,50 +239,7 @@ function App() {
               </button>
             </div>
 
-            {!session && !chatVerificationActive && (
-              <div className="chat-empty">
-                <button className="secondary-action" onClick={handleStartChat} disabled={!cameraReady}>
-                  <Video size={22} aria-label="Verify" />
-                </button>
-              </div>
-            )}
-
-            {chatVerificationActive && (
-              <div className="chat-empty">
-                <Video size={44} aria-label="Verifying" />
-              </div>
-            )}
-
-            {session?.locked && (
-              <div className="locked-state">
-                <Lock size={42} aria-label="Locked" />
-                <strong>{absentSecondsRemaining}</strong>
-              </div>
-            )}
-
-            {session && !session.locked && (
-              <>
-                <ChatHistory messages={session.conversation_history} />
-                <form className="chat-input-row" onSubmit={handleSendMessage}>
-                  <input
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    disabled={busy}
-                    maxLength={2000}
-                    aria-label="Chat message"
-                  />
-                  <button type="submit" className="icon-button" disabled={!draft.trim() || busy}>
-                    <Send size={22} aria-label="Send" />
-                  </button>
-                  <button type="button" className="icon-button" disabled title="Voice chat">
-                    <Mic size={22} aria-label="Voice" />
-                  </button>
-                  <button type="button" className="icon-button" onClick={handleEndChat} disabled={busy} title="End chat">
-                    <LogOut size={22} aria-label="End" />
-                  </button>
-                </form>
-              </>
-            )}
+            {session && <ChatHistory messages={session.conversation_history} />}
 
             {chatError && (
               <div className="inline-alert" title={chatError}>
@@ -358,60 +249,14 @@ function App() {
           </div>
         </section>
       )}
-
-      {offline && (
-        <div className="system-banner">
-          <WifiOff size={20} aria-label="Offline" />
-          <button onClick={refreshState}>
-            <RefreshCcw size={18} aria-label="Retry" />
-          </button>
-        </div>
-      )}
     </main>
   )
 }
 
-function StatusPill({ online, label }: { online: boolean; label: string }) {
-  return (
-    <div className={`status-pill ${online ? 'online' : 'offline'}`} title={label}>
-      <span />
-    </div>
-  )
-}
-
-function AccessStatus({
-  mode,
-  reason
-}: {
-  mode: string
-  reason?: string | null
-}) {
-  if (mode === 'access-granted') {
-    return (
-      <div className="access-result granted">
-        <CheckCircle2 size={42} aria-label="Access granted" />
-      </div>
-    )
-  }
-  if (mode === 'access-denied') {
-    return (
-      <div className="access-result denied">
-        <XCircle size={42} aria-label="Access denied" />
-      </div>
-    )
-  }
-  if (reason) {
-    return (
-      <div className="access-result warning">
-        <AlertTriangle size={34} aria-label={reason} />
-      </div>
-    )
-  }
-  return (
-    <div className="access-idle">
-      <DoorOpen size={36} aria-label="Door monitoring" />
-    </div>
-  )
+function accessBorderClass(mode: string) {
+  if (mode === 'access-granted') return 'access-granted-border'
+  if (mode === 'access-denied') return 'access-denied-border'
+  return ''
 }
 
 function ChatHistory({ messages }: { messages: ChatMessage[] }) {
@@ -463,7 +308,7 @@ function mergeAccessAttempt(current: KioskStateResponse | null, attempt: NonNull
 
 function mergeChatSession(current: KioskStateResponse | null, session: NonNullable<KioskStateResponse['active_chat_session']>) {
   if (!current) return current
-  return { ...current, active_chat_session: session }
+  return { ...current, active_chat_session: session, chat_recoverable: false }
 }
 
 async function captureFrame(video: HTMLVideoElement): Promise<Blob | null> {

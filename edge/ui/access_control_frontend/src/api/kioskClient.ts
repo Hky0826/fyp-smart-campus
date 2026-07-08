@@ -65,6 +65,15 @@ export const kioskClient = {
     })
   },
 
+  reopenChatFrame: (frame: Blob) => {
+    const body = new FormData()
+    body.append('file', frame, 'chat-reopen-frame.jpg')
+    return requestJson<ChatPresenceResponse>('/kiosk/chat/reopen/frame', {
+      method: 'POST',
+      body
+    })
+  },
+
   sendChatMessage: (query: string) =>
     requestJson<ChatMessageResponse>('/kiosk/chat/message', {
       method: 'POST',
