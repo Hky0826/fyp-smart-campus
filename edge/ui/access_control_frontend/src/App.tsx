@@ -9,6 +9,41 @@ import type { ChatMessage, KioskStateResponse } from './api/types'
 import { CAMERA_FRAME_INTERVAL_MS } from './app/config'
 import { deriveKioskMode } from './app/kioskStateMachine'
 
+type SpeechRecognitionResultLike = {
+  readonly isFinal: boolean
+  readonly 0: { readonly transcript: string }
+}
+
+type SpeechRecognitionEventLike = Event & {
+  readonly resultIndex: number
+  readonly results: ArrayLike<SpeechRecognitionResultLike>
+}
+
+type SpeechRecognitionErrorEventLike = Event & {
+  readonly error?: string
+}
+
+type SpeechRecognitionLike = EventTarget & {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  onstart: (() => void) | null
+  onend: (() => void) | null
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor
+    webkitSpeechRecognition?: SpeechRecognitionConstructor
+  }
+}
+
 function App() {
   const [state, setState] = useState<KioskStateResponse | null>(null)
   const [nowMs, setNowMs] = useState(Date.now())
@@ -17,12 +52,19 @@ function App() {
   const [cameraReady, setCameraReady] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [chatError, setChatError] = useState<string | null>(null)
+  const [voiceSupported, setVoiceSupported] = useState(true)
+  const [voiceListening, setVoiceListening] = useState(false)
+  const [voiceBusy, setVoiceBusy] = useState(false)
+  const [transcriptPreview, setTranscriptPreview] = useState('')
+  const [optimisticVoiceMessage, setOptimisticVoiceMessage] = useState<ChatMessage | null>(null)
   const [offline, setOffline] = useState(false)
   const [videoLayout, setVideoLayout] = useState({ width: 0, height: 0, videoWidth: 0, videoHeight: 0 })
   const [faceBoxes, setFaceBoxes] = useState<number[][]>([])
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const frameInFlightRef = useRef(false)
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const voiceQueueRef = useRef(Promise.resolve())
 
   const mode = deriveKioskMode(state, {
     chatVerificationActive,
@@ -30,8 +72,52 @@ function App() {
   })
 
   const session = state?.active_chat_session ?? null
-  const chatRecoverable = Boolean(state?.chat_recoverable)
   const chatCameraMinimized = chatExpanded && Boolean(session) && !chatVerificationActive
+
+  const stopVoiceRecognition = useCallback(() => {
+    const recognition = recognitionRef.current
+    recognitionRef.current = null
+    if (recognition) {
+      recognition.onend = null
+      recognition.onerror = null
+      recognition.onresult = null
+      try {
+        recognition.stop()
+      } catch {
+        // Recognition may already be stopped by the browser.
+      }
+    }
+    setVoiceListening(false)
+    setTranscriptPreview('')
+  }, [])
+
+  const sendVoiceQuery = useCallback((query: string) => {
+    const trimmed = query.trim()
+    if (!trimmed) return
+
+    voiceQueueRef.current = voiceQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const pendingMessage: ChatMessage = {
+          role: 'user',
+          content: trimmed,
+          created_at: new Date().toISOString(),
+          citations: []
+        }
+        setOptimisticVoiceMessage(pendingMessage)
+        setVoiceBusy(true)
+        try {
+          const response = await kioskClient.sendChatMessage(trimmed)
+          setState((current) => mergeChatSession(current, response.session))
+          setChatError(null)
+        } catch (error) {
+          setChatError(error instanceof Error ? error.message : 'Chatbot request failed.')
+        } finally {
+          setVoiceBusy(false)
+          setOptimisticVoiceMessage(null)
+        }
+      })
+  }, [])
 
   const refreshState = useCallback(async () => {
     try {
@@ -150,9 +236,10 @@ function App() {
           const presence = await kioskClient.verifyChatPresenceFrame(frame)
           setFaceBoxes(presence.bboxes)
           if (presence.ended) {
-            setState((current) => (current ? { ...current, active_chat_session: null, chat_recoverable: true } : current))
+            setState((current) => (current ? { ...current, active_chat_session: null, chat_recoverable: false } : current))
             setChatExpanded(false)
             setChatError(null)
+            stopVoiceRecognition()
             return
           }
 
@@ -167,18 +254,6 @@ function App() {
             setFaceBoxes(accessResponse.attempt.bboxes)
           }
           return
-        }
-
-        if (chatRecoverable) {
-          const recovery = await kioskClient.reopenChatFrame(frame)
-          setFaceBoxes(recovery.bboxes)
-          const recoverySession = recovery.session
-          if (recovery.owner_present && recoverySession) {
-            setState((current) => mergeChatSession(current, recoverySession))
-            setChatExpanded(true)
-            setChatError(null)
-            return
-          }
         }
 
         const accessResponse = await kioskClient.verifyAccessFrame(frame)
@@ -197,12 +272,108 @@ function App() {
     }, CAMERA_FRAME_INTERVAL_MS)
 
     return () => window.clearInterval(intervalId)
-  }, [cameraReady, chatRecoverable, chatVerificationActive, offline, session])
+  }, [cameraReady, chatVerificationActive, offline, session, stopVoiceRecognition])
+
+  useEffect(() => {
+    if (!chatExpanded || !session || chatVerificationActive) {
+      stopVoiceRecognition()
+      return
+    }
+
+    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition
+    if (!Recognition) {
+      setVoiceSupported(false)
+      return
+    }
+
+    setVoiceSupported(true)
+    const recognition = new Recognition()
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = 'en-US'
+    recognition.onstart = () => setVoiceListening(true)
+    recognition.onend = () => {
+      setVoiceListening(false)
+      if (recognitionRef.current === recognition) {
+        window.setTimeout(() => {
+          if (recognitionRef.current === recognition) {
+            try {
+              recognition.start()
+            } catch {
+              // The browser can reject immediate restarts while it is cleaning up.
+            }
+          }
+        }, 220)
+      }
+    }
+    recognition.onerror = (event) => {
+      if (event.error && !['aborted', 'no-speech'].includes(event.error)) {
+        setChatError(event.error)
+      }
+    }
+    recognition.onresult = (event) => {
+      let finalTranscript = ''
+      let interimTranscript = ''
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index]
+        const transcript = result[0]?.transcript ?? ''
+        if (result.isFinal) {
+          finalTranscript += transcript
+        } else {
+          interimTranscript += transcript
+        }
+      }
+
+      setTranscriptPreview(interimTranscript.trim())
+      if (finalTranscript.trim()) {
+        setTranscriptPreview('')
+        sendVoiceQuery(finalTranscript)
+      }
+    }
+
+    recognitionRef.current = recognition
+    try {
+      recognition.start()
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : 'Voice transcription failed.')
+    }
+
+    return () => {
+      if (recognitionRef.current === recognition) {
+        recognitionRef.current = null
+      }
+      recognition.onend = null
+      recognition.onerror = null
+      recognition.onresult = null
+      try {
+        recognition.stop()
+      } catch {
+        // Recognition may already be stopped by the browser.
+      }
+      setVoiceListening(false)
+      setTranscriptPreview('')
+    }
+  }, [chatExpanded, chatVerificationActive, sendVoiceQuery, session?.session_id, stopVoiceRecognition])
 
   async function handleOpenChat() {
     setChatExpanded(true)
     if (!session && !chatVerificationActive) {
       await handleStartChat()
+    }
+  }
+
+  async function handleExitChat() {
+    stopVoiceRecognition()
+    setChatExpanded(false)
+    setChatVerificationActive(false)
+    setTranscriptPreview('')
+    setOptimisticVoiceMessage(null)
+    try {
+      await kioskClient.endChat()
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : 'Could not end chatbot session.')
+    } finally {
+      setState((current) => (current ? { ...current, active_chat_session: null, chat_recoverable: false } : current))
     }
   }
 
@@ -234,16 +405,32 @@ function App() {
           <div className="chat-window">
             <div className="chat-header">
               <MessageSquare size={24} aria-label="Chatbot" />
-              <button className="icon-button dark" onClick={() => setChatExpanded(false)} title="Collapse chat">
-                <X size={22} aria-label="Close" />
+              <button className="icon-button dark" onClick={handleExitChat} title="Exit chat">
+                <X size={22} aria-label="Exit" />
               </button>
             </div>
 
-            {session && <ChatHistory messages={session.conversation_history} />}
+            {session && (
+              <>
+                <ChatHistory
+                  messages={session.conversation_history}
+                  optimisticMessage={optimisticVoiceMessage}
+                  transcriptPreview={transcriptPreview}
+                />
+                <div
+                  className={`voice-indicator ${voiceListening ? 'is-listening' : ''} ${voiceBusy ? 'is-busy' : ''}`}
+                  aria-hidden="true"
+                >
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </>
+            )}
 
-            {chatError && (
-              <div className="inline-alert" title={chatError}>
-                <AlertTriangle size={22} aria-label={chatError} />
+            {(!voiceSupported || chatError) && (
+              <div className="inline-alert" title={chatError ?? undefined}>
+                <AlertTriangle size={22} aria-label={chatError ?? 'Voice transcription is unavailable'} />
               </div>
             )}
           </div>
@@ -259,14 +446,35 @@ function accessBorderClass(mode: string) {
   return ''
 }
 
-function ChatHistory({ messages }: { messages: ChatMessage[] }) {
-  if (messages.length === 0) {
+function ChatHistory({
+  messages,
+  optimisticMessage,
+  transcriptPreview
+}: {
+  messages: ChatMessage[]
+  optimisticMessage: ChatMessage | null
+  transcriptPreview: string
+}) {
+  const previewMessage: ChatMessage | null = transcriptPreview
+    ? {
+        role: 'user',
+        content: transcriptPreview,
+        created_at: 'voice-preview',
+        citations: []
+      }
+    : null
+  const visibleMessages = [...messages, ...(optimisticMessage ? [optimisticMessage] : []), ...(previewMessage ? [previewMessage] : [])]
+
+  if (visibleMessages.length === 0) {
     return <div className="chat-history empty" />
   }
   return (
     <div className="chat-history">
-      {messages.map((message, index) => (
-        <article key={`${message.created_at}-${index}`} className={`message ${message.role}`}>
+      {visibleMessages.map((message, index) => (
+        <article
+          key={`${message.created_at}-${index}`}
+          className={`message ${message.role} ${message.created_at === 'voice-preview' ? 'pending' : ''}`}
+        >
           <p>{message.content}</p>
         </article>
       ))}

@@ -43,9 +43,9 @@ AccessDecision = Literal["PENDING", "VERIFYING", "GRANTED", "DENIED", "ERROR"]
 
 
 class KioskTimingConfig(BaseModel):
-    owner_missing_grace_seconds: int = Field(default=2)
-    owner_absent_lock_seconds: int = Field(default=2)
-    owner_absent_terminate_seconds: int = Field(default=2)
+    owner_missing_grace_seconds: int = Field(default=10)
+    owner_absent_lock_seconds: int = Field(default=10)
+    owner_absent_terminate_seconds: int = Field(default=10)
     access_result_hold_seconds: int = Field(default=4)
 
 
@@ -217,11 +217,6 @@ class KioskStateStore:
                     self._chat_session.view.presence_state = "OWNER_PRESENT"
                     self._chat_session.view.last_owner_seen_at = now
                     self._chat_session.view.locked = False
-                else:
-                    self._chat_session.owner_absent_since = dt.datetime.now(dt.timezone.utc)
-                    self._chat_session.view.owner_absent_since = now
-                    self._chat_session.view.presence_state = "DIFFERENT_PERSON_PRESENT"
-                    self._chat_session.view.locked = True
 
             return attempt
 
@@ -272,6 +267,7 @@ class KioskStateStore:
     def end_chat_session(self) -> None:
         with self._lock:
             self._chat_session = None
+            self._recoverable_chat_session = None
 
     def append_chat_exchange(
         self,
@@ -349,10 +345,10 @@ class KioskStateStore:
 
             elapsed = (now - self._chat_session.owner_absent_since).total_seconds()
             if elapsed >= self.timings.owner_absent_terminate_seconds:
-                self._recoverable_chat_session = self._chat_session
-                self._recoverable_chat_session.view.owner_absent_since = now_text
-                self._recoverable_chat_session.view.presence_state = "OWNER_LEFT"
-                self._recoverable_chat_session.view.locked = False
+                self._recoverable_chat_session = None
+                self._chat_session.view.owner_absent_since = now_text
+                self._chat_session.view.presence_state = "OWNER_LEFT"
+                self._chat_session.view.locked = False
                 self._chat_session = None
                 return ChatPresenceResponse(owner_present=False, ended=True, bboxes=frame_bboxes)
 

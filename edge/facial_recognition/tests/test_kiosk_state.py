@@ -7,7 +7,7 @@ from edge.facial_recognition.src.pipelines.access_audio import EdgeAuthToken
 
 
 class KioskStateTests(unittest.TestCase):
-    def test_different_access_user_locks_chat_session_and_hides_sensitive_view(self):
+    def test_different_access_user_does_not_lock_chat_session_before_absence_timeout(self):
         store = KioskStateStore(RuntimeConfig(sync_device_id="door-1", sync_device_name="Door 1"))
         token = EdgeAuthToken(
             access_token="secret",
@@ -33,13 +33,13 @@ class KioskStateTests(unittest.TestCase):
         state = store.state("ok")
 
         self.assertIsNotNone(state.active_chat_session)
-        self.assertTrue(state.active_chat_session.locked)
-        self.assertEqual(state.active_chat_session.presence_state, "DIFFERENT_PERSON_PRESENT")
-        self.assertIsNone(state.active_chat_session.username)
-        self.assertIsNone(state.active_chat_session.full_name)
-        self.assertEqual(state.active_chat_session.roles, [])
-        self.assertEqual(state.active_chat_session.conversation_history, [])
-        self.assertIsNotNone(state.active_chat_session.owner_absent_since)
+        self.assertFalse(state.active_chat_session.locked)
+        self.assertEqual(state.active_chat_session.presence_state, "OWNER_PRESENT")
+        self.assertEqual(state.active_chat_session.username, "owner")
+        self.assertEqual(state.active_chat_session.full_name, "Original Owner")
+        self.assertEqual(state.active_chat_session.roles, ["STAFF"])
+        self.assertEqual(len(state.active_chat_session.conversation_history), 3)
+        self.assertIsNone(state.active_chat_session.owner_absent_since)
 
     def test_owner_presence_expires_session_after_absence_timeout(self):
         store = KioskStateStore(
@@ -66,7 +66,7 @@ class KioskStateTests(unittest.TestCase):
 
         self.assertTrue(expired.ended)
         self.assertIsNone(store.state("ok").active_chat_session)
-        self.assertTrue(store.state("ok").chat_recoverable)
+        self.assertFalse(store.state("ok").chat_recoverable)
 
 
 if __name__ == "__main__":
