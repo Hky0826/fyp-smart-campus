@@ -55,6 +55,8 @@ export interface AccessAttemptView {
   reason?: string | null
   similarity?: number | null
   face_count: number
+  bbox?: number[] | null
+  bboxes: number[][]
   created_at: string
   completed_at?: string | null
 }
@@ -72,6 +74,7 @@ export interface AccessRequestResponse {
 
 export interface ChatVerifyResponse {
   session: ChatSessionView
+  bboxes: number[][]
 }
 
 export interface ChatMessageResponse {
@@ -88,4 +91,5 @@ export interface ChatPresenceResponse {
   session?: ChatSessionView | null
   owner_present: boolean
   ended: boolean
+  bboxes: number[][]
 }

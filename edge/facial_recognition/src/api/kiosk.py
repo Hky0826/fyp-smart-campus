@@ -90,6 +90,8 @@ class AccessAttemptView(BaseModel):
     reason: Optional[str] = None
     similarity: Optional[float] = None
     face_count: int = 0
+    bbox: Optional[list[int]] = None
+    bboxes: list[list[int]] = Field(default_factory=list)
     created_at: str
     completed_at: Optional[str] = None
 
@@ -107,12 +109,14 @@ class AccessRequestResponse(BaseModel):
 
 class ChatVerifyResponse(BaseModel):
     session: ChatSessionView
+    bboxes: list[list[int]] = Field(default_factory=list)
 
 
 class ChatPresenceResponse(BaseModel):
     session: Optional[ChatSessionView] = None
     owner_present: bool
     ended: bool = False
+    bboxes: list[list[int]] = Field(default_factory=list)
 
 
 class ChatMessageRequest(BaseModel):
@@ -195,6 +199,8 @@ class KioskStateStore:
             attempt.reason = None if granted else str(result.get("reason") or "Access denied")
             attempt.similarity = _optional_float(result.get("similarity"))
             attempt.face_count = int(result.get("face_count") or 0)
+            attempt.bbox = _coerce_bbox(result.get("bbox"))
+            attempt.bboxes = _coerce_bboxes(result.get("bboxes"), attempt.bbox)
             attempt.completed_at = now
             self._access_attempt = attempt
 
@@ -287,12 +293,13 @@ class KioskStateStore:
                 return None
             return self._chat_session.view.authenticated_user_id
 
-    def update_owner_presence(self, owner_present: bool) -> ChatPresenceResponse:
+    def update_owner_presence(self, owner_present: bool, bboxes: list[list[int]] | None = None) -> ChatPresenceResponse:
         now = dt.datetime.now(dt.timezone.utc)
         now_text = now.isoformat()
+        frame_bboxes = bboxes or []
         with self._lock:
             if self._chat_session is None:
-                return ChatPresenceResponse(owner_present=False, ended=True)
+                return ChatPresenceResponse(owner_present=False, ended=True, bboxes=frame_bboxes)
 
             if owner_present:
                 self._chat_session.owner_absent_since = None
@@ -304,6 +311,7 @@ class KioskStateStore:
                     session=self._safe_chat_view_locked(),
                     owner_present=True,
                     ended=False,
+                    bboxes=frame_bboxes,
                 )
 
             if self._chat_session.owner_absent_since is None:
@@ -313,7 +321,7 @@ class KioskStateStore:
             elapsed = (now - self._chat_session.owner_absent_since).total_seconds()
             if elapsed >= self.timings.owner_absent_terminate_seconds:
                 self._chat_session = None
-                return ChatPresenceResponse(owner_present=False, ended=True)
+                return ChatPresenceResponse(owner_present=False, ended=True, bboxes=frame_bboxes)
 
             self._chat_session.view.presence_state = "OWNER_TEMPORARILY_MISSING"
             self._chat_session.view.locked = True
@@ -321,6 +329,7 @@ class KioskStateStore:
                 session=self._safe_chat_view_locked(),
                 owner_present=False,
                 ended=False,
+                bboxes=frame_bboxes,
             )
 
     def _safe_chat_view_locked(self) -> ChatSessionView | None:
@@ -401,7 +410,7 @@ def create_kiosk_router(
                 detail="Cloud authentication is unavailable. Try again when connectivity is restored.",
             ) from exc
 
-        return ChatVerifyResponse(session=store.start_chat_session(token))
+        return ChatVerifyResponse(session=store.start_chat_session(token), bboxes=_result_bboxes(result))
 
     @router.post("/chat/presence/frame", response_model=ChatPresenceResponse)
     async def verify_chat_owner_presence(file: UploadFile = File(...)) -> ChatPresenceResponse:
@@ -417,7 +426,7 @@ def create_kiosk_router(
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
         owner_present = bool(result.get("access_granted")) and _optional_int(result.get("user_id")) == owner_user_id
-        return store.update_owner_presence(owner_present)
+        return store.update_owner_presence(owner_present, _result_bboxes(result))
 
     @router.post("/chat/message", response_model=ChatMessageResponse)
     def send_chat_message(body: ChatMessageRequest) -> ChatMessageResponse:
@@ -519,3 +528,28 @@ def _optional_float(value: Any) -> float | None:
         return None if value is None else float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_bbox(value: Any) -> list[int] | None:
+    if not isinstance(value, list) or len(value) < 4:
+        return None
+    try:
+        return [int(value[0]), int(value[1]), int(value[2]), int(value[3])]
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_bboxes(value: Any, fallback: list[int] | None = None) -> list[list[int]]:
+    boxes: list[list[int]] = []
+    if isinstance(value, list):
+        for item in value:
+            box = _coerce_bbox(item)
+            if box is not None:
+                boxes.append(box)
+    if not boxes and fallback is not None:
+        boxes.append(fallback)
+    return boxes
+
+
+def _result_bboxes(result: dict[str, Any]) -> list[list[int]]:
+    return _coerce_bboxes(result.get("bboxes"), _coerce_bbox(result.get("bbox")))

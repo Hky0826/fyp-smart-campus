@@ -122,11 +122,14 @@ button:disabled {
 }
 
 .status-pill {
+  width: 40px;
+  height: 40px;
   min-height: 40px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  padding: 0 14px;
+  padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.58);
@@ -217,6 +220,22 @@ button:disabled {
   font-size: clamp(1.35rem, 3.5vw, 2.1rem);
 }
 
+.face-box-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.face-box {
+  position: absolute;
+  border: 3px solid #5eead4;
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.85),
+    0 0 24px rgba(94, 234, 212, 0.28);
+}
+
 .access-result.granted {
   border-color: rgba(34, 197, 94, 0.42);
   background: rgba(20, 83, 45, 0.82);
@@ -240,7 +259,9 @@ button:disabled {
   right: clamp(18px, 3vw, 32px);
   bottom: clamp(18px, 3vw, 32px);
   z-index: 8;
-  min-width: 154px;
+  width: 64px;
+  height: 64px;
+  min-width: 64px;
   min-height: 64px;
   border: 0;
   border-radius: 999px;
@@ -248,7 +269,7 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 0 22px;
+  padding: 0;
   background: #f8fafc;
   color: var(--ink);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
@@ -265,6 +286,12 @@ button:disabled {
   backdrop-filter: blur(8px);
 }
 
+.chat-overlay.is-verifying {
+  background: rgba(2, 6, 23, 0.12);
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
 .chat-window {
   width: min(980px, 100%);
   height: min(760px, 100%);
@@ -277,6 +304,24 @@ button:disabled {
   background: var(--panel);
   color: var(--ink);
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
+}
+
+.chat-overlay.is-verifying .chat-window {
+  width: 116px;
+  height: 116px;
+  min-height: 116px;
+  margin: auto;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.72);
+  color: white;
+  pointer-events: auto;
+}
+
+.chat-overlay.is-verifying .chat-header,
+.chat-overlay.is-verifying .inline-alert {
+  display: none;
 }
 
 .chat-header {
@@ -414,9 +459,11 @@ button:disabled {
 
 .inline-alert {
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 12px;
   background: #fee2e2;
   color: #7f1d1d;
+  display: grid;
+  place-items: center;
 }
 
 .system-banner {
@@ -463,9 +510,9 @@ button:disabled {
   }
 
   .chat-launcher {
-    left: 18px;
+    left: auto;
     right: 18px;
-    width: auto;
+    width: 64px;
   }
 
   .chat-overlay {
