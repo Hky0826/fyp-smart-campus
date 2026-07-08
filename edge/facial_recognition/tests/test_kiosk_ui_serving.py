@@ -24,6 +24,7 @@ class KioskUiServingTests(unittest.TestCase):
                 client = TestClient(api_main.app)
                 page = client.get("/ui/")
                 asset = client.get("/ui/assets/app.js")
+                legacy_asset = client.get("/assets/app.js")
             finally:
                 api_main._KIOSK_UI_DIST = old_dist
                 api_main._KIOSK_UI_INDEX = old_index
@@ -32,6 +33,8 @@ class KioskUiServingTests(unittest.TestCase):
         self.assertIn("Kiosk UI", page.text)
         self.assertEqual(asset.status_code, 200)
         self.assertIn("console.log", asset.text)
+        self.assertEqual(legacy_asset.status_code, 200)
+        self.assertIn("console.log", legacy_asset.text)
 
 
 if __name__ == "__main__":

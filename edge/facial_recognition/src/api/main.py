@@ -131,6 +131,20 @@ def kiosk_ui(full_path: str = ""):
     return FileResponse(_KIOSK_UI_INDEX)
 
 
+@app.get("/assets/{full_path:path}", include_in_schema=False)
+def kiosk_legacy_assets(full_path: str):
+    """Serve assets for older Vite builds that used the default root base."""
+    if not _KIOSK_UI_INDEX.exists():
+        raise HTTPException(status_code=404, detail="Kiosk UI bundle not found.")
+
+    candidate = (_KIOSK_UI_DIST / "assets" / full_path).resolve()
+    assets_root = (_KIOSK_UI_DIST / "assets").resolve()
+    if _is_path_inside(candidate, assets_root) and candidate.is_file():
+        return FileResponse(candidate)
+
+    raise HTTPException(status_code=404, detail="Asset not found.")
+
+
 def _is_path_inside(path: Path, parent: Path) -> bool:
     try:
         path.relative_to(parent)
