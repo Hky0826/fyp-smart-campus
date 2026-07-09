@@ -107,6 +107,31 @@ Useful environment variables:
 | `EDGE_GUI_VOICE_RECORDING_MS` | `5500` | Audio chunk duration |
 | `EDGE_GUI_VOICE_RESTART_DELAY_MS` | `250` | Delay between audio chunks |
 | `EDGE_GUI_TTS_OUTPUT_SAMPLE_RATE` | `24000` | Cloud PCM playback rate |
+| `EDGE_GUI_QT_BACKEND` | `software` on Linux | Qt Quick scene graph backend |
+| `EDGE_GUI_QPA_PLATFORM` | unset | Optional Qt platform override, for example `xcb` |
+
+On i.MX/embedded Linux boards, the GUI defaults Qt Quick to the software scene
+graph to avoid EGL/OpenGL context failures such as:
+
+```text
+QEGLPlatformContext: Failed to create context: 3004
+Failed to initialize graphics backend for OpenGL.
+```
+
+To explicitly force the same setting from the shell:
+
+```bash
+export QT_QUICK_BACKEND=software
+python3 -m edge.ui.access_control_gui.main
+```
+
+If the device image has a working Qt/OpenGL stack, you can opt back into the
+hardware path:
+
+```bash
+export EDGE_GUI_QT_BACKEND=opengl
+python3 -m edge.ui.access_control_gui.main
+```
 
 ## Linux Autostart Example
 
@@ -120,7 +145,7 @@ After=network-online.target edge-face-api.service
 [Service]
 WorkingDirectory=/path/to/Code_FYP
 Environment=EDGE_GUI_API_BASE_URL=http://127.0.0.1:8080
-Environment=QT_QPA_PLATFORM=xcb
+Environment=QT_QUICK_BACKEND=software
 ExecStart=/usr/bin/python3 -m edge.ui.access_control_gui.main
 Restart=always
 RestartSec=3

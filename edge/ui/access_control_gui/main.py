@@ -6,9 +6,10 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QUrl, Qt
+from PySide6.QtCore import QCoreApplication, QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuick import QQuickWindow
 
 from .controllers.access_controller import AccessController
 from .controllers.api_client import KioskApiClient
@@ -17,10 +18,21 @@ from .controllers.chatbot_controller import ChatbotController
 from .controllers.device_controller import DeviceController
 
 
+def _configure_qt_runtime() -> None:
+    """Choose a conservative Qt Quick backend before the GUI is created."""
+    if "EDGE_GUI_QPA_PLATFORM" in os.environ:
+        os.environ.setdefault("QT_QPA_PLATFORM", os.environ["EDGE_GUI_QPA_PLATFORM"])
+
+    if sys.platform.startswith("linux"):
+        backend = os.getenv("EDGE_GUI_QT_BACKEND", "software")
+        os.environ.setdefault("QT_QUICK_BACKEND", backend)
+        QQuickWindow.setSceneGraphBackend(backend)
+
+
 def main() -> int:
+    _configure_qt_runtime()
     QCoreApplication.setApplicationName("Edge Access Control")
     QCoreApplication.setOrganizationName("EdgeMind")
-    QGuiApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
 
     app = QGuiApplication(sys.argv)
     engine = QQmlApplicationEngine()
@@ -58,4 +70,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
