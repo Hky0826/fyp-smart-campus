@@ -108,6 +108,9 @@ class AudioInteractionPipeline:
             response = self.cloud.send_audio(recording_path)
 
             # Step 3: Handle response
+            if response.transcribed_input:
+                logger.info("Transcribed input: %s", response.transcribed_input)
+
             if response.status == "blocked":
                 logger.info("Query blocked: %s", response.error_message or "potential injection detected")
                 if response.text:

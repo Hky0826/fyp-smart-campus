@@ -1,6 +1,7 @@
 import { API_BASE_URL } from '../app/config'
 import type {
   AccessRequestResponse,
+  ChatAudioResponse,
   ChatMessageResponse,
   ChatPresenceResponse,
   ChatVerifyResponse,
@@ -70,6 +71,15 @@ export const kioskClient = {
       method: 'POST',
       body: JSON.stringify({ query })
     }),
+
+  sendChatAudio: (audio: Blob) => {
+    const body = new FormData()
+    body.append('audio', audio, `chat-audio.${audio.type.includes('webm') ? 'webm' : 'wav'}`)
+    return requestJson<ChatAudioResponse>('/kiosk/chat/audio', {
+      method: 'POST',
+      body
+    })
+  },
 
   lockChat: () =>
     requestJson<ChatVerifyResponse>('/kiosk/chat/lock', {

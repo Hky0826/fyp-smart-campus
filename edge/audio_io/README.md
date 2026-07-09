@@ -22,15 +22,17 @@ handles only the physical I/O:
    finishes speaking.
 2. **Upload**: Send the recorded WAV file as a multipart HTTP POST to the cloud
    audio API endpoint.
-3. **Receive**: Parse the JSON response which contains validated text, optional
-   base64-encoded PCM audio (24 kHz mono), cited sources, and a status field.
+3. **Receive**: Parse the JSON response which contains the cloud transcription,
+   validated text, optional base64-encoded PCM audio (24 kHz mono), cited
+   sources, and a status field.
 4. **Play**: Decode the base64 audio and play it through the default output
    device. Linux uses ALSA (`aplay`) by default; other platforms use
    sounddevice.
 
-The cloud side (in `cloud/RagChatbot/`) handles audio query extraction, prompt
-injection detection, RBAC-filtered retrieval, response generation via Gemini,
-and response validation.
+The cloud side (in `cloud/RagChatbot/`) handles audio transcription/query
+extraction, prompt injection detection, Gemini Embedding 2 retrieval,
+Gemini 3.1 Lite response generation, Gemini 2.5 Flash TTS, and response
+validation.
 
 ## Folder Contents
 
@@ -197,6 +199,7 @@ Success response (HTTP 200):
 
 ```json
 {
+  "transcribed_input": "When is the library open?",
   "text_response": "The library is open from 8am to 10pm on weekdays.",
   "audio_response": "<base64-encoded 24kHz mono PCM>",
   "sources": [
@@ -222,9 +225,9 @@ Success response (HTTP 200):
 | Status | Meaning | Audio Response | Sources |
 |--------|---------|----------------|---------|
 | `ok` | Normal success | base64 PCM audio | cited chunks |
-| `blocked` | Prompt injection detected in extracted query | `null` | `[]` |
-| `no_access` | No RBAC access to matching documents | `null` | `[]` |
-| `auth_required` | JWT missing/invalid for protected content | `null` | `[]` |
+| `blocked` | Prompt injection detected in extracted query | base64 PCM audio for the safe refusal when available | `[]` |
+| `no_access` | No RBAC access to matching documents | base64 PCM audio when available | `[]` |
+| `auth_required` | JWT missing/invalid for protected content | base64 PCM audio when available | `[]` |
 | `validation_failed` | Response text/citations failed validation | `null` | `[]` |
 | `error` | Internal failure (Gemini, audio decode, etc.) | `null` | `[]` |
 
@@ -253,7 +256,7 @@ dependencies:
 | Aspect | Legacy (`audio_io_legacy`) | New (`audio_io`) |
 |--------|---------------------------|------------------|
 | Speech-to-text | Local whisper.cpp | Cloud Gemini (audio query extraction) |
-| Text-to-speech | Local Piper TTS | Cloud Gemini (response generation) |
+| Text-to-speech | Local Piper TTS | Cloud Gemini 2.5 Flash TTS |
 | Cloud protocol | SSE streaming | One-shot HTTP multipart |
 | Model downloads | Required (whisper + Piper) | None |
 | Files | 12 Python files + README | 7 Python files + README |

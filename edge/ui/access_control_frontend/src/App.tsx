@@ -3,46 +3,16 @@ import {
   MessageSquare,
   X
 } from 'lucide-react'
+import type { MutableRefObject } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { kioskClient, subscribeToKioskState } from './api/kioskClient'
 import type { ChatMessage, KioskStateResponse } from './api/types'
 import { CAMERA_FRAME_INTERVAL_MS } from './app/config'
 import { deriveKioskMode } from './app/kioskStateMachine'
 
-type SpeechRecognitionResultLike = {
-  readonly isFinal: boolean
-  readonly 0: { readonly transcript: string }
-}
-
-type SpeechRecognitionEventLike = Event & {
-  readonly resultIndex: number
-  readonly results: ArrayLike<SpeechRecognitionResultLike>
-}
-
-type SpeechRecognitionErrorEventLike = Event & {
-  readonly error?: string
-}
-
-type SpeechRecognitionLike = EventTarget & {
-  continuous: boolean
-  interimResults: boolean
-  lang: string
-  onstart: (() => void) | null
-  onend: (() => void) | null
-  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null
-  start: () => void
-  stop: () => void
-}
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
-
-declare global {
-  interface Window {
-    SpeechRecognition?: SpeechRecognitionConstructor
-    webkitSpeechRecognition?: SpeechRecognitionConstructor
-  }
-}
+const VOICE_RECORDING_MS = 5500
+const VOICE_RESTART_DELAY_MS = 250
+const TTS_OUTPUT_SAMPLE_RATE = 24000
 
 function App() {
   const [state, setState] = useState<KioskStateResponse | null>(null)
@@ -56,14 +26,17 @@ function App() {
   const [voiceListening, setVoiceListening] = useState(false)
   const [voiceBusy, setVoiceBusy] = useState(false)
   const [transcriptPreview, setTranscriptPreview] = useState('')
-  const [optimisticVoiceMessage, setOptimisticVoiceMessage] = useState<ChatMessage | null>(null)
   const [offline, setOffline] = useState(false)
   const [videoLayout, setVideoLayout] = useState({ width: 0, height: 0, videoWidth: 0, videoHeight: 0 })
   const [faceBoxes, setFaceBoxes] = useState<number[][]>([])
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const frameInFlightRef = useRef(false)
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const micStreamRef = useRef<MediaStream | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const voiceLoopTimeoutRef = useRef<number | null>(null)
+  const voiceActiveRef = useRef(false)
+  const audioContextRef = useRef<AudioContext | null>(null)
   const voiceQueueRef = useRef(Promise.resolve())
 
   const mode = deriveKioskMode(state, {
@@ -74,47 +47,51 @@ function App() {
   const session = state?.active_chat_session ?? null
   const chatCameraMinimized = chatExpanded && Boolean(session) && !chatVerificationActive
 
-  const stopVoiceRecognition = useCallback(() => {
-    const recognition = recognitionRef.current
-    recognitionRef.current = null
-    if (recognition) {
-      recognition.onend = null
-      recognition.onerror = null
-      recognition.onresult = null
+  const stopVoiceRecording = useCallback(() => {
+    voiceActiveRef.current = false
+    if (voiceLoopTimeoutRef.current !== null) {
+      window.clearTimeout(voiceLoopTimeoutRef.current)
+      voiceLoopTimeoutRef.current = null
+    }
+
+    const recorder = mediaRecorderRef.current
+    mediaRecorderRef.current = null
+    if (recorder) {
+      recorder.ondataavailable = null
+      recorder.onerror = null
+      recorder.onstop = null
       try {
-        recognition.stop()
+        if (recorder.state !== 'inactive') {
+          recorder.stop()
+        }
       } catch {
-        // Recognition may already be stopped by the browser.
+        // Recorder may already be stopped by the browser.
       }
     }
+    micStreamRef.current?.getTracks().forEach((track) => track.stop())
+    micStreamRef.current = null
     setVoiceListening(false)
     setTranscriptPreview('')
   }, [])
 
-  const sendVoiceQuery = useCallback((query: string) => {
-    const trimmed = query.trim()
-    if (!trimmed) return
-
+  const sendVoiceAudio = useCallback((audio: Blob) => {
+    if (audio.size < 1024) return
     voiceQueueRef.current = voiceQueueRef.current
       .catch(() => undefined)
       .then(async () => {
-        const pendingMessage: ChatMessage = {
-          role: 'user',
-          content: trimmed,
-          created_at: new Date().toISOString(),
-          citations: []
-        }
-        setOptimisticVoiceMessage(pendingMessage)
         setVoiceBusy(true)
         try {
-          const response = await kioskClient.sendChatMessage(trimmed)
+          const response = await kioskClient.sendChatAudio(audio)
           setState((current) => mergeChatSession(current, response.session))
+          setTranscriptPreview('')
+          if (response.audio_response) {
+            await playPcmBase64(response.audio_response, audioContextRef)
+          }
           setChatError(null)
         } catch (error) {
-          setChatError(error instanceof Error ? error.message : 'Chatbot request failed.')
+          setChatError(error instanceof Error ? error.message : 'Audio chatbot request failed.')
         } finally {
           setVoiceBusy(false)
-          setOptimisticVoiceMessage(null)
         }
       })
   }, [])
@@ -239,7 +216,7 @@ function App() {
             setState((current) => (current ? { ...current, active_chat_session: null, chat_recoverable: false } : current))
             setChatExpanded(false)
             setChatError(null)
-            stopVoiceRecognition()
+            stopVoiceRecording()
             return
           }
 
@@ -272,88 +249,85 @@ function App() {
     }, CAMERA_FRAME_INTERVAL_MS)
 
     return () => window.clearInterval(intervalId)
-  }, [cameraReady, chatVerificationActive, offline, session, stopVoiceRecognition])
+  }, [cameraReady, chatVerificationActive, offline, session, stopVoiceRecording])
 
   useEffect(() => {
     if (!chatExpanded || !session || chatVerificationActive) {
-      stopVoiceRecognition()
+      stopVoiceRecording()
       return
     }
 
-    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition
-    if (!Recognition) {
+    const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices)
+    if (!getUserMedia || typeof MediaRecorder === 'undefined') {
       setVoiceSupported(false)
       return
     }
 
+    let cancelled = false
     setVoiceSupported(true)
-    const recognition = new Recognition()
-    recognition.continuous = true
-    recognition.interimResults = true
-    recognition.lang = 'en-US'
-    recognition.onstart = () => setVoiceListening(true)
-    recognition.onend = () => {
-      setVoiceListening(false)
-      if (recognitionRef.current === recognition) {
-        window.setTimeout(() => {
-          if (recognitionRef.current === recognition) {
-            try {
-              recognition.start()
-            } catch {
-              // The browser can reject immediate restarts while it is cleaning up.
+
+    async function startVoiceLoop() {
+      try {
+        const micStream = await getUserMedia({ audio: true, video: false })
+        if (cancelled) {
+          micStream.getTracks().forEach((track) => track.stop())
+          return
+        }
+
+        micStreamRef.current = micStream
+        voiceActiveRef.current = true
+
+        const recordOnce = () => {
+          if (!voiceActiveRef.current || !micStreamRef.current) return
+
+          const chunks: Blob[] = []
+          const options = pickAudioRecorderOptions()
+          const recorder = options ? new MediaRecorder(micStreamRef.current, options) : new MediaRecorder(micStreamRef.current)
+          mediaRecorderRef.current = recorder
+
+          recorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              chunks.push(event.data)
             }
           }
-        }, 220)
-      }
-    }
-    recognition.onerror = (event) => {
-      if (event.error && !['aborted', 'no-speech'].includes(event.error)) {
-        setChatError(event.error)
-      }
-    }
-    recognition.onresult = (event) => {
-      let finalTranscript = ''
-      let interimTranscript = ''
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const result = event.results[index]
-        const transcript = result[0]?.transcript ?? ''
-        if (result.isFinal) {
-          finalTranscript += transcript
-        } else {
-          interimTranscript += transcript
+          recorder.onerror = () => {
+            setChatError('Microphone recording failed.')
+          }
+          recorder.onstop = () => {
+            if (!voiceActiveRef.current) return
+
+            setVoiceListening(false)
+            const mimeType = recorder.mimeType || 'audio/webm'
+            const audioBlob = new Blob(chunks, { type: mimeType })
+            if (audioBlob.size > 0) {
+              sendVoiceAudio(audioBlob)
+            }
+            voiceLoopTimeoutRef.current = window.setTimeout(recordOnce, VOICE_RESTART_DELAY_MS)
+          }
+
+          recorder.start()
+          setVoiceListening(true)
+          voiceLoopTimeoutRef.current = window.setTimeout(() => {
+            if (recorder.state !== 'inactive') {
+              recorder.stop()
+            }
+          }, VOICE_RECORDING_MS)
         }
-      }
 
-      setTranscriptPreview(interimTranscript.trim())
-      if (finalTranscript.trim()) {
-        setTranscriptPreview('')
-        sendVoiceQuery(finalTranscript)
+        recordOnce()
+      } catch (error) {
+        setVoiceSupported(false)
+        setChatError(error instanceof Error ? error.message : 'Microphone is unavailable.')
       }
     }
 
-    recognitionRef.current = recognition
-    try {
-      recognition.start()
-    } catch (error) {
-      setChatError(error instanceof Error ? error.message : 'Voice transcription failed.')
-    }
+    startVoiceLoop()
 
     return () => {
-      if (recognitionRef.current === recognition) {
-        recognitionRef.current = null
-      }
-      recognition.onend = null
-      recognition.onerror = null
-      recognition.onresult = null
-      try {
-        recognition.stop()
-      } catch {
-        // Recognition may already be stopped by the browser.
-      }
-      setVoiceListening(false)
-      setTranscriptPreview('')
+      cancelled = true
+      stopVoiceRecording()
     }
-  }, [chatExpanded, chatVerificationActive, sendVoiceQuery, session?.session_id, stopVoiceRecognition])
+  }, [chatExpanded, chatVerificationActive, sendVoiceAudio, session?.session_id, stopVoiceRecording])
 
   async function handleOpenChat() {
     setChatExpanded(true)
@@ -363,11 +337,10 @@ function App() {
   }
 
   async function handleExitChat() {
-    stopVoiceRecognition()
+    stopVoiceRecording()
     setChatExpanded(false)
     setChatVerificationActive(false)
     setTranscriptPreview('')
-    setOptimisticVoiceMessage(null)
     try {
       await kioskClient.endChat()
     } catch (error) {
@@ -384,7 +357,7 @@ function App() {
     try {
       await kioskClient.stopChatAudio()
     } catch {
-      // Browser text chat can still start even if there is no audio output to stop.
+      // Browser audio chat can still start even if there is no audio output to stop.
     }
   }
 
@@ -414,7 +387,6 @@ function App() {
               <>
                 <ChatHistory
                   messages={session.conversation_history}
-                  optimisticMessage={optimisticVoiceMessage}
                   transcriptPreview={transcriptPreview}
                 />
                 <div
@@ -448,11 +420,9 @@ function accessBorderClass(mode: string) {
 
 function ChatHistory({
   messages,
-  optimisticMessage,
   transcriptPreview
 }: {
   messages: ChatMessage[]
-  optimisticMessage: ChatMessage | null
   transcriptPreview: string
 }) {
   const previewMessage: ChatMessage | null = transcriptPreview
@@ -463,7 +433,7 @@ function ChatHistory({
         citations: []
       }
     : null
-  const visibleMessages = [...messages, ...(optimisticMessage ? [optimisticMessage] : []), ...(previewMessage ? [previewMessage] : [])]
+  const visibleMessages = [...messages, ...(previewMessage ? [previewMessage] : [])]
 
   if (visibleMessages.length === 0) {
     return <div className="chat-history empty" />
@@ -532,6 +502,52 @@ async function captureFrame(video: HTMLVideoElement): Promise<Blob | null> {
   }
   context.drawImage(video, 0, 0, canvas.width, canvas.height)
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82))
+}
+
+function pickAudioRecorderOptions(): MediaRecorderOptions | undefined {
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/wav'
+  ]
+  const mimeType = candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate))
+  return mimeType ? { mimeType } : undefined
+}
+
+async function playPcmBase64(base64Pcm: string, audioContextRef: MutableRefObject<AudioContext | null>) {
+  const binary = window.atob(base64Pcm)
+  const pcm = new Int16Array(binary.length / 2)
+  for (let index = 0; index < pcm.length; index += 1) {
+    const lo = binary.charCodeAt(index * 2)
+    const hi = binary.charCodeAt(index * 2 + 1)
+    pcm[index] = (hi << 8) | lo
+  }
+
+  const AudioContextCtor = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!AudioContextCtor) {
+    throw new Error('Audio playback is unavailable in this browser.')
+  }
+
+  const context = audioContextRef.current ?? new AudioContextCtor({ sampleRate: TTS_OUTPUT_SAMPLE_RATE })
+  audioContextRef.current = context
+  if (context.state === 'suspended') {
+    await context.resume()
+  }
+
+  const buffer = context.createBuffer(1, pcm.length, TTS_OUTPUT_SAMPLE_RATE)
+  const channel = buffer.getChannelData(0)
+  for (let index = 0; index < pcm.length; index += 1) {
+    channel[index] = Math.max(-1, Math.min(1, pcm[index] / 32768))
+  }
+
+  const source = context.createBufferSource()
+  source.buffer = buffer
+  source.connect(context.destination)
+  await new Promise<void>((resolve) => {
+    source.onended = () => resolve()
+    source.start()
+  })
 }
 
 function updateVideoLayout(video: HTMLVideoElement, setLayout: (layout: { width: number; height: number; videoWidth: number; videoHeight: number }) => void) {

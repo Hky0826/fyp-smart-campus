@@ -46,6 +46,7 @@ class CloudChatCredentials:
 class AudioResponseData:
     """Parsed response from the cloud audio API."""
 
+    transcribed_input: Optional[str] = None
     text: Optional[str] = None
     audio_bytes: Optional[bytes] = None  # decoded from base64
     sources: list = field(default_factory=list)
@@ -179,6 +180,7 @@ class CloudAudioClient:
             )
 
         # Extract fields matching the AudioChatResponse schema
+        transcribed_input = payload.get("transcribed_input")
         text = payload.get("text_response")
         audio_b64 = payload.get("audio_response")
         sources = payload.get("sources", [])
@@ -197,6 +199,7 @@ class CloudAudioClient:
                 logger.warning("Failed to decode base64 audio response: %s", exc)
 
         return AudioResponseData(
+            transcribed_input=transcribed_input,
             text=text,
             audio_bytes=audio_bytes,
             sources=sources,

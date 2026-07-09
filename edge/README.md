@@ -5,7 +5,7 @@ The edge code is split into independent runtime areas:
 ```text
 edge/
   facial_recognition/   Hailo face-recognition, access-control, surveillance, sync, and local API code
-  audio_io/             Spacebar activation, recording, whisper.cpp STT, cloud streaming, Piper TTS, and playback
+  audio_io/             Spacebar activation, recording, cloud Gemini transcription/RAG/TTS, and playback
   README.md             This folder overview
 ```
 

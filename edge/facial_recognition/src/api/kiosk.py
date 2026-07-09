@@ -135,6 +135,19 @@ class ChatMessageResponse(BaseModel):
     query_id: Optional[int] = None
 
 
+class ChatAudioResponse(BaseModel):
+    session: ChatSessionView
+    transcribed_input: Optional[str] = None
+    answer: str
+    audio_response: Optional[str] = None
+    citations: list[dict[str, Any]] = Field(default_factory=list)
+    access_granted: bool
+    status: str
+    status_message: Optional[str] = None
+    response_time_ms: Optional[int] = None
+    query_id: Optional[int] = None
+
+
 @dataclass
 class _StoredChatSession:
     view: ChatSessionView
@@ -516,6 +529,55 @@ def create_kiosk_router(
             citations=citations,
             access_granted=bool(response.get("access_granted")),
             status_message=response.get("status_message"),
+            response_time_ms=response.get("response_time_ms"),
+            query_id=response.get("query_id"),
+        )
+
+    @router.post("/chat/audio", response_model=ChatAudioResponse)
+    async def send_chat_audio(audio: UploadFile = File(...)) -> ChatAudioResponse:
+        if audio.content_type and not audio.content_type.startswith("audio/"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Expected an audio file, got {audio.content_type}.",
+            )
+
+        token = store.current_token()
+        audio_bytes = await audio.read()
+        if not audio_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded audio file is empty.",
+            )
+
+        try:
+            response = chatbot_client().audio_chat(
+                audio_bytes=audio_bytes,
+                mime_type=audio.content_type or "audio/webm",
+                jwt_token=token.access_token if token else None,
+                device_id=runtime_config().sync_device_id,
+                session_id=token.session_id if token else None,
+            )
+        except ChatbotClientError as exc:
+            status_code = exc.status_code or status.HTTP_502_BAD_GATEWAY
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+        transcribed_input = str(response.get("transcribed_input") or "").strip()
+        answer = str(response.get("text_response") or response.get("error_message") or "")
+        citations = response.get("sources", [])
+        session = store.append_chat_exchange(
+            transcribed_input or "[Audio input]",
+            answer,
+            citations,
+        )
+        return ChatAudioResponse(
+            session=session,
+            transcribed_input=transcribed_input or None,
+            answer=answer,
+            audio_response=response.get("audio_response"),
+            citations=citations,
+            access_granted=bool(response.get("access_granted")),
+            status=str(response.get("status") or "error"),
+            status_message=response.get("error_message"),
             response_time_ms=response.get("response_time_ms"),
             query_id=response.get("query_id"),
         )

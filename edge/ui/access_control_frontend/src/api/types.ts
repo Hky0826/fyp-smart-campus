@@ -89,6 +89,19 @@ export interface ChatMessageResponse {
   query_id?: number | null
 }
 
+export interface ChatAudioResponse {
+  session: ChatSessionView
+  transcribed_input?: string | null
+  answer: string
+  audio_response?: string | null
+  citations: Array<Record<string, unknown>>
+  access_granted: boolean
+  status: string
+  status_message?: string | null
+  response_time_ms?: number | null
+  query_id?: number | null
+}
+
 export interface ChatPresenceResponse {
   session?: ChatSessionView | null
   owner_present: boolean

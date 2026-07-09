@@ -48,6 +48,7 @@ class ChatbotClient:
     def __init__(self, config: RuntimeConfig):
         self._base_url = config.sync_cloud_url.rstrip("/")
         self._chat_endpoint = f"{self._base_url}/api/chatbot/chat"
+        self._audio_chat_endpoint = f"{self._base_url}/api/chatbot/chat/audio"
         self._health_endpoint = f"{self._base_url}/api/chatbot/health"
 
     def health_check(self) -> Dict[str, Any]:
@@ -158,6 +159,100 @@ class ChatbotClient:
         except requests.Timeout:
             raise ChatbotClientError(
                 "The cloud chatbot took too long to respond. Please try again.",
+                status_code=None,
+            )
+        except requests.ConnectionError:
+            raise ChatbotClientError(
+                "Cannot reach the cloud chatbot service. Check network connectivity.",
+                status_code=None,
+            )
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response else None
+            raise ChatbotClientError(
+                f"Unexpected cloud error (HTTP {status_code}): {exc}",
+                status_code=status_code,
+            )
+
+    def audio_chat(
+        self,
+        audio_bytes: bytes,
+        mime_type: str = "audio/webm",
+        jwt_token: Optional[str] = None,
+        device_id: Optional[str] = None,
+        session_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Send user audio to the cloud audio RAG chatbot and return its response.
+
+        Returns a dict matching the cloud AudioChatResponse schema:
+        {
+            "transcribed_input": str | null,
+            "text_response": str | null,
+            "audio_response": str | null,
+            "sources": [...],
+            "status": str,
+            "access_granted": bool,
+            "error_message": str | null,
+            "response_time_ms": int | null,
+            "query_id": int | null,
+        }
+        """
+        if not audio_bytes:
+            raise ChatbotClientError("Audio recording is empty.", status_code=400)
+
+        headers = {"Accept": "application/json"}
+        if jwt_token:
+            headers["Authorization"] = f"Bearer {jwt_token}"
+
+        files = {"audio": ("recording.webm", audio_bytes, mime_type)}
+        data: Dict[str, Any] = {}
+        if device_id:
+            data["device_id"] = device_id
+        if session_id is not None:
+            data["session_id"] = session_id
+
+        try:
+            resp = requests.post(
+                self._audio_chat_endpoint,
+                files=files,
+                data=data,
+                headers=headers,
+                timeout=(_CONNECT_TIMEOUT, _READ_TIMEOUT),
+            )
+
+            if resp.status_code == 401:
+                raise ChatbotClientError(
+                    "Authentication failed: JWT is invalid or expired. "
+                    "Please re-authenticate using face recognition.",
+                    status_code=401,
+                )
+
+            if resp.status_code == 403:
+                raise ChatbotClientError(
+                    "Access denied: you do not have permission to use the chatbot.",
+                    status_code=403,
+                )
+
+            if resp.status_code == 422:
+                detail = resp.json().get("detail", "Invalid request format.")
+                raise ChatbotClientError(
+                    f"Request validation error: {detail}",
+                    status_code=422,
+                )
+
+            if resp.status_code == 503:
+                detail = resp.json().get("detail", "Service unavailable.")
+                raise ChatbotClientError(
+                    f"Cloud service temporarily unavailable: {detail}",
+                    status_code=503,
+                )
+
+            resp.raise_for_status()
+            return resp.json()
+
+        except requests.Timeout:
+            raise ChatbotClientError(
+                "The cloud chatbot took too long to process the audio. Please try again.",
                 status_code=None,
             )
         except requests.ConnectionError:

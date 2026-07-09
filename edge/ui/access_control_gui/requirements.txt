@@ -1,0 +1,5 @@
+PySide6-Essentials>=6.6
+requests>=2.31
+opencv-python>=4.8
+numpy>=1.26
+sounddevice>=0.4.6
