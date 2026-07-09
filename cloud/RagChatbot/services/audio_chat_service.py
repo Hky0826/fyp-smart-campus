@@ -2,14 +2,14 @@
 Orchestrate the full two-step Gemini audio RAG pipeline.
 
 Receives raw audio bytes from the edge device and runs the complete
-pipeline: audio query extraction (Step 1) using ``AUDIO_EXTRACTION_MODEL``
-(``gemini-3.1-flash-lite``), prompt-injection guard, RBAC-resolved
-retrieval, final response generation (Step 2) using ``LLM_MODEL``
-(``gemini-3.1-flash-live-preview``) with text + audio output, response
-validation gate, and audit logging.
+pipeline: audio transcription/query extraction using ``AUDIO_EXTRACTION_MODEL``
+(``gemini-3.1-flash-lite``), prompt-injection guard, embedding with
+``EMBEDDING_MODEL``, RBAC-resolved retrieval, final text response generation
+using ``LLM_MODEL`` (``gemini-3.1-flash-lite``), TTS using
+``AUDIO_TTS_MODEL``, response validation gate, and audit logging.
 
-Returns an ``AudioChatResponse`` with optional text and/or base64-encoded
-audio output.
+Returns an ``AudioChatResponse`` with the cloud transcription, optional text,
+and optional base64-encoded audio output.
 
 Security invariants maintained by this module:
 - JWT verification runs before any audio is sent to Gemini.
@@ -32,7 +32,7 @@ import logging
 import time
 from typing import List, Optional
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from RagChatbot.config import rag_settings
@@ -102,6 +102,46 @@ def _derive_role_from_access_levels(levels: List[str]) -> str:
     return "VISITOR"
 
 
+def _tts_base64(text: str) -> Optional[str]:
+    """Generate base64 PCM audio for safe response text."""
+    if not rag_settings.AUDIO_TTS_ENABLED or not text.strip():
+        return None
+    try:
+        audio_pcm = generate_audio_from_text(text)
+    except RuntimeError as exc:
+        logger.warning("Audio chat: TTS failed, returning text only: %s", exc)
+        return None
+    if audio_pcm is None:
+        return None
+    return base64.b64encode(audio_pcm).decode("ascii")
+
+
+def _audio_response(
+    *,
+    transcribed_input: Optional[str],
+    text_response: Optional[str],
+    sources: Optional[List[CitationSchema]] = None,
+    status: str,
+    access_granted: bool,
+    start_time: float,
+    error_message: Optional[str] = None,
+    query_id: Optional[int] = None,
+    include_audio: bool = True,
+) -> AudioChatResponse:
+    """Build the audio API response with consistent transcription and TTS fields."""
+    return AudioChatResponse(
+        transcribed_input=transcribed_input,
+        text_response=text_response,
+        audio_response=_tts_base64(text_response or "") if include_audio and text_response else None,
+        sources=sources or [],
+        status=status,
+        access_granted=access_granted,
+        error_message=error_message,
+        response_time_ms=int((time.monotonic() - start_time) * 1000),
+        query_id=query_id,
+    )
+
+
 def process_audio_chat(
     audio_bytes: bytes,
     mime_type: str,
@@ -123,9 +163,9 @@ def process_audio_chat(
     6. Embed the extracted query
     7. Retrieve authorised document chunks (RBAC-filtered)
     8. Build separated prompt with trust boundaries
-    9. Generate text + audio response via Gemini
+    9. Generate text response via Gemini 3.1 Lite
     10. Validate text response and sources
-    11. If validation fails → regenerate audio from validated text (or text-only)
+    11. Convert validated text response to speech with Gemini 2.5 Flash TTS
     12. Build CitationSchema objects
     13. Audit log the interaction
     14. Return AudioChatResponse
@@ -154,14 +194,13 @@ def process_audio_chat(
             # Token invalid/expired — return auth_required rather than 401
             # so the edge device can prompt the user to re-authenticate.
             logger.warning("Audio chat: invalid/expired JWT, returning auth_required.")
-            return AudioChatResponse(
-                text_response=None,
-                audio_response=None,
-                sources=[],
+            return _audio_response(
+                transcribed_input=None,
+                text_response=AUTH_REQUIRED_ANSWER,
                 status="auth_required",
                 access_granted=False,
                 error_message=AUTH_REQUIRED_STATUS,
-                response_time_ms=int((time.monotonic() - start_time) * 1000),
+                start_time=start_time,
             )
 
     # ── Step 2: Resolve RBAC access levels ─────────────────────────────
@@ -182,14 +221,13 @@ def process_audio_chat(
         )
     except AudioQueryExtractionError as exc:
         logger.error("Audio chat: query extraction failed: %s", exc)
-        return AudioChatResponse(
+        return _audio_response(
+            transcribed_input=None,
             text_response=None,
-            audio_response=None,
-            sources=[],
             status="error",
             access_granted=False,
             error_message="Could not process the audio. Please try speaking clearly and try again.",
-            response_time_ms=int((time.monotonic() - start_time) * 1000),
+            start_time=start_time,
         )
 
     # ── Step 3b: Check audio-extraction prompt-injection flag ──────────
@@ -198,30 +236,31 @@ def process_audio_chat(
             "Audio query extraction flagged possible injection: %s",
             extraction_result.unsafe_instruction_summary,
         )
-        return AudioChatResponse(
-            text_response=None,
-            audio_response=None,
-            sources=[],
+        return _audio_response(
+            transcribed_input=extraction_result.user_query,
+            text_response=(
+                "I'm not able to process that request. "
+                "Please ask a straightforward question about campus services or documents."
+            ),
             status="blocked",
             access_granted=False,
             error_message=(
                 "Your request could not be processed as it contained "
                 "potentially unsafe instructions."
             ),
-            response_time_ms=int((time.monotonic() - start_time) * 1000),
+            start_time=start_time,
         )
 
     user_query = extraction_result.user_query
     if not user_query:
         logger.warning("Audio chat: extracted query is empty.")
-        return AudioChatResponse(
+        return _audio_response(
+            transcribed_input="",
             text_response=None,
-            audio_response=None,
-            sources=[],
             status="error",
             access_granted=False,
             error_message="No speech detected. Please try speaking clearly and try again.",
-            response_time_ms=int((time.monotonic() - start_time) * 1000),
+            start_time=start_time,
         )
 
     # ── Step 4: Prompt-injection detection on extracted query ──────────
@@ -242,16 +281,15 @@ def process_audio_chat(
                 reason=f"prompt_injection:{guard_result.matched_pattern}",
             )
 
-        return AudioChatResponse(
+        return _audio_response(
+            transcribed_input=user_query,
             text_response=(
                 "I'm not able to process that request. "
                 "Please ask a straightforward question about campus services or documents."
             ),
-            audio_response=None,
-            sources=[],
             status="blocked",
             access_granted=False,
-            response_time_ms=int((time.monotonic() - start_time) * 1000),
+            start_time=start_time,
         )
 
     sanitized_query = guard_result.sanitized_query or user_query
@@ -263,14 +301,13 @@ def process_audio_chat(
         query_embedding = embed_text(sanitized_query)
     except RuntimeError as exc:
         logger.error("Audio chat: embedding failed for user_id=%s: %s", user_id, exc)
-        return AudioChatResponse(
+        return _audio_response(
+            transcribed_input=user_query,
             text_response=None,
-            audio_response=None,
-            sources=[],
             status="error",
             access_granted=False,
             error_message="The search service is temporarily unavailable. Please try again later.",
-            response_time_ms=int((time.monotonic() - start_time) * 1000),
+            start_time=start_time,
         )
 
     # ── Step 7: Retrieve authorised document chunks ────────────────────
@@ -284,33 +321,31 @@ def process_audio_chat(
     if not ranked_chunks:
         if not bearer_token and _has_relevant_protected_chunks(query_embedding, db):
             # Anonymous user but there are protected chunks that match
-            return AudioChatResponse(
+            return _audio_response(
+                transcribed_input=user_query,
                 text_response=AUTH_REQUIRED_ANSWER,
-                audio_response=None,
-                sources=[],
                 status="auth_required",
                 access_granted=False,
-                response_time_ms=int((time.monotonic() - start_time) * 1000),
+                start_time=start_time,
             )
         else:
             # No relevant chunks at all
-            return AudioChatResponse(
+            return _audio_response(
+                transcribed_input=user_query,
                 text_response=(
                     "I'm sorry, but I don't have any documents available that match your question "
                     "based on your current access level. Please contact the campus administrator "
                     "if you believe you should have access to this information."
                 ),
-                audio_response=None,
-                sources=[],
                 status="no_access",
                 access_granted=False,
-                response_time_ms=int((time.monotonic() - start_time) * 1000),
+                start_time=start_time,
             )
 
     # ── Step 8: Build context block and separated prompt ────────────────
     context_block = build_context_block(ranked_chunks)
 
-    # ── Step 9: Generate text + audio response ─────────────────────────
+    # ── Step 9: Generate text response ─────────────────────────────────
     try:
         live_result = generate_response(
             system_instruction=_LIVE_SYSTEM_INSTRUCTION,
@@ -321,18 +356,16 @@ def process_audio_chat(
         )
     except GeminiLiveError as exc:
         logger.error("Audio chat: generation failed for user_id=%s: %s", user_id, exc)
-        return AudioChatResponse(
+        return _audio_response(
+            transcribed_input=user_query,
             text_response=None,
-            audio_response=None,
-            sources=[],
             status="error",
             access_granted=False,
             error_message="The answer service is temporarily unavailable. Please try again later.",
-            response_time_ms=int((time.monotonic() - start_time) * 1000),
+            start_time=start_time,
         )
 
     answer_text = live_result.text
-    audio_pcm = live_result.audio_pcm
 
     # ── Step 10: Validate text response and sources ────────────────────
     validation: ValidationResult = validate_response(
@@ -351,18 +384,13 @@ def process_audio_chat(
 
         # Do NOT include audio when validation has failed — the response
         # may contain sanitised/redacted text that should not be spoken.
-        audio_pcm = None
-
         # Return with validation_failed status so the edge device knows
         # the response went through extra sanitisation
         status_str = "validation_failed"
+        include_audio = False
     else:
         status_str = "ok"
-
-    # ── Step 11: Encode audio as base64 if present ─────────────────────
-    audio_b64: Optional[str] = None
-    if audio_pcm is not None:
-        audio_b64 = base64.b64encode(audio_pcm).decode("ascii")
+        include_audio = True
 
     # ── Step 12: Build CitationSchema objects ──────────────────────────
     citations: List[CitationSchema] = [
@@ -394,14 +422,15 @@ def process_audio_chat(
         audit_query_id = logged_id if logged_id > 0 else None
 
     # ── Step 14: Return AudioChatResponse ──────────────────────────────
-    return AudioChatResponse(
+    return _audio_response(
+        transcribed_input=user_query,
         text_response=answer_text,
-        audio_response=audio_b64,
         sources=citations,
         status=status_str,
         access_granted=True,
-        response_time_ms=response_time_ms,
+        start_time=start_time,
         query_id=audit_query_id,
+        include_audio=include_audio,
     )
 
 

@@ -1,9 +1,9 @@
 """
-Generate final text + audio response using Gemini (Step 2).
+Generate final grounded text response using Gemini.
 
 Uses the ``google-genai`` SDK to call ``LLM_MODEL``
-(``gemini-3.1-flash-live-preview``) via ``generate_content`` with
-separated prompt parts and both TEXT and AUDIO response modalities.
+(``gemini-3.1-flash-lite``) via ``generate_content`` with
+separated prompt parts.
 
 The caller is responsible for providing a prompt that clearly separates
 trusted sections (system instruction, authenticated user role, authorised
@@ -11,15 +11,12 @@ retrieved context) from the untrusted extracted user query. This module
 builds the separated prompt via ``_build_separated_prompt`` but does not
 enforce the separation — the enforcement is at the orchestration layer.
 
-If the model does not return an audio part (e.g. when the model is
-text-only or the audio modality is unavailable), the result contains
-text only. The caller can fall back to ``response_validator``'s
-``generate_audio_from_text`` for TTS from validated text.
+The caller converts validated text to speech with ``response_validator``'s
+``generate_audio_from_text`` using the dedicated Gemini TTS model.
 """
 
 from __future__ import annotations
 
-import base64
 import logging
 from dataclasses import dataclass, field
 from typing import Optional, List
@@ -35,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class LiveResponseResult:
-    """Result from the text + audio generation call."""
+    """Result from the text generation call."""
 
     text: str
     audio_pcm: Optional[bytes] = field(default=None)
@@ -98,16 +95,13 @@ def generate_response(
     sources: List[RankedChunk],
 ) -> LiveResponseResult:
     """
-    Generate text + audio response using Gemini.
+    Generate a grounded text response using Gemini.
 
     The prompt is carefully structured to separate:
     - trusted system instructions
     - authenticated user identity and role
     - authorised retrieved context
     - untrusted user query
-
-    Requests both TEXT and AUDIO response modalities. If audio is not
-    returned by the model the result will contain text only.
 
     Args:
         system_instruction: The base grounding system prompt.
@@ -117,7 +111,7 @@ def generate_response(
         sources: The RankedChunk list used as context (returned for citation).
 
     Returns:
-        LiveResponseResult with text, optional audio_pcm, and cited_chunks.
+        LiveResponseResult with text and cited_chunks.
 
     Raises:
         GeminiLiveError: If the Gemini API call fails entirely.
@@ -135,12 +129,10 @@ def generate_response(
         logger.error("Failed to create Gemini client: %s", exc)
         raise GeminiLiveError(f"Gemini client initialisation failed: {exc}") from exc
 
-    # Request both text and audio modalities
     config = types.GenerateContentConfig(
         system_instruction=system_instruction,
         temperature=rag_settings.TEMPERATURE,
         max_output_tokens=rag_settings.MAX_OUTPUT_TOKENS,
-        response_modalities=["TEXT", "AUDIO"],
     )
 
     try:
@@ -153,19 +145,14 @@ def generate_response(
         logger.error("Gemini generate_content failed: %s", exc)
         raise GeminiLiveError(f"Response generation failed: {exc}") from exc
 
-    # Extract text and audio from response candidates
+    # Extract text from response candidates.
     text_response: str = ""
-    audio_bytes: Optional[bytes] = None
 
     try:
         candidate = response.candidates[0]
         for part in candidate.content.parts:
             if part.text is not None:
                 text_response += part.text
-            if part.inline_data is not None and part.inline_data.mime_type.startswith(
-                "audio/"
-            ):
-                audio_bytes = part.inline_data.data
     except (IndexError, AttributeError) as exc:
         logger.warning("Could not extract parts from Gemini response: %s", exc)
         # Fall back to response.text if available
@@ -185,14 +172,13 @@ def generate_response(
         )
 
     logger.info(
-        "Live generation complete. text_len=%d, has_audio=%s, sources=%d",
+        "Generation complete. text_len=%d, sources=%d",
         len(text_response),
-        audio_bytes is not None,
         len(sources),
     )
 
     return LiveResponseResult(
         text=text_response.strip(),
-        audio_pcm=audio_bytes,
+        audio_pcm=None,
         cited_chunks=sources,
     )

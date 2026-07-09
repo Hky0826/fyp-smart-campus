@@ -31,25 +31,27 @@ class RagSettings:
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
     EMBEDDING_MODEL: str = os.getenv("RAG_EMBEDDING_MODEL", "gemini-embedding-2")
     EMBEDDING_DIM: int = int(os.getenv("RAG_EMBEDDING_DIM", "3072"))
-    # Primary LLM used by both the audio Live-API path and the migrated text path.
-    LLM_MODEL: str = os.getenv("RAG_LLM_MODEL", "gemini-3.1-flash-live-preview")
+    # Primary LLM used by both the audio path and the migrated text path.
+    LLM_MODEL: str = os.getenv("RAG_LLM_MODEL", "gemini-3.1-flash-lite")
 
     # ── Audio pipeline ────────────────────────────────────────────────────────
     # One-shot model used to extract a structured query from raw audio.
     AUDIO_EXTRACTION_MODEL: str = os.getenv(
         "RAG_AUDIO_EXTRACTION_MODEL", "gemini-3.1-flash-lite"
     )
-    # Model used for the TTS fallback when the Live-API audio response is invalid.
-    AUDIO_TTS_FALLBACK_MODEL: str = os.getenv(
-        "RAG_AUDIO_TTS_FALLBACK_MODEL", "gemini-2.5-flash"
+    # Model used for text-to-speech audio output.
+    AUDIO_TTS_MODEL: str = os.getenv(
+        "RAG_AUDIO_TTS_MODEL",
+        os.getenv("RAG_AUDIO_TTS_FALLBACK_MODEL", "gemini-2.5-flash-preview-tts"),
     )
     # Whether to enforce the structured response_schema on audio query extraction.
     AUDIO_EXTRACTION_SCHEMA_ENABLED: bool = os.getenv(
         "RAG_AUDIO_EXTRACTION_SCHEMA_ENABLED", "true"
     ).strip().lower() in {"1", "true", "yes", "on"}
-    # Whether the TTS fallback is enabled when Live-API audio is invalid.
-    AUDIO_TTS_FALLBACK_ENABLED: bool = os.getenv(
-        "RAG_AUDIO_TTS_FALLBACK_ENABLED", "true"
+    # Whether cloud TTS is enabled for audio chatbot responses.
+    AUDIO_TTS_ENABLED: bool = os.getenv(
+        "RAG_AUDIO_TTS_ENABLED",
+        os.getenv("RAG_AUDIO_TTS_FALLBACK_ENABLED", "true"),
     ).strip().lower() in {"1", "true", "yes", "on"}
 
     # ── Live-API session settings ─────────────────────────────────────────────

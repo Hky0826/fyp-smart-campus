@@ -77,6 +77,7 @@ class TestChatAudioEndpoint:
         from RagChatbot.schemas import AudioChatResponse
 
         mock_process.return_value = AudioChatResponse(
+            transcribed_input="When does the library close?",
             text_response="The library closes at 10 PM.",
             status="ok",
             access_granted=True,
@@ -90,6 +91,7 @@ class TestChatAudioEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "ok"
+        assert data["transcribed_input"] == "When does the library close?"
         assert data["text_response"] == "The library closes at 10 PM."
         assert data["access_granted"] is True
 

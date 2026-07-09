@@ -16,10 +16,9 @@ If validation fails, the response status is set to ``validation_failed``
 and ``audio_response`` is set to ``null`` — the edge device never plays
 unvalidated audio.
 
-Also provides ``generate_audio_from_text``, a TTS fallback that generates
-audio from validated text using a dedicated lightweight Gemini model
-(``AUDIO_TTS_FALLBACK_MODEL``, default ``gemini-2.5-flash``). This is used
-when the direct Gemini audio output cannot be reliably validated.
+Also provides ``generate_audio_from_text``, which generates audio from
+validated text using the configured Gemini 2.5 Flash TTS model
+(``AUDIO_TTS_MODEL``, default ``gemini-2.5-flash-preview-tts``).
 """
 
 from __future__ import annotations
@@ -149,9 +148,9 @@ def _remove_leakage(text: str, pattern: str) -> str:
 
 def generate_audio_from_text(text: str) -> Optional[bytes]:
     """
-    Fallback: Generate audio from validated text using Gemini.
+    Generate audio from validated text using Gemini TTS.
 
-    Uses the ``AUDIO_TTS_FALLBACK_MODEL`` configured in settings with
+    Uses the ``AUDIO_TTS_MODEL`` configured in settings with
     ``response_modalities=["AUDIO"]`` to produce spoken audio output.
 
     Args:
@@ -176,7 +175,7 @@ def generate_audio_from_text(text: str) -> Optional[bytes]:
     try:
         client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
     except Exception as exc:
-        logger.error("Failed to create Gemini client for TTS fallback: %s", exc)
+        logger.error("Failed to create Gemini client for TTS: %s", exc)
         raise RuntimeError(f"Gemini client initialisation failed: {exc}") from exc
 
     config = types.GenerateContentConfig(
@@ -186,13 +185,13 @@ def generate_audio_from_text(text: str) -> Optional[bytes]:
 
     try:
         response = client.models.generate_content(
-            model=rag_settings.AUDIO_TTS_FALLBACK_MODEL,
+            model=rag_settings.AUDIO_TTS_MODEL,
             contents=tts_prompt,
             config=config,
         )
     except Exception as exc:
-        logger.error("TTS fallback generation failed: %s", exc)
-        raise RuntimeError(f"TTS fallback generation failed: {exc}") from exc
+        logger.error("TTS generation failed: %s", exc)
+        raise RuntimeError(f"TTS generation failed: {exc}") from exc
 
     # Extract audio from the first candidate's parts
     try:
@@ -203,11 +202,11 @@ def generate_audio_from_text(text: str) -> Optional[bytes]:
             ):
                 audio_data = part.inline_data.data
                 logger.info(
-                    "TTS fallback generated %d bytes of audio.", len(audio_data)
+                    "TTS generated %d bytes of audio.", len(audio_data)
                 )
                 return audio_data
     except (IndexError, AttributeError) as exc:
         logger.warning("Could not extract audio part from TTS response: %s", exc)
 
-    logger.warning("TTS fallback returned no audio part.")
+    logger.warning("TTS returned no audio part.")
     return None

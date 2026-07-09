@@ -111,6 +111,10 @@ class AudioChatResponse(BaseModel):
     Contains optional text and/or audio response, sources, and access status.
     """
 
+    transcribed_input: Optional[str] = Field(
+        None,
+        description="The user's spoken input transcribed by the cloud audio model.",
+    )
     text_response: Optional[str] = None
     audio_response: Optional[str] = Field(
         None, description="Base64-encoded PCM audio data."
