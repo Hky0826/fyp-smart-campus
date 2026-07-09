@@ -96,12 +96,31 @@ export EDGE_GUI_API_BASE_URL=http://127.0.0.1:8080
 python3 -m edge.ui.access_control_gui.main
 ```
 
+If `/dev/video4` is not opening, list the board cameras and force the one that
+can return frames:
+
+```bash
+ls -l /dev/video*
+export EDGE_GUI_CAMERA=/dev/video4
+export EDGE_GUI_CAMERA_NO_FALLBACK=1
+python3 -m edge.ui.access_control_gui.main
+```
+
+The GUI opens `/dev/video*` devices with OpenCV's V4L2 backend. If another
+process owns the camera, stop it first:
+
+```bash
+sudo fuser -v /dev/video4
+```
+
 Useful environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `EDGE_GUI_API_BASE_URL` | `http://127.0.0.1:8080` | Local edge API base URL |
 | `EDGE_GUI_CAMERA` | `EDGE_ACCESS_CAMERA` / `EDGE_CAMERA` / `/dev/video4` | Camera source |
+| `EDGE_GUI_CAMERA_FALLBACKS` | `/dev/video0,/dev/video1,/dev/video2,/dev/video3,/dev/video4,/dev/video5,0,1` | Extra camera sources tried when the primary source fails |
+| `EDGE_GUI_CAMERA_NO_FALLBACK` | unset | Set to `1` to try only `EDGE_GUI_CAMERA` |
 | `EDGE_GUI_CAMERA_FRAME_INTERVAL_MS` | `500` | Frame verification interval |
 | `EDGE_GUI_ACCESS_RESULT_HOLD_MS` | `4000` | Local fallback result hold duration |
 | `EDGE_GUI_VOICE_RECORDING_MS` | `5500` | Audio chunk duration |
