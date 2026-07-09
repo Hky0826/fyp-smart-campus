@@ -20,9 +20,15 @@ except Exception:  # pragma: no cover - depends on target image
 DEFAULT_CAMERA = "/dev/video4"
 JPEG_QUALITY = 82
 DEFAULT_CAMERA_FALLBACKS = "/dev/video0,/dev/video1,/dev/video2,/dev/video3,/dev/video4,/dev/video5,0,1"
+DEFAULT_CAMERA_WIDTH = 1920
+DEFAULT_CAMERA_HEIGHT = 1080
 
 
 def _camera_source(value: str) -> str | int:
+    if value.startswith("/dev/video"):
+        suffix = value.replace("/dev/video", "")
+        if suffix.isdigit():
+            return int(suffix)
     return int(value) if value.isdigit() else value
 
 
@@ -59,12 +65,25 @@ def _open_capture(source: str | int) -> Any:
         if not capture.isOpened():
             capture.release()
             continue
+        _configure_capture(capture, source)
         try:
             capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         except Exception:
             pass
         return capture
     return None
+
+
+def _configure_capture(capture: Any, source: str | int) -> None:
+    if cv2 is None or not isinstance(source, int):
+        return
+    width = int(os.getenv("EDGE_GUI_CAMERA_WIDTH", str(DEFAULT_CAMERA_WIDTH)))
+    height = int(os.getenv("EDGE_GUI_CAMERA_HEIGHT", str(DEFAULT_CAMERA_HEIGHT)))
+    fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+    capture.set(cv2.CAP_PROP_FOURCC, fourcc)
+    capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    time.sleep(1.0)
 
 
 def sys_platform_is_linux() -> bool:
