@@ -108,19 +108,30 @@ Useful environment variables:
 | `EDGE_GUI_VOICE_RESTART_DELAY_MS` | `250` | Delay between audio chunks |
 | `EDGE_GUI_TTS_OUTPUT_SAMPLE_RATE` | `24000` | Cloud PCM playback rate |
 | `EDGE_GUI_QT_BACKEND` | `software` on Linux | Qt Quick scene graph backend |
-| `EDGE_GUI_QPA_PLATFORM` | unset | Optional Qt platform override, for example `xcb` |
+| `EDGE_GUI_QPA_PLATFORM` | `linuxfb`, or `wayland` when `WAYLAND_DISPLAY` is set | Optional Qt platform override |
 
 On i.MX/embedded Linux boards, the GUI defaults Qt Quick to the software scene
-graph to avoid EGL/OpenGL context failures such as:
+graph and avoids `xcb` unless explicitly requested. This avoids EGL/OpenGL and
+desktop XCB dependency failures such as:
 
 ```text
 QEGLPlatformContext: Failed to create context: 3004
 Failed to initialize graphics backend for OpenGL.
+Could not load the Qt platform plugin "xcb"
 ```
 
-To explicitly force the same setting from the shell:
+To explicitly force the framebuffer path from the shell:
 
 ```bash
+export EDGE_GUI_QPA_PLATFORM=linuxfb
+export QT_QUICK_BACKEND=software
+python3 -m edge.ui.access_control_gui.main
+```
+
+If the device is running a Wayland desktop session:
+
+```bash
+export EDGE_GUI_QPA_PLATFORM=wayland
 export QT_QUICK_BACKEND=software
 python3 -m edge.ui.access_control_gui.main
 ```
@@ -129,6 +140,7 @@ If the device image has a working Qt/OpenGL stack, you can opt back into the
 hardware path:
 
 ```bash
+export EDGE_GUI_QPA_PLATFORM=wayland
 export EDGE_GUI_QT_BACKEND=opengl
 python3 -m edge.ui.access_control_gui.main
 ```
@@ -145,6 +157,7 @@ After=network-online.target edge-face-api.service
 [Service]
 WorkingDirectory=/path/to/Code_FYP
 Environment=EDGE_GUI_API_BASE_URL=http://127.0.0.1:8080
+Environment=EDGE_GUI_QPA_PLATFORM=linuxfb
 Environment=QT_QUICK_BACKEND=software
 ExecStart=/usr/bin/python3 -m edge.ui.access_control_gui.main
 Restart=always
