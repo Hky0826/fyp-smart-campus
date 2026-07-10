@@ -10,6 +10,7 @@ import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
@@ -41,22 +42,22 @@ class AudioRecorder:
     def __init__(self, config: AudioIOConfig | None = None) -> None:
         self.config = config or AudioIOConfig()
 
-    def record(self) -> RecordingResult:
+    def record(self, cancel_requested: Callable[[], bool] | None = None) -> RecordingResult:
         """Record 16 kHz mono WAV with silence detection.
 
         Returns:
             RecordingResult with path to the recorded WAV file and duration.
         """
         if self.config.recording_backend == "alsa":
-            return self._record_alsa()
+            return self._record_alsa(cancel_requested)
         if self.config.recording_backend != "sounddevice":
             raise RuntimeError(
                 f"Unsupported recording backend: {self.config.recording_backend}. "
                 "Use 'alsa' or 'sounddevice'."
             )
-        return self._record_sounddevice()
+        return self._record_sounddevice(cancel_requested)
 
-    def _record_sounddevice(self) -> RecordingResult:
+    def _record_sounddevice(self, cancel_requested: Callable[[], bool] | None = None) -> RecordingResult:
         blocksize = max(1, int(self.config.sample_rate * self.config.recording_block_ms / 1000))
         block_seconds = blocksize / self.config.sample_rate
         max_blocks = max(1, math.ceil(self.config.max_record_seconds / block_seconds))
@@ -86,9 +87,13 @@ class AudioRecorder:
             device=self.config.microphone_device,
         ) as stream:
             for block_index in range(max_blocks):
+                if cancel_requested and cancel_requested():
+                    break
                 samples, overflowed = stream.read(blocksize)
                 if overflowed:
                     logger.warning("Audio recorder input overflowed")
+                if cancel_requested and cancel_requested():
+                    break
 
                 frame = np.asarray(samples, dtype=np.int16).reshape(-1)
                 frames.append(frame.copy())
@@ -111,7 +116,7 @@ class AudioRecorder:
         logger.info("Recorded %.2fs of speech to %s", duration_seconds, path)
         return RecordingResult(path=path, duration_seconds=duration_seconds)
 
-    def _record_alsa(self) -> RecordingResult:
+    def _record_alsa(self, cancel_requested: Callable[[], bool] | None = None) -> RecordingResult:
         blocksize = max(1, int(self.config.sample_rate * self.config.recording_block_ms / 1000))
         block_seconds = blocksize / self.config.sample_rate
         max_blocks = max(1, math.ceil(self.config.max_record_seconds / block_seconds))
@@ -157,8 +162,12 @@ class AudioRecorder:
         try:
             assert process.stdout is not None
             for block_index in range(max_blocks):
+                if cancel_requested and cancel_requested():
+                    break
                 raw = process.stdout.read(block_bytes)
                 if not raw:
+                    break
+                if cancel_requested and cancel_requested():
                     break
 
                 frame = np.frombuffer(raw, dtype="<i2").copy()

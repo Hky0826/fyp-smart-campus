@@ -16,6 +16,7 @@ from .presence_controller import PresenceController
 
 CAMERA_FRAME_INTERVAL_MS = int(os.getenv("EDGE_GUI_CAMERA_FRAME_INTERVAL_MS", "500"))
 ACCESS_RESULT_HOLD_MS = int(os.getenv("EDGE_GUI_ACCESS_RESULT_HOLD_MS", "4000"))
+CHAT_VERIFY_RETRY_MS = int(os.getenv("EDGE_GUI_CHAT_VERIFY_RETRY_MS", "350"))
 
 
 class _ApiCallWorker(QThread):
@@ -140,6 +141,7 @@ class AccessController(QObject):
         self._chatbot.stopVoiceLoop()
         self._run_worker("stop-chat-audio", self._api.stop_chat_audio)
         self._emit_all()
+        self._schedule_frame(0)
 
     @Slot()
     def exitChat(self) -> None:
@@ -256,14 +258,22 @@ class AccessController(QObject):
                 self._frame_in_flight = False
             self._emit_all()
             self._sync_voice_loop()
+            if name == "access-frame" and self._chat_verification_active:
+                self._schedule_frame(0)
 
     @Slot(str, str, int)
     def _on_worker_failure(self, name: str, message: str, _status_code: int) -> None:
+        retry_chat_verification = False
         if name == "state":
             self._offline = True
         elif name == "chat-verify-frame":
-            self._chat_error = message or "Face verification failed."
-            self._set_chat_verification_active(False)
+            if _status_code == 401 and self._chat_expanded:
+                self._chat_error = ""
+                self._set_chat_verification_active(True)
+                retry_chat_verification = True
+            else:
+                self._chat_error = message or "Face verification failed."
+                self._set_chat_verification_active(False)
         elif name in {"chat-message", "chat-audio", "lock-chat"}:
             self._chat_error = message or "Chatbot request failed."
         elif name.endswith("frame"):
@@ -272,6 +282,8 @@ class AccessController(QObject):
             self._frame_in_flight = False
         self._emit_all()
         self._sync_voice_loop()
+        if retry_chat_verification:
+            self._schedule_frame(CHAT_VERIFY_RETRY_MS)
 
     def _handle_presence_payload(self, payload: dict[str, Any]) -> bool:
         self._face_boxes = _coerce_boxes(payload.get("bboxes"))
@@ -327,6 +339,9 @@ class AccessController(QObject):
         if self._events_worker is worker:
             self._events_worker = None
         worker.deleteLater()
+
+    def _schedule_frame(self, delay_ms: int) -> None:
+        QTimer.singleShot(max(0, delay_ms), self._process_frame)
 
     def _set_chat_expanded(self, value: bool) -> None:
         if self._chat_expanded == value:

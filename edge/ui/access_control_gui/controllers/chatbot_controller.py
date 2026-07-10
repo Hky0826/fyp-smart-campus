@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import math
 import os
+import threading
 import time
 import wave
 from dataclasses import replace
@@ -21,9 +22,12 @@ from edge.audio_io.recorder import AudioRecorder
 from .api_client import KioskApiClient
 
 
-VOICE_RECORDING_MS = int(os.getenv("EDGE_GUI_VOICE_RECORDING_MS", "5500"))
+VOICE_RECORDING_MS = int(os.getenv("EDGE_GUI_VOICE_RECORDING_MS", "4000"))
 VOICE_RESTART_DELAY_MS = int(os.getenv("EDGE_GUI_VOICE_RESTART_DELAY_MS", "250"))
 TTS_OUTPUT_SAMPLE_RATE = int(os.getenv("EDGE_GUI_TTS_OUTPUT_SAMPLE_RATE", "24000"))
+VOICE_MIN_RECORD_SECONDS = float(os.getenv("EDGE_GUI_VOICE_MIN_RECORD_SECONDS", "0.35"))
+VOICE_SILENCE_SECONDS = float(os.getenv("EDGE_GUI_VOICE_SILENCE_SECONDS", "0.55"))
+VOICE_SILENCE_RMS = float(os.getenv("EDGE_GUI_VOICE_SILENCE_RMS", "700"))
 MIN_AUDIO_RMS = float(os.getenv("EDGE_GUI_AUDIO_MIN_RMS", "500"))
 MIN_AUDIO_PEAK = float(os.getenv("EDGE_GUI_AUDIO_MIN_PEAK", "1500"))
 MIN_VOICED_RATIO = float(os.getenv("EDGE_GUI_AUDIO_MIN_VOICED_RATIO", "0.03"))
@@ -40,11 +44,20 @@ class _AudioLoopWorker(QThread):
         super().__init__()
         self._api = api
         self._running = False
+        self._stop_requested = threading.Event()
 
     def run(self) -> None:
         self._running = True
+        self._stop_requested.clear()
         config = AudioIOConfig()
-        config = replace(config, max_record_seconds=max(0.5, VOICE_RECORDING_MS / 1000.0))
+        config = replace(
+            config,
+            max_record_seconds=max(0.5, VOICE_RECORDING_MS / 1000.0),
+            min_record_seconds=max(0.1, VOICE_MIN_RECORD_SECONDS),
+            silence_duration_seconds=max(0.1, VOICE_SILENCE_SECONDS),
+            silence_rms_threshold=VOICE_SILENCE_RMS,
+            recording_block_ms=max(20, VOICE_BLOCK_MS),
+        )
         recorder = AudioRecorder(config)
         player = AudioPlayer(config, sample_rate=TTS_OUTPUT_SAMPLE_RATE)
 
@@ -52,7 +65,7 @@ class _AudioLoopWorker(QThread):
             recording_path: Path | None = None
             try:
                 self.listeningChanged.emit(True)
-                result = recorder.record()
+                result = recorder.record(cancel_requested=self._stop_requested.is_set)
                 recording_path = result.path
                 self.listeningChanged.emit(False)
                 if not self._running:
@@ -86,6 +99,7 @@ class _AudioLoopWorker(QThread):
 
     def stop(self) -> None:
         self._running = False
+        self._stop_requested.set()
 
 
 class ChatbotController(QObject):
@@ -100,6 +114,7 @@ class ChatbotController(QObject):
         self._api = api
         self._worker: _AudioLoopWorker | None = None
         self._stopping_workers: list[_AudioLoopWorker] = []
+        self._start_requested = False
         self._listening = False
         self._busy = False
         self._error = ""
@@ -108,11 +123,13 @@ class ChatbotController(QObject):
     @Slot()
     def startVoiceLoop(self) -> None:
         if self._muted or self._stopping_workers:
+            self._start_requested = bool(self._stopping_workers and not self._muted)
             self._set_listening(False)
             self._set_busy(False)
             return
         if self._worker and self._worker.isRunning():
             return
+        self._start_requested = False
         worker = _AudioLoopWorker(self._api)
         worker.listeningChanged.connect(self._set_listening)
         worker.busyChanged.connect(self._set_busy)
@@ -124,6 +141,7 @@ class ChatbotController(QObject):
 
     @Slot()
     def stopVoiceLoop(self) -> None:
+        self._start_requested = False
         if not self._worker:
             self._set_listening(False)
             self._set_busy(False)
@@ -166,6 +184,9 @@ class ChatbotController(QObject):
         if worker in self._stopping_workers:
             self._stopping_workers.remove(worker)
         worker.deleteLater()
+        if self._start_requested and not self._stopping_workers and not self._muted:
+            self._start_requested = False
+            self.startVoiceLoop()
 
     @Slot(bool)
     def _set_listening(self, value: bool) -> None:

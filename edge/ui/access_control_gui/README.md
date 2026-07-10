@@ -153,10 +153,14 @@ Useful environment variables:
 | `EDGE_GUI_CAMERA_HEIGHT` | `1080` | Requested V4L2 camera height for numeric `/dev/video*` devices |
 | `EDGE_GUI_CAMERA_FOURCC` | `MJPG` | Requested V4L2 pixel format; use `YUYV` or `NONE` if MJPG frames warn about corrupt JPEG data |
 | `EDGE_GUI_CAMERA_FRAME_INTERVAL_MS` | `500` | Frame verification interval |
+| `EDGE_GUI_CHAT_VERIFY_RETRY_MS` | `350` | Delay before retrying chatbot owner verification after a no-face frame |
 | `EDGE_GUI_ACCESS_RESULT_HOLD_MS` | `4000` | Local fallback result hold duration |
-| `EDGE_GUI_VOICE_RECORDING_MS` | `5500` | Audio chunk duration |
+| `EDGE_GUI_VOICE_RECORDING_MS` | `4000` | Maximum audio chunk duration |
 | `EDGE_GUI_VOICE_RESTART_DELAY_MS` | `250` | Delay between audio chunks |
 | `EDGE_GUI_TTS_OUTPUT_SAMPLE_RATE` | `24000` | Cloud PCM playback rate |
+| `EDGE_GUI_VOICE_MIN_RECORD_SECONDS` | `0.35` | Minimum recording time before silence can stop capture |
+| `EDGE_GUI_VOICE_SILENCE_SECONDS` | `0.55` | Consecutive silence required before sending a captured voice chunk |
+| `EDGE_GUI_VOICE_SILENCE_RMS` | `700` | RMS level below which the GUI recorder treats input as silence |
 | `EDGE_GUI_AUDIO_MIN_RMS` | `500` | Minimum recorded WAV RMS required before uploading audio to the chatbot backend |
 | `EDGE_GUI_AUDIO_MIN_PEAK` | `1500` | Minimum peak sample level required before uploading audio |
 | `EDGE_GUI_AUDIO_MIN_VOICED_RATIO` | `0.03` | Minimum fraction of audio blocks that must look voiced before upload |
