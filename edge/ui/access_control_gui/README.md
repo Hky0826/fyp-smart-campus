@@ -157,6 +157,7 @@ Useful environment variables:
 | `EDGE_GUI_VOICE_RECORDING_MS` | `5500` | Audio chunk duration |
 | `EDGE_GUI_VOICE_RESTART_DELAY_MS` | `250` | Delay between audio chunks |
 | `EDGE_GUI_TTS_OUTPUT_SAMPLE_RATE` | `24000` | Cloud PCM playback rate |
+| `EDGE_GUI_AUDIO_MIN_RMS` | `500` | Minimum recorded WAV RMS required before uploading audio to the chatbot backend |
 | `EDGE_AUDIO_MICROPHONE_DEVICE` | unset | ALSA/PortAudio microphone device used by the GUI voice loop |
 | `EDGE_AUDIO_RECORDING_BACKEND` | `alsa` on Linux | Recording backend, usually `alsa` on the edge board |
 | `EDGE_AUDIO_SPEAKER_DEVICE` | unset | ALSA/PortAudio output device for chatbot TTS playback |
@@ -167,6 +168,11 @@ Useful environment variables:
 
 The GUI voice loop uses the existing `edge.audio_io` recorder. On Linux, set
 the ALSA capture device with `EDGE_AUDIO_MICROPHONE_DEVICE`.
+
+The chat screen has a manual `Mute` / `Unmute` button. Muting stops the local
+recording loop and prevents new audio uploads. The GUI also skips silent WAV
+chunks below `EDGE_GUI_AUDIO_MIN_RMS` so idle microphone noise does not keep
+calling `/kiosk/chat/audio`.
 
 List capture devices:
 

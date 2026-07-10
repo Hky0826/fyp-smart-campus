@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import base64
+import math
 import os
 import time
+import wave
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from PySide6.QtCore import QObject, Property, QThread, Signal, Slot
 
 from edge.audio_io.audio_player import AudioPlayer
@@ -21,6 +24,7 @@ from .api_client import KioskApiClient
 VOICE_RECORDING_MS = int(os.getenv("EDGE_GUI_VOICE_RECORDING_MS", "5500"))
 VOICE_RESTART_DELAY_MS = int(os.getenv("EDGE_GUI_VOICE_RESTART_DELAY_MS", "250"))
 TTS_OUTPUT_SAMPLE_RATE = int(os.getenv("EDGE_GUI_TTS_OUTPUT_SAMPLE_RATE", "24000"))
+MIN_AUDIO_RMS = float(os.getenv("EDGE_GUI_AUDIO_MIN_RMS", "500"))
 
 
 class _AudioLoopWorker(QThread):
@@ -54,6 +58,9 @@ class _AudioLoopWorker(QThread):
                 if recording_path.stat().st_size < 1024:
                     self.msleep(VOICE_RESTART_DELAY_MS)
                     continue
+                if _wav_rms(recording_path) < MIN_AUDIO_RMS:
+                    self.msleep(VOICE_RESTART_DELAY_MS)
+                    continue
 
                 self.busyChanged.emit(True)
                 response = self._api.send_chat_audio_file(recording_path, "audio/wav")
@@ -80,6 +87,7 @@ class ChatbotController(QObject):
     listeningChanged = Signal()
     busyChanged = Signal()
     errorChanged = Signal()
+    mutedChanged = Signal()
     responseReceived = Signal(dict)
 
     def __init__(self, api: KioskApiClient) -> None:
@@ -90,9 +98,14 @@ class ChatbotController(QObject):
         self._listening = False
         self._busy = False
         self._error = ""
+        self._muted = False
 
     @Slot()
     def startVoiceLoop(self) -> None:
+        if self._muted or self._stopping_workers:
+            self._set_listening(False)
+            self._set_busy(False)
+            return
         if self._worker and self._worker.isRunning():
             return
         worker = _AudioLoopWorker(self._api)
@@ -119,6 +132,19 @@ class ChatbotController(QObject):
             self._cleanup_worker(worker)
         self._set_listening(False)
         self._set_busy(False)
+
+    @Slot()
+    def toggleMute(self) -> None:
+        self.setMuted(not self._muted)
+
+    @Slot(bool)
+    def setMuted(self, muted: bool) -> None:
+        if muted == self._muted:
+            return
+        self._muted = muted
+        if self._muted:
+            self.stopVoiceLoop()
+        self.mutedChanged.emit()
 
     def shutdown(self) -> None:
         self.stopVoiceLoop()
@@ -164,6 +190,24 @@ class ChatbotController(QObject):
     def _get_error(self) -> str:
         return self._error
 
+    def _get_muted(self) -> bool:
+        return self._muted
+
     listening = Property(bool, _get_listening, notify=listeningChanged)
     busy = Property(bool, _get_busy, notify=busyChanged)
     error = Property(str, _get_error, notify=errorChanged)
+    muted = Property(bool, _get_muted, notify=mutedChanged)
+
+
+def _wav_rms(path: Path) -> float:
+    try:
+        with wave.open(str(path), "rb") as wav_file:
+            frames = wav_file.readframes(wav_file.getnframes())
+            if not frames:
+                return 0.0
+            samples = np.frombuffer(frames, dtype="<i2").astype(np.float32)
+    except Exception:
+        return math.inf
+    if samples.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(samples * samples)))

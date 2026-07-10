@@ -30,10 +30,12 @@ ApplicationWindow {
         presenceState: accessController.presenceState
         listening: chatbotController.listening
         busy: chatbotController.busy
+        muted: chatbotController.muted
         errorText: accessController.chatError
         verifying: accessController.chatVerificationActive
         onCloseRequested: accessController.exitChat()
         onMessageRequested: function(message) { accessController.sendMessage(message) }
+        onToggleMuteRequested: accessController.toggleMute()
     }
 
     ChatbotButton {

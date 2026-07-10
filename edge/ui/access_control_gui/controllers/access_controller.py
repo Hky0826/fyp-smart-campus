@@ -165,6 +165,12 @@ class AccessController(QObject):
         self._run_worker("lock-chat", self._api.lock_chat)
 
     @Slot()
+    def toggleMute(self) -> None:
+        self._chatbot.toggleMute()
+        self._sync_voice_loop()
+        self.uiChanged.emit()
+
+    @Slot()
     def _process_frame(self) -> None:
         if self._frame_in_flight or self._offline or not self._camera.ready:
             return

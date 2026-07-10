@@ -9,11 +9,13 @@ Item {
     property string presenceState: "UNKNOWN"
     property bool listening: false
     property bool busy: false
+    property bool muted: false
     property bool verifying: false
     property string errorText: ""
 
     signal closeRequested()
     signal messageRequested(string message)
+    signal toggleMuteRequested()
 
     Rectangle {
         anchors.fill: parent
@@ -47,11 +49,31 @@ Item {
                 }
 
                 Text {
-                    text: root.verifying ? "Verifying" : root.sessionName + "  " + root.presenceState
+                    text: root.verifying ? "Verifying" : root.muted ? "Muted" : root.sessionName + "  " + root.presenceState
                     color: "#64748b"
                     font.pixelSize: 14
                     elide: Text.ElideRight
                     Layout.maximumWidth: 420
+                }
+
+                Button {
+                    width: 104
+                    height: 54
+                    text: root.muted ? "Unmute" : "Mute"
+                    enabled: !root.verifying
+                    onClicked: root.toggleMuteRequested()
+                    background: Rectangle {
+                        radius: 8
+                        color: parent.enabled ? (root.muted ? "#0f766e" : "#e2e8f0") : "#cbd5e1"
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: root.muted ? "#ffffff" : "#0f172a"
+                        font.pixelSize: 15
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
                 }
 
                 Button {
@@ -183,7 +205,7 @@ Item {
                         radius: 7
                         color: "transparent"
                         border.width: 3
-                        border.color: root.busy ? "#2563eb" : root.listening ? "#0f766e" : "#64748b"
+                        border.color: root.muted ? "#94a3b8" : root.busy ? "#2563eb" : root.listening ? "#0f766e" : "#64748b"
                     }
 
                     Rectangle {
@@ -192,7 +214,7 @@ Item {
                         width: 3
                         height: 8
                         radius: 2
-                        color: root.busy ? "#2563eb" : root.listening ? "#0f766e" : "#64748b"
+                        color: root.muted ? "#94a3b8" : root.busy ? "#2563eb" : root.listening ? "#0f766e" : "#64748b"
                     }
 
                     Rectangle {
@@ -201,18 +223,18 @@ Item {
                         width: 16
                         height: 3
                         radius: 2
-                        color: root.busy ? "#2563eb" : root.listening ? "#0f766e" : "#64748b"
+                        color: root.muted ? "#94a3b8" : root.busy ? "#2563eb" : root.listening ? "#0f766e" : "#64748b"
                     }
 
                     SequentialAnimation on y {
-                        running: root.listening && !root.busy
+                        running: root.listening && !root.busy && !root.muted
                         loops: Animation.Infinite
                         NumberAnimation { to: -5; duration: 260; easing.type: Easing.InOutQuad }
                         NumberAnimation { to: 0; duration: 260; easing.type: Easing.InOutQuad }
                     }
 
                     RotationAnimation on rotation {
-                        running: root.busy
+                        running: root.busy && !root.muted
                         loops: Animation.Infinite
                         from: 0
                         to: 360
@@ -221,14 +243,14 @@ Item {
                 }
 
                 Text {
-                    text: root.busy ? "Processing audio" : root.listening ? "Listening" : "Microphone standby"
+                    text: root.muted ? "Microphone muted" : root.busy ? "Processing audio" : root.listening ? "Listening" : "Microphone standby"
                     color: "#64748b"
                     font.pixelSize: 13
                 }
 
                 Row {
                     spacing: 5
-                    visible: root.busy
+                    visible: root.busy && !root.muted
                     Layout.alignment: Qt.AlignVCenter
 
                     Repeater {
