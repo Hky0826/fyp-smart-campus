@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Layouts
 
 ApplicationWindow {
     id: root
@@ -10,6 +9,9 @@ ApplicationWindow {
     visibility: Window.FullScreen
     color: "#020617"
     title: "Edge Access Control"
+    readonly property bool showAccessGlow: !accessController.chatExpanded
+                                           && (accessController.mode === "access-granted"
+                                               || accessController.mode === "access-denied")
 
     CameraView {
         id: cameraView
@@ -84,7 +86,7 @@ ApplicationWindow {
         anchors.fill: parent
         z: 110
         color: "transparent"
-        border.width: accessController.mode === "access-granted" || accessController.mode === "access-denied" ? 12 : 0
+        border.width: root.showAccessGlow ? 12 : 0
         border.color: accessController.mode === "access-granted" ? "#22c55e" : "#ef4444"
 
         Behavior on border.width { NumberAnimation { duration: 140 } }
@@ -96,12 +98,12 @@ ApplicationWindow {
             anchors.fill: parent
             z: 109 - index
             color: "transparent"
-            border.width: accessController.mode === "access-granted" || accessController.mode === "access-denied" ? 18 + index * 18 : 0
+            border.width: root.showAccessGlow ? 18 + index * 18 : 0
             border.color: accessController.mode === "access-granted" ? "#22c55e" : "#ef4444"
-            opacity: accessController.mode === "access-granted" || accessController.mode === "access-denied" ? 0.18 / (index + 1) : 0
+            opacity: root.showAccessGlow ? 0.18 / (index + 1) : 0
 
             SequentialAnimation on opacity {
-                running: accessController.mode === "access-granted" || accessController.mode === "access-denied"
+                running: root.showAccessGlow
                 loops: Animation.Infinite
                 NumberAnimation { to: 0.06; duration: 520 }
                 NumberAnimation { to: 0.18 / (index + 1); duration: 520 }

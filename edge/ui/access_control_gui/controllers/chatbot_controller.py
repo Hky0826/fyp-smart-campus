@@ -25,6 +25,9 @@ VOICE_RECORDING_MS = int(os.getenv("EDGE_GUI_VOICE_RECORDING_MS", "5500"))
 VOICE_RESTART_DELAY_MS = int(os.getenv("EDGE_GUI_VOICE_RESTART_DELAY_MS", "250"))
 TTS_OUTPUT_SAMPLE_RATE = int(os.getenv("EDGE_GUI_TTS_OUTPUT_SAMPLE_RATE", "24000"))
 MIN_AUDIO_RMS = float(os.getenv("EDGE_GUI_AUDIO_MIN_RMS", "500"))
+MIN_AUDIO_PEAK = float(os.getenv("EDGE_GUI_AUDIO_MIN_PEAK", "1500"))
+MIN_VOICED_RATIO = float(os.getenv("EDGE_GUI_AUDIO_MIN_VOICED_RATIO", "0.03"))
+VOICE_BLOCK_MS = int(os.getenv("EDGE_GUI_AUDIO_VOICE_BLOCK_MS", "100"))
 
 
 class _AudioLoopWorker(QThread):
@@ -58,7 +61,9 @@ class _AudioLoopWorker(QThread):
                 if recording_path.stat().st_size < 1024:
                     self.msleep(VOICE_RESTART_DELAY_MS)
                     continue
-                if _wav_rms(recording_path) < MIN_AUDIO_RMS:
+
+                voice_stats = _wav_voice_stats(recording_path)
+                if not _has_voice(voice_stats):
                     self.msleep(VOICE_RESTART_DELAY_MS)
                     continue
 
@@ -199,15 +204,42 @@ class ChatbotController(QObject):
     muted = Property(bool, _get_muted, notify=mutedChanged)
 
 
-def _wav_rms(path: Path) -> float:
+def _has_voice(stats: dict[str, float]) -> bool:
+    return (
+        stats["rms"] >= MIN_AUDIO_RMS
+        and stats["peak"] >= MIN_AUDIO_PEAK
+        and stats["voiced_ratio"] >= MIN_VOICED_RATIO
+    )
+
+
+def _wav_voice_stats(path: Path) -> dict[str, float]:
     try:
         with wave.open(str(path), "rb") as wav_file:
+            frame_rate = max(1, wav_file.getframerate())
+            channels = max(1, wav_file.getnchannels())
             frames = wav_file.readframes(wav_file.getnframes())
             if not frames:
-                return 0.0
+                return {"rms": 0.0, "peak": 0.0, "voiced_ratio": 0.0}
             samples = np.frombuffer(frames, dtype="<i2").astype(np.float32)
     except Exception:
-        return math.inf
+        return {"rms": math.inf, "peak": math.inf, "voiced_ratio": 1.0}
+
     if samples.size == 0:
-        return 0.0
-    return float(np.sqrt(np.mean(samples * samples)))
+        return {"rms": 0.0, "peak": 0.0, "voiced_ratio": 0.0}
+
+    if channels > 1 and samples.size >= channels:
+        usable = samples[: samples.size - (samples.size % channels)]
+        samples = usable.reshape(-1, channels).mean(axis=1)
+
+    rms = float(np.sqrt(np.mean(samples * samples)))
+    peak = float(np.max(np.abs(samples)))
+    block_size = max(1, int(frame_rate * max(10, VOICE_BLOCK_MS) / 1000))
+    block_count = samples.size // block_size
+    if block_count <= 0:
+        voiced_ratio = 1.0 if rms >= MIN_AUDIO_RMS else 0.0
+    else:
+        blocks = samples[: block_count * block_size].reshape(block_count, block_size)
+        block_rms = np.sqrt(np.mean(blocks * blocks, axis=1))
+        voiced_ratio = float(np.mean(block_rms >= MIN_AUDIO_RMS))
+
+    return {"rms": rms, "peak": peak, "voiced_ratio": voiced_ratio}
