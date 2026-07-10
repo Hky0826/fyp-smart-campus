@@ -13,7 +13,6 @@ ApplicationWindow {
 
     CameraView {
         id: cameraView
-        anchors.fill: parent
         minimized: accessController.chatCameraMinimized
         sourceUrl: cameraController.sourceUrl
         videoWidth: cameraController.videoWidth
@@ -24,6 +23,7 @@ ApplicationWindow {
     ChatbotView {
         id: chatbotView
         anchors.fill: parent
+        z: 20
         visible: accessController.chatExpanded
         messages: accessController.messages
         sessionName: accessController.sessionName
