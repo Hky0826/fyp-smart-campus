@@ -51,6 +51,8 @@ _LEAKAGE_PATTERNS = [
     "Do NOT mention any section",
 ]
 
+_UNAVAILABLE_TTS_MODELS: set[str] = set()
+
 
 @dataclass
 class ValidationResult:
@@ -181,32 +183,74 @@ def generate_audio_from_text(text: str) -> Optional[bytes]:
     config = types.GenerateContentConfig(
         temperature=0.0,
         response_modalities=["AUDIO"],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                    voice_name=getattr(rag_settings, "AUDIO_TTS_VOICE", "Kore")
+                )
+            )
+        ),
     )
 
-    try:
-        response = client.models.generate_content(
-            model=rag_settings.AUDIO_TTS_MODEL,
-            contents=tts_prompt,
-            config=config,
-        )
-    except Exception as exc:
-        logger.error("TTS generation failed: %s", exc)
-        raise RuntimeError(f"TTS generation failed: {exc}") from exc
+    last_error: Exception | None = None
+    attempted_models: list[str] = []
+    for model_name in _candidate_tts_models():
+        attempted_models.append(model_name)
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=tts_prompt,
+                config=config,
+            )
+        except Exception as exc:
+            last_error = exc
+            if _is_not_found_error(exc):
+                _UNAVAILABLE_TTS_MODELS.add(model_name)
+            logger.warning("TTS model failed. model=%s error=%s", model_name, exc)
+            continue
 
-    # Extract audio from the first candidate's parts
+        audio_data = _extract_audio_data(response)
+        if audio_data is not None:
+            logger.info("TTS generated %d bytes of audio with model=%s.", len(audio_data), model_name)
+            return audio_data
+
+        logger.warning("TTS returned no audio part. model=%s", model_name)
+
+    if last_error is not None:
+        logger.error(
+            "TTS generation failed for all models. attempted_models=%s",
+            attempted_models,
+        )
+        raise RuntimeError(f"TTS generation failed: {last_error}") from last_error
+
+    logger.warning("TTS returned no audio part.")
+    return None
+
+
+def _candidate_tts_models() -> list[str]:
+    configured = str(getattr(rag_settings, "AUDIO_TTS_MODEL", "") or "")
+    fallbacks = str(getattr(rag_settings, "AUDIO_TTS_FALLBACK_MODELS", "") or "")
+    candidates: list[str] = []
+    for model_name in [configured, *fallbacks.split(",")]:
+        cleaned = model_name.strip()
+        if cleaned and cleaned not in candidates and cleaned not in _UNAVAILABLE_TTS_MODELS:
+            candidates.append(cleaned)
+    return candidates
+
+
+def _is_not_found_error(exc: Exception) -> bool:
+    text = str(exc).upper()
+    return "404" in text or "NOT_FOUND" in text or "NOT FOUND" in text
+
+
+def _extract_audio_data(response: object) -> Optional[bytes]:
     try:
         candidate = response.candidates[0]
         for part in candidate.content.parts:
             if part.inline_data is not None and part.inline_data.mime_type.startswith(
                 "audio/"
             ):
-                audio_data = part.inline_data.data
-                logger.info(
-                    "TTS generated %d bytes of audio.", len(audio_data)
-                )
-                return audio_data
+                return part.inline_data.data
     except (IndexError, AttributeError) as exc:
         logger.warning("Could not extract audio part from TTS response: %s", exc)
-
-    logger.warning("TTS returned no audio part.")
     return None

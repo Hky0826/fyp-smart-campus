@@ -42,7 +42,12 @@ class RagSettings:
     # Model used for text-to-speech audio output.
     AUDIO_TTS_MODEL: str = os.getenv(
         "RAG_AUDIO_TTS_MODEL",
-        os.getenv("RAG_AUDIO_TTS_FALLBACK_MODEL", "gemini-2.5-flash-preview-tts"),
+        os.getenv("RAG_AUDIO_TTS_FALLBACK_MODEL", "gemini-3.1-flash-tts-preview"),
+    )
+    AUDIO_TTS_VOICE: str = os.getenv("RAG_AUDIO_TTS_VOICE", "Kore")
+    AUDIO_TTS_FALLBACK_MODELS: str = os.getenv(
+        "RAG_AUDIO_TTS_FALLBACK_MODELS",
+        "gemini-2.5-flash-preview-tts,gemini-2.5-pro-preview-tts",
     )
     # Whether to enforce the structured response_schema on audio query extraction.
     AUDIO_EXTRACTION_SCHEMA_ENABLED: bool = os.getenv(
@@ -53,6 +58,8 @@ class RagSettings:
         "RAG_AUDIO_TTS_ENABLED",
         os.getenv("RAG_AUDIO_TTS_FALLBACK_ENABLED", "true"),
     ).strip().lower() in {"1", "true", "yes", "on"}
+    AUDIO_TTS_TIMEOUT_SECONDS: float = float(os.getenv("RAG_AUDIO_TTS_TIMEOUT_SECONDS", "30"))
+    AUDIO_TTS_WORKERS: int = int(os.getenv("RAG_AUDIO_TTS_WORKERS", "2"))
 
     # ── Live-API session settings ─────────────────────────────────────────────
     # Comma-separated modalities requested from the Live-API session.

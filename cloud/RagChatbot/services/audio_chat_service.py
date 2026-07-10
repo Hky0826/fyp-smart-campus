@@ -28,6 +28,7 @@ Security invariants maintained by this module:
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import logging
 import time
 from typing import List, Optional
@@ -65,6 +66,10 @@ from RagChatbot.services.chat_service import (
 )
 
 logger = logging.getLogger(__name__)
+_TTS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=max(1, int(getattr(rag_settings, "AUDIO_TTS_WORKERS", 2))),
+    thread_name_prefix="rag-audio-tts",
+)
 
 # System instruction used for the audio generation path.
 # This is the same grounding prompt used by the text pipeline
@@ -106,14 +111,33 @@ def _tts_base64(text: str) -> Optional[str]:
     """Generate base64 PCM audio for safe response text."""
     if not rag_settings.AUDIO_TTS_ENABLED or not text.strip():
         return None
+    timeout_seconds = max(0.0, float(getattr(rag_settings, "AUDIO_TTS_TIMEOUT_SECONDS", 6)))
     try:
-        audio_pcm = generate_audio_from_text(text)
-    except RuntimeError as exc:
+        if timeout_seconds:
+            future = _TTS_EXECUTOR.submit(generate_audio_from_text, text)
+            try:
+                audio_pcm = future.result(timeout=timeout_seconds)
+            except concurrent.futures.TimeoutError:
+                future.cancel()
+                logger.warning(
+                    "Audio chat: TTS timed out after %.1fs, returning text only.",
+                    timeout_seconds,
+                )
+                return None
+        else:
+            audio_pcm = generate_audio_from_text(text)
+    except Exception as exc:
         logger.warning("Audio chat: TTS failed, returning text only: %s", exc)
         return None
     if audio_pcm is None:
         return None
-    return base64.b64encode(audio_pcm).decode("ascii")
+    audio_base64 = base64.b64encode(audio_pcm).decode("ascii")
+    logger.info(
+        "Audio chat: TTS payload ready. pcm_bytes=%d base64_chars=%d",
+        len(audio_pcm),
+        len(audio_base64),
+    )
+    return audio_base64
 
 
 def _audio_response(
