@@ -36,18 +36,6 @@ ApplicationWindow {
         onMessageRequested: function(message) { accessController.sendMessage(message) }
     }
 
-    AccessOverlay {
-        anchors.left: parent.left
-        anchors.bottom: parent.bottom
-        anchors.leftMargin: Math.max(18, parent.width * 0.025)
-        anchors.bottomMargin: accessController.chatExpanded ? 28 : 104
-        z: 60
-        titleText: accessController.accessTitle
-        subtitleText: accessController.accessSubtitle
-        mode: accessController.mode
-        cameraError: accessController.cameraError
-    }
-
     ChatbotButton {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
@@ -56,15 +44,8 @@ ApplicationWindow {
         z: 62
         visible: !accessController.chatExpanded
         enabled: cameraController.ready && !accessController.offline
-        onClicked: accessController.openChat()
-    }
-
-    AccessResultOverlay {
-        anchors.fill: parent
-        z: 90
         mode: accessController.mode
-        titleText: accessController.accessTitle
-        subtitleText: accessController.accessSubtitle
+        onClicked: accessController.openChat()
     }
 
     SessionLockedOverlay {
@@ -97,24 +78,32 @@ ApplicationWindow {
         }
     }
 
-    DeviceStatusBar {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        z: 70
-        deviceName: accessController.deviceName
-        deviceId: accessController.deviceId
-        edgeOnline: !accessController.offline
-        cloudSync: accessController.cloudSync
-        cloudChatbot: accessController.cloudChatbot
-    }
-
     Rectangle {
         anchors.fill: parent
         z: 110
         color: "transparent"
-        border.width: accessController.mode === "access-granted" || accessController.mode === "access-denied" ? 10 : 0
+        border.width: accessController.mode === "access-granted" || accessController.mode === "access-denied" ? 12 : 0
         border.color: accessController.mode === "access-granted" ? "#22c55e" : "#ef4444"
+
+        Behavior on border.width { NumberAnimation { duration: 140 } }
+    }
+
+    Repeater {
+        model: 3
+        Rectangle {
+            anchors.fill: parent
+            z: 109 - index
+            color: "transparent"
+            border.width: accessController.mode === "access-granted" || accessController.mode === "access-denied" ? 18 + index * 18 : 0
+            border.color: accessController.mode === "access-granted" ? "#22c55e" : "#ef4444"
+            opacity: accessController.mode === "access-granted" || accessController.mode === "access-denied" ? 0.18 / (index + 1) : 0
+
+            SequentialAnimation on opacity {
+                running: accessController.mode === "access-granted" || accessController.mode === "access-denied"
+                loops: Animation.Infinite
+                NumberAnimation { to: 0.06; duration: 520 }
+                NumberAnimation { to: 0.18 / (index + 1); duration: 520 }
+            }
+        }
     }
 }
-

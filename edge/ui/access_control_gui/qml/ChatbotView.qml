@@ -165,10 +165,86 @@ Item {
                 Layout.fillWidth: true
                 spacing: 12
 
+                Item {
+                    id: micIndicator
+                    width: 42
+                    height: 42
+                    Layout.alignment: Qt.AlignVCenter
+
+                    Rectangle {
+                        id: micHead
+                        x: 14
+                        y: 5
+                        width: 14
+                        height: 22
+                        radius: 7
+                        color: "transparent"
+                        border.width: 3
+                        border.color: root.busy ? "#2563eb" : root.listening ? "#0f766e" : "#64748b"
+                    }
+
+                    Rectangle {
+                        x: 20
+                        y: 26
+                        width: 3
+                        height: 8
+                        radius: 2
+                        color: root.busy ? "#2563eb" : root.listening ? "#0f766e" : "#64748b"
+                    }
+
+                    Rectangle {
+                        x: 13
+                        y: 34
+                        width: 16
+                        height: 3
+                        radius: 2
+                        color: root.busy ? "#2563eb" : root.listening ? "#0f766e" : "#64748b"
+                    }
+
+                    SequentialAnimation on y {
+                        running: root.listening && !root.busy
+                        loops: Animation.Infinite
+                        NumberAnimation { to: -5; duration: 260; easing.type: Easing.InOutQuad }
+                        NumberAnimation { to: 0; duration: 260; easing.type: Easing.InOutQuad }
+                    }
+
+                    RotationAnimation on rotation {
+                        running: root.busy
+                        loops: Animation.Infinite
+                        from: 0
+                        to: 360
+                        duration: 900
+                    }
+                }
+
                 Text {
                     text: root.busy ? "Processing audio" : root.listening ? "Listening" : "Microphone standby"
                     color: "#64748b"
                     font.pixelSize: 13
+                }
+
+                Row {
+                    spacing: 5
+                    visible: root.busy
+                    Layout.alignment: Qt.AlignVCenter
+
+                    Repeater {
+                        model: 3
+                        Rectangle {
+                            width: 7
+                            height: 7
+                            radius: 4
+                            color: "#2563eb"
+
+                            SequentialAnimation on opacity {
+                                running: root.busy
+                                loops: Animation.Infinite
+                                PauseAnimation { duration: index * 130 }
+                                NumberAnimation { to: 0.2; duration: 260 }
+                                NumberAnimation { to: 1.0; duration: 260 }
+                            }
+                        }
+                    }
                 }
 
                 Text {

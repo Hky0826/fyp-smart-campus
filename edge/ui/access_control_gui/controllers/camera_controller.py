@@ -22,6 +22,7 @@ JPEG_QUALITY = 82
 DEFAULT_CAMERA_FALLBACKS = "/dev/video0,/dev/video1,/dev/video2,/dev/video3,/dev/video4,/dev/video5,0,1"
 DEFAULT_CAMERA_WIDTH = 1920
 DEFAULT_CAMERA_HEIGHT = 1080
+DEFAULT_CAMERA_FOURCC = "MJPG"
 
 
 def _camera_source(value: str) -> str | int:
@@ -79,8 +80,12 @@ def _configure_capture(capture: Any, source: str | int) -> None:
         return
     width = int(os.getenv("EDGE_GUI_CAMERA_WIDTH", str(DEFAULT_CAMERA_WIDTH)))
     height = int(os.getenv("EDGE_GUI_CAMERA_HEIGHT", str(DEFAULT_CAMERA_HEIGHT)))
-    fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-    capture.set(cv2.CAP_PROP_FOURCC, fourcc)
+    fourcc_name = os.getenv("EDGE_GUI_CAMERA_FOURCC", DEFAULT_CAMERA_FOURCC).strip().upper()
+    if fourcc_name and fourcc_name not in {"NONE", "DEFAULT", "AUTO"}:
+        if len(fourcc_name) != 4:
+            raise RuntimeError("EDGE_GUI_CAMERA_FOURCC must be a 4-character code, or NONE")
+        fourcc = cv2.VideoWriter_fourcc(*fourcc_name)
+        capture.set(cv2.CAP_PROP_FOURCC, fourcc)
     capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     time.sleep(1.0)

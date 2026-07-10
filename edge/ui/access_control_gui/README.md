@@ -125,6 +125,22 @@ process owns the camera, stop it first:
 sudo fuser -v /dev/video4
 ```
 
+If the terminal prints `Corrupt JPEG data: premature end of data segment`, the
+camera's MJPG stream is returning incomplete JPEG frames. Try a raw YUYV stream:
+
+```bash
+export EDGE_GUI_CAMERA=/dev/video4
+export EDGE_GUI_CAMERA_FOURCC=YUYV
+python3 -m edge.ui.access_control_gui.main
+```
+
+Or let the camera driver choose its default format:
+
+```bash
+export EDGE_GUI_CAMERA_FOURCC=NONE
+python3 -m edge.ui.access_control_gui.main
+```
+
 Useful environment variables:
 
 | Variable | Default | Purpose |
@@ -135,6 +151,7 @@ Useful environment variables:
 | `EDGE_GUI_CAMERA_NO_FALLBACK` | unset | Set to `1` to try only `EDGE_GUI_CAMERA` |
 | `EDGE_GUI_CAMERA_WIDTH` | `1920` | Requested V4L2 camera width for numeric `/dev/video*` devices |
 | `EDGE_GUI_CAMERA_HEIGHT` | `1080` | Requested V4L2 camera height for numeric `/dev/video*` devices |
+| `EDGE_GUI_CAMERA_FOURCC` | `MJPG` | Requested V4L2 pixel format; use `YUYV` or `NONE` if MJPG frames warn about corrupt JPEG data |
 | `EDGE_GUI_CAMERA_FRAME_INTERVAL_MS` | `500` | Frame verification interval |
 | `EDGE_GUI_ACCESS_RESULT_HOLD_MS` | `4000` | Local fallback result hold duration |
 | `EDGE_GUI_VOICE_RECORDING_MS` | `5500` | Audio chunk duration |
