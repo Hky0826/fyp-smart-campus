@@ -86,6 +86,7 @@ class ChatbotController(QObject):
         super().__init__()
         self._api = api
         self._worker: _AudioLoopWorker | None = None
+        self._stopping_workers: list[_AudioLoopWorker] = []
         self._listening = False
         self._busy = False
         self._error = ""
@@ -99,7 +100,7 @@ class ChatbotController(QObject):
         worker.busyChanged.connect(self._set_busy)
         worker.errorOccurred.connect(self._set_error)
         worker.responseReceived.connect(self.responseReceived)
-        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(lambda: self._cleanup_worker(worker))
         self._worker = worker
         worker.start()
 
@@ -109,11 +110,31 @@ class ChatbotController(QObject):
             self._set_listening(False)
             self._set_busy(False)
             return
-        self._worker.stop()
-        self._worker.wait(1500)
+        worker = self._worker
         self._worker = None
+        worker.stop()
+        if worker.isRunning():
+            self._stopping_workers.append(worker)
+        else:
+            self._cleanup_worker(worker)
         self._set_listening(False)
         self._set_busy(False)
+
+    def shutdown(self) -> None:
+        self.stopVoiceLoop()
+        workers = list(self._stopping_workers)
+        if self._worker is not None:
+            workers.append(self._worker)
+        for worker in workers:
+            worker.stop()
+            worker.wait(3000)
+
+    def _cleanup_worker(self, worker: _AudioLoopWorker) -> None:
+        if self._worker is worker:
+            self._worker = None
+        if worker in self._stopping_workers:
+            self._stopping_workers.remove(worker)
+        worker.deleteLater()
 
     @Slot(bool)
     def _set_listening(self, value: bool) -> None:
@@ -146,4 +167,3 @@ class ChatbotController(QObject):
     listening = Property(bool, _get_listening, notify=listeningChanged)
     busy = Property(bool, _get_busy, notify=busyChanged)
     error = Property(str, _get_error, notify=errorChanged)
-

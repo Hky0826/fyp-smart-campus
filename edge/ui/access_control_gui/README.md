@@ -157,8 +157,37 @@ Useful environment variables:
 | `EDGE_GUI_VOICE_RECORDING_MS` | `5500` | Audio chunk duration |
 | `EDGE_GUI_VOICE_RESTART_DELAY_MS` | `250` | Delay between audio chunks |
 | `EDGE_GUI_TTS_OUTPUT_SAMPLE_RATE` | `24000` | Cloud PCM playback rate |
+| `EDGE_AUDIO_MICROPHONE_DEVICE` | unset | ALSA/PortAudio microphone device used by the GUI voice loop |
+| `EDGE_AUDIO_RECORDING_BACKEND` | `alsa` on Linux | Recording backend, usually `alsa` on the edge board |
+| `EDGE_AUDIO_SPEAKER_DEVICE` | unset | ALSA/PortAudio output device for chatbot TTS playback |
 | `EDGE_GUI_QT_BACKEND` | `software` on Linux | Qt Quick scene graph backend |
 | `EDGE_GUI_QPA_PLATFORM` | `linuxfb`, or `wayland` when `WAYLAND_DISPLAY` is set | Optional Qt platform override |
+
+## Microphone Setup
+
+The GUI voice loop uses the existing `edge.audio_io` recorder. On Linux, set
+the ALSA capture device with `EDGE_AUDIO_MICROPHONE_DEVICE`.
+
+List capture devices:
+
+```bash
+arecord -l
+```
+
+Use a specific card/device:
+
+```bash
+export EDGE_AUDIO_RECORDING_BACKEND=alsa
+export EDGE_AUDIO_MICROPHONE_DEVICE=plughw:1,0
+python3 -m edge.ui.access_control_gui.main
+```
+
+If you want to test the microphone before starting the GUI:
+
+```bash
+arecord -D plughw:1,0 -f S16_LE -r 16000 -c 1 -d 5 /tmp/mic-test.wav
+aplay /tmp/mic-test.wav
+```
 
 On i.MX/embedded Linux boards, the GUI defaults Qt Quick to the software scene
 graph and avoids `xcb` unless explicitly requested. This avoids EGL/OpenGL and

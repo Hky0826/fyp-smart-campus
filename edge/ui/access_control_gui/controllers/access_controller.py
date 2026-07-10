@@ -115,7 +115,7 @@ class AccessController(QObject):
 
     @Slot()
     def stop(self) -> None:
-        self._chatbot.stopVoiceLoop()
+        self._chatbot.shutdown()
         if self._events_worker:
             if self._events_worker.isRunning():
                 self._events_worker.stop()
