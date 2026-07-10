@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import math
 import os
 import threading
@@ -22,6 +23,7 @@ from edge.audio_io.recorder import AudioRecorder
 from .api_client import KioskApiClient
 
 
+logger = logging.getLogger(__name__)
 VOICE_RECORDING_MS = int(os.getenv("EDGE_GUI_VOICE_RECORDING_MS", "4000"))
 VOICE_RESTART_DELAY_MS = int(os.getenv("EDGE_GUI_VOICE_RESTART_DELAY_MS", "250"))
 TTS_OUTPUT_SAMPLE_RATE = int(os.getenv("EDGE_GUI_TTS_OUTPUT_SAMPLE_RATE", "24000"))
@@ -85,7 +87,13 @@ class _AudioLoopWorker(QThread):
                 self.responseReceived.emit(response)
                 audio_response = response.get("audio_response")
                 if audio_response and self._running:
-                    player.play_pcm(base64.b64decode(str(audio_response)))
+                    audio_pcm = base64.b64decode(str(audio_response))
+                    logger.info(
+                        "GUI audio chat TTS received. base64_chars=%d pcm_bytes=%d",
+                        len(str(audio_response)),
+                        len(audio_pcm),
+                    )
+                    player.play_pcm(audio_pcm)
             except Exception as exc:  # pragma: no cover - hardware/network runtime
                 self.errorOccurred.emit(str(exc))
                 time.sleep(max(0.25, VOICE_RESTART_DELAY_MS / 1000.0))

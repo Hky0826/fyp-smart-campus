@@ -564,6 +564,13 @@ def create_kiosk_router(
         transcribed_input = str(response.get("transcribed_input") or "").strip()
         answer = str(response.get("text_response") or response.get("error_message") or "")
         citations = response.get("sources", [])
+        audio_response = response.get("audio_response")
+        logger.info(
+            "Kiosk audio chat response forwarding. status=%s answer_len=%d audio_base64_chars=%d",
+            response.get("status"),
+            len(answer),
+            len(str(audio_response or "")),
+        )
         session = store.append_chat_exchange(
             transcribed_input or "[Audio input]",
             answer,
@@ -573,7 +580,7 @@ def create_kiosk_router(
             session=session,
             transcribed_input=transcribed_input or None,
             answer=answer,
-            audio_response=response.get("audio_response"),
+            audio_response=audio_response,
             citations=citations,
             access_granted=bool(response.get("access_granted")),
             status=str(response.get("status") or "error"),

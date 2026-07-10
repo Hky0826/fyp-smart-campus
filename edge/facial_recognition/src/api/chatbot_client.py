@@ -151,7 +151,7 @@ class ChatbotClient:
                 raise ChatbotClientError(
                     f"Cloud service temporarily unavailable: {detail}",
                     status_code=503,
-                )
+            )
 
             resp.raise_for_status()
             return resp.json()
@@ -248,7 +248,15 @@ class ChatbotClient:
                 )
 
             resp.raise_for_status()
-            return resp.json()
+            payload = resp.json()
+            audio_response = payload.get("audio_response")
+            logger.info(
+                "Cloud audio chat response received. status=%s text_len=%d audio_base64_chars=%d",
+                payload.get("status"),
+                len(str(payload.get("text_response") or "")),
+                len(str(audio_response or "")),
+            )
+            return payload
 
         except requests.Timeout:
             raise ChatbotClientError(
