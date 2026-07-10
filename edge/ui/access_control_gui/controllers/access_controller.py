@@ -404,7 +404,7 @@ class AccessController(QObject):
         return self._chat_verification_active
 
     def _get_chat_camera_minimized(self) -> bool:
-        return bool(self._chat_expanded and self._session and not self._chat_verification_active)
+        return bool(self._chat_expanded)
 
     def _get_face_boxes(self) -> list:
         return self._face_boxes

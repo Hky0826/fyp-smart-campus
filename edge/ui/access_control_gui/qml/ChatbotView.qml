@@ -18,21 +18,20 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: "#f8fafc"
-        visible: !root.verifying
     }
 
     Rectangle {
         id: windowPanel
-        visible: !root.verifying
-        anchors.centerIn: parent
-        width: Math.min(980, parent.width)
-        height: Math.min(760, parent.height)
-        radius: parent.width < 760 ? 0 : 8
+        anchors.fill: parent
+        radius: 0
         color: "#f8fafc"
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: parent.width < 760 ? 16 : 24
+            anchors.leftMargin: parent.width < 760 ? 16 : 300
+            anchors.rightMargin: parent.width < 760 ? 16 : 24
+            anchors.topMargin: 24
+            anchors.bottomMargin: 24
             spacing: 14
 
             RowLayout {
@@ -48,7 +47,7 @@ Item {
                 }
 
                 Text {
-                    text: root.sessionName + "  " + root.presenceState
+                    text: root.verifying ? "Verifying" : root.sessionName + "  " + root.presenceState
                     color: "#64748b"
                     font.pixelSize: 14
                     elide: Text.ElideRight
@@ -125,6 +124,8 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 12
+                enabled: !root.verifying
+                opacity: root.verifying ? 0.45 : 1
 
                 TextField {
                     id: input
@@ -164,6 +165,8 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 12
+                enabled: !root.verifying
+                opacity: root.verifying ? 0.45 : 1
 
                 Item {
                     id: micIndicator
