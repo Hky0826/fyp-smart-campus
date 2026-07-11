@@ -61,7 +61,15 @@ class FakeRepository:
 
 
 def face(x1=10, y1=10, x2=80, y2=80):
-    return DetectedFace([x1, y1, x2, y2], 0.9)
+    width, height = x2 - x1, y2 - y1
+    landmarks = np.array([
+        [x1 + 0.30 * width, y1 + 0.35 * height],
+        [x1 + 0.70 * width, y1 + 0.35 * height],
+        [x1 + 0.50 * width, y1 + 0.55 * height],
+        [x1 + 0.35 * width, y1 + 0.75 * height],
+        [x1 + 0.65 * width, y1 + 0.75 * height],
+    ], dtype=np.float32)
+    return DetectedFace([x1, y1, x2, y2], 0.9, landmarks)
 
 
 class SurveillanceLogicTests(unittest.TestCase):

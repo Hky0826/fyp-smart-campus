@@ -3,7 +3,12 @@ import unittest
 import numpy as np
 
 from edge.facial_recognition.src.hailo.postprocess_scrfd import postprocess_scrfd
-from edge.facial_recognition.src.hailo.preprocess import preprocess_arcface, preprocess_scrfd
+from edge.facial_recognition.src.hailo.preprocess import (
+    letterbox_preprocess,
+    map_bbox_to_original,
+    preprocess_arcface,
+    preprocess_scrfd,
+)
 
 
 class SCRFDPostprocessTests(unittest.TestCase):
@@ -25,6 +30,17 @@ class SCRFDPostprocessTests(unittest.TestCase):
         self.assertEqual(tensor.shape, (1, 1, 1, 3))
         np.testing.assert_allclose(tensor[0, 0, 0], [30.0, 20.0, 10.0])
 
+    def test_letterbox_preserves_aspect_ratio_and_maps_back(self):
+        frame = np.zeros((100, 200, 3), dtype=np.uint8)
+        image, metadata = letterbox_preprocess(frame, (640, 640))
+        self.assertEqual(image.shape, (640, 640, 3))
+        self.assertEqual(metadata.scale, 3.2)
+        self.assertEqual(metadata.pad_y, 160.0)
+        np.testing.assert_allclose(
+            map_bbox_to_original(np.array([64, 192, 576, 448]), metadata),
+            [20, 10, 180, 90],
+        )
+
     def test_parses_hailo_detection_outputs(self):
         outputs = {
             "scrfd/detection_boxes": np.array([[[0.10, 0.20, 0.40, 0.60]]], dtype=np.float32),
@@ -35,7 +51,7 @@ class SCRFDPostprocessTests(unittest.TestCase):
         faces = postprocess_scrfd(outputs, original_shape=(100, 200), confidence_threshold=0.6)
 
         self.assertEqual(len(faces), 1)
-        np.testing.assert_allclose(faces[0].bbox, [40.0, 10.0, 120.0, 40.0])
+        np.testing.assert_allclose(faces[0].bbox, [40.0, 0.0, 120.0, 30.0])
         self.assertAlmostEqual(faces[0].confidence, 0.9, places=5)
 
     def test_decodes_raw_hwc_scrfd_heads(self):
@@ -54,7 +70,7 @@ class SCRFDPostprocessTests(unittest.TestCase):
         faces = postprocess_scrfd(outputs, original_shape=(480, 640), input_size=(640, 640), confidence_threshold=0.6)
 
         self.assertEqual(len(faces), 1)
-        np.testing.assert_allclose(faces[0].bbox, [200.0, 84.0, 296.0, 168.0])
+        np.testing.assert_allclose(faces[0].bbox, [200.0, 32.0, 296.0, 144.0])
         self.assertAlmostEqual(faces[0].confidence, 0.95, places=5)
         self.assertEqual(faces[0].landmarks.shape, (5, 2))
 
@@ -73,6 +89,31 @@ class SCRFDPostprocessTests(unittest.TestCase):
         self.assertEqual(len(faces), 1)
         self.assertAlmostEqual(faces[0].confidence, 0.91, places=5)
         self.assertEqual(faces[0].xyxy_int(), [384, 0, 432, 40])
+
+    def test_nms_removes_overlapping_duplicate_detections(self):
+        outputs = {
+            "detection_boxes": np.array([[
+                [0.2, 0.2, 0.7, 0.7],
+                [0.21, 0.21, 0.69, 0.69],
+            ]], dtype=np.float32),
+            "detection_scores": np.array([[0.95, 0.85]], dtype=np.float32),
+        }
+        faces = postprocess_scrfd(outputs, (640, 640), nms_iou_threshold=0.4)
+        self.assertEqual(len(faces), 1)
+        self.assertAlmostEqual(faces[0].confidence, 0.95, places=5)
+
+    def test_rejects_nan_nonpositive_and_out_of_frame_landmarks(self):
+        base = np.array([0.2, 0.2, 0.7, 0.7], dtype=np.float32)
+        outputs = {
+            "detection_boxes": np.array([[base, [np.nan, 0.2, 0.7, 0.7], [0.5, 0.5, 0.4, 0.4]]]),
+            "detection_scores": np.array([[0.9, 0.9, 0.9]], dtype=np.float32),
+            "face_landmarks": np.array([[
+                np.full(10, 10000, dtype=np.float32),
+                np.zeros(10, dtype=np.float32),
+                np.zeros(10, dtype=np.float32),
+            ]]),
+        }
+        self.assertEqual(postprocess_scrfd(outputs, (640, 640)), [])
 
 
 if __name__ == "__main__":

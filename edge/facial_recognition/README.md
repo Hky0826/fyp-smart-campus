@@ -324,6 +324,9 @@ EDGE_REQUIRE_HAILORT=0 docker compose -f edge/facial_recognition/docker/docker-c
 
 ## Pipeline Behavior
 
+Architecture details, tensor assumptions, configuration guidance, and the staged
+migration plan are in [RECOGNITION_HARDENING.md](RECOGNITION_HARDENING.md).
+
 Access control:
 
 - Detector: `models/surveillance/scrfd_10g.hef`

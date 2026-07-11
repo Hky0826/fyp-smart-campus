@@ -3,9 +3,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import List, Optional, Sequence
 
 import numpy as np
+
+
+class AuthenticationResult(Enum):
+    GRANT = "grant"
+    DENY_NO_MATCH = "deny_no_match"
+    DENY_MULTIPLE_FACES = "deny_multiple_faces"
+    DENY_SPOOF = "deny_spoof"
+    RETRY_NO_FACE = "retry_no_face"
+    RETRY_UNSTABLE_TRACK = "retry_unstable_track"
+    RETRY_LOW_QUALITY = "retry_low_quality"
+    RETRY_ALIGNMENT = "retry_alignment"
+    RETRY_INSUFFICIENT_SAMPLES = "retry_insufficient_samples"
+    SYSTEM_ERROR = "system_error"
 
 
 @dataclass(frozen=True)
@@ -13,6 +27,7 @@ class DetectedFace:
     bbox: Sequence[float]
     confidence: float
     landmarks: Optional[np.ndarray] = None
+    track_id: Optional[int] = None
 
     def xyxy_int(self) -> List[int]:
         x1, y1, x2, y2 = self.bbox

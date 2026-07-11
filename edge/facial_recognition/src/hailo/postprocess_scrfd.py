@@ -9,6 +9,7 @@ from typing import Dict, Iterable, List, Tuple
 import numpy as np
 
 from ..face.types import DetectedFace
+from .preprocess import LetterboxMetadata, map_bbox_to_original, map_landmarks_to_original
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,10 @@ def postprocess_scrfd(
     input_size: Tuple[int, int] = (640, 640),
     confidence_threshold: float = 0.6,
     nms_iou_threshold: float = 0.4,
+    metadata: LetterboxMetadata | None = None,
+    min_box_size: float = 1.0,
+    max_box_size_ratio: float = 1.0,
+    box_expansion_ratio: float = 0.0,
 ) -> List[DetectedFace]:
     """Parse SCRFD output tensors into `DetectedFace` objects.
 
@@ -62,13 +67,27 @@ def postprocess_scrfd(
     strides 8/16/32 and then filtered with NMS.
     """
 
-    faces = _parse_named_detection_outputs(outputs, original_shape, confidence_threshold)
+    original_h, original_w = original_shape[:2]
+    input_w, input_h = input_size
+    metadata = metadata or LetterboxMetadata(
+        original_width=original_w,
+        original_height=original_h,
+        input_width=input_w,
+        input_height=input_h,
+        scale=min(input_w / original_w, input_h / original_h),
+        pad_x=(input_w - original_w * min(input_w / original_w, input_h / original_h)) / 2.0,
+        pad_y=(input_h - original_h * min(input_w / original_w, input_h / original_h)) / 2.0,
+    )
+    detector_shape = (input_h, input_w)
+    faces = _parse_named_detection_outputs(outputs, detector_shape, confidence_threshold)
     if not faces:
-        faces = _parse_final_detection_rows(outputs, original_shape, input_size, confidence_threshold)
+        faces = _parse_final_detection_rows(outputs, detector_shape, input_size, confidence_threshold)
     if not faces:
-        faces = _parse_raw_scrfd_heads(outputs, original_shape, input_size, confidence_threshold)
+        faces = _parse_raw_scrfd_heads(outputs, detector_shape, input_size, confidence_threshold)
 
-    faces = _clip_faces(faces, original_shape)
+    faces = _map_validate_and_expand_faces(
+        faces, metadata, min_box_size, max_box_size_ratio, box_expansion_ratio
+    )
     if not faces:
         logger.debug("SCRFD postprocess produced no faces. Output summary: %s", summarize_outputs(outputs))
     return nms(faces, nms_iou_threshold)
@@ -465,3 +484,47 @@ def _clip_faces(faces: List[DetectedFace], original_shape: Tuple[int, int]) -> L
             DetectedFace(bbox=[x1, y1, x2, y2], confidence=face.confidence, landmarks=face.landmarks)
         )
     return clipped
+
+
+def _map_validate_and_expand_faces(
+    faces: List[DetectedFace],
+    metadata: LetterboxMetadata,
+    min_box_size: float,
+    max_box_size_ratio: float,
+    expansion_ratio: float,
+) -> List[DetectedFace]:
+    validated: List[DetectedFace] = []
+    max_width = metadata.original_width * max_box_size_ratio
+    max_height = metadata.original_height * max_box_size_ratio
+    for face in faces:
+        detector_bbox = np.asarray(face.bbox, dtype=np.float32)
+        if detector_bbox.shape != (4,) or not np.all(np.isfinite(detector_bbox)):
+            continue
+        if not np.isfinite(face.confidence) or detector_bbox[2] <= detector_bbox[0] or detector_bbox[3] <= detector_bbox[1]:
+            continue
+        landmarks = None
+        if face.landmarks is not None:
+            detector_landmarks = np.asarray(face.landmarks, dtype=np.float32)
+            if detector_landmarks.shape != (5, 2) or not np.all(np.isfinite(detector_landmarks)):
+                continue
+            input_margin = max(metadata.input_width, metadata.input_height) * 0.25
+            if (
+                np.any(detector_landmarks[:, 0] < -input_margin)
+                or np.any(detector_landmarks[:, 0] > metadata.input_width + input_margin)
+                or np.any(detector_landmarks[:, 1] < -input_margin)
+                or np.any(detector_landmarks[:, 1] > metadata.input_height + input_margin)
+            ):
+                continue
+            landmarks = map_landmarks_to_original(detector_landmarks, metadata)
+        bbox = map_bbox_to_original(detector_bbox, metadata)
+        if expansion_ratio > 0:
+            center = (bbox[:2] + bbox[2:]) * 0.5
+            half = (bbox[2:] - bbox[:2]) * 0.5 * (1.0 + expansion_ratio)
+            bbox = np.concatenate((center - half, center + half))
+            bbox[[0, 2]] = np.clip(bbox[[0, 2]], 0, metadata.original_width - 1)
+            bbox[[1, 3]] = np.clip(bbox[[1, 3]], 0, metadata.original_height - 1)
+        width, height = float(bbox[2] - bbox[0]), float(bbox[3] - bbox[1])
+        if width < min_box_size or height < min_box_size or width > max_width or height > max_height:
+            continue
+        validated.append(DetectedFace(bbox, float(face.confidence), landmarks, face.track_id))
+    return validated

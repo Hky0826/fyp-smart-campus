@@ -15,12 +15,14 @@ import numpy as np
 
 from ..camera.camera_reader import CameraReader
 from ..config import AccessControlConfig
+from ..face.aggregation import EmbeddingAggregationConfig, TrackEmbeddingAggregator
 from ..face.alignment import FaceAligner
 from ..face.database import DeviceUserRepository
 from ..face.matching import TemplateMatcher
-from ..face.quality import FaceQualityChecker
+from ..face.quality import FaceQualityChecker, FaceQualityConfig
 from ..face.spoofing import MotionSpoofDetector, SpoofResult
-from ..face.types import DetectedFace
+from ..face.tracking import FaceTracker, FaceTrackerConfig
+from ..face.types import AuthenticationResult, DetectedFace
 from ..utils.logging import configure_logging
 from ..utils.timing import StageTimer
 from ..utils.visualization import close_display, show_pipeline_result
@@ -110,6 +112,8 @@ class AccessControlPipeline:
         quality_checker: Any | None = None,
         clock: Callable[[], float] | None = None,
         sleeper: Callable[[float], None] | None = None,
+        tracker: FaceTracker | None = None,
+        embedding_aggregator: TrackEmbeddingAggregator | None = None,
     ) -> None:
         self.config = config or AccessControlConfig()
         self.detector = detector
@@ -118,51 +122,110 @@ class AccessControlPipeline:
         self.aligner = aligner or FaceAligner()
         self.matcher = matcher or TemplateMatcher(self.config.recognition_threshold)
         self.spoof_detector = spoof_detector or MotionSpoofDetector()
-        self.quality_checker = quality_checker or FaceQualityChecker(self.config.min_face_size)
+        self.quality_checker = quality_checker or FaceQualityChecker(
+            config=FaceQualityConfig(
+                min_face_size=self.config.min_face_size,
+                min_inter_eye_distance=self.config.min_inter_eye_distance,
+            )
+        )
+        self.tracker = tracker or FaceTracker(FaceTrackerConfig(
+            min_stable_frames=self.config.min_stable_frames,
+            min_stable_duration_ms=self.config.min_stable_duration_ms,
+            max_missed_frames=self.config.max_missed_frames,
+            track_timeout_ms=self.config.track_timeout_ms,
+            min_iou_for_match=self.config.min_iou_for_match,
+            max_landmark_jump_ratio=self.config.max_landmark_jump_ratio,
+        ))
+        self.embedding_aggregator = embedding_aggregator or TrackEmbeddingAggregator(
+            EmbeddingAggregationConfig(
+                min_embedding_samples=self.config.min_embedding_samples,
+                max_embedding_samples=self.config.max_embedding_samples,
+                embedding_outlier_threshold=self.config.embedding_outlier_threshold,
+                candidate_consistency_ratio=self.config.candidate_consistency_ratio,
+            )
+        )
         self._clock = clock or time.monotonic
         self._sleep = sleeper or time.sleep
         self._last_recognition_finished_at: float | None = None
+        self._active_track_id: int | None = None
 
     def process_frame(self, frame: np.ndarray, target_user_id: Optional[str] = None) -> dict:
         timer = StageTimer()
-        faces = self._detect(frame)
+        timestamp = self._clock()
+        try:
+            faces = self._detect(frame)
+        except Exception:
+            logger.exception("Face detection failed")
+            timer.total()
+            return self._deny(
+                "Face detection failed", 0, AuthenticationResult.SYSTEM_ERROR,
+                metrics=timer.metrics, bboxes=[],
+            )
         timer.mark("detection")
-        face_count = len(faces)
+        tracks = self.tracker.update(faces, timestamp)
+        visible_tracks = [track for track in tracks if track.visible]
+        face_count = len(visible_tracks)
         bboxes = [face.xyxy_int() for face in faces]
 
         if face_count == 0:
+            if self._active_track_id is not None and not any(
+                track.track_id == self._active_track_id for track in tracks
+            ):
+                self._reset_active_track()
             timer.total()
-            return self._deny("No face detected", 0, metrics=timer.metrics, bboxes=bboxes)
+            return self._deny(
+                "No face detected", 0, AuthenticationResult.RETRY_NO_FACE,
+                metrics=timer.metrics, bboxes=bboxes,
+            )
 
         if face_count > 1:
+            self._reset_active_track()
             timer.total()
-            return self._deny(MULTIPLE_FACE_REASON, face_count, metrics=timer.metrics, bboxes=bboxes)
+            return self._deny(
+                MULTIPLE_FACE_REASON, face_count, AuthenticationResult.DENY_MULTIPLE_FACES,
+                metrics=timer.metrics, bboxes=bboxes,
+            )
 
-        self._wait_for_recognition_delay()
+        track = visible_tracks[0]
+        if self._active_track_id != track.track_id:
+            self._reset_active_track()
+            self._active_track_id = track.track_id
+        face = track.as_detection(faces[0].confidence if faces else 1.0)
+        bbox = face.xyxy_int()
+        if not track.stable:
+            timer.total()
+            return self._deny(
+                "Face track is not stable yet", face_count, AuthenticationResult.RETRY_UNSTABLE_TRACK,
+                metrics=timer.metrics, bbox=bbox, bboxes=bboxes,
+            )
+
         try:
-            face = faces[0]
-            bbox = face.xyxy_int()
             quality = self.quality_checker.check(frame, face)
             if not quality.passed:
                 timer.total()
                 return self._deny(
                     f"Face quality check failed: {quality.reason}",
                     face_count,
+                    AuthenticationResult.RETRY_LOW_QUALITY,
                     metrics=timer.metrics,
                     bbox=bbox,
                     bboxes=bboxes,
+                    quality=self._quality_payload(quality),
                 )
 
             if self.config.require_liveness:
                 spoof_result = self.spoof_detector.check(frame, face)
                 logger.info("Access-control spoofing result: %s score=%.4f reason=%s", spoof_result.state, spoof_result.score, spoof_result.reason)
                 if spoof_result.state != "live":
-                    reason = "Spoofing/liveness check failed." if spoof_result.state == "spoof" else "Liveness check inconclusive."
-                    self._log_event(None, "SPOOFING", spoof_result.score)
+                    is_spoof = spoof_result.state == "spoof"
+                    reason = "Spoofing/liveness check failed." if is_spoof else "Liveness check inconclusive."
+                    if is_spoof:
+                        self._log_event(None, "SPOOFING", spoof_result.score)
                     timer.total()
                     return self._deny(
                         reason,
                         face_count,
+                        AuthenticationResult.DENY_SPOOF if is_spoof else AuthenticationResult.RETRY_UNSTABLE_TRACK,
                         spoofing_passed=False,
                         similarity=spoof_result.score,
                         metrics=timer.metrics,
@@ -170,8 +233,18 @@ class AccessControlPipeline:
                         bboxes=bboxes,
                     )
 
-            face_image = self.aligner.extract(frame, face)
-            embedding = self.embedder.embed(face_image)
+            alignment = self.aligner.align(frame, face)
+            if not alignment.success or alignment.aligned_face is None:
+                timer.total()
+                return self._deny(
+                    f"Face alignment failed: {alignment.failure_reason}",
+                    face_count,
+                    AuthenticationResult.RETRY_ALIGNMENT,
+                    metrics=timer.metrics,
+                    bbox=bbox,
+                    bboxes=bboxes,
+                )
+            embedding = self.embedder.embed(alignment.aligned_face)
             timer.mark("recognition")
 
             templates = self.repository.load_templates()
@@ -190,6 +263,53 @@ class AccessControlPipeline:
                     threshold=self.config.recognition_threshold,
                     include_inactive=True,
                 )
+            candidate_id = str(match.user_id) if match.matched and match.user_id is not None else None
+            self.embedding_aggregator.add_sample(
+                embedding, float(quality.score), timestamp, candidate_id=candidate_id
+            )
+            if not self.embedding_aggregator.has_enough_samples():
+                timer.mark("database_matching")
+                timer.total()
+                return self._deny(
+                    "Collecting valid face samples",
+                    face_count,
+                    AuthenticationResult.RETRY_INSUFFICIENT_SAMPLES,
+                    metrics=timer.metrics,
+                    bbox=bbox,
+                    bboxes=bboxes,
+                    sample_count=self.embedding_aggregator.sample_count,
+                    quality=self._quality_payload(quality),
+                )
+
+            consistent_candidate = self.embedding_aggregator.consistent_candidate()
+            if consistent_candidate is None:
+                timer.mark("database_matching")
+                timer.total()
+                terminal = self.embedding_aggregator.sample_count >= self.config.max_embedding_samples
+                if terminal:
+                    self._log_event(None, "FAILED", match.similarity)
+                return self._deny(
+                    "Candidate identity is not consistent across frames",
+                    face_count,
+                    AuthenticationResult.DENY_NO_MATCH if terminal else AuthenticationResult.RETRY_INSUFFICIENT_SAMPLES,
+                    similarity=match.similarity,
+                    metrics=timer.metrics,
+                    bbox=bbox,
+                    bboxes=bboxes,
+                    sample_count=self.embedding_aggregator.sample_count,
+                )
+
+            aggregated_embedding = self.embedding_aggregator.get_aggregated_embedding()
+            if target_user_id is not None:
+                match = self.matcher.verify(
+                    aggregated_embedding, templates, str(target_user_id),
+                    threshold=self.config.recognition_threshold, include_inactive=True,
+                )
+            else:
+                match = self.matcher.match(
+                    aggregated_embedding, templates,
+                    threshold=self.config.recognition_threshold, include_inactive=True,
+                )
             timer.mark("database_matching")
 
             logger.info(
@@ -200,12 +320,13 @@ class AccessControlPipeline:
                 match.matched,
             )
 
-            if not match.matched:
+            if not match.matched or str(match.user_id) != consistent_candidate:
                 self._log_event(None, "FAILED", match.similarity)
                 timer.total()
                 return self._deny(
                     "Unknown face or low-confidence match",
                     face_count,
+                    AuthenticationResult.DENY_NO_MATCH,
                     similarity=match.similarity,
                     matched_template=match.matched_template,
                     metrics=timer.metrics,
@@ -219,6 +340,7 @@ class AccessControlPipeline:
                 return self._deny(
                     "Matched user is inactive",
                     face_count,
+                    AuthenticationResult.DENY_NO_MATCH,
                     identity=match.identity,
                     similarity=match.similarity,
                     matched_template=match.matched_template,
@@ -231,6 +353,7 @@ class AccessControlPipeline:
             timer.total()
             return {
                 "success": True,
+                "authentication_result": AuthenticationResult.GRANT.value,
                 "mode": "access_control",
                 "access_granted": True,
                 "identity": match.identity,
@@ -242,7 +365,16 @@ class AccessControlPipeline:
                 "bbox": bbox,
                 "bboxes": bboxes,
                 "metrics": timer.metrics,
+                "track_id": track.track_id,
+                "sample_count": self.embedding_aggregator.sample_count,
             }
+        except Exception:
+            logger.exception("Access-control frame processing failed")
+            timer.total()
+            return self._deny(
+                "Access-control processing error", face_count, AuthenticationResult.SYSTEM_ERROR,
+                metrics=timer.metrics, bbox=bbox, bboxes=bboxes,
+            )
         finally:
             self._mark_recognition_finished()
 
@@ -311,6 +443,7 @@ class AccessControlPipeline:
         self,
         reason: str,
         face_count: int,
+        authentication_result: AuthenticationResult = AuthenticationResult.DENY_NO_MATCH,
         identity: str = "unknown",
         similarity: float = 0.0,
         matched_template: Optional[str] = None,
@@ -318,9 +451,12 @@ class AccessControlPipeline:
         metrics: Optional[dict] = None,
         bbox: Optional[List[int]] = None,
         bboxes: Optional[List[List[int]]] = None,
+        sample_count: int | None = None,
+        quality: dict | None = None,
     ) -> dict:
         result = {
             "success": False,
+            "authentication_result": authentication_result.value,
             "mode": "access_control",
             "access_granted": False,
             "reason": reason,
@@ -335,7 +471,27 @@ class AccessControlPipeline:
             result["bbox"] = bbox
         if bboxes is not None:
             result["bboxes"] = bboxes
+        if sample_count is not None:
+            result["sample_count"] = sample_count
+        if quality is not None:
+            result["quality"] = quality
+        if self._active_track_id is not None:
+            result["track_id"] = self._active_track_id
         return result
+
+    def _reset_active_track(self) -> None:
+        self._active_track_id = None
+        self.embedding_aggregator.reset()
+        reset = getattr(self.spoof_detector, "reset", None)
+        if callable(reset):
+            reset()
+
+    @staticmethod
+    def _quality_payload(quality: Any) -> dict:
+        return {
+            "overall_score": float(getattr(quality, "overall_score", getattr(quality, "score", 0.0))),
+            "failure_reasons": list(getattr(quality, "failure_reasons", [])),
+        }
 
     def _log_event(self, user_id: Optional[str], status: str, confidence: Optional[float]) -> None:
         log_method = getattr(self.repository, "log_auth_event", None)
@@ -351,6 +507,10 @@ def build_pipeline(config: AccessControlConfig) -> AccessControlPipeline:
         config.detector_model_path,
         confidence_threshold=config.detection_threshold,
         log_empty_detections=False,
+        nms_iou_threshold=config.detector_nms_iou_threshold,
+        min_box_size=config.detector_min_box_size,
+        max_box_size_ratio=config.detector_max_box_size_ratio,
+        box_expansion_ratio=config.detector_box_expansion_ratio,
     )
     embedder = HailoArcFaceEmbedder(config.embedding_model_path)
     repository = DeviceUserRepository(config.database_path)
