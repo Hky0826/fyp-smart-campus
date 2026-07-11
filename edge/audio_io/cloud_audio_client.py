@@ -10,7 +10,7 @@ import base64
 import json
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -55,6 +55,7 @@ class AudioResponseData:
     error_message: Optional[str] = None
     response_time_ms: Optional[int] = None
     query_id: Optional[int] = None
+    audio_streamed: bool = False
 
 
 class CloudAudioClient:
@@ -123,6 +124,55 @@ class CloudAudioClient:
         # Should not be reached
         return AudioResponseData(status="error", error_message="Max retries exceeded")
 
+    def send_audio_stream(
+        self,
+        audio_path: str | Path,
+        audio_consumer: Callable[[Iterator[bytes]], None] | None = None,
+    ) -> AudioResponseData:
+        """Upload a WAV file and consume streamed PCM response chunks."""
+        path = Path(audio_path)
+        if not path.exists():
+            return AudioResponseData(
+                status="error",
+                error_message=f"Audio file not found: {path}",
+            )
+
+        with open(path, "rb") as f:
+            audio_bytes = f.read()
+
+        return self.send_audio_bytes_stream(audio_bytes, mime_type="audio/wav", audio_consumer=audio_consumer)
+
+    def send_audio_bytes_stream(
+        self,
+        audio_bytes: bytes,
+        mime_type: str = "audio/wav",
+        audio_consumer: Callable[[Iterator[bytes]], None] | None = None,
+    ) -> AudioResponseData:
+        """Upload raw audio bytes and consume streamed PCM response chunks."""
+        if not audio_bytes:
+            return AudioResponseData(
+                status="error",
+                error_message="Empty audio data",
+            )
+
+        for attempt in range(self.config.cloud_retries + 1):
+            try:
+                return self._send_stream_once(audio_bytes, mime_type, audio_consumer)
+            except CloudAudioClientError as exc:
+                if attempt >= self.config.cloud_retries:
+                    raise
+                delay = self.config.cloud_retry_backoff_seconds * (attempt + 1)
+                logger.warning(
+                    "Cloud audio stream failed (attempt %d/%d); retrying in %.1fs: %s",
+                    attempt + 1,
+                    self.config.cloud_retries + 1,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+
+        return AudioResponseData(status="error", error_message="Max retries exceeded")
+
     def _send_once(self, audio_bytes: bytes, mime_type: str) -> AudioResponseData:
         """Send a single audio upload request without retry logic."""
         credentials = self._credentials()
@@ -164,6 +214,111 @@ class CloudAudioClient:
             )
 
         return self._parse_response(response, elapsed_ms)
+
+    def _send_stream_once(
+        self,
+        audio_bytes: bytes,
+        mime_type: str,
+        audio_consumer: Callable[[Iterator[bytes]], None] | None,
+    ) -> AudioResponseData:
+        """Send one streaming audio upload request without retry logic."""
+        credentials = self._credentials()
+        headers: dict[str, str] = {"Accept": "application/x-ndjson"}
+        if credentials.bearer_token:
+            headers["Authorization"] = f"Bearer {credentials.bearer_token}"
+
+        files = {"audio": ("recording.wav", audio_bytes, mime_type)}
+        data: dict[str, Any] = {"device_id": self.config.cloud_device_id}
+        if credentials.session_id is not None:
+            data["session_id"] = credentials.session_id
+
+        timeout = (self.config.cloud_connect_timeout_seconds, self.config.cloud_read_timeout_seconds)
+        start = time.monotonic()
+
+        try:
+            response = requests.post(
+                self.config.cloud_stream_api_url,
+                files=files,
+                data=data,
+                headers=headers,
+                timeout=timeout,
+                stream=True,
+            )
+        except requests.Timeout as exc:
+            raise CloudAudioClientError("Cloud audio stream timed out") from exc
+        except requests.ConnectionError as exc:
+            raise CloudAudioClientError("Could not connect to cloud audio stream endpoint") from exc
+        except requests.RequestException as exc:
+            raise CloudAudioClientError(f"Cloud audio stream request failed: {exc}") from exc
+
+        if response.status_code >= 400:
+            error_detail = self._error_message(response)
+            response.close()
+            raise CloudAudioClientError(
+                error_detail,
+                status_code=response.status_code,
+            )
+
+        metadata = AudioResponseData(status="error")
+        collected_audio = bytearray()
+        streamed_any = False
+        elapsed_ms = lambda: int((time.monotonic() - start) * 1000)
+
+        def audio_chunks() -> Iterator[bytes]:
+            nonlocal metadata, streamed_any
+            try:
+                for raw_line in response.iter_lines(decode_unicode=True):
+                    if not raw_line:
+                        continue
+                    try:
+                        event_payload = json.loads(raw_line)
+                    except json.JSONDecodeError as exc:
+                        raise CloudAudioClientError(
+                            f"Invalid streaming JSON from cloud: {raw_line[:200]}"
+                        ) from exc
+
+                    event = event_payload.get("event")
+                    data_payload = event_payload.get("data") or {}
+                    if event == "metadata":
+                        metadata = self._parse_stream_payload(data_payload, elapsed_ms())
+                    elif event == "audio":
+                        chunk_b64 = data_payload.get("chunk")
+                        if not chunk_b64:
+                            continue
+                        try:
+                            chunk = base64.b64decode(chunk_b64)
+                        except (ValueError, TypeError) as exc:
+                            raise CloudAudioClientError("Invalid base64 audio chunk from cloud") from exc
+                        streamed_any = True
+                        yield chunk
+                    elif event == "done":
+                        metadata = self._parse_stream_payload(data_payload, elapsed_ms())
+                    elif event in {"tts_error", "error"}:
+                        message = data_payload.get("message") or "cloud audio stream reported an error"
+                        logger.warning("Cloud audio stream event %s: %s", event, message)
+                        if event == "error":
+                            metadata.status = "error"
+                            metadata.error_message = message
+                    else:
+                        logger.debug("Ignoring unknown cloud audio stream event: %s", event)
+            finally:
+                response.close()
+
+        if audio_consumer is None:
+            for chunk in audio_chunks():
+                collected_audio.extend(chunk)
+            if collected_audio:
+                metadata.audio_bytes = bytes(collected_audio)
+        else:
+            try:
+                audio_consumer(audio_chunks())
+            finally:
+                response.close()
+
+        metadata.audio_streamed = streamed_any
+        if metadata.response_time_ms is None:
+            metadata.response_time_ms = elapsed_ms()
+        return metadata
 
     def _parse_response(self, response: requests.Response, elapsed_ms: int) -> AudioResponseData:
         """Parse the JSON response into an AudioResponseData instance."""
@@ -208,6 +363,20 @@ class CloudAudioClient:
             error_message=error_message,
             response_time_ms=response_time_ms,
             query_id=query_id,
+        )
+
+    def _parse_stream_payload(self, payload: Mapping[str, Any], elapsed_ms: int) -> AudioResponseData:
+        """Parse one metadata/done NDJSON payload into AudioResponseData."""
+        return AudioResponseData(
+            transcribed_input=payload.get("transcribed_input"),
+            text=payload.get("text_response"),
+            audio_bytes=None,
+            sources=payload.get("sources", []),
+            status=payload.get("status", "error"),
+            access_granted=bool(payload.get("access_granted", False)),
+            error_message=payload.get("error_message"),
+            response_time_ms=payload.get("response_time_ms") or elapsed_ms,
+            query_id=payload.get("query_id"),
         )
 
     def _credentials(self) -> CloudChatCredentials:

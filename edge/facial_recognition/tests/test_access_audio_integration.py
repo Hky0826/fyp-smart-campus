@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from edge.audio_io.cloud_audio_client import CloudAudioClient, CloudChatCredentials
-from edge.audio_io.config import _cloud_audio_url
+from edge.audio_io.config import _cloud_audio_stream_url, _cloud_audio_url
 from edge.facial_recognition.src.config import AccessControlConfig
 from edge.facial_recognition.src.pipelines.access_audio import (
     AccessControlAudioCoordinator,
@@ -28,6 +28,10 @@ class AccessAudioIntegrationTests(unittest.TestCase):
     def test_audio_cloud_url_defaults_to_edge_sync_cloud_url(self):
         with patch.dict("os.environ", {"EDGE_SYNC_CLOUD_URL": "http://cloud.example:8000"}, clear=True):
             self.assertEqual(_cloud_audio_url(), "http://cloud.example:8000/api/chatbot/chat/audio")
+            self.assertEqual(
+                _cloud_audio_stream_url(),
+                "http://cloud.example:8000/api/chatbot/chat/audio/stream",
+            )
 
     def test_cloud_audio_client_prefers_runtime_credentials(self):
         client = CloudAudioClient(

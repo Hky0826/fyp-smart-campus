@@ -65,6 +65,13 @@ def _cloud_audio_url() -> str:
     return f"{cloud_base_url}/api/chatbot/chat/audio"
 
 
+def _cloud_audio_stream_url() -> str:
+    configured = _optional_str_env("EDGE_AUDIO_CLOUD_STREAM_API_URL")
+    if configured:
+        return configured
+    return f"{_cloud_audio_url().rstrip('/')}/stream"
+
+
 @dataclass(frozen=True)
 class AudioIOConfig:
     """Runtime settings for the edge audio I/O terminal (record, send, receive, play)."""
@@ -84,6 +91,8 @@ class AudioIOConfig:
     silence_rms_threshold: float = _float_env("EDGE_AUDIO_SILENCE_RMS_THRESHOLD", 500.0)
 
     cloud_api_url: str = _cloud_audio_url()
+    cloud_stream_api_url: str = _cloud_audio_stream_url()
+    cloud_streaming_enabled: bool = _bool_env("EDGE_AUDIO_CLOUD_STREAMING_ENABLED", True)
     cloud_bearer_token: str | None = _optional_str_env("EDGE_AUDIO_CLOUD_BEARER_TOKEN")
     cloud_device_id: str = os.getenv("EDGE_AUDIO_CLOUD_DEVICE_ID", os.getenv("EDGE_SYNC_DEVICE_ID", "entry-gate-01"))
     cloud_session_id: int | None = _optional_int_env("EDGE_AUDIO_CLOUD_SESSION_ID")

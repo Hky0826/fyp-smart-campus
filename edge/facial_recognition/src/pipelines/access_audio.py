@@ -169,6 +169,7 @@ class AccessControlAudioCoordinator:
 
             audio_config = AudioIOConfig(
                 cloud_api_url=f"{self.config.sync_cloud_url.rstrip('/')}/api/chatbot/chat/audio",
+                cloud_stream_api_url=f"{self.config.sync_cloud_url.rstrip('/')}/api/chatbot/chat/audio/stream",
                 cloud_device_id=self.config.sync_device_id,
             )
             pipeline = AudioInteractionPipeline(

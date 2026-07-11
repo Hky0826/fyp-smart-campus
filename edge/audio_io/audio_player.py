@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Optional
 
@@ -110,6 +111,96 @@ class AudioPlayer:
 
         samples = len(pcm_bytes) // 2
         logger.info("Played %d PCM samples at %d Hz with ALSA", samples, self.sample_rate)
+
+    def play_pcm_stream(self, pcm_chunks: Iterable[bytes]) -> None:
+        """Play a stream of raw PCM chunks as one continuous audio output."""
+        if self.config.playback_backend == "alsa":
+            self._play_pcm_stream_alsa(pcm_chunks)
+            return
+        if self.config.playback_backend != "sounddevice":
+            raise AudioPlaybackError(
+                f"Unsupported playback backend: {self.config.playback_backend}. "
+                "Use 'alsa' or 'sounddevice'."
+            )
+        self._play_pcm_stream_sounddevice(pcm_chunks)
+
+    def _play_pcm_stream_sounddevice(self, pcm_chunks: Iterable[bytes]) -> None:
+        try:
+            import sounddevice as sd
+
+            samples = 0
+            with sd.OutputStream(
+                samplerate=self.sample_rate,
+                channels=1,
+                dtype="int16",
+            ) as stream:
+                for chunk in pcm_chunks:
+                    if not chunk:
+                        continue
+                    audio_array: np.ndarray = np.frombuffer(chunk, dtype=np.int16)
+                    if audio_array.size == 0:
+                        continue
+                    stream.write(audio_array.reshape(-1, 1))
+                    samples += audio_array.size
+            logger.info("Streamed %d PCM samples at %d Hz", samples, self.sample_rate)
+        except Exception as exc:
+            raise AudioPlaybackError(f"Failed to stream PCM audio: {exc}") from exc
+
+    def _play_pcm_stream_alsa(self, pcm_chunks: Iterable[bytes]) -> None:
+        command = [
+            "aplay",
+            "-q",
+            "-f",
+            "S16_LE",
+            "-r",
+            str(self.sample_rate),
+            "-c",
+            "1",
+            "-t",
+            "raw",
+        ]
+        if self.config.speaker_device is not None:
+            command.extend(["-D", _alsa_device_name(self.config.speaker_device)])
+
+        try:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+        except FileNotFoundError as exc:
+            raise AudioPlaybackError(
+                "ALSA playback backend requires aplay. Install it on the edge device with: "
+                "sudo apt update && sudo apt install -y alsa-utils"
+            ) from exc
+
+        total_bytes = 0
+        stderr = b""
+        try:
+            assert process.stdin is not None
+            for chunk in pcm_chunks:
+                if not chunk:
+                    continue
+                if len(chunk) % 2 != 0:
+                    raise AudioPlaybackError("PCM audio byte length is not aligned to int16 samples")
+                process.stdin.write(chunk)
+                process.stdin.flush()
+                total_bytes += len(chunk)
+            process.stdin.close()
+            stderr = process.stderr.read() if process.stderr is not None else b""
+            return_code = process.wait()
+        except Exception:
+            process.kill()
+            process.wait()
+            raise
+
+        if return_code != 0:
+            message = stderr.decode(errors="ignore").strip()
+            raise AudioPlaybackError(f"ALSA streaming playback failed: {message or 'aplay exited with an error'}")
+
+        samples = total_bytes // 2
+        logger.info("Streamed %d PCM samples at %d Hz with ALSA", samples, self.sample_rate)
 
     def play_wav(self, wav_path: str | Path) -> None:
         """Play a WAV file through the default output device.

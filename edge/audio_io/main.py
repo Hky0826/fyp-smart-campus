@@ -104,8 +104,23 @@ class AudioInteractionPipeline:
             recording_path = recording.path
             logger.info("Recorded %.2fs of audio", recording.duration_seconds)
 
-            # Step 2: Upload to cloud
-            response = self.cloud.send_audio(recording_path)
+            # Step 2: Upload to cloud and stream playback as TTS chunks arrive.
+            streamed_audio = False
+            if self.config.cloud_streaming_enabled:
+                try:
+                    response = self.cloud.send_audio_stream(
+                        recording_path,
+                        audio_consumer=self.player.play_pcm_stream,
+                    )
+                    streamed_audio = response.audio_streamed
+                except CloudAudioClientError as exc:
+                    logger.warning(
+                        "Streaming cloud audio failed; falling back to legacy response: %s",
+                        exc,
+                    )
+                    response = self.cloud.send_audio(recording_path)
+            else:
+                response = self.cloud.send_audio(recording_path)
 
             # Step 3: Handle response
             if response.transcribed_input:
@@ -133,8 +148,11 @@ class AudioInteractionPipeline:
                 if response.text:
                     logger.info("Response text: %s", response.text)
 
-                # Step 4: Play audio response if available
-                if response.audio_bytes:
+                # Step 4: Play audio response if available. In streaming mode
+                # playback has already happened while the HTTP response arrived.
+                if streamed_audio:
+                    logger.info("Streamed audio response from cloud")
+                elif response.audio_bytes:
                     self.player.play_pcm(response.audio_bytes)
                 elif response.text:
                     logger.info("No audio response to play (text-only response)")
@@ -194,8 +212,26 @@ class AudioInteractionPipeline:
         # We can no longer do local TTS; just log and let the handler manage UI
         if recording_path and recording_path.exists():
             try:
-                response = self.cloud.send_audio(recording_path)
-                if response.audio_bytes:
+                streamed_audio = False
+                if self.config.cloud_streaming_enabled:
+                    try:
+                        response = self.cloud.send_audio_stream(
+                            recording_path,
+                            audio_consumer=self.player.play_pcm_stream,
+                        )
+                        streamed_audio = response.audio_streamed
+                    except CloudAudioClientError as exc:
+                        logger.warning(
+                            "Streaming authenticated retry failed; falling back to legacy response: %s",
+                            exc,
+                        )
+                        response = self.cloud.send_audio(recording_path)
+                else:
+                    response = self.cloud.send_audio(recording_path)
+
+                if streamed_audio:
+                    logger.info("Streamed authenticated audio response from cloud")
+                elif response.audio_bytes:
                     self.player.play_pcm(response.audio_bytes)
                 elif response.text:
                     logger.info("Authenticated response text: %s", response.text)
