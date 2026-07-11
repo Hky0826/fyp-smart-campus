@@ -173,6 +173,7 @@ def process_audio_chat(
     device_id: Optional[str],
     session_id: Optional[int],
     db: Session,
+    include_audio: bool = True,
 ) -> AudioChatResponse:
     """
     Execute the full audio RAG pipeline.
@@ -189,7 +190,7 @@ def process_audio_chat(
     8. Build separated prompt with trust boundaries
     9. Generate text response via Gemini 3.1 Lite
     10. Validate text response and sources
-    11. Convert validated text response to speech with Gemini 2.5 Flash TTS
+    11. Convert validated text response to speech with Gemini TTS when requested
     12. Build CitationSchema objects
     13. Audit log the interaction
     14. Return AudioChatResponse
@@ -225,6 +226,7 @@ def process_audio_chat(
                 access_granted=False,
                 error_message=AUTH_REQUIRED_STATUS,
                 start_time=start_time,
+                include_audio=include_audio,
             )
 
     # ── Step 2: Resolve RBAC access levels ─────────────────────────────
@@ -252,6 +254,7 @@ def process_audio_chat(
             access_granted=False,
             error_message="Could not process the audio. Please try speaking clearly and try again.",
             start_time=start_time,
+            include_audio=include_audio,
         )
 
     # ── Step 3b: Check audio-extraction prompt-injection flag ──────────
@@ -273,6 +276,7 @@ def process_audio_chat(
                 "potentially unsafe instructions."
             ),
             start_time=start_time,
+            include_audio=include_audio,
         )
 
     user_query = extraction_result.user_query
@@ -285,6 +289,7 @@ def process_audio_chat(
             access_granted=False,
             error_message="No speech detected. Please try speaking clearly and try again.",
             start_time=start_time,
+            include_audio=include_audio,
         )
 
     # ── Step 4: Prompt-injection detection on extracted query ──────────
@@ -314,6 +319,7 @@ def process_audio_chat(
             status="blocked",
             access_granted=False,
             start_time=start_time,
+            include_audio=include_audio,
         )
 
     sanitized_query = guard_result.sanitized_query or user_query
@@ -332,6 +338,7 @@ def process_audio_chat(
             access_granted=False,
             error_message="The search service is temporarily unavailable. Please try again later.",
             start_time=start_time,
+            include_audio=include_audio,
         )
 
     # ── Step 7: Retrieve authorised document chunks ────────────────────
@@ -351,6 +358,7 @@ def process_audio_chat(
                 status="auth_required",
                 access_granted=False,
                 start_time=start_time,
+                include_audio=include_audio,
             )
         else:
             # No relevant chunks at all
@@ -364,6 +372,7 @@ def process_audio_chat(
                 status="no_access",
                 access_granted=False,
                 start_time=start_time,
+                include_audio=include_audio,
             )
 
     # ── Step 8: Build context block and separated prompt ────────────────
@@ -387,6 +396,7 @@ def process_audio_chat(
             access_granted=False,
             error_message="The answer service is temporarily unavailable. Please try again later.",
             start_time=start_time,
+            include_audio=include_audio,
         )
 
     answer_text = live_result.text
@@ -411,10 +421,10 @@ def process_audio_chat(
         # Return with validation_failed status so the edge device knows
         # the response went through extra sanitisation
         status_str = "validation_failed"
-        include_audio = False
+        include_response_audio = False
     else:
         status_str = "ok"
-        include_audio = True
+        include_response_audio = include_audio
 
     # ── Step 12: Build CitationSchema objects ──────────────────────────
     citations: List[CitationSchema] = [
@@ -454,7 +464,7 @@ def process_audio_chat(
         access_granted=True,
         start_time=start_time,
         query_id=audit_query_id,
-        include_audio=include_audio,
+        include_audio=include_response_audio,
     )
 
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from collections.abc import Iterator
 from typing import List, Optional
 
 from google import genai
@@ -225,6 +226,92 @@ def generate_audio_from_text(text: str) -> Optional[bytes]:
 
     logger.warning("TTS returned no audio part.")
     return None
+
+
+def generate_audio_from_text_stream(text: str) -> Iterator[bytes]:
+    """
+    Stream audio chunks from the configured Gemini TTS model.
+
+    Yields raw PCM audio bytes (24 kHz mono int16) as the SDK returns them.
+    This is used by the edge-device streaming endpoint so playback can start
+    before the full TTS response has been generated.
+
+    Raises:
+        RuntimeError: If no configured/fallback TTS model can produce audio.
+    """
+    if not text or not text.strip():
+        logger.warning("generate_audio_from_text_stream called with empty text.")
+        return
+
+    tts_prompt = (
+        "Read the following text aloud in a clear, natural speaking voice:\n\n"
+        f"{text}"
+    )
+
+    try:
+        client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
+    except Exception as exc:
+        logger.error("Failed to create Gemini client for streaming TTS: %s", exc)
+        raise RuntimeError(f"Gemini client initialisation failed: {exc}") from exc
+
+    config = types.GenerateContentConfig(
+        temperature=0.0,
+        response_modalities=["AUDIO"],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                    voice_name=getattr(rag_settings, "AUDIO_TTS_VOICE", "Kore")
+                )
+            )
+        ),
+    )
+
+    last_error: Exception | None = None
+    attempted_models: list[str] = []
+    for model_name in _candidate_tts_models():
+        attempted_models.append(model_name)
+        yielded_any = False
+        try:
+            responses = client.models.generate_content_stream(
+                model=model_name,
+                contents=tts_prompt,
+                config=config,
+            )
+            for response in responses:
+                audio_data = _extract_audio_data(response)
+                if audio_data is None:
+                    continue
+                yielded_any = True
+                logger.debug(
+                    "Streaming TTS yielded %d bytes with model=%s.",
+                    len(audio_data),
+                    model_name,
+                )
+                yield audio_data
+        except Exception as exc:
+            last_error = exc
+            if yielded_any:
+                logger.error("Streaming TTS failed after yielding audio: %s", exc)
+                raise RuntimeError(f"Streaming TTS failed: {exc}") from exc
+            if _is_not_found_error(exc):
+                _UNAVAILABLE_TTS_MODELS.add(model_name)
+            logger.warning("Streaming TTS model failed. model=%s error=%s", model_name, exc)
+            continue
+
+        if yielded_any:
+            logger.info("Streaming TTS completed with model=%s.", model_name)
+            return
+
+        logger.warning("Streaming TTS returned no audio part. model=%s", model_name)
+
+    if last_error is not None:
+        logger.error(
+            "Streaming TTS failed for all models. attempted_models=%s",
+            attempted_models,
+        )
+        raise RuntimeError(f"Streaming TTS failed: {last_error}") from last_error
+
+    logger.warning("Streaming TTS returned no audio part.")
 
 
 def _candidate_tts_models() -> list[str]:

@@ -18,6 +18,7 @@ Security:
 
 from __future__ import annotations
 
+import base64
 import datetime
 import json
 import logging
@@ -33,6 +34,7 @@ from app.core.security import verify_content_admin
 from RagChatbot.config import rag_settings
 from RagChatbot.generation.audio_query_extractor import AudioQueryExtractionError
 from RagChatbot.generation.gemini_live_service import GeminiLiveError
+from RagChatbot.generation.response_validator import generate_audio_from_text_stream
 from RagChatbot.schemas import (
     AudioChatResponse,
     ChatRequest,
@@ -82,6 +84,11 @@ def _sse_event(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def _ndjson_event(event: str, payload: dict) -> str:
+    """Serialize one newline-delimited JSON streaming event."""
+    return json.dumps({"event": event, "data": payload}, ensure_ascii=False) + "\n"
+
+
 def _chat_response_events(response: ChatResponse) -> Iterator[str]:
     """Yield chatbot answer chunks followed by the complete response metadata."""
     for chunk in _split_stream_text(response.answer):
@@ -95,6 +102,109 @@ def _require_public_smoke_test_enabled() -> None:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Public chatbot smoke test endpoint is disabled.",
         )
+
+
+async def _read_valid_audio_upload(audio: UploadFile) -> tuple[bytes, str]:
+    """Validate an uploaded audio file and return its bytes and MIME type."""
+    if audio.content_type and not audio.content_type.startswith("audio/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Expected an audio file, got {audio.content_type}.",
+        )
+
+    audio_bytes = await audio.read()
+
+    if not audio_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded audio file is empty.",
+        )
+
+    if len(audio_bytes) > rag_settings.AUDIO_MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Audio file exceeds the maximum allowed size of "
+                f"{rag_settings.AUDIO_MAX_UPLOAD_BYTES} bytes."
+            ),
+        )
+
+    return audio_bytes, audio.content_type or "audio/wav"
+
+
+def _should_stream_tts_audio(response: AudioChatResponse) -> bool:
+    """Return whether a validated/canned audio response should be spoken."""
+    return bool(
+        rag_settings.AUDIO_TTS_ENABLED
+        and response.text_response
+        and response.status in {"ok", "blocked", "no_access", "auth_required"}
+    )
+
+
+def _audio_chat_stream_events(
+    *,
+    audio_bytes: bytes,
+    mime_type: str,
+    bearer_token: str | None,
+    device_id: str | None,
+    session_id: int | None,
+    db: Session,
+) -> Iterator[str]:
+    """Run the audio RAG pipeline and stream TTS PCM chunks as NDJSON."""
+    try:
+        response = process_audio_chat(
+            audio_bytes=audio_bytes,
+            mime_type=mime_type,
+            bearer_token=bearer_token,
+            device_id=device_id,
+            session_id=session_id,
+            db=db,
+            include_audio=False,
+        )
+    except AudioQueryExtractionError:
+        yield _ndjson_event(
+            "error",
+            {"message": "Audio query extraction service is temporarily unavailable."},
+        )
+        return
+    except GeminiLiveError:
+        yield _ndjson_event(
+            "error",
+            {"message": "Audio generation service is temporarily unavailable."},
+        )
+        return
+    except Exception:
+        logger.exception("Unexpected error in audio chat stream")
+        yield _ndjson_event(
+            "error",
+            {"message": "An unexpected error occurred while processing the audio."},
+        )
+        return
+
+    response_payload = response.model_dump(mode="json", exclude={"audio_response"})
+    yield _ndjson_event("metadata", response_payload)
+
+    if _should_stream_tts_audio(response):
+        try:
+            for chunk in generate_audio_from_text_stream(response.text_response or ""):
+                if not chunk:
+                    continue
+                yield _ndjson_event(
+                    "audio",
+                    {
+                        "encoding": "pcm_s16le",
+                        "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
+                        "chunk": base64.b64encode(chunk).decode("ascii"),
+                    },
+                )
+        except Exception as exc:
+            logger.warning("Audio chat stream: TTS streaming failed: %s", exc)
+            yield _ndjson_event(
+                "tts_error",
+                {"message": "Audio playback stream could not be generated."},
+            )
+
+    yield _ndjson_event("done", response_payload)
 
 
 # ── Health Check ──────────────────────────────────────────────────────────────
@@ -305,6 +415,45 @@ async def chat_audio(
 
 
 # ── Ingestion Endpoint ────────────────────────────────────────────────────────
+
+@router.post(
+    "/chat/audio/stream",
+    summary="Submit audio query and stream TTS audio chunks to the edge device",
+)
+async def chat_audio_stream(
+    audio: UploadFile = File(...),
+    device_id: str | None = Form(None),
+    session_id: int | None = Form(None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    db: Session = Depends(get_db),
+):
+    """
+    Accept audio from the edge device and stream generated speech as NDJSON.
+
+    Events:
+      - metadata: AudioChatResponse fields without base64 audio_response
+      - audio: base64 PCM chunk, 24 kHz mono int16
+      - done: final metadata
+      - tts_error/error: recoverable streaming failure information
+    """
+    audio_bytes, mime_type = await _read_valid_audio_upload(audio)
+    bearer_token = credentials.credentials if credentials else None
+    return StreamingResponse(
+        _audio_chat_stream_events(
+            audio_bytes=audio_bytes,
+            mime_type=mime_type,
+            bearer_token=bearer_token,
+            device_id=device_id,
+            session_id=session_id,
+            db=db,
+        ),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
 
 @router.post(
     "/ingest",

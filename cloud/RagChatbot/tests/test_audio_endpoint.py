@@ -12,6 +12,8 @@ Uses FastAPI TestClient with mocked service dependencies to verify:
 
 from __future__ import annotations
 
+import base64
+import json
 from io import BytesIO
 from unittest.mock import MagicMock, patch
 
@@ -123,6 +125,37 @@ class TestChatAudioEndpoint:
         call_kwargs = mock_process.call_args.kwargs
         assert call_kwargs["device_id"] == "edge-001"
         assert call_kwargs["session_id"] == 42
+
+    @patch("RagChatbot.router.generate_audio_from_text_stream")
+    @patch("RagChatbot.router.process_audio_chat")
+    def test_audio_stream_upload_returns_metadata_and_audio_chunks(self, mock_process, mock_tts_stream):
+        """Streaming upload should emit metadata, PCM chunks, and done events."""
+        from RagChatbot.schemas import AudioChatResponse
+
+        mock_process.return_value = AudioChatResponse(
+            transcribed_input="When does the library close?",
+            text_response="The library closes at 10 PM.",
+            status="ok",
+            access_granted=True,
+        )
+        mock_tts_stream.return_value = iter([b"pcm-1", b"pcm-2"])
+
+        response = client.post(
+            "/api/chatbot/chat/audio/stream",
+            files={"audio": ("test.wav", BytesIO(_MINIMAL_WAV), "audio/wav")},
+        )
+
+        assert response.status_code == 200
+        events = [json.loads(line) for line in response.text.splitlines() if line]
+        assert [event["event"] for event in events] == ["metadata", "audio", "audio", "done"]
+        assert events[0]["data"]["status"] == "ok"
+        assert "audio_response" not in events[0]["data"]
+        assert base64.b64decode(events[1]["data"]["chunk"]) == b"pcm-1"
+        assert base64.b64decode(events[2]["data"]["chunk"]) == b"pcm-2"
+
+        call_kwargs = mock_process.call_args.kwargs
+        assert call_kwargs["include_audio"] is False
+        mock_tts_stream.assert_called_once_with("The library closes at 10 PM.")
 
     def test_missing_audio_returns_422(self):
         """Sending no audio file should return a 422 validation error."""

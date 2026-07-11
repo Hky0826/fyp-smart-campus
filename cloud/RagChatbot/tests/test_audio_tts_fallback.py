@@ -70,6 +70,29 @@ def test_generate_audio_from_text_falls_back_after_missing_model(monkeypatch):
     assert "missing-model" in response_validator._UNAVAILABLE_TTS_MODELS
 
 
+def test_generate_audio_from_text_stream_yields_chunks(monkeypatch):
+    """Streaming TTS should yield each audio part as it arrives."""
+    response_validator._UNAVAILABLE_TTS_MODELS.clear()
+    monkeypatch.setattr(response_validator.rag_settings, "AUDIO_TTS_MODEL", "stream-model")
+    monkeypatch.setattr(response_validator.rag_settings, "AUDIO_TTS_FALLBACK_MODELS", "")
+
+    calls: list[str] = []
+
+    def generate_content_stream(*, model, contents, config):
+        calls.append(model)
+        return iter([_fake_audio_response(b"pcm-1"), _fake_audio_response(b"pcm-2")])
+
+    fake_client = Mock()
+    fake_client.models.generate_content_stream = generate_content_stream
+    monkeypatch.setattr(response_validator.genai, "Client", Mock(return_value=fake_client))
+
+    assert list(response_validator.generate_audio_from_text_stream("short answer")) == [
+        b"pcm-1",
+        b"pcm-2",
+    ]
+    assert calls == ["stream-model"]
+
+
 def _fake_audio_response(data: bytes):
     inline_data = Mock(mime_type="audio/pcm", data=data)
     part = Mock(inline_data=inline_data)
