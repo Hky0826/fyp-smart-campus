@@ -44,8 +44,10 @@ def run_evaluation(dataset, model_interface, thresholds, far_targets, results_di
             labels.append(is_same)
             scores.append(score)
         except Exception as e:
-            # Skip invalid images
-            pass
+            # Print the error so the user knows exactly why an image pair was skipped
+            print(f"\n[Warning] Skipped pair due to error: {e}")
+            print(f"  img1: {img1}")
+            print(f"  img2: {img2}\n")
             
     if len(scores) == 0:
         print(f"No valid scores computed for {dataset.name}.")
