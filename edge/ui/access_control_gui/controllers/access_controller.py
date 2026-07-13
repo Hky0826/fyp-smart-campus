@@ -14,7 +14,7 @@ from .chatbot_controller import ChatbotController
 from .presence_controller import PresenceController
 
 
-CAMERA_FRAME_INTERVAL_MS = int(os.getenv("EDGE_GUI_CAMERA_FRAME_INTERVAL_MS", "500"))
+CAMERA_FRAME_INTERVAL_MS = int(os.getenv("EDGE_GUI_CAMERA_FRAME_INTERVAL_MS", "33"))
 ACCESS_RESULT_HOLD_MS = int(os.getenv("EDGE_GUI_ACCESS_RESULT_HOLD_MS", "4000"))
 CHAT_VERIFY_RETRY_MS = int(os.getenv("EDGE_GUI_CHAT_VERIFY_RETRY_MS", "350"))
 
