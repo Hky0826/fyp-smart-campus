@@ -70,3 +70,22 @@ class CFPDataset(BaseDataset):
         random.shuffle(self.pairs)
         if self.sample_size and self.sample_size < len(self.pairs):
             self.pairs = self.pairs[:self.sample_size]
+
+if __name__ == '__main__':
+    # Test the CFP dataset download and prepare logic
+    import argparse
+    parser = argparse.ArgumentParser(description="Test CFPDataset loading")
+    parser.add_argument("--data-dir", type=str, default="./data/cfp", help="Path to store dataset")
+    args = parser.parse_args()
+
+    dataset = CFPDataset(data_dir=args.data_dir)
+    print("Testing CFPDataset...")
+    dataset.download()
+    dataset.prepare()
+    pairs = dataset.get_pairs()
+    
+    print(f"\nSuccessfully loaded {len(pairs)} pairs.")
+    if len(pairs) > 0:
+        print("First 2 pairs:")
+        for p in pairs[:2]:
+            print(f"  {p}")
