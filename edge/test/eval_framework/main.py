@@ -24,7 +24,12 @@ def run_evaluation(dataset, model_interface, thresholds, far_targets, results_di
     dataset.prepare()
     pairs = dataset.get_pairs()
     
-    print(f"Evaluating {dataset.name} on {len(pairs)} pairs...")
+    if len(pairs) == 0:
+        print(f"\n[!] Skipping {dataset.name} evaluation: No valid image pairs were found.")
+        print("This usually means the dataset was not downloaded correctly or the folder structure is missing.")
+        return None
+        
+    print(f"\nEvaluating {dataset.name} on {len(pairs)} pairs...")
     
     labels = []
     scores = []

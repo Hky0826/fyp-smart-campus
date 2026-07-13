@@ -40,8 +40,8 @@ class BaseDataset(ABC):
             )
             print(f"Successfully downloaded and unzipped {dataset_identifier}")
         except FileNotFoundError:
-            print("Error: Kaggle CLI not found. Please install via 'pip install kaggle'")
-            raise
+            print(f"\n[!] Error: Kaggle CLI not found. Could not download {dataset_identifier}.")
+            print("Please either 'pip install kaggle' and configure it, or download the dataset manually to the specified data directory.")
         except subprocess.CalledProcessError as e:
-            print(f"Error downloading {dataset_identifier}: {e}")
-            raise
+            print(f"\n[!] Error downloading {dataset_identifier}: Kaggle returned an error (perhaps the dataset is private or forbidden).")
+            print("Please download it manually to the specified data directory.")
