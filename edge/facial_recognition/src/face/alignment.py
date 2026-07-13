@@ -26,7 +26,7 @@ class AlignmentConfig:
     min_inter_eye_distance: float = 18.0
     landmark_box_tolerance_ratio: float = 0.15
     max_rotation_degrees: float = 35.0
-    min_scale: float = 0.4
+    min_scale: float = 0.1
     max_scale: float = 6.0
     max_translation_ratio: float = 2.0
 
