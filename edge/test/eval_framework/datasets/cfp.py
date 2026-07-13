@@ -1,0 +1,62 @@
+import os
+import random
+from .base import BaseDataset
+
+class CFPDataset(BaseDataset):
+    def __init__(self, data_dir, sample_size=None, seed=42):
+        super().__init__("CFP", data_dir, sample_size, seed)
+        # Assuming a standard Kaggle CFP dataset upload (e.g. from users like sayhye or similar)
+        # Update this identifier if a specific Kaggle CFP dataset is preferred
+        self.kaggle_id = "abhinav1402/cfp-dataset" 
+        
+    def download(self):
+        if not os.path.exists(os.path.join(self.data_dir, "Protocol")):
+            self._download_kaggle_dataset(self.kaggle_id)
+            
+    def prepare(self):
+        # CFP has Frontal-Profile (FP) and Frontal-Frontal (FF) protocols
+        # usually 10 splits. We will aggregate them.
+        protocol_dir = os.path.join(self.data_dir, "Protocol")
+        image_dir = os.path.join(self.data_dir, "Images")
+        
+        self.pairs = []
+        
+        if os.path.exists(protocol_dir) and os.path.exists(image_dir):
+            for split_idx in range(1, 11):
+                split_dir = os.path.join(protocol_dir, "Split", f"{split_idx:02d}")
+                gen_file = os.path.join(split_dir, "FP", "same.txt")
+                imp_file = os.path.join(split_dir, "FP", "diff.txt")
+                
+                # Parse genuine
+                if os.path.exists(gen_file):
+                    with open(gen_file, 'r') as f:
+                        for line in f:
+                            parts = line.strip().split(',')
+                            if len(parts) >= 2:
+                                # CFP format: 001/frontal/01.jpg,001/profile/01.jpg
+                                img1 = os.path.join(image_dir, parts[0].strip())
+                                img2 = os.path.join(image_dir, parts[1].strip())
+                                self.pairs.append((img1, img2, True))
+                                
+                # Parse impostor
+                if os.path.exists(imp_file):
+                    with open(imp_file, 'r') as f:
+                        for line in f:
+                            parts = line.strip().split(',')
+                            if len(parts) >= 2:
+                                img1 = os.path.join(image_dir, parts[0].strip())
+                                img2 = os.path.join(image_dir, parts[1].strip())
+                                self.pairs.append((img1, img2, False))
+        else:
+            print("Warning: CFP Protocol/Images not found. Generating dummy pairs for testing.")
+            # Dummy generation logic for testing if dataset is missing
+            self.pairs = [
+                ("dummy1.jpg", "dummy2.jpg", True),
+                ("dummy1.jpg", "dummy3.jpg", False)
+            ]
+            
+        # Shuffle and sample
+        random.seed(self.seed)
+        random.shuffle(self.pairs)
+        if self.sample_size and self.sample_size < len(self.pairs):
+            self.pairs = self.pairs[:self.sample_size]
