@@ -148,6 +148,9 @@ class AccessControlPipeline:
         self._sleep = sleeper or time.sleep
         self._last_recognition_finished_at: float | None = None
         self._active_track_id: int | None = None
+        self._last_full_recognition_time = 0.0
+        self._cached_recognition_result: dict | None = None
+        self._recognition_interval = 0.25
 
     def process_frame(self, frame: np.ndarray, target_user_id: Optional[str] = None) -> dict:
         timer = StageTimer()
@@ -199,11 +202,24 @@ class AccessControlPipeline:
                 metrics=timer.metrics, bbox=bbox, bboxes=bboxes,
             )
 
+        if self._cached_recognition_result is not None and (timestamp - self._last_full_recognition_time) < self._recognition_interval:
+            result = dict(self._cached_recognition_result)
+            result["bbox"] = bbox
+            result["bboxes"] = bboxes
+            timer.total()
+            result["metrics"] = timer.metrics
+            return result
+
+        def cache_and_return(res: dict) -> dict:
+            self._cached_recognition_result = res
+            self._last_full_recognition_time = timestamp
+            return res
+
         try:
             quality = self.quality_checker.check(frame, face)
             if not quality.passed:
                 timer.total()
-                return self._deny(
+                return cache_and_return(self._deny(
                     f"Face quality check failed: {quality.reason}",
                     face_count,
                     AuthenticationResult.RETRY_LOW_QUALITY,
@@ -211,7 +227,7 @@ class AccessControlPipeline:
                     bbox=bbox,
                     bboxes=bboxes,
                     quality=self._quality_payload(quality),
-                )
+                ))
 
             if self.config.require_liveness:
                 spoof_result = self.spoof_detector.check(frame, face)
@@ -222,7 +238,7 @@ class AccessControlPipeline:
                     if is_spoof:
                         self._log_event(None, "SPOOFING", spoof_result.score)
                     timer.total()
-                    return self._deny(
+                    return cache_and_return(self._deny(
                         reason,
                         face_count,
                         AuthenticationResult.DENY_SPOOF if is_spoof else AuthenticationResult.RETRY_UNSTABLE_TRACK,
@@ -231,19 +247,19 @@ class AccessControlPipeline:
                         metrics=timer.metrics,
                         bbox=bbox,
                         bboxes=bboxes,
-                    )
+                    ))
 
             alignment = self.aligner.align(frame, face)
             if not alignment.success or alignment.aligned_face is None:
                 timer.total()
-                return self._deny(
+                return cache_and_return(self._deny(
                     f"Face alignment failed: {alignment.failure_reason}",
                     face_count,
                     AuthenticationResult.RETRY_ALIGNMENT,
                     metrics=timer.metrics,
                     bbox=bbox,
                     bboxes=bboxes,
-                )
+                ))
             embedding = self.embedder.embed(alignment.aligned_face)
             timer.mark("recognition")
 
@@ -272,7 +288,7 @@ class AccessControlPipeline:
             if not self.embedding_aggregator.has_enough_samples():
                 timer.mark("database_matching")
                 timer.total()
-                return self._deny(
+                return cache_and_return(self._deny(
                     "Collecting valid face samples",
                     face_count,
                     AuthenticationResult.RETRY_INSUFFICIENT_SAMPLES,
@@ -281,7 +297,7 @@ class AccessControlPipeline:
                     bboxes=bboxes,
                     sample_count=self.embedding_aggregator.sample_count,
                     quality=self._quality_payload(quality),
-                )
+                ))
 
             consistent_candidate = self.embedding_aggregator.consistent_candidate()
             if consistent_candidate is None:
@@ -290,7 +306,7 @@ class AccessControlPipeline:
                 terminal = self.embedding_aggregator.sample_count >= self.config.max_embedding_samples
                 if terminal:
                     self._log_event(None, "FAILED", match.similarity)
-                return self._deny(
+                return cache_and_return(self._deny(
                     "Candidate identity is not consistent across frames",
                     face_count,
                     AuthenticationResult.DENY_NO_MATCH if terminal else AuthenticationResult.RETRY_INSUFFICIENT_SAMPLES,
@@ -299,7 +315,7 @@ class AccessControlPipeline:
                     bbox=bbox,
                     bboxes=bboxes,
                     sample_count=self.embedding_aggregator.sample_count,
-                )
+                ))
 
             aggregated_embedding = self.embedding_aggregator.get_aggregated_embedding()
             if target_user_id is not None:
@@ -325,7 +341,7 @@ class AccessControlPipeline:
             if not match.matched or str(match.user_id) != consistent_candidate:
                 self._log_event(None, "FAILED", match.similarity)
                 timer.total()
-                return self._deny(
+                return cache_and_return(self._deny(
                     "Unknown face or low-confidence match",
                     face_count,
                     AuthenticationResult.DENY_NO_MATCH,
@@ -334,12 +350,12 @@ class AccessControlPipeline:
                     metrics=timer.metrics,
                     bbox=bbox,
                     bboxes=bboxes,
-                )
+                ))
 
             if not match.is_active:
                 self._log_event(match.user_id, "FAILED", match.similarity)
                 timer.total()
-                return self._deny(
+                return cache_and_return(self._deny(
                     "Matched user is inactive",
                     face_count,
                     AuthenticationResult.DENY_NO_MATCH,
@@ -349,11 +365,11 @@ class AccessControlPipeline:
                     metrics=timer.metrics,
                     bbox=bbox,
                     bboxes=bboxes,
-                )
+                ))
 
             self._log_event(match.user_id, "SUCCESS", match.similarity)
             timer.total()
-            return {
+            return cache_and_return({
                 "success": True,
                 "authentication_result": AuthenticationResult.GRANT.value,
                 "mode": "access_control",
@@ -369,7 +385,7 @@ class AccessControlPipeline:
                 "metrics": timer.metrics,
                 "track_id": track.track_id,
                 "sample_count": self.embedding_aggregator.sample_count,
-            }
+            })
         except Exception:
             logger.exception("Access-control frame processing failed")
             timer.total()
@@ -487,6 +503,8 @@ class AccessControlPipeline:
         reset = getattr(self.spoof_detector, "reset", None)
         if callable(reset):
             reset()
+        self._cached_recognition_result = None
+        self._last_full_recognition_time = 0.0
 
     @staticmethod
     def _quality_payload(quality: Any) -> dict:
