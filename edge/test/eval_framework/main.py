@@ -59,6 +59,13 @@ def run_evaluation(dataset, model_interface, thresholds, far_targets, results_di
     genuine_scores = [s for l, s in zip(labels, scores) if l]
     impostor_scores = [s for l, s in zip(labels, scores) if not l]
     
+    print(f"\n[INFO] {dataset.name} Evaluation Summary:")
+    print(f"Total valid pairs scored: {len(scores)}")
+    print(f"Genuine matches successfully scored: {len(genuine_scores)}")
+    print(f"Impostor matches successfully scored: {len(impostor_scores)}\n")
+    
+    eer, eer_threshold, fpr, tpr, roc_thresholds = calculate_eer(labels, scores)
+    
     # 4. Generate Visualizations
     plot_roc_curve(fpr, tpr, os.path.join(results_dir, "roc_curve.png"))
     plot_det_curve(fpr, 1 - tpr, os.path.join(results_dir, "det_curve.png"))

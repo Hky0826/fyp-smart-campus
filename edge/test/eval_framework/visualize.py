@@ -40,9 +40,13 @@ def plot_det_curve(fpr, fnr, output_path):
     plt.close()
 
 def plot_score_distributions(genuine_scores, impostor_scores, output_path):
+    import matplotlib.pyplot as plt
     plt.figure()
-    plt.hist(genuine_scores, bins=50, alpha=0.5, label='Genuine', color='green', density=True)
-    plt.hist(impostor_scores, bins=50, alpha=0.5, label='Impostor', color='red', density=True)
+    if len(genuine_scores) > 0:
+        plt.hist(genuine_scores, bins=50, alpha=0.5, label='Genuine', color='green', density=True)
+    if len(impostor_scores) > 0:
+        plt.hist(impostor_scores, bins=50, alpha=0.5, label='Impostor', color='red', density=True)
+        
     plt.xlabel('Cosine Similarity Score')
     plt.ylabel('Density')
     plt.title('Score Distribution (Genuine vs Impostor)')
