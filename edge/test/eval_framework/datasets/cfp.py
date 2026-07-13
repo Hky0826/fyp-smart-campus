@@ -34,14 +34,17 @@ class CFPDataset(BaseDataset):
         # usually 10 splits. We will aggregate them.
         protocol_dir = os.path.join(self.data_dir, "Protocol")
         image_dir = os.path.join(self.data_dir, "Images")
-        
+        if not os.path.exists(image_dir):
+            image_dir = os.path.join(self.data_dir, "Data")
+            
         # If not at the root, search for them in subdirectories (often datasets are nested)
         if not (os.path.exists(protocol_dir) and os.path.exists(image_dir)):
             for root, dirs, files in os.walk(self.data_dir):
-                if "Protocol" in dirs and "Images" in dirs:
+                has_images = "Images" in dirs or "Data" in dirs
+                if "Protocol" in dirs and has_images:
                     protocol_dir = os.path.join(root, "Protocol")
-                    image_dir = os.path.join(root, "Images")
-                    print(f"Found Protocol and Images nested in: {root}")
+                    image_dir = os.path.join(root, "Images") if "Images" in dirs else os.path.join(root, "Data")
+                    print(f"Found Protocol and image directory nested in: {root}")
                     break
         
         self.pairs = []
