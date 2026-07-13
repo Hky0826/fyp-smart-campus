@@ -24,7 +24,7 @@ class FaceQualityConfig:
     min_inter_eye_distance: float = 18.0
     min_face_occupancy: float = 0.015
     max_face_occupancy: float = 0.65
-    min_sharpness: float = 0.18
+    min_sharpness: float = 0.05
     min_brightness: float = 45.0
     max_brightness: float = 215.0
     min_contrast: float = 25.0

@@ -27,7 +27,7 @@ class AlignmentConfig:
     landmark_box_tolerance_ratio: float = 0.15
     max_rotation_degrees: float = 35.0
     min_scale: float = 0.4
-    max_scale: float = 4.0
+    max_scale: float = 6.0
     max_translation_ratio: float = 2.0
 
 

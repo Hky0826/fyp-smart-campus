@@ -175,6 +175,26 @@ class AccessControlLogicTests(unittest.TestCase):
         self.assertEqual(replaced["sample_count"], 1)
         self.assertNotEqual(first.get("track_id"), replaced.get("track_id"))
 
+    def test_access_control_filters_templates(self):
+        templates = [
+            FaceTemplate("user_001", np.array([1.0, 0.0]), "front"),
+            FaceTemplate("user_001", np.array([0.0, 1.0]), "low_light"),
+            FaceTemplate("user_002", np.array([0.5, 0.5]), "right_60"),
+        ]
+        detector = FakeDetector([face()])
+        # Match against right_60 which should be filtered out. Since max_embedding_samples is 3,
+        # we process 3 frames to reach terminal state.
+        pipeline = self.pipeline(detector.faces, [0.5, 0.5], templates, samples=1)
+        pipeline.process_frame(self.frame)
+        pipeline.process_frame(self.frame)
+        result = pipeline.process_frame(self.frame)
+        self.assertEqual(result["authentication_result"], AuthenticationResult.DENY_NO_MATCH.value)
+
+        # Match against low_light which is not filtered out, so it should grant (as user_001 has low_light)
+        pipeline = self.pipeline(detector.faces, [0.0, 1.0], templates, samples=1)
+        result = pipeline.process_frame(self.frame)
+        self.assertEqual(result["authentication_result"], AuthenticationResult.GRANT.value)
+
 
 if __name__ == "__main__":
     unittest.main()

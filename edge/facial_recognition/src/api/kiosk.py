@@ -666,6 +666,7 @@ def _first_face_with_embedding(result: dict[str, Any]) -> dict[str, Any] | None:
 def _try_issue_registered_token(pipeline: Any, owner_embedding: np.ndarray, config: RuntimeConfig) -> EdgeAuthToken | None:
     try:
         templates = pipeline.repository.load_templates()
+        templates = [t for t in templates if t.template_name in (None, "front", "low_light")]
         match = pipeline.matcher.match(
             owner_embedding,
             templates,

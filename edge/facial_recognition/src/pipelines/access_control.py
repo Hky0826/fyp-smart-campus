@@ -248,6 +248,8 @@ class AccessControlPipeline:
             timer.mark("recognition")
 
             templates = self.repository.load_templates()
+            # Only use 'front' and 'low_light' templates for access control
+            templates = [t for t in templates if t.template_name in (None, "front", "low_light")]
             if target_user_id is not None:
                 match = self.matcher.verify(
                     embedding,
