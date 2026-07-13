@@ -1,6 +1,12 @@
 import os
 import random
-from .base import BaseDataset
+if __name__ == '__main__':
+    import sys, os
+    # Add the parent directory of 'datasets' to sys.path
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from datasets.base import BaseDataset
+else:
+    from .base import BaseDataset
 
 class CFPDataset(BaseDataset):
     def __init__(self, data_dir, sample_size=None, seed=42):
