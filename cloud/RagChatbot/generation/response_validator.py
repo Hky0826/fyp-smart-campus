@@ -17,8 +17,7 @@ and ``audio_response`` is set to ``null`` — the edge device never plays
 unvalidated audio.
 
 Also provides ``generate_audio_from_text``, which generates audio from
-validated text using the configured Gemini 2.5 Flash TTS model
-(``AUDIO_TTS_MODEL``, default ``gemini-2.5-flash-preview-tts``).
+validated text using the configured Google Cloud Text-to-Speech API.
 """
 
 from __future__ import annotations
@@ -28,8 +27,7 @@ from dataclasses import dataclass, field
 from collections.abc import Iterator
 from typing import List, Optional
 
-from google import genai
-from google.genai import types
+from google.cloud import texttospeech
 
 from RagChatbot.config import rag_settings
 from RagChatbot.retrieval.access_filter import VALID_ACCESS_LEVELS
@@ -51,8 +49,6 @@ _LEAKAGE_PATTERNS = [
     "context documents provided",
     "Do NOT mention any section",
 ]
-
-_UNAVAILABLE_TTS_MODELS: set[str] = set()
 
 
 @dataclass
@@ -151,193 +147,87 @@ def _remove_leakage(text: str, pattern: str) -> str:
 
 def generate_audio_from_text(text: str) -> Optional[bytes]:
     """
-    Generate audio from validated text using Gemini TTS.
+    Generate audio from validated text using Google Cloud TTS.
 
-    Uses the ``AUDIO_TTS_MODEL`` configured in settings with
-    ``response_modalities=["AUDIO"]`` to produce spoken audio output.
+    Uses the configured Google Cloud Text-to-Speech API with a Chirp 3
+    model to produce spoken audio output.
 
     Args:
         text: The validated text to convert to speech.
 
     Returns:
-        Raw PCM audio bytes (24 kHz mono int16), or None if generation
-        fails or no audio part is returned.
+        Raw audio bytes (LINEAR16, 24 kHz), or None if generation fails.
 
     Raises:
-        RuntimeError: If the Gemini API call fails entirely.
+        RuntimeError: If the TTS API call fails entirely.
     """
     if not text or not text.strip():
         logger.warning("generate_audio_from_text called with empty text.")
         return None
 
-    tts_prompt = (
-        "Read the following text aloud in a clear, natural speaking voice:\n\n"
-        f"{text}"
+    try:
+        client_options = {"api_key": rag_settings.GOOGLE_API_KEY}
+        client = texttospeech.TextToSpeechClient(client_options=client_options)
+    except Exception as exc:
+        logger.error("Failed to create Google Cloud TTS client: %s", exc)
+        raise RuntimeError(f"TTS client initialisation failed: {exc}") from exc
+
+    voice_name = getattr(rag_settings, "AUDIO_TTS_VOICE", "en-US-Chirp3-HD-Kore")
+    if voice_name == "Kore":
+        voice_name = "en-US-Chirp3-HD-Kore"
+
+    # Extract language code from voice name (e.g. 'en-US' from 'en-US-Chirp3-HD-Kore')
+    language_code = "-".join(voice_name.split("-")[:2]) if "-" in voice_name else "en-US"
+
+    voice = texttospeech.VoiceSelectionParams(
+        language_code=language_code,
+        name=voice_name,
     )
+    
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.LINEAR16,
+        sample_rate_hertz=24000
+    )
+
+    synthesis_input = texttospeech.SynthesisInput(text=text)
 
     try:
-        client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
-    except Exception as exc:
-        logger.error("Failed to create Gemini client for TTS: %s", exc)
-        raise RuntimeError(f"Gemini client initialisation failed: {exc}") from exc
-
-    config = types.GenerateContentConfig(
-        temperature=0.0,
-        response_modalities=["AUDIO"],
-        speech_config=types.SpeechConfig(
-            voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                    voice_name=getattr(rag_settings, "AUDIO_TTS_VOICE", "Kore")
-                )
-            )
-        ),
-    )
-
-    last_error: Exception | None = None
-    attempted_models: list[str] = []
-    for model_name in _candidate_tts_models():
-        attempted_models.append(model_name)
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=tts_prompt,
-                config=config,
-            )
-        except Exception as exc:
-            last_error = exc
-            if _is_not_found_error(exc):
-                _UNAVAILABLE_TTS_MODELS.add(model_name)
-            logger.warning("TTS model failed. model=%s error=%s", model_name, exc)
-            continue
-
-        audio_data = _extract_audio_data(response)
-        if audio_data is not None:
-            logger.info("TTS generated %d bytes of audio with model=%s.", len(audio_data), model_name)
-            return audio_data
-
-        logger.warning("TTS returned no audio part. model=%s", model_name)
-
-    if last_error is not None:
-        logger.error(
-            "TTS generation failed for all models. attempted_models=%s",
-            attempted_models,
+        response = client.synthesize_speech(
+            input=synthesis_input,
+            voice=voice,
+            audio_config=audio_config
         )
-        raise RuntimeError(f"TTS generation failed: {last_error}") from last_error
-
-    logger.warning("TTS returned no audio part.")
-    return None
+        audio_data = response.audio_content
+        if audio_data:
+            logger.info("TTS generated %d bytes of audio with voice=%s.", len(audio_data), voice_name)
+            return audio_data
+        else:
+            logger.warning("TTS returned no audio data. voice=%s", voice_name)
+            return None
+    except Exception as exc:
+        logger.error("TTS generation failed: %s", exc)
+        raise RuntimeError(f"TTS generation failed: {exc}") from exc
 
 
 def generate_audio_from_text_stream(text: str) -> Iterator[bytes]:
     """
-    Stream audio chunks from the configured Gemini TTS model.
+    Stream audio chunks from the configured TTS model.
 
-    Yields raw PCM audio bytes (24 kHz mono int16) as the SDK returns them.
-    This is used by the edge-device streaming endpoint so playback can start
-    before the full TTS response has been generated.
+    Since we are using Google Cloud TTS batch synthesis for simplicity and
+    stability, we generate the full audio and yield it as a single chunk.
+    This maintains compatibility with the edge device's streaming endpoint.
 
     Raises:
-        RuntimeError: If no configured/fallback TTS model can produce audio.
+        RuntimeError: If TTS fails.
     """
     if not text or not text.strip():
         logger.warning("generate_audio_from_text_stream called with empty text.")
         return
 
-    tts_prompt = (
-        "Read the following text aloud in a clear, natural speaking voice:\n\n"
-        f"{text}"
-    )
-
     try:
-        client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
+        audio_data = generate_audio_from_text(text)
+        if audio_data:
+            yield audio_data
     except Exception as exc:
-        logger.error("Failed to create Gemini client for streaming TTS: %s", exc)
-        raise RuntimeError(f"Gemini client initialisation failed: {exc}") from exc
-
-    config = types.GenerateContentConfig(
-        temperature=0.0,
-        response_modalities=["AUDIO"],
-        speech_config=types.SpeechConfig(
-            voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                    voice_name=getattr(rag_settings, "AUDIO_TTS_VOICE", "Kore")
-                )
-            )
-        ),
-    )
-
-    last_error: Exception | None = None
-    attempted_models: list[str] = []
-    for model_name in _candidate_tts_models():
-        attempted_models.append(model_name)
-        yielded_any = False
-        try:
-            responses = client.models.generate_content_stream(
-                model=model_name,
-                contents=tts_prompt,
-                config=config,
-            )
-            for response in responses:
-                audio_data = _extract_audio_data(response)
-                if audio_data is None:
-                    continue
-                yielded_any = True
-                logger.debug(
-                    "Streaming TTS yielded %d bytes with model=%s.",
-                    len(audio_data),
-                    model_name,
-                )
-                yield audio_data
-        except Exception as exc:
-            last_error = exc
-            if yielded_any:
-                logger.error("Streaming TTS failed after yielding audio: %s", exc)
-                raise RuntimeError(f"Streaming TTS failed: {exc}") from exc
-            if _is_not_found_error(exc):
-                _UNAVAILABLE_TTS_MODELS.add(model_name)
-            logger.warning("Streaming TTS model failed. model=%s error=%s", model_name, exc)
-            continue
-
-        if yielded_any:
-            logger.info("Streaming TTS completed with model=%s.", model_name)
-            return
-
-        logger.warning("Streaming TTS returned no audio part. model=%s", model_name)
-
-    if last_error is not None:
-        logger.error(
-            "Streaming TTS failed for all models. attempted_models=%s",
-            attempted_models,
-        )
-        raise RuntimeError(f"Streaming TTS failed: {last_error}") from last_error
-
-    logger.warning("Streaming TTS returned no audio part.")
-
-
-def _candidate_tts_models() -> list[str]:
-    configured = str(getattr(rag_settings, "AUDIO_TTS_MODEL", "") or "")
-    fallbacks = str(getattr(rag_settings, "AUDIO_TTS_FALLBACK_MODELS", "") or "")
-    candidates: list[str] = []
-    for model_name in [configured, *fallbacks.split(",")]:
-        cleaned = model_name.strip()
-        if cleaned and cleaned not in candidates and cleaned not in _UNAVAILABLE_TTS_MODELS:
-            candidates.append(cleaned)
-    return candidates
-
-
-def _is_not_found_error(exc: Exception) -> bool:
-    text = str(exc).upper()
-    return "404" in text or "NOT_FOUND" in text or "NOT FOUND" in text
-
-
-def _extract_audio_data(response: object) -> Optional[bytes]:
-    try:
-        candidate = response.candidates[0]
-        for part in candidate.content.parts:
-            if part.inline_data is not None and part.inline_data.mime_type.startswith(
-                "audio/"
-            ):
-                return part.inline_data.data
-    except (IndexError, AttributeError) as exc:
-        logger.warning("Could not extract audio part from TTS response: %s", exc)
-    return None
+        logger.error("Streaming TTS failed: %s", exc)
+        raise RuntimeError(f"Streaming TTS failed: {exc}") from exc

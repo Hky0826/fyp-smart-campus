@@ -1340,6 +1340,9 @@ async def enroll_user_video(
 
     detector = get_scrfd_detector()
     frame_idx = 0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    # Sample no more than roughly 60 frames; detector inference dominates runtime.
+    frame_step = max(2, int(np.ceil(total_frames / 60))) if total_frames else 2
 
     while True:
         ret, frame = cap.read()
@@ -1347,7 +1350,7 @@ async def enroll_user_video(
             break
 
         frame_idx += 1
-        if frame_idx % 2 != 0:
+        if frame_idx % frame_step != 0:
             continue
 
         try:
@@ -1420,7 +1423,8 @@ async def enroll_user_video(
                 harvested_crops[detected_pose] = aligned_crop.copy()
                 harvested_blurs[detected_pose] = blur_score
 
-        if len(harvested_crops) == 7:
+        # low_light is derived below; six required poses are enough to finish.
+        if len(harvested_crops) == len(required_poses):
             break
 
     cap.release()

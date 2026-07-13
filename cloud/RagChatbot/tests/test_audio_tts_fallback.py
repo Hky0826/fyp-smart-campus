@@ -47,60 +47,15 @@ def test_tts_base64_returns_text_only_when_tts_times_out(monkeypatch):
     assert timeout_future.cancelled
 
 
-def test_generate_audio_from_text_falls_back_after_missing_model(monkeypatch):
-    """A bad configured TTS model should fall back before giving up."""
-    response_validator._UNAVAILABLE_TTS_MODELS.clear()
-    monkeypatch.setattr(response_validator.rag_settings, "AUDIO_TTS_MODEL", "missing-model")
-    monkeypatch.setattr(response_validator.rag_settings, "AUDIO_TTS_FALLBACK_MODELS", "working-model")
-
-    calls: list[str] = []
-
-    def generate_content(*, model, contents, config):
-        calls.append(model)
-        if model == "missing-model":
-            raise RuntimeError("404 NOT_FOUND")
-        return _fake_audio_response(b"pcm")
-
-    fake_client = Mock()
-    fake_client.models.generate_content = generate_content
-    monkeypatch.setattr(response_validator.genai, "Client", Mock(return_value=fake_client))
-
-    assert response_validator.generate_audio_from_text("short answer") == b"pcm"
-    assert calls == ["missing-model", "working-model"]
-    assert "missing-model" in response_validator._UNAVAILABLE_TTS_MODELS
-
-
 def test_generate_audio_from_text_stream_yields_chunks(monkeypatch):
-    """Streaming TTS should yield each audio part as it arrives."""
-    response_validator._UNAVAILABLE_TTS_MODELS.clear()
-    monkeypatch.setattr(response_validator.rag_settings, "AUDIO_TTS_MODEL", "stream-model")
-    monkeypatch.setattr(response_validator.rag_settings, "AUDIO_TTS_FALLBACK_MODELS", "")
-
-    calls: list[str] = []
-
-    def generate_content_stream(*, model, contents, config):
-        calls.append(model)
-        return iter([_fake_audio_response(b"pcm-1"), _fake_audio_response(b"pcm-2")])
-
-    fake_client = Mock()
-    fake_client.models.generate_content_stream = generate_content_stream
-    monkeypatch.setattr(response_validator.genai, "Client", Mock(return_value=fake_client))
+    """Streaming TTS should yield the batch audio as a single chunk."""
+    monkeypatch.setattr(
+        response_validator, "generate_audio_from_text", Mock(return_value=b"batch-pcm")
+    )
 
     assert list(response_validator.generate_audio_from_text_stream("short answer")) == [
-        b"pcm-1",
-        b"pcm-2",
+        b"batch-pcm",
     ]
-    assert calls == ["stream-model"]
-
-
-def _fake_audio_response(data: bytes):
-    inline_data = Mock(mime_type="audio/pcm", data=data)
-    part = Mock(inline_data=inline_data)
-    candidate = Mock()
-    candidate.content.parts = [part]
-    response = Mock()
-    response.candidates = [candidate]
-    return response
 
 
 class _TimeoutFuture:

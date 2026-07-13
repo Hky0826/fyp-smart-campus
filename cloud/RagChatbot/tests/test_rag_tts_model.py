@@ -29,35 +29,32 @@ from RagChatbot.services import audio_chat_service
 
 class RagTtsModelTests(unittest.TestCase):
     def test_generate_audio_from_text_uses_configured_tts_model(self):
-        """The TTS helper should call Gemini with the configured audio model."""
-        response_validator._UNAVAILABLE_TTS_MODELS.clear()
+        """The TTS helper should call Google Cloud TTS with the configured voice."""
         calls: list[dict[str, object]] = []
 
-        def generate_content(*, model, contents, config):
-            calls.append({"model": model, "contents": contents, "config": config})
-            return _fake_audio_response(b"pcm-bytes")
+        def synthesize_speech(*, input, voice, audio_config):
+            calls.append({"input": input, "voice": voice, "audio_config": audio_config})
+            response = Mock()
+            response.audio_content = b"pcm-bytes"
+            return response
 
         fake_client = Mock()
-        fake_client.models.generate_content = generate_content
+        fake_client.synthesize_speech = synthesize_speech
 
         with (
-            patch.object(response_validator.rag_settings, "AUDIO_TTS_MODEL", "test-tts-model"),
-            patch.object(response_validator.rag_settings, "AUDIO_TTS_VOICE", "Kore"),
-            patch.object(response_validator.rag_settings, "AUDIO_TTS_FALLBACK_MODELS", ""),
-            patch.object(response_validator.genai, "Client", Mock(return_value=fake_client)),
+            patch.object(response_validator.rag_settings, "AUDIO_TTS_VOICE", "en-US-Journey-F"),
+            patch.object(response_validator.texttospeech, "TextToSpeechClient", Mock(return_value=fake_client)),
         ):
             audio = response_validator.generate_audio_from_text(
                 "The library closes at 10 PM."
             )
 
         self.assertEqual(audio, b"pcm-bytes")
-        self.assertEqual(calls[0]["model"], "test-tts-model")
-        self.assertIn("The library closes at 10 PM.", calls[0]["contents"])
-        self.assertEqual(calls[0]["config"].response_modalities, ["AUDIO"])
-        self.assertEqual(
-            calls[0]["config"].speech_config.voice_config.prebuilt_voice_config.voice_name,
-            "Kore",
-        )
+        self.assertEqual(calls[0]["input"].text, "The library closes at 10 PM.")
+        self.assertEqual(calls[0]["voice"].name, "en-US-Journey-F")
+        self.assertEqual(calls[0]["voice"].language_code, "en-US")
+        self.assertEqual(calls[0]["audio_config"].audio_encoding, response_validator.texttospeech.AudioEncoding.LINEAR16)
+        self.assertEqual(calls[0]["audio_config"].sample_rate_hertz, 24000)
 
     def test_process_audio_chat_returns_base64_tts_after_validated_rag_answer(self):
         """A successful audio RAG answer should include base64-encoded TTS audio."""
@@ -149,17 +146,8 @@ class RagTtsModelTests(unittest.TestCase):
         if not response_validator.rag_settings.GOOGLE_API_KEY:
             self.skipTest("GOOGLE_API_KEY is required for real TTS timing.")
 
-        response_validator._UNAVAILABLE_TTS_MODELS.clear()
-        timings: list[tuple[int, float, int]] = []
-
         with (
-            patch.object(
-                response_validator.rag_settings,
-                "AUDIO_TTS_MODEL",
-                "gemini-3.1-flash-tts-preview",
-            ),
-            patch.object(response_validator.rag_settings, "AUDIO_TTS_FALLBACK_MODELS", ""),
-            patch.object(response_validator.rag_settings, "AUDIO_TTS_VOICE", "Kore"),
+            patch.object(response_validator.rag_settings, "AUDIO_TTS_VOICE", "en-US-Chirp3-HD-Kore"),
         ):
             for char_count in (100, 300, 700):
                 text = _sample_text(char_count)
