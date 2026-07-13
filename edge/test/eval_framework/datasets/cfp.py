@@ -35,6 +35,15 @@ class CFPDataset(BaseDataset):
         protocol_dir = os.path.join(self.data_dir, "Protocol")
         image_dir = os.path.join(self.data_dir, "Images")
         
+        # If not at the root, search for them in subdirectories (often datasets are nested)
+        if not (os.path.exists(protocol_dir) and os.path.exists(image_dir)):
+            for root, dirs, files in os.walk(self.data_dir):
+                if "Protocol" in dirs and "Images" in dirs:
+                    protocol_dir = os.path.join(root, "Protocol")
+                    image_dir = os.path.join(root, "Images")
+                    print(f"Found Protocol and Images nested in: {root}")
+                    break
+        
         self.pairs = []
         
         if os.path.exists(protocol_dir) and os.path.exists(image_dir):
