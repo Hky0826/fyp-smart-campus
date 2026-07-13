@@ -10,8 +10,18 @@ class CFPDataset(BaseDataset):
         self.kaggle_id = "abhinav1402/cfp-dataset" 
         
     def download(self):
-        if not os.path.exists(os.path.join(self.data_dir, "Protocol")):
-            self._download_kaggle_dataset(self.kaggle_id)
+        try:
+            import kagglehub
+            print("\nDownloading CFP dataset using kagglehub...")
+            path = kagglehub.dataset_download("chinafax/cfpw-dataset")
+            print(f"CFP dataset downloaded to: {path}")
+            # Update data_dir to the kagglehub cache path so prepare() can find Protocol and Images
+            self.data_dir = path
+        except ImportError:
+            print("\n[!] Error: 'kagglehub' is not installed.")
+            print("Please run 'pip install kagglehub' to download the CFP dataset automatically.")
+        except Exception as e:
+            print(f"\n[!] Error downloading CFP dataset via kagglehub: {e}")
             
     def prepare(self):
         # CFP has Frontal-Profile (FP) and Frontal-Frontal (FF) protocols
