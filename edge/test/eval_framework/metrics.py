@@ -46,6 +46,11 @@ def calculate_eer(labels, scores):
     labels = np.array(labels, dtype=int)
     scores = np.array(scores)
     
+    if len(np.unique(labels)) < 2:
+        print("Warning: Only one class present in labels (no negative or positive samples). Cannot compute ROC curve.")
+        # Return dummy arrays to prevent downstream crash
+        return float('nan'), float('nan'), np.array([0.0, 1.0]), np.array([0.0, 1.0]), np.array([0.0, 1.0])
+        
     fpr, tpr, thresholds = roc_curve(labels, scores)
     fnr = 1 - tpr
     
