@@ -10,6 +10,9 @@ import sys
 import threading
 import time
 from typing import Any, Callable, List, Optional, Sequence
+import cv2
+from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 
@@ -305,7 +308,8 @@ class AccessControlPipeline:
                 timer.total()
                 terminal = self.embedding_aggregator.sample_count >= self.config.max_embedding_samples
                 if terminal:
-                    self._log_event(None, "FAILED", match.similarity)
+                    image_path = self._save_face_snapshot(frame, face)
+                    self._log_event(None, "FAILED", match.similarity, image_path=image_path)
                 return cache_and_return(self._deny(
                     "Candidate identity is not consistent across frames",
                     face_count,
@@ -339,7 +343,8 @@ class AccessControlPipeline:
             )
 
             if not match.matched or str(match.user_id) != consistent_candidate:
-                self._log_event(None, "FAILED", match.similarity)
+                image_path = self._save_face_snapshot(frame, face)
+                self._log_event(None, "FAILED", match.similarity, image_path=image_path)
                 timer.total()
                 return cache_and_return(self._deny(
                     "Unknown face or low-confidence match",
@@ -353,7 +358,8 @@ class AccessControlPipeline:
                 ))
 
             if not match.is_active:
-                self._log_event(match.user_id, "FAILED", match.similarity)
+                image_path = self._save_face_snapshot(frame, face)
+                self._log_event(match.user_id, "FAILED", match.similarity, image_path=image_path)
                 timer.total()
                 return cache_and_return(self._deny(
                     "Matched user is inactive",
@@ -367,7 +373,8 @@ class AccessControlPipeline:
                     bboxes=bboxes,
                 ))
 
-            self._log_event(match.user_id, "SUCCESS", match.similarity)
+            image_path = self._save_face_snapshot(frame, face)
+            self._log_event(match.user_id, "SUCCESS", match.similarity, image_path=image_path)
             timer.total()
             return cache_and_return({
                 "success": True,
@@ -513,10 +520,40 @@ class AccessControlPipeline:
             "failure_reasons": list(getattr(quality, "failure_reasons", [])),
         }
 
-    def _log_event(self, user_id: Optional[str], status: str, confidence: Optional[float]) -> None:
+    def _save_face_snapshot(self, frame: np.ndarray, face: DetectedFace) -> Optional[str]:
+        if not hasattr(self.config, 'snapshot_enabled') or not self.config.snapshot_enabled or cv2 is None:
+            return None
+
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = face.xyxy_int()
+        x1 = max(0, min(w, x1))
+        x2 = max(0, min(w, x2))
+        y1 = max(0, min(h, y1))
+        y2 = max(0, min(h, y2))
+        if x2 <= x1 or y2 <= y1:
+            return None
+
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            return None
+
+        snapshot_dir = Path(getattr(self.config, 'snapshot_dir', 'data/snapshots')) / datetime.now(timezone.utc).strftime("%Y%m%d")
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{datetime.now(timezone.utc).strftime('%H%M%S_%f')}_access.jpg"
+        path = snapshot_dir / filename
+        
+        if not cv2.imwrite(str(path), crop):
+            logger.warning("Failed to save face snapshot to %s", path)
+            return None
+        return str(path)
+
+    def _log_event(self, user_id: Optional[str], status: str, confidence: Optional[float], image_path: Optional[str] = None) -> None:
         log_method = getattr(self.repository, "log_auth_event", None)
         if callable(log_method):
-            log_method(user_id, status, confidence)
+            try:
+                log_method(user_id, status, confidence, image_path=image_path)
+            except TypeError:
+                log_method(user_id, status, confidence)
 
 
 def build_pipeline(config: AccessControlConfig) -> AccessControlPipeline:

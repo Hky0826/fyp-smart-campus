@@ -113,7 +113,7 @@ class DeviceUserRepository:
             logger.info("Loaded %s templates for user %s", count, user_id)
         return templates
 
-    def log_auth_event(self, user_id: Optional[str], auth_status: str, confidence_score: Optional[float]) -> None:
+    def log_auth_event(self, user_id: Optional[str], auth_status: str, confidence_score: Optional[float], image_path: Optional[str] = None) -> None:
         try:
             conn = self._connect()
         except FileNotFoundError:
@@ -134,8 +134,8 @@ class DeviceUserRepository:
                 normalized_user_id = None if user_id is None else int(user_id)
             except (TypeError, ValueError):
                 normalized_user_id = None
-            fields = ["user_id", "auth_status", "confidence_score", "sync_status"]
-            values: List[Any] = [normalized_user_id, auth_status.upper(), confidence_score, 0]
+            fields = ["user_id", "auth_status", "confidence_score", "image_path", "sync_status"]
+            values: List[Any] = [normalized_user_id, auth_status.upper(), confidence_score, image_path, 0]
             if "sync_key" in columns:
                 fields.insert(0, "sync_key")
                 values.insert(0, generate_sync_key())

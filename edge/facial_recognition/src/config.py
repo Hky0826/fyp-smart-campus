@@ -83,6 +83,8 @@ class AccessControlConfig(RuntimeConfig):
     audio_token_retry_seconds: float = float(os.getenv("EDGE_ACCESS_AUDIO_TOKEN_RETRY_SECONDS", "10"))
     audio_auto_visitor_token: bool = _bool_env("EDGE_ACCESS_CHATBOT_AUTO_VISITOR_TOKEN", False)
     audio_visitor_user_id: int | None = _optional_int_env("EDGE_ACCESS_CHATBOT_VISITOR_USER_ID")
+    snapshot_enabled: bool = _bool_env("EDGE_ACCESS_SNAPSHOT_ENABLED", True)
+    snapshot_dir: Path = Path(os.getenv("EDGE_ACCESS_SNAPSHOT_DIR", str(PACKAGE_ROOT / "data" / "snapshots")))
 
 
 @dataclass(frozen=True)

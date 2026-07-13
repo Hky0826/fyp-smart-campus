@@ -3,10 +3,10 @@ import cv2
 import numpy as np
 import sys
 
-# Ensure edge module is importable
-edge_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if edge_path not in sys.path:
-    sys.path.insert(0, edge_path)
+# Ensure project root is importable so 'edge' module can be found
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 from edge.facial_recognition.src.face.detection import HailoSCRFDDetector
 from edge.facial_recognition.src.face.alignment import FaceAligner
