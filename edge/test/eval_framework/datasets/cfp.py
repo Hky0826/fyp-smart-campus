@@ -75,7 +75,20 @@ class CFPDataset(BaseDataset):
                                 img1 = os.path.join(image_dir, parts[0].strip())
                                 img2 = os.path.join(image_dir, parts[1].strip())
                                 self.pairs.append((img1, img2, False))
-        else:
+        if len(self.pairs) == 0 and os.path.exists(protocol_dir):
+            print(f"DEBUG: Found Protocol dir at {protocol_dir} but loaded 0 pairs.")
+            print(f"DEBUG: Let's see what is inside {protocol_dir}:")
+            for root, dirs, files in os.walk(protocol_dir):
+                print(f"  {root}")
+                for f in files[:5]: # Print first 5 files in each dir
+                    print(f"    - {f}")
+            print("Warning: CFP Protocol text files not found in expected Split/XX/FP format.")
+            # Dummy generation logic for testing if dataset is missing
+            self.pairs = [
+                ("dummy1.jpg", "dummy2.jpg", True),
+                ("dummy1.jpg", "dummy3.jpg", False)
+            ]
+        elif len(self.pairs) == 0:
             print("Warning: CFP Protocol/Images not found. Generating dummy pairs for testing.")
             # Dummy generation logic for testing if dataset is missing
             self.pairs = [
