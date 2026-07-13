@@ -52,24 +52,15 @@ class ModelInterface:
             faces = self.detector.detect(img)
             
         if faces is not None and len(faces) > 0:
-            if isinstance(faces[0], np.ndarray):
-                print(f"Debug: faces is ndarray list/tuple. Type: {type(faces)}, len/shape: {len(faces) if isinstance(faces, list) else faces.shape}")
-                # Fallback in case detect() returns something unexpected
-                # Just skip face detection and use center crop
+            face = faces[0]
+            align_result = self.aligner.align(img, face)
+            
+            if align_result.success and align_result.aligned_face is not None:
+                crop = align_result.aligned_face
+            else:
                 h, w = img.shape[:2]
                 sz = min(h, w)
                 crop = img[(h-sz)//2:(h+sz)//2, (w-sz)//2:(w+sz)//2]
-            else:
-                face = faces[0]
-                landmarks = face.landmarks
-                
-                if landmarks is not None:
-                    aligned_face = self.aligner.align(img, landmarks)
-                    crop = aligned_face
-                else:
-                    h, w = img.shape[:2]
-                    sz = min(h, w)
-                    crop = img[(h-sz)//2:(h+sz)//2, (w-sz)//2:(w+sz)//2]
         else:
             h, w = img.shape[:2]
             sz = min(h, w)
