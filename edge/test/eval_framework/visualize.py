@@ -20,12 +20,13 @@ def plot_det_curve(fpr, fnr, output_path):
     Plot Detection Error Tradeoff (DET) curve.
     Normally uses normal deviate scale, but standard log scale is also acceptable.
     """
+    import matplotlib.pyplot as plt
     plt.figure()
     
-    # Filter out zeros to avoid log(0) warnings
-    mask = (fpr > 0) & (fnr > 0)
-    fpr_clean = fpr[mask]
-    fnr_clean = fnr[mask]
+    # Add a tiny epsilon to avoid log(0) and empty arrays on perfect separation
+    epsilon = 1e-6
+    fpr_clean = fpr + epsilon
+    fnr_clean = fnr + epsilon
     
     plt.plot(fpr_clean, fnr_clean, color='blue', lw=2, label='DET curve')
     plt.xscale('log')
