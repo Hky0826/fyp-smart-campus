@@ -51,9 +51,10 @@ class CFPDataset(BaseDataset):
         
         if os.path.exists(protocol_dir) and os.path.exists(image_dir):
             for split_idx in range(1, 11):
-                split_dir = os.path.join(protocol_dir, "Split", f"{split_idx:02d}")
-                gen_file = os.path.join(split_dir, "FP", "same.txt")
-                imp_file = os.path.join(split_dir, "FP", "diff.txt")
+                # The chinafax/cfpw-dataset has structure Split/FP/01/same.txt
+                split_dir = os.path.join(protocol_dir, "Split", "FP", f"{split_idx:02d}")
+                gen_file = os.path.join(split_dir, "same.txt")
+                imp_file = os.path.join(split_dir, "diff.txt")
                 
                 # Parse genuine
                 if os.path.exists(gen_file):
