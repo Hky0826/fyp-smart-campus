@@ -18,11 +18,30 @@ class CFPDataset(BaseDataset):
     def download(self):
         try:
             import kagglehub
+            import shutil
+            
+            # Check if the dataset is already present in our local data folder
+            protocol_path = os.path.join(self.data_dir, "Protocol")
+            if os.path.exists(protocol_path):
+                return
+                
             print("\nDownloading CFP dataset using kagglehub...")
             path = kagglehub.dataset_download("chinafax/cfpw-dataset")
-            print(f"CFP dataset downloaded to: {path}")
-            # Update data_dir to the kagglehub cache path so prepare() can find Protocol and Images
-            self.data_dir = path
+            print(f"CFP dataset downloaded to cache: {path}")
+            
+            print(f"Copying dataset to local project directory: {self.data_dir}")
+            os.makedirs(self.data_dir, exist_ok=True)
+            
+            for item in os.listdir(path):
+                s = os.path.join(path, item)
+                d = os.path.join(self.data_dir, item)
+                if os.path.isdir(s):
+                    shutil.copytree(s, d, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(s, d)
+            
+            print(f"Successfully moved to {self.data_dir}")
+
         except ImportError:
             print("\n[!] Error: 'kagglehub' is not installed.")
             print("Please run 'pip install kagglehub' to download the CFP dataset automatically.")
