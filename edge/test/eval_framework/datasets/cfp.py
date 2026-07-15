@@ -69,34 +69,30 @@ class CFPDataset(BaseDataset):
         self.pairs = []
         
         if os.path.exists(protocol_dir) and os.path.exists(image_dir):
-            print(f"Indexing images in {image_dir}...")
-            image_map = {}
-            for r, d, f_names in os.walk(image_dir):
-                for f in f_names:
-                    if not f.startswith('.'):
-                        basename = os.path.splitext(f)[0]
-                        image_map[basename] = os.path.join(r, f)
-            print(f"Indexed {len(image_map)} images.")
+            print("Loading CFP index mappings...")
             
-            # DIAGNOSTIC: Print a few files to see what they look like
-            print(f"DIAGNOSTIC: A few indexed files: {list(image_map.keys())[:5]}")
-            print(f"DIAGNOSTIC: Top level contents of {image_dir}:")
-            try:
-                for item in os.listdir(image_dir)[:10]:
-                    path = os.path.join(image_dir, item)
-                    size = os.path.getsize(path) if os.path.isfile(path) else 'DIR'
-                    print(f"  - {item} ({size})")
-            except Exception as e:
-                print(f"  Failed to list dir: {e}")
+            pair_list_f = {}
+            pair_list_p = {}
             
-            def resolve_path(p):
-                # Clean up the parsed string
-                p = str(p).strip().replace("'", "").replace('"', '')
-                basename = os.path.splitext(os.path.basename(p))[0]
-                if basename in image_map:
-                    return image_map[basename]
-                return os.path.join(image_dir, p)
-                
+            # Load Frontal index mappings
+            with open(os.path.join(protocol_dir, "Pair_list_F.txt"), 'r') as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) == 2:
+                        # Convert "../Data/Images/001/frontal/01.jpg" to "001/frontal/01.jpg"
+                        clean_path = parts[1].replace('../Data/Images/', '').replace('../Data/', '')
+                        pair_list_f[parts[0]] = clean_path
+                        
+            # Load Profile index mappings
+            with open(os.path.join(protocol_dir, "Pair_list_P.txt"), 'r') as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) == 2:
+                        clean_path = parts[1].replace('../Data/Images/', '').replace('../Data/', '')
+                        pair_list_p[parts[0]] = clean_path
+            
+            print(f"Loaded {len(pair_list_f)} frontal and {len(pair_list_p)} profile mappings.")
+            
             for split_idx in range(1, 11):
                 # The chinafax/cfpw-dataset has structure Split/FP/01/same.txt
                 split_dir = os.path.join(protocol_dir, "Split", "FP", f"{split_idx:02d}")
@@ -109,9 +105,19 @@ class CFPDataset(BaseDataset):
                         for line in f:
                             parts = line.strip().split(',')
                             if len(parts) >= 2:
-                                img1 = resolve_path(parts[0].strip())
-                                img2 = resolve_path(parts[1].strip())
-                                self.pairs.append((img1, img2, True))
+                                idx1 = parts[0].strip()
+                                idx2 = parts[1].strip()
+                                
+                                if idx1 in pair_list_f and idx2 in pair_list_p:
+                                    img1 = os.path.join(image_dir, "Images", pair_list_f[idx1])
+                                    img2 = os.path.join(image_dir, "Images", pair_list_p[idx2])
+                                    
+                                    # Fallback in case "Images" is not nested
+                                    if not os.path.exists(img1):
+                                        img1 = os.path.join(image_dir, pair_list_f[idx1])
+                                        img2 = os.path.join(image_dir, pair_list_p[idx2])
+                                        
+                                    self.pairs.append((img1, img2, True))
                                 
                 # Parse impostor
                 if os.path.exists(imp_file):
@@ -119,9 +125,18 @@ class CFPDataset(BaseDataset):
                         for line in f:
                             parts = line.strip().split(',')
                             if len(parts) >= 2:
-                                img1 = resolve_path(parts[0].strip())
-                                img2 = resolve_path(parts[1].strip())
-                                self.pairs.append((img1, img2, False))
+                                idx1 = parts[0].strip()
+                                idx2 = parts[1].strip()
+                                
+                                if idx1 in pair_list_f and idx2 in pair_list_p:
+                                    img1 = os.path.join(image_dir, "Images", pair_list_f[idx1])
+                                    img2 = os.path.join(image_dir, "Images", pair_list_p[idx2])
+                                    
+                                    if not os.path.exists(img1):
+                                        img1 = os.path.join(image_dir, pair_list_f[idx1])
+                                        img2 = os.path.join(image_dir, pair_list_p[idx2])
+                                        
+                                    self.pairs.append((img1, img2, False))
         if len(self.pairs) == 0 and os.path.exists(protocol_dir):
             print(f"DEBUG: Found Protocol dir at {protocol_dir} but loaded 0 pairs.")
             print(f"DEBUG: Let's see what is inside {protocol_dir}:")
