@@ -33,6 +33,7 @@ def run_evaluation(dataset, model_interface, thresholds, far_targets, results_di
     
     labels = []
     scores = []
+    skipped_count = 0
     
     # 2. Extract Embeddings and Compute Scores
     for img1, img2, is_same in tqdm(pairs, desc=f"Processing {dataset.name}"):
@@ -44,11 +45,17 @@ def run_evaluation(dataset, model_interface, thresholds, far_targets, results_di
             labels.append(is_same)
             scores.append(score)
         except Exception as e:
-            # Print the error so the user knows exactly why an image pair was skipped
-            print(f"\n[Warning] Skipped pair due to error: {e}")
-            print(f"  img1: {img1}")
-            print(f"  img2: {img2}\n")
+            if skipped_count < 2:
+                print(f"\n[Warning] Skipped pair due to error: {e}")
+                print(f"  img1: {img1}")
+                print(f"  img2: {img2}\n")
+            elif skipped_count == 2:
+                print(f"\n[Warning] More pairs failed. Suppressing further errors to keep terminal clean...")
+            skipped_count += 1
             
+    if skipped_count > 0:
+        print(f"\n[!] Total skipped pairs due to errors: {skipped_count}")
+        
     if len(scores) == 0:
         print(f"No valid scores computed for {dataset.name}.")
         return None
