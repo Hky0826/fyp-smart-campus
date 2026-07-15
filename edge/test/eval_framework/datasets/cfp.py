@@ -56,15 +56,36 @@ class CFPDataset(BaseDataset):
                 gen_file = os.path.join(split_dir, "same.txt")
                 imp_file = os.path.join(split_dir, "diff.txt")
                 
+                # Helper to resolve extensions
+                def resolve_path(img_dir, p):
+                    base = os.path.join(img_dir, p)
+                    if os.path.isdir(base):
+                        # If it's a directory, maybe the image is inside it? 
+                        # Return the first jpg/png we find, or a dummy if empty
+                        files = [f for f in os.listdir(base) if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
+                        if files: return os.path.join(base, files[0])
+                    
+                    if os.path.isfile(base): return base
+                    if os.path.isfile(base + '.jpg'): return base + '.jpg'
+                    if os.path.isfile(base + '.png'): return base + '.png'
+                    if os.path.isfile(base + '.jpeg'): return base + '.jpeg'
+                    
+                    # If the user has a flat directory but with leading zeros removed (e.g. 1 instead of 001)
+                    if '/' in p:
+                        # try to find the flat file if the dataset was flattened
+                        flat_name = p.replace('/', '_')
+                        if os.path.isfile(os.path.join(img_dir, flat_name)): return os.path.join(img_dir, flat_name)
+                        
+                    return base + '.jpg' # Fallback
+
                 # Parse genuine
                 if os.path.exists(gen_file):
                     with open(gen_file, 'r') as f:
                         for line in f:
                             parts = line.strip().split(',')
                             if len(parts) >= 2:
-                                # CFP format: 001/frontal/01.jpg,001/profile/01.jpg
-                                img1 = os.path.join(image_dir, parts[0].strip())
-                                img2 = os.path.join(image_dir, parts[1].strip())
+                                img1 = resolve_path(image_dir, parts[0].strip())
+                                img2 = resolve_path(image_dir, parts[1].strip())
                                 self.pairs.append((img1, img2, True))
                                 
                 # Parse impostor
@@ -73,8 +94,8 @@ class CFPDataset(BaseDataset):
                         for line in f:
                             parts = line.strip().split(',')
                             if len(parts) >= 2:
-                                img1 = os.path.join(image_dir, parts[0].strip())
-                                img2 = os.path.join(image_dir, parts[1].strip())
+                                img1 = resolve_path(image_dir, parts[0].strip())
+                                img2 = resolve_path(image_dir, parts[1].strip())
                                 self.pairs.append((img1, img2, False))
         if len(self.pairs) == 0 and os.path.exists(protocol_dir):
             print(f"DEBUG: Found Protocol dir at {protocol_dir} but loaded 0 pairs.")

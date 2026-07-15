@@ -143,7 +143,7 @@ def main():
         combined_df = pd.DataFrame(all_metrics)
         combined_df.to_csv(os.path.join(combined_dir, "combined_metrics.csv"), index=False)
         print("\nEvaluation Complete! Combined Metrics:")
-        print(combined_df.to_markdown(index=False))
+        print(combined_df.to_string(index=False))
 
 if __name__ == "__main__":
     main()
