@@ -95,6 +95,11 @@ def run_evaluation(dataset, model_interface, thresholds, far_targets, results_di
     return metrics
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Evaluate Facial Recognition Models")
+    parser.add_argument("--dataset", type=str, choices=['all', 'lfw', 'cfp'], default='all', help="Which dataset to evaluate")
+    args = parser.parse_args()
+
     config = load_config()
     
     detector_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "facial_recognition", "models", "surveillance", "scrfd_10g.hef"))
@@ -115,22 +120,29 @@ def main():
     
     results_base = "./results"
     
-    datasets_to_run = [
-        LFWDataset(
-            data_dir=config['datasets']['lfw']['data_dir'],
-            sample_size=config['datasets']['lfw'].get('sample_size'),
-            seed=config['random_seed']
-        ),
-        CFPDataset(
-            data_dir=config['datasets']['cfp']['data_dir'],
-            sample_size=config['datasets']['cfp'].get('sample_size'),
-            seed=config['random_seed']
+    datasets = []
+    
+    if args.dataset in ['all', 'lfw']:
+        datasets.append(
+            LFWDataset(
+                data_dir=config['datasets']['lfw']['data_dir'],
+                sample_size=config['datasets']['lfw'].get('sample_size'),
+                seed=config['random_seed']
+            )
         )
-    ]
+        
+    if args.dataset in ['all', 'cfp']:
+        datasets.append(
+            CFPDataset(
+                data_dir=config['datasets']['cfp']['data_dir'],
+                sample_size=config['datasets']['cfp'].get('sample_size'),
+                seed=config['random_seed']
+            )
+        )
     
     all_metrics = []
     
-    for ds in datasets_to_run:
+    for ds in datasets:
         ds_results_dir = os.path.join(results_base, ds.name.lower())
         metrics = run_evaluation(ds, model_interface, thresholds, far_targets, ds_results_dir)
         if metrics:

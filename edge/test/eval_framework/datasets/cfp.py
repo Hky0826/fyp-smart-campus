@@ -69,42 +69,35 @@ class CFPDataset(BaseDataset):
         self.pairs = []
         
         if os.path.exists(protocol_dir) and os.path.exists(image_dir):
+            print(f"Indexing images in {image_dir}...")
+            image_map = {}
+            for r, d, f_names in os.walk(image_dir):
+                for f in f_names:
+                    if f.lower().endswith(('.jpg', '.png', '.jpeg')):
+                        basename = os.path.splitext(f)[0]
+                        image_map[basename] = os.path.join(r, f)
+            print(f"Indexed {len(image_map)} images.")
+            
+            def resolve_path(p):
+                basename = os.path.splitext(os.path.basename(p))[0]
+                if basename in image_map:
+                    return image_map[basename]
+                return os.path.join(image_dir, p)
+                
             for split_idx in range(1, 11):
                 # The chinafax/cfpw-dataset has structure Split/FP/01/same.txt
                 split_dir = os.path.join(protocol_dir, "Split", "FP", f"{split_idx:02d}")
                 gen_file = os.path.join(split_dir, "same.txt")
                 imp_file = os.path.join(split_dir, "diff.txt")
                 
-                # Helper to resolve extensions
-                def resolve_path(img_dir, p):
-                    base = os.path.join(img_dir, p)
-                    if os.path.isdir(base):
-                        # If it's a directory, maybe the image is inside it? 
-                        # Return the first jpg/png we find, or a dummy if empty
-                        files = [f for f in os.listdir(base) if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
-                        if files: return os.path.join(base, files[0])
-                    
-                    if os.path.isfile(base): return base
-                    if os.path.isfile(base + '.jpg'): return base + '.jpg'
-                    if os.path.isfile(base + '.png'): return base + '.png'
-                    if os.path.isfile(base + '.jpeg'): return base + '.jpeg'
-                    
-                    # If the user has a flat directory but with leading zeros removed (e.g. 1 instead of 001)
-                    if '/' in p:
-                        # try to find the flat file if the dataset was flattened
-                        flat_name = p.replace('/', '_')
-                        if os.path.isfile(os.path.join(img_dir, flat_name)): return os.path.join(img_dir, flat_name)
-                        
-                    return base + '.jpg' # Fallback
-
                 # Parse genuine
                 if os.path.exists(gen_file):
                     with open(gen_file, 'r') as f:
                         for line in f:
                             parts = line.strip().split(',')
                             if len(parts) >= 2:
-                                img1 = resolve_path(image_dir, parts[0].strip())
-                                img2 = resolve_path(image_dir, parts[1].strip())
+                                img1 = resolve_path(parts[0].strip())
+                                img2 = resolve_path(parts[1].strip())
                                 self.pairs.append((img1, img2, True))
                                 
                 # Parse impostor
@@ -113,8 +106,8 @@ class CFPDataset(BaseDataset):
                         for line in f:
                             parts = line.strip().split(',')
                             if len(parts) >= 2:
-                                img1 = resolve_path(image_dir, parts[0].strip())
-                                img2 = resolve_path(image_dir, parts[1].strip())
+                                img1 = resolve_path(parts[0].strip())
+                                img2 = resolve_path(parts[1].strip())
                                 self.pairs.append((img1, img2, False))
         if len(self.pairs) == 0 and os.path.exists(protocol_dir):
             print(f"DEBUG: Found Protocol dir at {protocol_dir} but loaded 0 pairs.")
