@@ -105,12 +105,18 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="Evaluate Facial Recognition Models")
     parser.add_argument("--dataset", type=str, choices=['all', 'lfw', 'cfp'], default='all', help="Which dataset to evaluate")
+    parser.add_argument("--detector", type=str, default="scrfd_10g.hef", help="Filename of the detector model (must be in models/surveillance/)")
+    parser.add_argument("--embedder", type=str, default="arcface_r50.hef", help="Filename of the embedder model (must be in models/surveillance/)")
     args = parser.parse_args()
 
     config = load_config()
     
-    detector_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "facial_recognition", "models", "surveillance", "scrfd_10g.hef"))
-    embedder_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "facial_recognition", "models", "surveillance", "arcface_r50.hef"))
+    models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "facial_recognition", "models", "surveillance"))
+    detector_path = os.path.join(models_dir, args.detector)
+    embedder_path = os.path.join(models_dir, args.embedder)
+    
+    print(f"Using Detector: {args.detector}")
+    print(f"Using Embedder: {args.embedder}\n")
 
     model_interface = ModelInterface(
         detector_path=detector_path,
