@@ -73,12 +73,25 @@ class CFPDataset(BaseDataset):
             image_map = {}
             for r, d, f_names in os.walk(image_dir):
                 for f in f_names:
-                    if f.lower().endswith(('.jpg', '.png', '.jpeg')):
+                    if not f.startswith('.'):
                         basename = os.path.splitext(f)[0]
                         image_map[basename] = os.path.join(r, f)
             print(f"Indexed {len(image_map)} images.")
             
+            # DIAGNOSTIC: Print a few files to see what they look like
+            print(f"DIAGNOSTIC: A few indexed files: {list(image_map.keys())[:5]}")
+            print(f"DIAGNOSTIC: Top level contents of {image_dir}:")
+            try:
+                for item in os.listdir(image_dir)[:10]:
+                    path = os.path.join(image_dir, item)
+                    size = os.path.getsize(path) if os.path.isfile(path) else 'DIR'
+                    print(f"  - {item} ({size})")
+            except Exception as e:
+                print(f"  Failed to list dir: {e}")
+            
             def resolve_path(p):
+                # Clean up the parsed string
+                p = str(p).strip().replace("'", "").replace('"', '')
                 basename = os.path.splitext(os.path.basename(p))[0]
                 if basename in image_map:
                     return image_map[basename]
