@@ -133,6 +133,9 @@ class ChatMessageResponse(BaseModel):
     status_message: Optional[str] = None
     response_time_ms: Optional[int] = None
     query_id: Optional[int] = None
+    response_scope: str = "DOCUMENT"
+    personal_intent: Optional[str] = None
+    navigation_target: Optional[dict[str, Any]] = None
 
 
 class ChatAudioResponse(BaseModel):
@@ -146,6 +149,9 @@ class ChatAudioResponse(BaseModel):
     status_message: Optional[str] = None
     response_time_ms: Optional[int] = None
     query_id: Optional[int] = None
+    response_scope: str = "DOCUMENT"
+    personal_intent: Optional[str] = None
+    navigation_target: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -531,6 +537,9 @@ def create_kiosk_router(
             status_message=response.get("status_message"),
             response_time_ms=response.get("response_time_ms"),
             query_id=response.get("query_id"),
+            response_scope=response.get("response_scope", "DOCUMENT"),
+            personal_intent=response.get("personal_intent"),
+            navigation_target=response.get("navigation_target"),
         )
 
     @router.post("/chat/audio", response_model=ChatAudioResponse)
@@ -587,6 +596,9 @@ def create_kiosk_router(
             status_message=response.get("error_message"),
             response_time_ms=response.get("response_time_ms"),
             query_id=response.get("query_id"),
+            response_scope=response.get("response_scope", "DOCUMENT"),
+            personal_intent=response.get("personal_intent"),
+            navigation_target=response.get("navigation_target"),
         )
 
     @router.post("/chat/lock", response_model=ChatVerifyResponse)
