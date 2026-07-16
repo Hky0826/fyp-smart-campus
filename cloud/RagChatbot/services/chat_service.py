@@ -40,6 +40,10 @@ from RagChatbot.schemas import ChatRequest, ChatResponse, CitationSchema
 from RagChatbot.security.audit_logger import log_access_denied, log_chatbot_interaction
 from RagChatbot.security.prompt_guard import check_query
 from RagChatbot.security.rbac import get_allowed_access_levels_for_user
+from RagChatbot.security.auth_context import resolve_auth_context
+from RagChatbot.personalisation.intents import parse_personal_intent
+from RagChatbot.personalisation.service import handle_personal_request
+from RagChatbot.security.audit_logger import log_personal_interaction
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +56,7 @@ AUTH_REQUIRED_ANSWER = (
 AUTH_REQUIRED_STATUS = "Authentication required: please scan your face to check protected document access."
 
 
-# ── JWT Helpers ───────────────────────────────────────────────────────────────
+# JWT helpers
 
 def _decode_jwt(token: str) -> dict:
     """
@@ -86,7 +90,7 @@ def _verify_session(token: str, db: Session) -> tuple[int, int]:
 
     Supports two JWT formats:
       - Edge user tokens: payload contains 'user_id' (int) field.
-      - Admin tokens: payload contains 'sub' (admin_id str) — these can
+      - Admin tokens: payload contains 'sub' (admin_id str) â€” these can
         also use the chatbot if they want, but are less likely to.
 
     Returns:
@@ -126,11 +130,16 @@ def _verify_session(token: str, db: Session) -> tuple[int, int]:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session has expired. Please re-authenticate.",
         )
+    if int(session.user_id) != int(user_id):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication session does not match the token user.")
+    from app.models.models import User
+    if not db.query(User).filter_by(user_id=user_id, is_active=True).first():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User is inactive or unavailable. Please re-authenticate.")
 
     return user_id, session.session_id
 
 
-# ── Main Chat Pipeline ────────────────────────────────────────────────────────
+# Main chat pipeline
 
 def process_chat(
     request: ChatRequest,
@@ -150,7 +159,7 @@ def process_chat(
     """
     start_time = time.monotonic()
 
-    # ── Step 1: Prompt injection guard ────────────────────────────────────────
+# Step 1: Prompt injection guard
     guard_result = check_query(request.query)
     if not guard_result.is_safe:
         logger.warning("Prompt injection blocked. pattern=%s", guard_result.matched_pattern)
@@ -162,7 +171,7 @@ def process_chat(
             try:
                 user_id, session_id = _verify_session(bearer_token, db)
             except HTTPException:
-                user_id, session_id = None, request.session_id or -1
+                user_id, session_id = None, None
 
         if session_id and session_id > 0:
             log_access_denied(
@@ -186,17 +195,30 @@ def process_chat(
 
     sanitized_query = guard_result.sanitized_query or request.query
 
-    # ── Step 2: JWT verification -> resolve user_id and session_id ────────────
-    if bearer_token:
-        user_id, session_id = _verify_session(bearer_token, db)
+# Step 2: JWT verification and user/session resolution
+    context = resolve_auth_context(bearer_token, db)
+    user_id, session_id = context.user_id, context.session_id
+    if context.authenticated and user_id is not None:
         allowed_levels = get_allowed_access_levels_for_user(user_id, db)
         logger.info("Chat: user_id=%d allowed_levels=%s", user_id, allowed_levels)
     else:
-        user_id, session_id = None, None
         allowed_levels = VISITOR_ACCESS_LEVELS
         logger.info("Chat: anonymous visitor allowed_levels=%s", allowed_levels)
 
-    # ── Step 2.5: Query Routing ───────────────────────────────────────────────
+    personal_route = parse_personal_intent(sanitized_query)
+    personal_result = handle_personal_request(personal_route, context, db)
+    if personal_result is not None:
+        response_time_ms = int((time.monotonic() - start_time) * 1000)
+        query_id = None
+        if session_id is not None and user_id is not None:
+            logged_query_id = log_personal_interaction(db, session_id=session_id, user_id=user_id, intent=personal_result.intent.value, response_time_ms=response_time_ms, is_navigational=personal_result.navigation_target is not None)
+            query_id = logged_query_id if logged_query_id > 0 else None
+        navigation = None
+        if personal_result.navigation_target:
+            navigation = {"label": personal_result.navigation_target.label, "location": personal_result.navigation_target.location.display}
+        return ChatResponse(answer=personal_result.answer, citations=[], access_granted=personal_result.access_granted, status_message=personal_result.status_message, response_time_ms=response_time_ms, query_id=query_id, response_scope=personal_result.response_scope, personal_intent=personal_result.intent.value, authentication_required=personal_result.authentication_required, navigation_target=navigation)
+
+# Step 2.5: Query routing
     from RagChatbot.generation.query_router import classify_query, get_capabilities_summary
     
     route = classify_query(sanitized_query)
@@ -205,7 +227,7 @@ def process_chat(
     if route.category == "GREETING":
         fast_answer = "Hi! How can I help you with Quest International University today?"
     elif route.category == "CAPABILITY":
-        fast_answer = get_capabilities_summary()
+        fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
     elif route.category == "NAVIGATIONAL":
         fast_answer = "Navigational request detected. Routing to map module..."
     elif route.category == "OUT_OF_SCOPE":
@@ -238,9 +260,9 @@ def process_chat(
             query_id=query_id,
         )
 
-    # ── Step 3: RBAC – resolve allowed document access levels from DB ─────────
+# Step 3: RBAC access levels
 
-    # ── Step 4: Embed the query ───────────────────────────────────────────────
+# Step 4: Embed the query
     try:
         query_embedding = embed_text(sanitized_query)
     except RuntimeError as exc:
@@ -250,14 +272,14 @@ def process_chat(
             detail="Embedding service is temporarily unavailable. Please try again later.",
         )
 
-    # ── Step 5–6: Retrieve and re-rank authorized chunks ─────────────────────
+# Steps 5-6: Retrieve and re-rank authorized chunks
     ranked_chunks = retrieve_chunks(
         query_embedding=query_embedding,
         allowed_access_levels=allowed_levels,
         db=db,
     )
 
-    # ── Step 7: Generate answer ───────────────────────────────────────────────
+# Step 7: Generate answer
     if not ranked_chunks:
         if not bearer_token and _has_relevant_protected_chunks(query_embedding, db):
             answer = AUTH_REQUIRED_ANSWER
@@ -269,7 +291,24 @@ def process_chat(
             status_message = "No relevant documents found for your access level."
     else:
         try:
-            answer = generate_answer(sanitized_query, ranked_chunks)
+            chat_history = []
+            if session_id:
+                from app.models.models import ChatbotQuery
+                recent_queries = (
+                    db.query(ChatbotQuery)
+                    .filter(ChatbotQuery.session_id == session_id)
+                    .filter(ChatbotQuery.response_text.isnot(None))
+                    .order_by(ChatbotQuery.timestamp.desc())
+                    .limit(3)
+                    .all()
+                )
+                for q in reversed(recent_queries):
+                    chat_history.append({
+                        "user": q.query_text,
+                        "assistant": q.response_text
+                    })
+
+            answer = generate_answer(sanitized_query, ranked_chunks, chat_history=chat_history)
             access_granted = True
             status_message = None
         except RuntimeError as exc:
@@ -279,7 +318,7 @@ def process_chat(
                 detail="Answer generation is temporarily unavailable. Please try again later.",
             )
 
-    # ── Step 8: Build citation objects ───────────────────────────────────────
+# Step 8: Build citation objects
     citations: List[CitationSchema] = [
         CitationSchema(
             chunk_id=chunk.chunk_id,
@@ -294,7 +333,7 @@ def process_chat(
 
     response_time_ms = int((time.monotonic() - start_time) * 1000)
 
-    # ── Step 9: Audit log ─────────────────────────────────────────────────────
+# Step 9: Audit log
     query_id = None
     if session_id is not None:
         logged_query_id = log_chatbot_interaction(
@@ -308,7 +347,7 @@ def process_chat(
         )
         query_id = logged_query_id if logged_query_id > 0 else None
 
-    # ── Step 10: Return response ──────────────────────────────────────────────
+# Step 10: Return response
     return ChatResponse(
         answer=answer,
         citations=citations,
@@ -362,7 +401,7 @@ def process_public_smoke_chat(
     allowed_levels = ["PUBLIC"]
     logger.info("Public smoke-test chat: allowed_levels=%s", allowed_levels)
 
-    # ── Step 2.5: Query Routing ───────────────────────────────────────────────
+# Step 2.5: Query routing
     from RagChatbot.generation.query_router import classify_query, get_capabilities_summary
     
     route = classify_query(sanitized_query)

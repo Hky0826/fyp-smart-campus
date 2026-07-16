@@ -57,6 +57,10 @@ from RagChatbot.schemas import AudioChatResponse, CitationSchema
 from RagChatbot.security.audit_logger import log_access_denied, log_chatbot_interaction
 from RagChatbot.security.prompt_guard import check_query
 from RagChatbot.security.rbac import get_allowed_access_levels_for_user
+from RagChatbot.security.auth_context import resolve_auth_context
+from RagChatbot.personalisation.intents import parse_personal_intent
+from RagChatbot.personalisation.service import handle_personal_request
+from RagChatbot.security.audit_logger import log_personal_interaction
 from RagChatbot.services.chat_service import (
     AUTH_REQUIRED_ANSWER,
     AUTH_REQUIRED_STATUS,
@@ -151,6 +155,10 @@ def _audio_response(
     error_message: Optional[str] = None,
     query_id: Optional[int] = None,
     include_audio: bool = True,
+    response_scope: str = "DOCUMENT",
+    personal_intent: Optional[str] = None,
+    authentication_required: bool = False,
+    navigation_target: Optional[dict] = None,
 ) -> AudioChatResponse:
     """Build the audio API response with consistent transcription and TTS fields."""
     return AudioChatResponse(
@@ -163,6 +171,10 @@ def _audio_response(
         error_message=error_message,
         response_time_ms=int((time.monotonic() - start_time) * 1000),
         query_id=query_id,
+        response_scope=response_scope,
+        personal_intent=personal_intent,
+        authentication_required=authentication_required,
+        navigation_target=navigation_target,
     )
 
 
@@ -208,7 +220,7 @@ def process_audio_chat(
     """
     start_time = time.monotonic()
 
-    # ── Step 1: Verify JWT → resolve user_id and session_id ───────────
+# Step 1: Verify JWT
     user_id: Optional[int] = None
     resolved_session_id: Optional[int] = None
 
@@ -216,7 +228,7 @@ def process_audio_chat(
         try:
             user_id, resolved_session_id = _verify_session(bearer_token, db)
         except HTTPException:
-            # Token invalid/expired — return auth_required rather than 401
+# Token invalid or expired; return auth_required
             # so the edge device can prompt the user to re-authenticate.
             logger.warning("Audio chat: invalid/expired JWT, returning auth_required.")
             return _audio_response(
@@ -229,7 +241,7 @@ def process_audio_chat(
                 include_audio=include_audio,
             )
 
-    # ── Step 2: Resolve RBAC access levels ─────────────────────────────
+# Step 2: Resolve RBAC access levels
     if user_id is not None:
         allowed_levels = get_allowed_access_levels_for_user(user_id, db)
         logger.info("Audio chat: user_id=%d allowed_levels=%s", user_id, allowed_levels)
@@ -239,7 +251,7 @@ def process_audio_chat(
 
     user_role = _derive_role_from_access_levels(allowed_levels)
 
-    # ── Step 3: Extract query from audio ───────────────────────────────
+# Step 3: Extract query from audio
     try:
         extraction_result = extract_query_from_audio(
             audio_bytes=audio_bytes,
@@ -257,7 +269,7 @@ def process_audio_chat(
             include_audio=include_audio,
         )
 
-    # ── Step 3b: Check audio-extraction prompt-injection flag ──────────
+# Step 3b: Check audio extraction prompt-injection flag
     if extraction_result.possible_prompt_injection:
         logger.warning(
             "Audio query extraction flagged possible injection: %s",
@@ -292,7 +304,7 @@ def process_audio_chat(
             include_audio=include_audio,
         )
 
-    # ── Step 4: Prompt-injection detection on extracted query ──────────
+# Step 4: Prompt-injection detection on extracted query
     guard_result = check_query(user_query)
     if not guard_result.is_safe:
         logger.warning(
@@ -324,9 +336,23 @@ def process_audio_chat(
 
     sanitized_query = guard_result.sanitized_query or user_query
 
-    # ── Step 5: (Prompt injection passed — continue to retrieval) ──────
+    context = resolve_auth_context(bearer_token, db)
+    personal_route = parse_personal_intent(sanitized_query)
+    personal_result = handle_personal_request(personal_route, context, db)
+    if personal_result is not None:
+        response_time_ms = int((time.monotonic() - start_time) * 1000)
+        query_id = None
+        navigation = None
+        if personal_result.navigation_target:
+            navigation = {"label": personal_result.navigation_target.label, "location": personal_result.navigation_target.location.display}
+        if context.session_id is not None and context.user_id is not None:
+            logged_query_id = log_personal_interaction(db, session_id=context.session_id, user_id=context.user_id, intent=personal_result.intent.value, response_time_ms=response_time_ms, is_navigational=personal_result.navigation_target is not None)
+            query_id = logged_query_id if logged_query_id > 0 else None
+        return _audio_response(transcribed_input=user_query, text_response=personal_result.answer, status="ok" if personal_result.access_granted else ("auth_required" if personal_result.authentication_required else "no_access"), access_granted=personal_result.access_granted, error_message=personal_result.status_message, start_time=start_time, query_id=query_id, include_audio=include_audio, response_scope=personal_result.response_scope, personal_intent=personal_result.intent.value, authentication_required=personal_result.authentication_required, navigation_target=navigation)
 
-    # ── Step 6: Embed the extracted query ──────────────────────────────
+# Step 5: Continue to retrieval
+
+# Step 6: Embed the extracted query
     try:
         query_embedding = embed_text(sanitized_query)
     except RuntimeError as exc:
@@ -341,14 +367,14 @@ def process_audio_chat(
             include_audio=include_audio,
         )
 
-    # ── Step 7: Retrieve authorised document chunks ────────────────────
+# Step 7: Retrieve authorized document chunks
     ranked_chunks = retrieve_chunks(
         query_embedding=query_embedding,
         allowed_access_levels=allowed_levels,
         db=db,
     )
 
-    # ── Check if authentication upgrade could help ─────────────────────
+# Check whether authentication upgrade could help
     if not ranked_chunks:
         if not bearer_token and _has_relevant_protected_chunks(query_embedding, db):
             # Anonymous user but there are protected chunks that match
@@ -375,10 +401,10 @@ def process_audio_chat(
                 include_audio=include_audio,
             )
 
-    # ── Step 8: Build context block and separated prompt ────────────────
+# Step 8: Build context block and separated prompt
     context_block = build_context_block(ranked_chunks)
 
-    # ── Step 9: Generate text response ─────────────────────────────────
+# Step 9: Generate text response
     try:
         live_result = generate_response(
             system_instruction=_LIVE_SYSTEM_INSTRUCTION,
@@ -401,7 +427,7 @@ def process_audio_chat(
 
     answer_text = live_result.text
 
-    # ── Step 10: Validate text response and sources ────────────────────
+# Step 10: Validate text response and sources
     validation: ValidationResult = validate_response(
         text=answer_text,
         sources=ranked_chunks,
@@ -416,7 +442,7 @@ def process_audio_chat(
         if validation.sanitized_text:
             answer_text = validation.sanitized_text
 
-        # Do NOT include audio when validation has failed — the response
+# Do not include audio when validation has failed
         # may contain sanitised/redacted text that should not be spoken.
         # Return with validation_failed status so the edge device knows
         # the response went through extra sanitisation
@@ -426,7 +452,7 @@ def process_audio_chat(
         status_str = "ok"
         include_response_audio = include_audio
 
-    # ── Step 12: Build CitationSchema objects ──────────────────────────
+# Step 12: Build CitationSchema objects
     citations: List[CitationSchema] = [
         CitationSchema(
             chunk_id=chunk.chunk_id,
@@ -441,7 +467,7 @@ def process_audio_chat(
 
     response_time_ms = int((time.monotonic() - start_time) * 1000)
 
-    # ── Step 13: Audit log ─────────────────────────────────────────────
+# Step 13: Audit log
     audit_query_id: Optional[int] = None
     if resolved_session_id is not None and resolved_session_id > 0:
         logged_id = log_chatbot_interaction(
@@ -455,7 +481,7 @@ def process_audio_chat(
         )
         audit_query_id = logged_id if logged_id > 0 else None
 
-    # ── Step 14: Return AudioChatResponse ──────────────────────────────
+# Step 14: Return AudioChatResponse
     return _audio_response(
         transcribed_input=user_query,
         text_response=answer_text,

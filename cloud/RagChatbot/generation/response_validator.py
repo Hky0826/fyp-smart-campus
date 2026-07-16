@@ -1,7 +1,7 @@
 """
 Validate generated responses before returning audio to the edge device.
 
-This module implements the validation gate — a security invariant that
+This module implements the validation gate â€” a security invariant that
 ensures audio is never returned unless the text response and cited sources
 pass validation.
 
@@ -13,7 +13,7 @@ Validation checks:
 4. Response shows basic grounding in the original query (soft check).
 
 If validation fails, the response status is set to ``validation_failed``
-and ``audio_response`` is set to ``null`` — the edge device never plays
+and ``audio_response`` is set to ``null`` â€” the edge device never plays
 unvalidated audio.
 
 Also provides ``generate_audio_from_text``, which generates audio from
@@ -35,7 +35,7 @@ from RagChatbot.retrieval.ranking import RankedChunk
 
 logger = logging.getLogger(__name__)
 
-# Phrases that indicate system prompt leakage — if any appear in the response
+# Phrases that indicate system prompt leakage â€” if any appear in the response
 # text the validation should flag it.
 _LEAKAGE_PATTERNS = [
     "system instruction",
@@ -118,7 +118,7 @@ def validate_response(
                 reason=f"Source chunk {src.chunk_id} has invalid access level '{src.access_level}'.",
             )
 
-    # Check 4: Basic grounding — the response should relate to the query
+    # Check 4: Basic grounding â€” the response should relate to the query
     # (This is a lightweight heuristic; a more thorough grounding check
     # would require an additional LLM call or embedding comparison.)
     query_words = set(original_query.lower().split())
@@ -127,7 +127,7 @@ def validate_response(
         overlap = query_words & text_words
         if not overlap:
             logger.warning(
-                "Response validation: response appears ungrounded — "
+                "Response validation: response appears ungrounded â€” "
                 "no word overlap with the original query."
             )
             # This is a soft check; we return as valid with a note rather
@@ -166,8 +166,18 @@ def generate_audio_from_text(text: str) -> Optional[bytes]:
         return None
 
     try:
-        client_options = {"api_key": rag_settings.GOOGLE_API_KEY}
-        client = texttospeech.TextToSpeechClient(client_options=client_options)
+        import os
+        client_options = {}
+        tts_api_key = getattr(rag_settings, "GOOGLE_CLOUD_TTS_API_KEY", "") or rag_settings.GOOGLE_API_KEY
+
+        # Prioritize GOOGLE_APPLICATION_CREDENTIALS for service accounts if set.
+        # Otherwise use the API key.
+        if "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ and tts_api_key:
+            client_options["api_key"] = tts_api_key
+
+        client = texttospeech.TextToSpeechClient(
+            client_options=client_options if client_options else None
+        )
     except Exception as exc:
         logger.error("Failed to create Google Cloud TTS client: %s", exc)
         raise RuntimeError(f"TTS client initialisation failed: {exc}") from exc
@@ -183,7 +193,7 @@ def generate_audio_from_text(text: str) -> Optional[bytes]:
         language_code=language_code,
         name=voice_name,
     )
-    
+
     audio_config = texttospeech.AudioConfig(
         audio_encoding=texttospeech.AudioEncoding.LINEAR16,
         sample_rate_hertz=24000

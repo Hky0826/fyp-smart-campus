@@ -102,8 +102,14 @@ Do NOT wrap the JSON in markdown code blocks.
         return RouteClassification(category="UNIVERSITY_INFO")
 
 
-def get_capabilities_summary() -> str:
-    """Returns a natural language summary of the knowledge base manifest."""
+def get_capabilities_summary(*, authenticated: bool = False, personalisation_enabled: bool = False) -> str:
+    """Return capabilities without claiming disabled personal features."""
     topics = ", ".join([t.lower() for t in KNOWLEDGE_BASE_MANIFEST[:-1]])
     last_topic = KNOWLEDGE_BASE_MANIFEST[-1].lower()
-    return f"I can help answer questions about {topics}, and {last_topic} available in the university documents."
+    answer = f"I can help answer questions about {topics}, and {last_topic} available in the university documents."
+    if personalisation_enabled:
+        if authenticated:
+            answer += " I can also show your own profile, current courses, timetable, next class, and appointments."
+        else:
+            answer += " Personal profile, course, timetable, and appointment questions require face authentication."
+    return answer

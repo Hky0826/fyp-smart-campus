@@ -102,3 +102,23 @@ def log_access_denied(
         response_time_ms=None,
         is_navigational=False,
     )
+def log_personal_interaction(
+    db: Session,
+    *,
+    session_id: int,
+    user_id: int,
+    intent: str,
+    response_time_ms: Optional[int],
+    is_navigational: bool = False,
+) -> int:
+    """Write only a redacted marker for a personal response."""
+    return log_chatbot_interaction(
+        db,
+        session_id=session_id,
+        user_id=user_id,
+        query_text=f"[PERSONAL_INTENT] {intent}",
+        response_text="[PERSONAL_RESPONSE_REDACTED]",
+        retrieved_chunk_ids=[],
+        response_time_ms=response_time_ms,
+        is_navigational=is_navigational,
+    )

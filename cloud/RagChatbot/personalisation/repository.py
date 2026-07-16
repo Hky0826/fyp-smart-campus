@@ -1,0 +1,95 @@
+"""Read-only ownership-filtered queries for chatbot personalisation."""
+
+from __future__ import annotations
+
+import datetime as dt
+from typing import Optional
+
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session, joinedload
+
+from RagChatbot.personalisation.schemas import AuthenticatedChatContext, SafeAppointment, SafeCourse, SafeLocation, SafeProfile, SafeTimetableEntry
+
+
+class PersonalDataRepository:
+    """All methods scope through the trusted authenticated user context."""
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    @staticmethod
+    def _location(node) -> SafeLocation:
+        if node is None:
+            return SafeLocation()
+        floorplan = getattr(node, "floorplan", None)
+        building = getattr(floorplan, "building", None)
+        return SafeLocation(room=getattr(node, "room_label", None), building=getattr(building, "building_name", None), floor=getattr(floorplan, "floor_level", None))
+
+    def profile(self, context: AuthenticatedChatContext) -> Optional[SafeProfile]:
+        from app.models.models import User
+        user = self.db.query(User).filter_by(user_id=context.user_id, is_active=True).first()
+        if not user:
+            return None
+        name = getattr(user, "full_name", "").strip()
+        if context.student_id and getattr(user, "student", None):
+            student = user.student
+            return SafeProfile(name=name, role="STUDENT", programme=getattr(student, "program", None), faculty=getattr(student, "faculty", None))
+        if context.lecturer_id and getattr(user, "lecturer", None):
+            lecturer = user.lecturer
+            return SafeProfile(name=name, role="LECTURER", faculty=getattr(lecturer, "faculty", None), department=getattr(lecturer, "department", None), position=getattr(lecturer, "position", None), office=self._location(getattr(lecturer, "office", None)).display or None)
+        staff = getattr(user, "staff", None)
+        if staff and (context.staff_id or context.admin_id):
+            return SafeProfile(name=name, role="ADMINISTRATOR" if context.admin_id else "STAFF", department=getattr(staff, "department", None), position=getattr(staff, "position", None), office=self._location(getattr(staff, "office", None)).display or None)
+        if context.visitor_id and getattr(user, "visitor", None):
+            visitor = user.visitor
+            if self._visitor_expired(getattr(visitor, "access_expiry", None)):
+                return None
+            return SafeProfile(name=name, role="VISITOR")
+        return SafeProfile(name=name, role=(context.roles[0] if context.roles else "USER"))
+
+    def courses(self, context: AuthenticatedChatContext, term: tuple[int, str]) -> list[SafeCourse]:
+        from app.models.models import Course, CourseEnrollment, Student
+        rows = (self.db.query(CourseEnrollment).join(Course, Course.course_id == CourseEnrollment.course_id).join(Student, Student.student_id == CourseEnrollment.student_id).options(joinedload(CourseEnrollment.course)).filter(Student.user_id == context.user_id, CourseEnrollment.status == "ENROLLED", CourseEnrollment.semester == term[0], CourseEnrollment.academic_year == term[1], Course.is_active.is_(True)).order_by(Course.course_code).all())
+        return [SafeCourse(code=row.course.course_code, name=row.course.course_name, credits=getattr(row.course, "credit_hours", None)) for row in rows]
+
+    def student_timetable(self, context: AuthenticatedChatContext, term: tuple[int, str]) -> list[SafeTimetableEntry]:
+        from app.models.models import Course, CourseEnrollment, Student, Timetable
+        rows = (self.db.query(Timetable).join(Course, Course.course_id == Timetable.course_id).join(CourseEnrollment, CourseEnrollment.course_id == Timetable.course_id).join(Student, Student.student_id == CourseEnrollment.student_id).options(joinedload(Timetable.course), joinedload(Timetable.classroom).joinedload("floorplan").joinedload("building")).filter(Student.user_id == context.user_id, CourseEnrollment.status == "ENROLLED", CourseEnrollment.semester == term[0], CourseEnrollment.academic_year == term[1], Timetable.semester == term[0], Timetable.academic_year == term[1], Course.is_active.is_(True)).distinct().order_by(Timetable.day_of_week, Timetable.start_time).all())
+        return [self._timetable_dto(row) for row in rows]
+
+    def lecturer_timetable(self, context: AuthenticatedChatContext, term: tuple[int, str]) -> list[SafeTimetableEntry]:
+        from app.models.models import Course, Lecturer, Timetable
+        rows = (self.db.query(Timetable).join(Lecturer, Lecturer.lecturer_id == Timetable.lecturer_id).join(Course, Course.course_id == Timetable.course_id).options(joinedload(Timetable.course), joinedload(Timetable.classroom).joinedload("floorplan").joinedload("building")).filter(Lecturer.user_id == context.user_id, Timetable.semester == term[0], Timetable.academic_year == term[1], Course.is_active.is_(True)).order_by(Timetable.day_of_week, Timetable.start_time).all())
+        return [self._timetable_dto(row) for row in rows]
+
+    def appointments(self, context: AuthenticatedChatContext, start: Optional[dt.datetime] = None, end: Optional[dt.datetime] = None) -> list[SafeAppointment]:
+        from app.models.models import Appointment, Visitor
+        if context.visitor_id:
+            visitor = self.db.query(Visitor).filter_by(visitor_id=context.visitor_id, user_id=context.user_id).first()
+            if not visitor or self._visitor_expired(getattr(visitor, "access_expiry", None)):
+                return []
+            filters = [Appointment.guest_user_id == context.user_id]
+        else:
+            filters = [or_(Appointment.guest_user_id == context.user_id, Appointment.host_user_id == context.user_id)]
+        if start is not None:
+            filters.append(Appointment.scheduled_at >= start.replace(tzinfo=None))
+        if end is not None:
+            filters.append(Appointment.scheduled_at < end.replace(tzinfo=None))
+        rows = (self.db.query(Appointment).options(joinedload(Appointment.guest), joinedload(Appointment.host), joinedload(Appointment.location).joinedload("floorplan").joinedload("building")).filter(and_(*filters)).order_by(Appointment.scheduled_at).all())
+        result = []
+        for row in rows:
+            if str(getattr(row, "status", "")).upper() == "CANCELLED":
+                continue
+            participant = row.host if row.guest_user_id == context.user_id else row.guest
+            result.append(SafeAppointment(participant_name=getattr(participant, "full_name", "campus participant"), scheduled_at=row.scheduled_at, duration_minutes=int(row.duration_minutes or 0), status=str(row.status), location=self._location(row.location)))
+        return result
+
+    @staticmethod
+    def _visitor_expired(expiry) -> bool:
+        if expiry is None:
+            return True
+        return expiry.replace(tzinfo=None) < dt.datetime.utcnow()
+
+    def _timetable_dto(self, row) -> SafeTimetableEntry:
+        course = row.course
+        return SafeTimetableEntry(course=SafeCourse(code=course.course_code, name=course.course_name, credits=getattr(course, "credit_hours", None)), weekday=str(row.day_of_week), start=row.start_time, end=row.end_time, location=self._location(row.classroom))

@@ -157,3 +157,7 @@ class ExtractedQuery(BaseModel):
         None,
         description="If injection is suspected, a summary of the unsafe instruction.",
     )
+    response_scope: str = Field(default="DOCUMENT", description="DOCUMENT, PERSONAL, or MIXED.")
+    personal_intent: Optional[str] = None
+    authentication_required: bool = False
+    navigation_target: Optional[dict[str, Any]] = None

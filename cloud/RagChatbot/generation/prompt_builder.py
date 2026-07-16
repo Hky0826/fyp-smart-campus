@@ -14,7 +14,7 @@ can be unit-tested independently.
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional, Dict, Any
 
 from RagChatbot.retrieval.ranking import RankedChunk
 
@@ -62,22 +62,31 @@ def build_context_block(chunks: List[RankedChunk]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def build_prompt(query: str, chunks: List[RankedChunk]) -> tuple[str, str]:
+def build_prompt(query: str, chunks: List[RankedChunk], chat_history: Optional[List[Dict[str, Any]]] = None) -> tuple[str, str]:
     """
     Build the system and user messages to send to the LLM.
 
     Args:
         query: The sanitized user query.
         chunks: Authorized, re-ranked document chunks.
+        chat_history: Optional list of previous interactions (dicts with 'user' and 'assistant' keys).
 
     Returns:
         A tuple of (system_prompt, user_message) strings.
     """
     context_block = build_context_block(chunks)
 
+    history_block = ""
+    if chat_history:
+        history_block = "Previous Conversation:\n"
+        for turn in chat_history:
+            history_block += f"User: {turn.get('user', '')}\nAssistant: {turn.get('assistant', '')}\n\n"
+        history_block += "---\n\n"
+
     user_message = (
         f"Context documents:\n\n{context_block}\n\n"
         f"---\n\n"
+        f"{history_block}"
         f"Question: {query}\n\n"
         f"Answer based only on the context documents above:"
     )

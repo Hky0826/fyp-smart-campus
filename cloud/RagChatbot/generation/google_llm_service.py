@@ -10,7 +10,7 @@ returned in responses or logged.
 from __future__ import annotations
 
 import logging
-from typing import List
+from typing import List, Optional, Dict, Any
 
 from google import genai
 from google.genai import types
@@ -22,7 +22,7 @@ from RagChatbot.retrieval.ranking import RankedChunk
 logger = logging.getLogger(__name__)
 
 
-def generate_answer(query: str, chunks: List[RankedChunk]) -> str:
+def generate_answer(query: str, chunks: List[RankedChunk], chat_history: Optional[List[Dict[str, Any]]] = None) -> str:
     """
     Generate a grounded answer using the Google Gemini model.
 
@@ -33,6 +33,7 @@ def generate_answer(query: str, chunks: List[RankedChunk]) -> str:
     Args:
         query: The sanitized user query.
         chunks: Authorized, re-ranked document chunks to use as context.
+        chat_history: Optional list of previous interactions (dicts with 'user' and 'assistant' keys).
 
     Returns:
         The generated answer string.
@@ -40,7 +41,7 @@ def generate_answer(query: str, chunks: List[RankedChunk]) -> str:
     Raises:
         RuntimeError: If the Google API call fails.
     """
-    system_prompt, user_message = build_prompt(query, chunks)
+    system_prompt, user_message = build_prompt(query, chunks, chat_history)
 
     try:
         client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
