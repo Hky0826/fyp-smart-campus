@@ -301,6 +301,10 @@ class Lecturer(Base):
     @property
     def department(self):
         return self.staff.department if self.staff else ""
+
+    @property
+    def department_id(self):
+        return self.staff.department_id if self.staff else None
         
     @property
     def faculty(self):
@@ -347,6 +351,10 @@ class Admin(Base):
     @property
     def department(self):
         return self.staff.department if self.staff else ""
+
+    @property
+    def department_id(self):
+        return self.staff.department_id if self.staff else None
         
     @property
     def office_node_id(self):
@@ -378,6 +386,11 @@ class UploadedDocument(Base):
     
     uploader = relationship("User", back_populates="uploaded_documents")
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
+
+    @property
+    def is_chunked(self) -> bool:
+        return len(self.chunks) > 0
+
 
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
@@ -558,6 +571,10 @@ class Course(Base):
     @property
     def faculty(self):
         return self.programme_rel.faculty.faculty_name if (self.programme_rel and self.programme_rel.faculty) else ""
+
+    @property
+    def faculty_id(self):
+        return self.programme_rel.faculty_id if self.programme_rel else None
 
 class CourseEnrollment(Base):
     __tablename__ = "course_enrollments"

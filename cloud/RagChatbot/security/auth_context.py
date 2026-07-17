@@ -49,12 +49,22 @@ def resolve_auth_context(token: Optional[str], db: Session) -> AuthenticatedChat
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User is inactive or unavailable. Please re-authenticate.")
     roles = tuple(sorted({str(role.role_name).upper() for role in (user.roles or [])}))
+    from RagChatbot.security.rbac import get_highest_role
+    highest_role = get_highest_role(roles) if roles else "VISITOR"
+    roles = (highest_role,)
+
+    student_id = getattr(getattr(user, "student", None), "student_id", None) if highest_role == "STUDENT" else None
+    lecturer_id = getattr(getattr(user, "lecturer", None), "lecturer_id", None) if highest_role == "LECTURER" else None
+    staff_id = getattr(getattr(user, "staff", None), "staff_id", None) if highest_role in {"STAFF", "LECTURER", "ADMIN", "SUPER_ADMIN", "SYSTEM_ADMIN", "CONTENT_ADMIN"} else None
+    visitor_id = getattr(getattr(user, "visitor", None), "visitor_id", None) if highest_role == "VISITOR" else None
+    admin_id = getattr(getattr(user, "admin", None), "admin_id", None) if highest_role in {"ADMIN", "SUPER_ADMIN", "SYSTEM_ADMIN", "CONTENT_ADMIN"} else None
+
     return AuthenticatedChatContext(
         user_id=user_id, session_id=int(session.session_id), roles=roles,
-        student_id=getattr(getattr(user, "student", None), "student_id", None),
-        lecturer_id=getattr(getattr(user, "lecturer", None), "lecturer_id", None),
-        staff_id=getattr(getattr(user, "staff", None), "staff_id", None),
-        visitor_id=getattr(getattr(user, "visitor", None), "visitor_id", None),
-        admin_id=getattr(getattr(user, "admin", None), "admin_id", None),
+        student_id=student_id,
+        lecturer_id=lecturer_id,
+        staff_id=staff_id,
+        visitor_id=visitor_id,
+        admin_id=admin_id,
         authenticated=True,
     )

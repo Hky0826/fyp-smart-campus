@@ -84,6 +84,28 @@ class PersonalisationTests(unittest.TestCase):
         self.assertFalse(result.access_granted)
         self.assertFalse(repo.calls)
 
+    def test_multiple_roles_highest_role_access_student_lecturer(self):
+        # When a user has both STUDENT and LECTURER roles, LECTURER is higher.
+        from RagChatbot.security.rbac import get_highest_role, resolve_allowed_access_levels
+        
+        self.assertEqual(get_highest_role(("STUDENT", "LECTURER")), "LECTURER")
+        self.assertEqual(get_highest_role(("VISITOR", "STUDENT")), "STUDENT")
+        self.assertEqual(get_highest_role(("STAFF", "ADMIN")), "ADMIN")
+        
+        # Test that allowed access levels use the highest role:
+        self.assertEqual(resolve_allowed_access_levels(["STUDENT", "LECTURER"]), ["PUBLIC", "STUDENT", "LECTURER"])
+        self.assertEqual(resolve_allowed_access_levels(["VISITOR", "STUDENT"]), ["PUBLIC", "STUDENT"])
+        
+        # Test handle_personal_request behavior with highest role:
+        # User is LECTURER (highest role), student_id is set to None by resolve_auth_context.
+        repo = FakeRepository()
+        context = AuthenticatedChatContext(7, 9, roles=("LECTURER",), lecturer_id="L7", staff_id="ST7", authenticated=True)
+        result = handle_personal_request(parse_personal_intent("What is my timetable?"), context, None, repository=repo)
+        
+        # Should call lecturer_timetable instead of student_timetable
+        self.assertIn("lecturer_timetable", [call[0] for call in repo.calls])
+        self.assertNotIn("student_timetable", [call[0] for call in repo.calls])
+
 
 if __name__ == "__main__":
     unittest.main()

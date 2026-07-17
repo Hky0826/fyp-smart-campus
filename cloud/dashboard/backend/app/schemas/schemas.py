@@ -193,23 +193,28 @@ class UserUpdate(BaseSchema):
 
 class StudentBase(BaseSchema):
     student_id: Optional[str] = None
-    program: str
-    faculty: str
+    program: Optional[str] = None
+    faculty: Optional[str] = None
+    programme_id: Optional[str] = None
+    faculty_id: Optional[str] = None
     intake: int
     enrollment_status: EnrollmentStatusEnum = EnrollmentStatusEnum.ACTIVE
     enrolled_since: datetime.date
 
 class LecturerBase(BaseSchema):
     lecturer_id: Optional[str] = None
-    department: str
-    faculty: str
+    department: Optional[str] = None
+    faculty: Optional[str] = None
+    department_id: Optional[str] = None
+    faculty_id: Optional[str] = None
     position: str
     is_head_of_department: bool = False
     office_node_id: Optional[int] = None
 
 class StaffBase(BaseSchema):
     staff_id: Optional[str] = None
-    department: str
+    department: Optional[str] = None
+    department_id: Optional[str] = None
     position: str
     staff_type: StaffTypeEnum
     office_node_id: Optional[int] = None
@@ -226,6 +231,7 @@ class AdminBase(BaseSchema):
     admin_id: Optional[str] = None
     admin_type: AdminTypeEnum
     department: Optional[str] = None
+    department_id: Optional[str] = None
     office_node_id: Optional[int] = None
     staff_id: Optional[str] = None
 
@@ -251,6 +257,8 @@ class StudentCreate(StudentBase):
 class StudentUpdate(BaseSchema):
     program: Optional[str] = None
     faculty: Optional[str] = None
+    programme_id: Optional[str] = None
+    faculty_id: Optional[str] = None
     intake: Optional[int] = None
     enrollment_status: Optional[EnrollmentStatusEnum] = None
     user: Optional[UserUpdate] = None
@@ -266,6 +274,8 @@ class LecturerCreate(LecturerBase):
 class LecturerUpdate(BaseSchema):
     department: Optional[str] = None
     faculty: Optional[str] = None
+    department_id: Optional[str] = None
+    faculty_id: Optional[str] = None
     position: Optional[str] = None
     is_head_of_department: Optional[bool] = None
     office_node_id: Optional[int] = None
@@ -281,6 +291,7 @@ class StaffCreate(StaffBase):
 
 class StaffUpdate(BaseSchema):
     department: Optional[str] = None
+    department_id: Optional[str] = None
     position: Optional[str] = None
     staff_type: Optional[StaffTypeEnum] = None
     office_node_id: Optional[int] = None
@@ -312,6 +323,7 @@ class AdminCreate(AdminBase):
 class AdminUpdate(BaseSchema):
     admin_type: Optional[AdminTypeEnum] = None
     department: Optional[str] = None
+    department_id: Optional[str] = None
     office_node_id: Optional[int] = None
     password: Optional[str] = None
     user: Optional[UserUpdate] = None
@@ -337,6 +349,8 @@ class UploadedDocumentCreate(UploadedDocumentBase):
 class UploadedDocumentResponse(UploadedDocumentBase):
     document_id: int
     uploaded_at: datetime.datetime
+    is_chunked: bool
+
 
 class DocumentChunkBase(BaseSchema):
     document_id: int
@@ -484,8 +498,10 @@ class CourseBase(BaseSchema):
     course_code: str
     course_name: str
     credit_hours: int
-    department: str
-    faculty: str
+    department: Optional[str] = None
+    faculty: Optional[str] = None
+    programme_id: Optional[str] = None
+    faculty_id: Optional[str] = None
     course_level: CourseLevelEnum
     is_active: bool = True
 
@@ -544,6 +560,8 @@ class AppointmentUpdate(BaseSchema):
     scheduled_at: Optional[datetime.datetime] = None
     duration_minutes: Optional[int] = None
     node_id: Optional[int] = None
+    purpose: Optional[str] = None
+    host_email: Optional[str] = None
 
 class AppointmentResponse(AppointmentBase):
     appointment_id: int
@@ -621,6 +639,8 @@ class CourseUpdate(BaseSchema):
     credit_hours: Optional[int] = None
     department: Optional[str] = None
     faculty: Optional[str] = None
+    programme_id: Optional[str] = None
+    faculty_id: Optional[str] = None
     course_level: Optional[CourseLevelEnum] = None
     is_active: Optional[bool] = None
 

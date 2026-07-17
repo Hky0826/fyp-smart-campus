@@ -2,7 +2,7 @@ const { useState, useEffect, useRef, useMemo } = React;
 
 const DASHBOARD_SUB_TABS = {
     iam: ["users", "roles", "facial-recognition"],
-    rag: ["documents", "chunks", "chatbot-queries"],
+    rag: ["documents", "chatbot-queries"],
     infra: ["devices", "node-rbac", "edge-rbac", "auth-logs", "jwt-sessions"],
     academics: ["courses", "enrollments", "timetables", "appointments", "notifications", "faculties", "departments", "programmes"]
 };
@@ -172,7 +172,7 @@ function dashboardPath(tab, subTab) {
                 if (!item) return "";
                 const keyMap = {
                     iam: { users: "user_id", roles: "role_id", "facial-recognition": "user_id" },
-                    rag: { documents: "document_id", chunks: "chunk_id", "chatbot-queries": "query_id" },
+                    rag: { documents: "document_id", "chatbot-queries": "query_id" },
                     infra: { devices: "device_id", "auth-logs": "log_id", "jwt-sessions": "session_id" },
                     academics: {
                         courses: "course_id", enrollments: "enrollment_id", timetables: "timetable_id",
@@ -398,7 +398,7 @@ function dashboardPath(tab, subTab) {
                     const headers = { "Authorization": `Bearer ${token}` };
                     const endpointMap = {
                         iam: { users: "/api/iam/users", roles: "/api/iam/roles", "facial-recognition": "/api/iam/users" },
-                        rag: { documents: "/api/rag/documents", chunks: "/api/rag/chunks", "chatbot-queries": "/api/rag/chatbot-queries" },
+                        rag: { documents: "/api/rag/documents", "chatbot-queries": "/api/rag/chatbot-queries" },
                         infra: { devices: "/api/infra/devices", "node-rbac": "/api/infra/node-rbac", "edge-rbac": "/api/infra/edge-rbac", "auth-logs": "/api/infra/auth-logs", "jwt-sessions": "/api/infra/jwt-sessions" },
                         academics: { courses: "/api/academics/courses", enrollments: "/api/academics/enrollments", timetables: "/api/academics/timetables", appointments: "/api/academics/appointments", notifications: "/api/academics/notifications", faculties: "/api/refs/faculties", departments: "/api/refs/departments", programmes: "/api/refs/programmes" }
                     };
@@ -622,7 +622,7 @@ function dashboardPath(tab, subTab) {
                     const data = await response.json();
                     if (!response.ok) throw new Error(data.detail || "Device did not respond.");
                     mergeRecordIntoList({ ...item, last_heartbeat: data.last_heartbeat });
-                    showSuccessToast(`Device responded (${data.status_code || "OK"}).`);
+                    showSuccessToast("Ping successful.");
                     fetchTabData();
                 } catch (err) {
                     showErrorToast(err.message);
@@ -968,7 +968,7 @@ function dashboardPath(tab, subTab) {
                 if (subTab === "roles") return <RoleForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "rag" && subTab === "documents") return <DocumentForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "infra" && subTab === "devices") return <DeviceForm item={selectedItem} nodes={refs.nodes} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
-                if (currentTab === "academics" && subTab === "courses") return <CourseForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
+                if (currentTab === "academics" && subTab === "courses") return <CourseForm item={selectedItem} programmes={refs.programmes} faculties={refs.faculties} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "enrollments") return <EnrollmentForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "timetables") return <TimetableForm item={selectedItem} nodes={refs.nodes} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "appointments") return <AppointmentForm item={selectedItem} nodes={refs.nodes} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
@@ -1563,7 +1563,7 @@ function dashboardPath(tab, subTab) {
                         {currentTab === "rag" && (
                             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
                                 <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-4 mb-6">
-                                    {["documents", "chunks", "chatbot-queries"].map(t => (
+                                    {DASHBOARD_SUB_TABS.rag.map(t => (
                                         <button key={t} onClick={() => setSubTab(t)}
                                             className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 border ${subTab === t ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-sm' : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800/80 hover:border-slate-700'}`}>
                                             {subTabLabel(t)}
@@ -1572,17 +1572,16 @@ function dashboardPath(tab, subTab) {
                                 </div>
 
                                 <SectionHeader
-                                    title={subTab === 'documents' ? "Uploaded Documents" : subTab === 'chunks' ? "Content Chunks" : "Chatbot Conversations"}
+                                    title={subTab === 'documents' ? "Uploaded Documents" : "Chatbot Conversations"}
                                     description={
                                         subTab === 'documents' ? "Upload and manage documents that the campus chatbot uses to answer questions." :
-                                        subTab === 'chunks' ? "Read-only view of how documents are split and indexed for search." :
                                         "Review chatbot conversation history and response quality."
                                     }
                                     searchVal={searchQuery}
                                     onSearchChange={setSearchQuery}
                                     onCreateClick={subTab === 'documents' ? () => { setSelectedItem(null); setModalType("create"); setShowModal(true); } : null}
                                     createLabel="Upload Document"
-                                    customAction={(subTab === 'documents' || subTab === 'chunks') ? (
+                                    customAction={subTab === 'documents' ? (
                                         <select value={accessLevelFilter} onChange={e => setAccessLevelFilter(e.target.value)}
                                             className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer">
                                             <option value="ALL">All Access Levels</option>
@@ -1599,7 +1598,7 @@ function dashboardPath(tab, subTab) {
                                         <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
                                         <span className="text-sm font-semibold">Loading knowledge base...</span>
                                     </div>
-                                ) : listData.length === 0 ? (
+                               ) : listData.length === 0 ? (
                                     <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-800 bg-slate-900/30 rounded-3xl py-24">
                                         <div className="p-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-2xl mb-5"><Icon name="book-open" className="w-8 h-8" /></div>
                                         <h4 className="text-base font-bold text-slate-200">No content yet</h4>
@@ -1615,6 +1614,7 @@ function dashboardPath(tab, subTab) {
                                                             <th className="p-4 pl-6 font-semibold">Document</th>
                                                             <th className="p-4 font-semibold">Who Can Access</th>
                                                             <th className="p-4 font-semibold">Uploaded On</th>
+                                                            <th className="p-4 font-semibold">Chunked Status</th>
                                                             <th className="p-4 font-semibold">Status</th>
                                                             <th className="p-4 pr-6 text-right font-semibold">Actions</th>
                                                         </tr>
@@ -1635,6 +1635,19 @@ function dashboardPath(tab, subTab) {
                                                                     <span className="text-[10px] font-bold tracking-widest px-2.5 py-1 bg-slate-800 text-slate-300 border border-slate-700/50 rounded-md uppercase">{item.access_level}</span>
                                                                 </td>
                                                                 <td className="p-4 text-xs font-mono text-slate-400">{item.uploaded_at}</td>
+                                                                <td className="p-4">
+                                                                    {item.is_chunked ? (
+                                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold">
+                                                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                                                            Chunked
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full text-xs font-bold">
+                                                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                                                                            Processing
+                                                                        </span>
+                                                                    )}
+                                                                </td>
                                                                 <td className="p-4">
                                                                     <button onClick={() => handleToggleStatus(item)}
                                                                         className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-all ${item.is_active ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500 hover:text-white hover:border-emerald-500' : 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500 hover:text-white'}`}>
@@ -1659,30 +1672,7 @@ function dashboardPath(tab, subTab) {
                                                     </tbody>
                                                 </table>
                                             )}
-                                            {subTab === 'chunks' && (
-                                                <table className="w-full text-left text-sm">
-                                                    <thead>
-                                                        <tr className="bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80">
-                                                            <th className="p-4 pl-6 w-24 font-semibold">Chunk #</th>
-                                                            <th className="p-4 font-semibold">Content Preview</th>
-                                                            <th className="p-4 w-40 font-semibold">Access Level</th>
-                                                            <th className="p-4 pr-6 w-28 text-right font-semibold">Outdated</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-slate-800/50">
-                                                        {paginatedData.map((item, idx) => (
-                                                            <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
-                                                                <td className="p-4 pl-6 font-mono text-indigo-400 text-xs font-semibold">#{item.chunk_index}</td>
-                                                                <td className="p-4 text-xs text-slate-400 leading-relaxed font-mono whitespace-pre-wrap">{item.chunk_text?.slice(0, 180)}…</td>
-                                                                <td className="p-4 text-[10px] font-bold tracking-widest text-slate-300 uppercase">{item.access_level}</td>
-                                                                <td className="p-4 pr-6 text-right text-xs">
-                                                                    {item.is_outdated ? <span className="inline-flex items-center gap-1 text-amber-400 font-bold bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20"><Icon name="alert-triangle" className="w-3 h-3"/> Yes</span> : <span className="text-slate-600 font-medium">No</span>}
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            )}
+
                                             {subTab === 'chatbot-queries' && (
                                                 <table className="w-full text-left text-sm">
                                                     <thead>
@@ -1788,10 +1778,33 @@ function dashboardPath(tab, subTab) {
                                                                     <span className="px-2.5 py-1 bg-slate-800 border border-slate-700/50 text-slate-300 rounded-md font-bold text-[10px] tracking-wider uppercase">{item.device_type}</span>
                                                                 </td>
                                                                 <td className="p-4">
-                                                                    <div className="inline-flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
-                                                                        <span className={`w-2 h-2 rounded-full shrink-0 shadow-sm ${item.last_heartbeat ? 'bg-emerald-400 shadow-emerald-500/50 animate-pulse' : 'bg-red-500 shadow-red-500/50'}`}></span>
-                                                                        <span className="text-xs font-semibold text-slate-300">{item.last_heartbeat ? `Active ${item.last_heartbeat.split('T')[1]?.slice(0, 5) || ''}` : 'Offline'}</span>
-                                                                    </div>
+                                                                    {(() => {
+                                                                        if (!item.last_heartbeat) {
+                                                                            return (
+                                                                                <div className="inline-flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
+                                                                                    <span className="w-2 h-2 rounded-full shrink-0 shadow-sm bg-red-500 shadow-red-500/50"></span>
+                                                                                    <span className="text-xs font-semibold text-slate-300">Offline</span>
+                                                                                </div>
+                                                                            );
+                                                                        }
+                                                                        const lastSeenStr = item.last_heartbeat.endsWith('Z') ? item.last_heartbeat : item.last_heartbeat + 'Z';
+                                                                        const dateObj = new Date(lastSeenStr);
+                                                                        const isOnline = (() => {
+                                                                            if (!item.is_active) return false;
+                                                                            const diffMs = new Date() - dateObj;
+                                                                            // 60 seconds threshold (1 minute)
+                                                                            return diffMs >= 0 && diffMs <= 60000;
+                                                                        })();
+                                                                        const localTimeStr = `${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`;
+                                                                        return (
+                                                                            <div className="inline-flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
+                                                                                <span className={`w-2 h-2 rounded-full shrink-0 shadow-sm ${isOnline ? 'bg-emerald-400 shadow-emerald-500/50 animate-pulse' : 'bg-red-500 shadow-red-500/50'}`}></span>
+                                                                                <span className="text-xs font-semibold text-slate-300">
+                                                                                    {isOnline ? `Active ${localTimeStr}` : 'Offline'}
+                                                                                </span>
+                                                                            </div>
+                                                                        );
+                                                                    })()}
                                                                 </td>
                                                                 <td className="p-4 pr-6 text-right">
                                                                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">

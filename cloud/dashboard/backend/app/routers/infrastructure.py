@@ -123,7 +123,7 @@ def record_heartbeat(device_id: str, db: Session = Depends(get_db), current_admi
     if not probe["ok"]:
         raise HTTPException(
             status_code=502,
-            detail=f"Device did not respond at {base_url}: {probe['error']}"
+            detail="Device is offline."
         )
 
     device.last_heartbeat = datetime.utcnow()

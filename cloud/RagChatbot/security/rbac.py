@@ -36,6 +36,31 @@ _ROLE_ACCESS_MAP: dict[str, List[str]] = {
 _DEFAULT_ACCESS: List[str] = ["PUBLIC"]
 
 
+ROLE_PRIORITY_ORDER: List[str] = [
+    "SUPER_ADMIN",
+    "SYSTEM_ADMIN",
+    "CONTENT_ADMIN",
+    "ADMIN",
+    "LECTURER",
+    "STAFF",
+    "STUDENT",
+    "VISITOR",
+]
+
+
+def get_highest_role(roles: List[str]) -> str:
+    """
+    Find the highest role from a list/tuple of roles based on hierarchy.
+    """
+    if not roles:
+        return "VISITOR"
+    roles_upper = {role.upper() for role in roles}
+    for role_name in ROLE_PRIORITY_ORDER:
+        if role_name in roles_upper:
+            return role_name
+    return sorted(list(roles_upper))[0]
+
+
 def get_user_roles(user_id: int, db: Session) -> List[str]:
     """
     Query the database to retrieve all role_names assigned to a user.
@@ -72,8 +97,9 @@ def resolve_allowed_access_levels(roles: List[str]) -> List[str]:
         A deduplicated, sorted list of allowed access_level strings.
     """
     allowed: Set[str] = set()
-    for role_name in roles:
-        levels = _ROLE_ACCESS_MAP.get(role_name.upper(), [])
+    if roles:
+        highest_role = get_highest_role(roles)
+        levels = _ROLE_ACCESS_MAP.get(highest_role, [])
         allowed.update(levels)
 
     if not allowed:
@@ -85,6 +111,7 @@ def resolve_allowed_access_levels(roles: List[str]) -> List[str]:
     result = [level for level in order if level in allowed]
     logger.debug("RBAC: resolved access levels=%s for roles=%s", result, roles)
     return result
+
 
 
 def get_allowed_access_levels_for_user(user_id: int, db: Session) -> List[str]:

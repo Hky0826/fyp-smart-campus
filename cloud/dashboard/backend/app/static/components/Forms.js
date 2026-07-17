@@ -3,14 +3,19 @@ const { useState, useEffect, useRef } = React;
 // ==========================================================
 // SEARCHABLE DROPDOWN COMPONENT (Custom Search + Dropdown)
 // ==========================================================
-function SearchableDropdown({ list, value, onChange, placeholder, filterFn, displayFn }) {
+function SearchableDropdown({ list, value, onChange, placeholder, filterFn, displayFn, valueFn }) {
     const [query, setQuery] = useState("");
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef(null);
 
     useEffect(() => {
-        setQuery(value || "");
-    }, [value]);
+        if (valueFn) {
+            const selected = list.find(item => String(valueFn(item)) === String(value));
+            setQuery(selected ? displayFn(selected) : (value || ""));
+        } else {
+            setQuery(value || "");
+        }
+    }, [value, list]);
 
     useEffect(() => {
         function handleClickOutside(event) {
@@ -60,8 +65,9 @@ function SearchableDropdown({ list, value, onChange, placeholder, filterFn, disp
                             key={idx}
                             onClick={() => {
                                 const displayVal = displayFn(item);
+                                const submitVal = valueFn ? valueFn(item) : displayVal;
                                 setQuery(displayVal);
-                                onChange(displayVal);
+                                onChange(submitVal, item);
                                 setIsOpen(false);
                             }}
                             className="p-3 hover:bg-slate-900 cursor-pointer text-sm transition-colors duration-150 text-slate-200"
@@ -211,14 +217,14 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
     // Sub-profile states
     // Student
     const [studentId, setStudentId] = useState(item?.student?.student_id || "");
-    const [program, setProgram] = useState(item?.student?.program || "");
-    const [faculty, setFaculty] = useState(item?.student?.faculty || "");
+    const [program, setProgram] = useState(item?.student?.programme_id || item?.student?.program || "");
+    const [faculty, setFaculty] = useState(item?.student?.faculty_id || item?.lecturer?.faculty_id || item?.student?.faculty || item?.lecturer?.faculty || "");
     const [intake, setIntake] = useState(item?.student?.intake || "");
     const [enrolledSince, setEnrolledSince] = useState(item?.student?.enrolled_since || new Date().toISOString().split('T')[0]);
 
     // Lecturer / Staff / Admin / Visitor common department, faculty & office
     const [lecturerId, setLecturerId] = useState(item?.lecturer?.lecturer_id || "");
-    const [department, setDepartment] = useState(item?.lecturer?.department || item?.staff?.department || item?.admin?.department || "");
+    const [department, setDepartment] = useState(item?.lecturer?.department_id || item?.staff?.department_id || item?.admin?.department_id || item?.lecturer?.department || item?.staff?.department || item?.admin?.department || "");
     const [position, setPosition] = useState(item?.lecturer?.position || item?.staff?.position || "");
     const [isHoD, setIsHoD] = useState(item?.lecturer?.is_head_of_department || false);
     const [officeNodeId, setOfficeNodeId] = useState(item?.lecturer?.office_node_id || item?.staff?.office_node_id || item?.admin?.office_node_id || "");
@@ -253,6 +259,10 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
     // Custom Validation states
     const [errors, setErrors] = useState({});
 
+    const findProgramme = (value) => programmes.find(p => String(p.programme_id) === String(value) || p.programme_name === value);
+    const findFaculty = (value) => faculties.find(f => String(f.faculty_id) === String(value) || f.faculty_name === value);
+    const findDepartment = (value) => departments.find(d => String(d.department_id) === String(value) || d.department_name === value);
+
     const validate = () => {
         let err = {};
         if (!linkExisting || isEdit) {
@@ -264,15 +274,20 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
 
         if (roleName === "STUDENT") {
             if (!program.trim()) err.program = "Program selection is required";
+            else if (programmes.length > 0 && !findProgramme(program)) err.program = "Select a valid programme from the list";
             if (!faculty.trim()) err.faculty = "Faculty selection is required";
+            else if (faculties.length > 0 && !findFaculty(faculty)) err.faculty = "Select a valid faculty from the list";
             if (!/^\d{6}$/.test(String(intake).trim())) err.intake = "Intake must be exactly 6 digits, for example 202407";
             if (!enrolledSince) err.enrolledSince = "Enrollment date is required";
         } else if (roleName === "LECTURER") {
             if (!department.trim()) err.department = "Department selection is required";
+            else if (departments.length > 0 && !findDepartment(department)) err.department = "Select a valid department from the list";
             if (!faculty.trim()) err.faculty = "Faculty selection is required";
+            else if (faculties.length > 0 && !findFaculty(faculty)) err.faculty = "Select a valid faculty from the list";
             if (!position.trim()) err.position = "Position is required";
         } else if (roleName === "STAFF") {
             if (!department.trim()) err.department = "Department selection is required";
+            else if (departments.length > 0 && !findDepartment(department)) err.department = "Select a valid department from the list";
             if (!position.trim()) err.position = "Position is required";
             if (!staffType) err.staffType = "Staff type selection is required";
         } else if (roleName === "VISITOR") {
@@ -282,6 +297,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
             if (!adminType) err.adminType = "Admin type selection is required";
             if (!isEdit && !password.trim()) err.password = "Admin setup password is required";
             if (!department.trim()) err.department = "Department selection is required";
+            else if (departments.length > 0 && !findDepartment(department)) err.department = "Select a valid department from the list";
         }
 
         setErrors(err);
@@ -294,26 +310,31 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
         
         let profileData = {};
         if (roleName === "STUDENT") {
+            const selectedProgramme = findProgramme(program);
+            const selectedFaculty = findFaculty(faculty);
             profileData = {
                 student_id: studentId || null,
-                program: program,
-                faculty: faculty,
+                programme_id: selectedProgramme ? selectedProgramme.programme_id : program,
+                faculty_id: selectedFaculty ? selectedFaculty.faculty_id : faculty,
                 intake: parseInt(String(intake).trim(), 10),
                 enrolled_since: enrolledSince
             };
         } else if (roleName === "LECTURER") {
+            const selectedDepartment = findDepartment(department);
+            const selectedFaculty = findFaculty(faculty);
             profileData = {
                 lecturer_id: lecturerId || null,
-                department: department,
-                faculty: faculty,
+                department_id: selectedDepartment ? selectedDepartment.department_id : department,
+                faculty_id: selectedFaculty ? selectedFaculty.faculty_id : faculty,
                 position: position,
                 is_head_of_department: isHoD,
                 office_node_id: officeNodeId ? parseInt(officeNodeId) : null
             };
         } else if (roleName === "STAFF") {
+            const selectedDepartment = findDepartment(department);
             profileData = {
                 staff_id: staffId || null,
-                department: department,
+                department_id: selectedDepartment ? selectedDepartment.department_id : department,
                 position: position,
                 staff_type: staffType,
                 office_node_id: officeNodeId ? parseInt(officeNodeId) : null
@@ -328,10 +349,11 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                 registered_by: registeredBy
             };
         } else if (roleName === "ADMIN") {
+            const selectedDepartment = findDepartment(department);
             profileData = {
                 admin_id: adminId || null,
                 admin_type: adminType,
-                department: department,
+                department_id: selectedDepartment ? selectedDepartment.department_id : department,
                 office_node_id: officeNodeId ? parseInt(officeNodeId) : null,
                 password: password || null
             };
@@ -565,13 +587,16 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                             <SearchableDropdown
                                 list={programmes}
                                 value={program}
-                                onChange={val => {
+                                onChange={(val, item) => {
                                     setProgram(val);
+                                    if (item?.faculty_id) setFaculty(item.faculty_id);
                                     if (errors.program) setErrors(prev => ({ ...prev, program: "" }));
+                                    if (errors.faculty) setErrors(prev => ({ ...prev, faculty: "" }));
                                 }}
                                 placeholder="Search program (e.g. Computer Science)"
                                 filterFn={(p, q) => p.programme_name.toLowerCase().includes(q) || p.programme_id.toLowerCase().includes(q)}
                                 displayFn={p => p.programme_name}
+                                valueFn={p => p.programme_id}
                             />
                             {errors.program && (
                                 <p className="text-rose-500 text-xs mt-1.5 flex items-center gap-1.5">
@@ -592,6 +617,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                 placeholder="Search faculty (e.g. FCI)"
                                 filterFn={(f, q) => f.faculty_name.toLowerCase().includes(q) || f.faculty_id.toLowerCase().includes(q)}
                                 displayFn={f => f.faculty_name}
+                                valueFn={f => f.faculty_id}
                             />
                             {errors.faculty && (
                                 <p className="text-rose-500 text-xs mt-1.5 flex items-center gap-1.5">
@@ -669,6 +695,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                 placeholder="Search department"
                                 filterFn={(d, q) => d.department_name.toLowerCase().includes(q) || d.department_id.toLowerCase().includes(q)}
                                 displayFn={d => d.department_name}
+                                valueFn={d => d.department_id}
                             />
                             {errors.department && (
                                 <p className="text-rose-500 text-xs mt-1.5 flex items-center gap-1.5">
@@ -689,6 +716,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                 placeholder="Search faculty"
                                 filterFn={(f, q) => f.faculty_name.toLowerCase().includes(q) || f.faculty_id.toLowerCase().includes(q)}
                                 displayFn={f => f.faculty_name}
+                                valueFn={f => f.faculty_id}
                             />
                             {errors.faculty && (
                                 <p className="text-rose-500 text-xs mt-1.5 flex items-center gap-1.5">
@@ -766,6 +794,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                 placeholder="Search department"
                                 filterFn={(d, q) => d.department_name.toLowerCase().includes(q) || d.department_id.toLowerCase().includes(q)}
                                 displayFn={d => d.department_name}
+                                valueFn={d => d.department_id}
                             />
                             {errors.department && (
                                 <p className="text-rose-500 text-xs mt-1.5 flex items-center gap-1.5">
@@ -960,6 +989,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                 placeholder="Search department"
                                 filterFn={(d, q) => d.department_name.toLowerCase().includes(q) || d.department_id.toLowerCase().includes(q)}
                                 displayFn={d => d.department_name}
+                                valueFn={d => d.department_id}
                             />
                             {errors.department && (
                                 <p className="text-rose-500 text-xs mt-1.5 flex items-center gap-1.5">
@@ -2091,22 +2121,27 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
         }
 
         // 10. Course Registration Form
-        function CourseForm({ item, onSubmit, onCancel }) {
+        function CourseForm({ item, programmes = [], faculties = [], onSubmit, onCancel }) {
             const isEdit = !!item;
             const [courseCode, setCourseCode] = useState(item?.course_code || "");
             const [courseName, setCourseName] = useState(item?.course_name || "");
             const [credits, setCredits] = useState(item?.credit_hours || 3);
-            const [department, setDepartment] = useState(item?.department || "");
-            const [faculty, setFaculty] = useState(item?.faculty || "");
+            const [programmeId, setProgrammeId] = useState(item?.programme_id || item?.department || "");
+            const [facultyId, setFacultyId] = useState(item?.faculty_id || item?.faculty || "");
             const [level, setLevel] = useState(item?.course_level || "UNDERGRADUATE");
 
+            const findProgramme = (value) => programmes.find(p => String(p.programme_id) === String(value) || p.programme_name === value);
+            const findFaculty = (value) => faculties.find(f => String(f.faculty_id) === String(value) || f.faculty_name === value);
+
             const handleSubmit = (e) => {
+                const selectedProgramme = findProgramme(programmeId);
+                const selectedFaculty = findFaculty(facultyId);
                 onSubmit(e, {
                     course_code: courseCode,
                     course_name: courseName,
                     credit_hours: parseInt(credits),
-                    department,
-                    faculty,
+                    programme_id: selectedProgramme ? selectedProgramme.programme_id : programmeId,
+                    faculty_id: selectedFaculty ? selectedFaculty.faculty_id : facultyId,
                     course_level: level,
                     is_active: true
                 });
@@ -2130,12 +2165,31 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Faculty Department</label>
-                            <input type="text" required value={department} onChange={e => setDepartment(e.target.value)} placeholder="e.g. Software Engineering" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" />
+                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Programme</label>
+                            <SearchableDropdown
+                                list={programmes}
+                                value={programmeId}
+                                onChange={(val, item) => {
+                                    setProgrammeId(val);
+                                    if (item?.faculty_id) setFacultyId(item.faculty_id);
+                                }}
+                                placeholder="Search programme"
+                                filterFn={(p, q) => p.programme_name.toLowerCase().includes(q) || p.programme_id.toLowerCase().includes(q)}
+                                displayFn={p => p.programme_name}
+                                valueFn={p => p.programme_id}
+                            />
                         </div>
                         <div>
-                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Faculty Board</label>
-                            <input type="text" required value={faculty} onChange={e => setFaculty(e.target.value)} placeholder="e.g. FCI" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" />
+                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Faculty</label>
+                            <SearchableDropdown
+                                list={faculties}
+                                value={facultyId}
+                                onChange={setFacultyId}
+                                placeholder="Search faculty"
+                                filterFn={(f, q) => f.faculty_name.toLowerCase().includes(q) || f.faculty_id.toLowerCase().includes(q)}
+                                displayFn={f => f.faculty_name}
+                                valueFn={f => f.faculty_id}
+                            />
                         </div>
                     </div>
                     <div>

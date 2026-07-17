@@ -61,6 +61,43 @@ def get_or_create_programme(db: Session, prog_name: str, faculty_id: str, defaul
         db.flush()
     return prog
 
+def resolve_faculty(db: Session, faculty_id: str | None = None, faculty_name: str | None = None) -> Faculty:
+    if faculty_id:
+        faculty = db.query(Faculty).filter_by(faculty_id=faculty_id).first()
+        if not faculty:
+            raise HTTPException(status_code=400, detail=f"Faculty ID {faculty_id} does not exist")
+        return faculty
+    if faculty_name:
+        return get_or_create_faculty(db, faculty_name)
+    raise HTTPException(status_code=400, detail="Faculty is required")
+
+def resolve_department(db: Session, department_id: str | None = None, department_name: str | None = None) -> Department:
+    if department_id:
+        dept = db.query(Department).filter_by(department_id=department_id).first()
+        if not dept:
+            raise HTTPException(status_code=400, detail=f"Department ID {department_id} does not exist")
+        return dept
+    if department_name:
+        return get_or_create_department(db, department_name)
+    raise HTTPException(status_code=400, detail="Department is required")
+
+def resolve_programme(
+    db: Session,
+    programme_id: str | None = None,
+    programme_name: str | None = None,
+    faculty_id: str | None = None,
+) -> Programme:
+    if programme_id:
+        prog = db.query(Programme).filter_by(programme_id=programme_id).first()
+        if not prog:
+            raise HTTPException(status_code=400, detail=f"Programme ID {programme_id} does not exist")
+        if faculty_id and prog.faculty_id != faculty_id:
+            raise HTTPException(status_code=400, detail="Programme does not belong to the selected faculty")
+        return prog
+    if programme_name and faculty_id:
+        return get_or_create_programme(db, programme_name, faculty_id)
+    raise HTTPException(status_code=400, detail="Programme is required")
+
 def generate_unique_id(db: Session, model, prefix: str, field_name: str) -> str:
     existing_ids = db.query(getattr(model, field_name)).all()
     max_num = 0
@@ -121,6 +158,24 @@ def check_and_delete_user_if_orphaned(db: Session, user):
     has_admin = db.query(Admin).filter_by(user_id=user.user_id).first() is not None
     if not (has_student or has_lecturer or has_staff or has_visitor or has_admin):
         db.delete(user)
+
+def apply_user_update(db: Session, user: User, user_data: dict):
+    role_ids = None
+    if user_data.get("role_ids") is not None:
+        role_ids = user_data["role_ids"]
+    elif user_data.get("role_id") is not None:
+        role_ids = [user_data["role_id"]]
+
+    if role_ids is not None:
+        roles = db.query(Role).filter(Role.role_id.in_(role_ids)).all()
+        if len(roles) != len(set(role_ids)):
+            raise HTTPException(status_code=400, detail="One or more selected roles do not exist")
+        user.roles = roles
+
+    for field, val in user_data.items():
+        if field in ["role_id", "role_ids"]:
+            continue
+        setattr(user, field, val)
 
 # Import the edge push helper from the downstream sync service
 try:
@@ -206,7 +261,7 @@ def delete_role(role_id: int, db: Session = Depends(get_db), current_admin=Depen
     role = db.query(Role).filter_by(role_id=role_id).first()
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")
-    user_count = db.query(User).filter_by(role_id=role_id).count()
+    user_count = len(role.users)
     if user_count > 0:
         raise HTTPException(
             status_code=400, 
@@ -357,8 +412,15 @@ def create_student(student_in: schemas.StudentCreate, db: Session = Depends(get_
         db.flush()
         
     # 3. Create Student
-    fac = get_or_create_faculty(db, student_in.faculty)
-    prog = get_or_create_programme(db, student_in.program, fac.faculty_id)
+    fac = resolve_faculty(db, student_in.faculty_id, student_in.faculty) if (student_in.faculty_id or student_in.faculty) else None
+    prog = resolve_programme(
+        db,
+        programme_id=student_in.programme_id,
+        programme_name=student_in.program,
+        faculty_id=fac.faculty_id if fac else None,
+    )
+    if fac is None:
+        fac = resolve_faculty(db, prog.faculty_id)
     student = Student(
         student_id=student_id,
         user_id=user.user_id,
@@ -383,25 +445,26 @@ def update_student(student_id: str, student_in: schemas.StudentUpdate, db: Sessi
     user_data = student_data.pop("user", None)
     program = student_data.pop("program", None)
     faculty = student_data.pop("faculty", None)
+    programme_id = student_data.pop("programme_id", None)
+    faculty_id = student_data.pop("faculty_id", None)
     
     # Update Student fields
     for field, val in student_data.items():
         setattr(student, field, val)
         
-    if faculty:
-        fac = get_or_create_faculty(db, faculty)
+    if faculty_id or faculty:
+        fac = resolve_faculty(db, faculty_id, faculty)
         student.faculty_id = fac.faculty_id
-        if program:
-            prog = get_or_create_programme(db, program, fac.faculty_id)
+        if programme_id or program:
+            prog = resolve_programme(db, programme_id, program, fac.faculty_id)
             student.programme_id = prog.programme_id
-    elif program:
-        prog = get_or_create_programme(db, program, student.faculty_id)
+    elif programme_id or program:
+        prog = resolve_programme(db, programme_id, program, student.faculty_id)
         student.programme_id = prog.programme_id
         
     # Update User fields if provided
     if user_data:
-        for field, val in user_data.items():
-            setattr(student.user, field, val)
+        apply_user_update(db, student.user, user_data)
             
     db.commit()
     db.refresh(student)
@@ -475,7 +538,7 @@ def create_lecturer(lecturer_in: schemas.LecturerCreate, db: Session = Depends(g
         
     # Find or create Staff record first for the Lecturer!
     staff = db.query(Staff).filter_by(user_id=user.user_id).first()
-    dept = get_or_create_department(db, lecturer_in.department)
+    dept = resolve_department(db, lecturer_in.department_id, lecturer_in.department)
     if not staff:
         staff = Staff(
             staff_id=generate_unique_id(db, Staff, "STF-", "staff_id"),
@@ -487,7 +550,7 @@ def create_lecturer(lecturer_in: schemas.LecturerCreate, db: Session = Depends(g
         db.add(staff)
         db.flush()
         
-    fac = get_or_create_faculty(db, lecturer_in.faculty)
+    fac = resolve_faculty(db, lecturer_in.faculty_id, lecturer_in.faculty)
     
     lecturer = Lecturer(
         lecturer_id=lecturer_id,
@@ -512,6 +575,8 @@ def update_lecturer(lecturer_id: str, lecturer_in: schemas.LecturerUpdate, db: S
     user_data = lecturer_data.pop("user", None)
     department = lecturer_data.pop("department", None)
     faculty = lecturer_data.pop("faculty", None)
+    department_id = lecturer_data.pop("department_id", None)
+    faculty_id = lecturer_data.pop("faculty_id", None)
     position = lecturer_data.pop("position", None)
     office_node_id = lecturer_data.get("office_node_id", None)
     
@@ -528,18 +593,17 @@ def update_lecturer(lecturer_id: str, lecturer_in: schemas.LecturerUpdate, db: S
         if lecturer.staff:
             lecturer.staff.office_node_id = office_node_id
             
-    if department is not None:
-        dept = get_or_create_department(db, department)
+    if department_id is not None or department is not None:
+        dept = resolve_department(db, department_id, department)
         if lecturer.staff:
             lecturer.staff.department_id = dept.department_id
             
-    if faculty is not None:
-        fac = get_or_create_faculty(db, faculty)
+    if faculty_id is not None or faculty is not None:
+        fac = resolve_faculty(db, faculty_id, faculty)
         lecturer.faculty_id = fac.faculty_id
         
     if user_data:
-        for field, val in user_data.items():
-            setattr(lecturer.user, field, val)
+        apply_user_update(db, lecturer.user, user_data)
             
     db.commit()
     db.refresh(lecturer)
@@ -611,7 +675,7 @@ def create_staff(staff_in: schemas.StaffCreate, db: Session = Depends(get_db), c
         db.add(user)
         db.flush()
         
-    dept = get_or_create_department(db, staff_in.department)
+    dept = resolve_department(db, staff_in.department_id, staff_in.department)
     staff = Staff(
         staff_id=staff_id,
         user_id=user.user_id,
@@ -633,18 +697,18 @@ def update_staff(staff_id: str, staff_in: schemas.StaffUpdate, db: Session = Dep
     staff_data = staff_in.model_dump(exclude_unset=True)
     user_data = staff_data.pop("user", None)
     department = staff_data.pop("department", None)
+    department_id = staff_data.pop("department_id", None)
     staff_type = staff_data.pop("staff_type", None)
     
     for field, val in staff_data.items():
         setattr(staff, field, val)
         
-    if department is not None:
-        dept = get_or_create_department(db, department)
+    if department_id is not None or department is not None:
+        dept = resolve_department(db, department_id, department)
         staff.department_id = dept.department_id
         
     if user_data:
-        for field, val in user_data.items():
-            setattr(staff.user, field, val)
+        apply_user_update(db, staff.user, user_data)
             
     db.commit()
     db.refresh(staff)
@@ -743,8 +807,7 @@ def update_visitor(visitor_id: str, visitor_in: schemas.VisitorUpdate, db: Sessi
         setattr(visitor, field, val)
         
     if user_data:
-        for field, val in user_data.items():
-            setattr(visitor.user, field, val)
+        apply_user_update(db, visitor.user, user_data)
             
     db.commit()
     db.refresh(visitor)
@@ -809,7 +872,7 @@ def create_admin(admin_in: schemas.AdminCreate, db: Session = Depends(get_db), c
     # 3. Find or auto-create Staff profile (the trigger)
     staff = db.query(Staff).filter_by(user_id=user.user_id).first()
     if not staff:
-        dept = get_or_create_department(db, admin_in.department or "DEP-IT")
+        dept = resolve_department(db, admin_in.department_id, admin_in.department or "DEP-IT")
         staff = Staff(
             staff_id=generate_unique_id(db, Staff, "STF-", "staff_id"),
             user_id=user.user_id,
@@ -844,6 +907,7 @@ def update_admin(admin_id: str, admin_in: schemas.AdminUpdate, db: Session = Dep
     user_data = admin_data.pop("user", None)
     password = admin_data.pop("password", None)
     department = admin_data.pop("department", None)
+    department_id = admin_data.pop("department_id", None)
     office_node_id = admin_data.pop("office_node_id", None)
     
     for field, val in admin_data.items():
@@ -852,8 +916,8 @@ def update_admin(admin_id: str, admin_in: schemas.AdminUpdate, db: Session = Dep
     if password:
         admin.password_hash = get_password_hash(password)
         
-    if department is not None:
-        dept = get_or_create_department(db, department)
+    if department_id is not None or department is not None:
+        dept = resolve_department(db, department_id, department)
         if admin.staff:
             admin.staff.department_id = dept.department_id
             
@@ -862,8 +926,7 @@ def update_admin(admin_id: str, admin_in: schemas.AdminUpdate, db: Session = Dep
             admin.staff.office_node_id = office_node_id
             
     if user_data:
-        for field, val in user_data.items():
-            setattr(admin.user, field, val)
+        apply_user_update(db, admin.user, user_data)
             
     db.commit()
     db.refresh(admin)

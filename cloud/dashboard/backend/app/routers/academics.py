@@ -7,9 +7,15 @@ from app.core.database import get_db
 from app.core.security import verify_system_admin
 from app.models.models import Course, CourseEnrollment, Timetable, Appointment, Notification, User, Student, Lecturer, Staff, Node, Role
 from app.schemas import schemas
-from app.routers.iam import get_or_create_faculty, get_or_create_programme
+from app.routers.iam import resolve_faculty, resolve_programme
 
 router = APIRouter(prefix="/academics", tags=["Academic & Scheduling Operations"])
+
+def user_has_any_role(user: User, allowed_roles: set[str]) -> bool:
+    return any(role.role_name in allowed_roles for role in user.roles)
+
+def role_names(user: User) -> str:
+    return ", ".join(role.role_name for role in user.roles) or "none"
 
 # ==========================================
 # COURSE REGISTRY CRUD (SYSTEM_ADMIN or SUPER_ADMIN)
@@ -24,8 +30,13 @@ def create_course(course_in: schemas.CourseCreate, db: Session = Depends(get_db)
     if existing:
         raise HTTPException(status_code=400, detail="Course code already registered")
         
-    fac = get_or_create_faculty(db, course_in.faculty)
-    prog = get_or_create_programme(db, course_in.department, fac.faculty_id)
+    fac = resolve_faculty(db, course_in.faculty_id, course_in.faculty) if (course_in.faculty_id or course_in.faculty) else None
+    prog = resolve_programme(
+        db,
+        programme_id=course_in.programme_id,
+        programme_name=course_in.department,
+        faculty_id=fac.faculty_id if fac else None,
+    )
     course = Course(
         course_code=course_in.course_code.upper(),
         course_name=course_in.course_name,
@@ -65,16 +76,21 @@ def update_course(course_id: int, course_in: schemas.CourseUpdate, db: Session =
     
     faculty_name = course_data.pop("faculty", None)
     dept_name = course_data.pop("department", None)
+    faculty_id = course_data.pop("faculty_id", None)
+    programme_id = course_data.pop("programme_id", None)
     
-    if faculty_name is not None or dept_name is not None:
+    if faculty_id is not None or faculty_name is not None or programme_id is not None or dept_name is not None:
         current_fac_name = course.faculty
         current_dept_name = course.department
         
         fac_name = faculty_name if faculty_name is not None else current_fac_name
         dep_name = dept_name if dept_name is not None else current_dept_name
         
-        fac = get_or_create_faculty(db, fac_name)
-        prog = get_or_create_programme(db, dep_name, fac.faculty_id)
+        if programme_id is not None and faculty_id is None and faculty_name is None:
+            prog = resolve_programme(db, programme_id=programme_id)
+        else:
+            fac = resolve_faculty(db, faculty_id, fac_name)
+            prog = resolve_programme(db, programme_id, dep_name, fac.faculty_id)
         course.programme_id = prog.programme_id
         
     for field, val in course_data.items():
@@ -298,19 +314,15 @@ def create_appointment(appt_in: schemas.AppointmentCreate, db: Session = Depends
     guest = db.query(User).filter_by(user_id=appt_in.guest_user_id).first()
     if not guest:
         raise HTTPException(status_code=400, detail="Guest user not found")
-    # Verify role
-    guest_role = guest.role.role_name
-    if guest_role not in ["STUDENT", "VISITOR"]:
-        raise HTTPException(status_code=400, detail=f"Invalid Guest: User has role {guest_role}, must be STUDENT or VISITOR")
+    if not user_has_any_role(guest, {"STUDENT", "VISITOR"}):
+        raise HTTPException(status_code=400, detail=f"Invalid Guest: User has role(s) {role_names(guest)}, must include STUDENT or VISITOR")
         
     # 2. Verify Host (LECTURER or STAFF)
     host = db.query(User).filter_by(user_id=appt_in.host_user_id).first()
     if not host:
         raise HTTPException(status_code=400, detail="Host user not found")
-    # Verify role
-    host_role = host.role.role_name
-    if host_role not in ["LECTURER", "STAFF", "ADMIN"]: # allow admin as host too
-        raise HTTPException(status_code=400, detail=f"Invalid Host: User has role {host_role}, must be LECTURER or STAFF")
+    if not user_has_any_role(host, {"LECTURER", "STAFF", "ADMIN"}):
+        raise HTTPException(status_code=400, detail=f"Invalid Host: User has role(s) {role_names(host)}, must include LECTURER, STAFF, or ADMIN")
         
     # 3. Check Host double-booking (UNIQUE(host_user_id, scheduled_at))
     duplicate = db.query(Appointment).filter_by(

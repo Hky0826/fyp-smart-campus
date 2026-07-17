@@ -1,6 +1,6 @@
 import os
 import shutil
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -16,6 +16,21 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 router = APIRouter(prefix="/rag", tags=["RAG Knowledge Base & Documents"])
 
+def background_ingest(document_id: int, force_reindex: bool = False):
+    from app.core.database import SessionLocal
+    from RagChatbot.services.ingestion_service import ingest_document
+    import logging
+    logger = logging.getLogger(__name__)
+    db = SessionLocal()
+    try:
+        logger.info(f"Starting background ingestion for document_id={document_id} (force_reindex={force_reindex})")
+        ingest_document(document_id, db, force_reindex=force_reindex)
+        logger.info(f"Finished background ingestion for document_id={document_id}")
+    except Exception as e:
+        logger.error(f"Failed background ingestion for document_id={document_id}: {e}", exc_info=True)
+    finally:
+        db.close()
+
 # ==========================================
 # UPLOADED DOCUMENTS CRUD (CONTENT_ADMIN or SUPER_ADMIN)
 # ==========================================
@@ -25,6 +40,7 @@ def list_documents(db: Session = Depends(get_db), current_admin=Depends(verify_c
 
 @router.post("/documents", response_model=schemas.UploadedDocumentResponse)
 def create_document(
+    background_tasks: BackgroundTasks,
     title: str = Form(...),
     access_level: str = Form(...),
     uploaded_by: int = Form(...),
@@ -33,8 +49,6 @@ def create_document(
     db: Session = Depends(get_db), 
     current_admin=Depends(verify_content_admin)
 ):
-    from RagChatbot.services.ingestion_service import ingest_document
-
     filename = ""
     file_path = ""
     if file:
@@ -56,14 +70,15 @@ def create_document(
     db.refresh(doc)
     
     if file:
-        # Trigger ingestion synchronously
-        ingest_document(doc.document_id, db)
+        # Trigger ingestion asynchronously in background
+        background_tasks.add_task(background_ingest, doc.document_id, False)
         
     return doc
 
 @router.put("/documents/{document_id}", response_model=schemas.UploadedDocumentResponse)
 def update_document(
     document_id: int, 
+    background_tasks: BackgroundTasks,
     title: str = Form(None),
     access_level: str = Form(None),
     uploaded_by: int = Form(None),
@@ -72,8 +87,6 @@ def update_document(
     db: Session = Depends(get_db), 
     current_admin=Depends(verify_content_admin)
 ):
-    from RagChatbot.services.ingestion_service import ingest_document
-
     doc = db.query(UploadedDocument).filter_by(document_id=document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -95,10 +108,11 @@ def update_document(
     db.refresh(doc)
     
     if file:
-        # Trigger re-ingestion if a new file is uploaded
-        ingest_document(doc.document_id, db, force_reindex=True)
+        # Trigger re-ingestion in background if a new file is uploaded
+        background_tasks.add_task(background_ingest, doc.document_id, True)
         
     return doc
+
 
 @router.post("/documents/{document_id}/toggle-active")
 def toggle_document_active(document_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_content_admin)):
