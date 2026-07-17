@@ -706,14 +706,28 @@ function dashboardPath(tab, subTab) {
 
             const completeLiveEnrollment = async () => {
                 setRecordingPhase('embedding');
-                setEmbeddingProgress(8);
+                setEmbeddingProgress(0);
                 setEnrollFeedback('');
 
-                let progress = 8;
-                const progressTimer = setInterval(() => {
-                    progress = Math.min(92, progress + (progress < 60 ? 8 : progress < 84 ? 4 : 2));
-                    setEmbeddingProgress(progress);
-                }, 350);
+                let progressTimer;
+                const pollProgress = async () => {
+                    try {
+                        const res = await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/progress`, {
+                            headers: { "Authorization": `Bearer ${token}` }
+                        });
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (data.progress !== undefined) {
+                                setEmbeddingProgress(data.progress);
+                            }
+                        }
+                    } catch (err) {
+                        console.error("Error polling progress:", err);
+                    }
+                };
+
+                pollProgress();
+                progressTimer = setInterval(pollProgress, 250);
 
                 try {
                     const response = await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/complete`, {
@@ -2551,10 +2565,16 @@ function dashboardPath(tab, subTab) {
 
                                                     {/* ── Processing overlay ── */}
                                                     {recordingPhase === 'embedding' && (
-                                                        <div className='absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-4 pointer-events-none'>
+                                                        <div className='absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-4 pointer-events-none px-8'>
                                                             <div className='w-12 h-12 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin'></div>
-                                                            <p className='text-white font-bold text-sm'>Embedding Face ID...</p>
-                                                            <p className='text-slate-400 text-xs'>{embeddingProgress}% complete</p>
+                                                            <div className='text-center space-y-1.5 w-full max-w-[240px]'>
+                                                                <p className='text-white font-bold text-sm'>Embedding Face ID...</p>
+                                                                <p className='text-slate-400 text-xs'>{embeddingProgress}% complete</p>
+                                                                <div className='h-2 w-full bg-slate-950/80 rounded-full border border-white/5 overflow-hidden shadow-inner mt-2'>
+                                                                    <div className='h-full bg-gradient-to-r from-teal-400 to-indigo-500 rounded-full transition-all duration-300'
+                                                                        style={{width:`${embeddingProgress}%`}}></div>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     )}
 

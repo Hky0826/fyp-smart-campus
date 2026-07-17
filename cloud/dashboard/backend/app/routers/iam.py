@@ -193,6 +193,7 @@ except Exception as _e:
 
 # Temporary in-memory session store for live enrollment
 enrollment_sessions = {}
+enrollment_progress = {}
 scrfd_detector_instance = None
 arcface_embedder_instance = None
 
@@ -1290,6 +1291,14 @@ async def enroll_live_frame(
         raise e
 
 
+@router.get("/users/{user_id}/enroll-live/progress")
+def enroll_live_progress(
+    user_id: int,
+    current_admin=Depends(verify_super_admin)
+):
+    return {"progress": enrollment_progress.get(user_id, 0)}
+
+
 @router.post("/users/{user_id}/enroll-live/complete")
 def enroll_live_complete(
     user_id: int,
@@ -1297,79 +1306,87 @@ def enroll_live_complete(
     db: Session = Depends(get_db),
     current_admin=Depends(verify_super_admin)
 ):
-    session_data = enrollment_sessions.get(user_id)
-    if not session_data:
-        raise HTTPException(status_code=400, detail="No active enrollment session. Start live enrollment first.")
+    enrollment_progress[user_id] = 0
+    try:
+        session_data = enrollment_sessions.get(user_id)
+        if not session_data:
+            raise HTTPException(status_code=400, detail="No active enrollment session. Start live enrollment first.")
 
-    required_poses = ["front", "left_30", "right_30", "left_60", "right_60", "slightly_up"]
-    missing = [p for p in required_poses if p not in session_data]
-    if missing:
-        raise HTTPException(status_code=400, detail=f"Please complete all poses. Missing: {', '.join(missing)}")
+        required_poses = ["front", "left_30", "right_30", "left_60", "right_60", "slightly_up"]
+        missing = [p for p in required_poses if p not in session_data]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Please complete all poses. Missing: {', '.join(missing)}")
 
-    user = db.query(User).filter_by(user_id=user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        user = db.query(User).filter_by(user_id=user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
 
-    front_crop = session_data["front"]
-    low_light_crop = np.clip(front_crop.astype(np.float32) * 0.4, 0, 255).astype(np.uint8)
-    session_data["low_light"] = low_light_crop
+        front_crop = session_data["front"]
+        low_light_crop = np.clip(front_crop.astype(np.float32) * 0.4, 0, 255).astype(np.uint8)
+        session_data["low_light"] = low_light_crop
 
-    from app.models.models import UserImage, UserFaceEmbedding
-    db.query(UserImage).filter_by(user_id=user_id).delete()
-    db.query(UserFaceEmbedding).filter_by(user_id=user_id).delete()
+        from app.models.models import UserImage, UserFaceEmbedding
+        db.query(UserImage).filter_by(user_id=user_id).delete()
+        db.query(UserFaceEmbedding).filter_by(user_id=user_id).delete()
 
-    router_dir = os.path.dirname(os.path.abspath(__file__))
-    app_dir = os.path.dirname(router_dir)
-    static_dir = os.path.join(app_dir, "static")
-    user_upload_dir = os.path.join(static_dir, "uploads", "faces", str(user_id))
-    os.makedirs(user_upload_dir, exist_ok=True)
+        router_dir = os.path.dirname(os.path.abspath(__file__))
+        app_dir = os.path.dirname(router_dir)
+        static_dir = os.path.join(app_dir, "static")
+        user_upload_dir = os.path.join(static_dir, "uploads", "faces", str(user_id))
+        os.makedirs(user_upload_dir, exist_ok=True)
 
-    embedder = get_arcface_embedder()
+        embedder = get_arcface_embedder()
 
-    for pose in ["front", "left_30", "right_30", "left_60", "right_60", "slightly_up", "low_light"]:
-        crop = session_data[pose]
-        file_path = os.path.join(user_upload_dir, f"{pose}.jpg")
-        cv2.imwrite(file_path, crop)
+        poses = ["front", "left_30", "right_30", "left_60", "right_60", "slightly_up", "low_light"]
+        for idx, pose in enumerate(poses):
+            crop = session_data[pose]
+            file_path = os.path.join(user_upload_dir, f"{pose}.jpg")
+            cv2.imwrite(file_path, crop)
 
-        db_img = UserImage(
-            user_id=user_id,
-            template_name=pose,
-            image_path=f"/static/uploads/faces/{user_id}/{pose}.jpg"
-        )
-        db.add(db_img)
+            db_img = UserImage(
+                user_id=user_id,
+                template_name=pose,
+                image_path=f"/static/uploads/faces/{user_id}/{pose}.jpg"
+            )
+            db.add(db_img)
 
-        try:
-            embedding_vec = embedder.embed(crop)
-            emb_bytes = embedding_vec.astype(np.float32).tobytes()
-        except Exception as e:
-            print(f"Failed to embed pose '{pose}' for user {user_id}: {e}")
-            random.seed(user_id + hash(pose))
-            fallback_vec = np.array([random.uniform(-1.0, 1.0) for _ in range(512)], dtype=np.float32)
-            norm = np.linalg.norm(fallback_vec) + 1e-10
-            fallback_vec = fallback_vec / norm
-            emb_bytes = fallback_vec.tobytes()
+            try:
+                embedding_vec = embedder.embed(crop)
+                emb_bytes = embedding_vec.astype(np.float32).tobytes()
+            except Exception as e:
+                print(f"Failed to embed pose '{pose}' for user {user_id}: {e}")
+                random.seed(user_id + hash(pose))
+                fallback_vec = np.array([random.uniform(-1.0, 1.0) for _ in range(512)], dtype=np.float32)
+                norm = np.linalg.norm(fallback_vec) + 1e-10
+                fallback_vec = fallback_vec / norm
+                emb_bytes = fallback_vec.tobytes()
 
-        db_emb = UserFaceEmbedding(
-            user_id=user_id,
-            template_name=pose,
-            model_name="arcface_r50",
-            embedding=emb_bytes
-        )
-        db.add(db_emb)
+            db_emb = UserFaceEmbedding(
+                user_id=user_id,
+                template_name=pose,
+                model_name="arcface_r50",
+                embedding=emb_bytes
+            )
+            db.add(db_emb)
+            
+            # Update progress
+            enrollment_progress[user_id] = int((idx + 1) / len(poses) * 100)
 
-    db.commit()
-    db.refresh(user)
+        db.commit()
+        db.refresh(user)
 
-    enrollment_sessions.pop(user_id, None)
+        enrollment_sessions.pop(user_id, None)
 
-    if _PUSH_SYNC_AVAILABLE and _push_sync_to_all_edges is not None:
-        background_tasks.add_task(_push_sync_to_all_edges, db)
+        if _PUSH_SYNC_AVAILABLE and _push_sync_to_all_edges is not None:
+            background_tasks.add_task(_push_sync_to_all_edges, db)
 
-    return {
-        "detail": "Live multi-pose face enrollment completed successfully.",
-        "face_vector": user.face_vector,
-        "imagepath": user.imagepath
-    }
+        return {
+            "detail": "Live multi-pose face enrollment completed successfully.",
+            "face_vector": user.face_vector,
+            "imagepath": user.imagepath
+        }
+    finally:
+        enrollment_progress.pop(user_id, None)
 
 
 @router.post("/users/{user_id}/enroll-video")
