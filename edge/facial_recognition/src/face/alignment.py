@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Tuple
 
@@ -19,6 +20,7 @@ ARCFACE_TEMPLATE = np.array(
     [[38.2946, 51.6963], [73.5318, 51.5014], [56.0252, 71.7366],
      [41.5493, 92.3655], [70.7299, 92.2041]], dtype=np.float32,
 )
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -47,34 +49,38 @@ class FaceAligner:
         self.config = config or AlignmentConfig()
 
     def align(self, frame: np.ndarray, face: DetectedFace) -> AlignmentResult:
-        if cv2 is None:
-            return AlignmentResult(False, failure_reason="opencv_unavailable")
-        landmarks = None if face.landmarks is None else np.asarray(face.landmarks, dtype=np.float32)
-        failure = self._validate_landmarks(landmarks, face)
-        if failure:
-            return AlignmentResult(False, failure_reason=failure)
-        assert landmarks is not None
-        dst = ARCFACE_TEMPLATE.copy()
-        dst[:, 0] *= self.output_size[0] / 112.0
-        dst[:, 1] *= self.output_size[1] / 112.0
-        transform, _ = cv2.estimateAffinePartial2D(landmarks, dst, method=cv2.LMEDS)
-        if transform is None or transform.shape != (2, 3) or not np.all(np.isfinite(transform)):
-            return AlignmentResult(False, failure_reason="invalid_affine_transform")
-        linear = transform[:, :2]
-        determinant = float(np.linalg.det(linear))
-        scale = float(np.sqrt(abs(determinant)))
-        rotation = abs(float(np.degrees(np.arctan2(linear[1, 0], linear[0, 0]))))
-        translation = float(np.linalg.norm(transform[:, 2]))
-        if determinant <= 1e-8 or not self.config.min_scale <= scale <= self.config.max_scale:
-            return AlignmentResult(False, failure_reason="invalid_alignment_scale")
-        if rotation > self.config.max_rotation_degrees:
-            return AlignmentResult(False, failure_reason="invalid_alignment_rotation")
-        if translation > self.config.max_translation_ratio * max(frame.shape[:2]):
-            return AlignmentResult(False, failure_reason="invalid_alignment_translation")
-        aligned = cv2.warpAffine(frame, transform, self.output_size, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        if aligned.size == 0 or not np.all(np.isfinite(aligned)):
-            return AlignmentResult(False, failure_reason="invalid_aligned_face")
-        return AlignmentResult(True, aligned, transform, None)
+        try:
+            if cv2 is None:
+                return AlignmentResult(False, failure_reason="opencv_unavailable")
+            landmarks = None if face.landmarks is None else np.asarray(face.landmarks, dtype=np.float32)
+            failure = self._validate_landmarks(landmarks, face)
+            if failure:
+                return AlignmentResult(False, failure_reason=failure)
+            assert landmarks is not None
+            dst = ARCFACE_TEMPLATE.copy()
+            dst[:, 0] *= self.output_size[0] / 112.0
+            dst[:, 1] *= self.output_size[1] / 112.0
+            transform, _ = cv2.estimateAffinePartial2D(landmarks, dst, method=cv2.LMEDS)
+            if transform is None or transform.shape != (2, 3) or not np.all(np.isfinite(transform)):
+                return AlignmentResult(False, failure_reason="invalid_affine_transform")
+            linear = transform[:, :2]
+            determinant = float(np.linalg.det(linear))
+            scale = float(np.sqrt(abs(determinant)))
+            rotation = abs(float(np.degrees(np.arctan2(linear[1, 0], linear[0, 0]))))
+            translation = float(np.linalg.norm(transform[:, 2]))
+            if determinant <= 1e-8 or not self.config.min_scale <= scale <= self.config.max_scale:
+                return AlignmentResult(False, failure_reason="invalid_alignment_scale")
+            if rotation > self.config.max_rotation_degrees:
+                return AlignmentResult(False, failure_reason="invalid_alignment_rotation")
+            if translation > self.config.max_translation_ratio * max(frame.shape[:2]):
+                return AlignmentResult(False, failure_reason="invalid_alignment_translation")
+            aligned = cv2.warpAffine(frame, transform, self.output_size, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            if aligned.size == 0 or not np.all(np.isfinite(aligned)):
+                return AlignmentResult(False, failure_reason="invalid_aligned_face")
+            return AlignmentResult(True, aligned, transform, None)
+        except Exception:
+            logger.exception("Face alignment failed unexpectedly")
+            return AlignmentResult(False, failure_reason="alignment_exception")
 
     def extract(self, frame: np.ndarray, face: DetectedFace) -> np.ndarray:
         """Compatibility API for non-authorization callers; never falls back to a box crop."""

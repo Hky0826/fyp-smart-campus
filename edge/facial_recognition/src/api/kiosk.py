@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..config import RuntimeConfig
+from ..face.types import AuthenticationResult
 from ..pipelines.access_audio import EdgeAuthToken, EdgeAuthTokenClient
 from .chatbot_client import ChatbotClient, ChatbotClientError
 
@@ -40,6 +41,13 @@ PresenceState = Literal[
     "UNKNOWN",
 ]
 AccessDecision = Literal["PENDING", "VERIFYING", "GRANTED", "DENIED", "ERROR"]
+_RETRY_AUTHENTICATION_RESULTS = {
+    AuthenticationResult.RETRY_NO_FACE.value,
+    AuthenticationResult.RETRY_UNSTABLE_TRACK.value,
+    AuthenticationResult.RETRY_LOW_QUALITY.value,
+    AuthenticationResult.RETRY_ALIGNMENT.value,
+    AuthenticationResult.RETRY_INSUFFICIENT_SAMPLES.value,
+}
 
 
 class KioskTimingConfig(BaseModel):
@@ -218,14 +226,23 @@ class KioskStateStore:
             )
             granted = bool(result.get("access_granted"))
             detected_user_id = _optional_int(result.get("user_id")) if granted else None
+            authentication_result = str(result.get("authentication_result") or "")
+            is_retry = authentication_result in _RETRY_AUTHENTICATION_RESULTS
             attempt.detected_user_id = detected_user_id
-            attempt.access_decision = "GRANTED" if granted else "DENIED"
+            if granted:
+                attempt.access_decision = "GRANTED"
+            elif is_retry:
+                attempt.access_decision = "VERIFYING"
+            elif authentication_result == AuthenticationResult.SYSTEM_ERROR.value:
+                attempt.access_decision = "ERROR"
+            else:
+                attempt.access_decision = "DENIED"
             attempt.reason = None if granted else str(result.get("reason") or "Access denied")
             attempt.similarity = _optional_float(result.get("similarity"))
             attempt.face_count = int(result.get("face_count") or 0)
             attempt.bbox = _coerce_bbox(result.get("bbox"))
             attempt.bboxes = _coerce_bboxes(result.get("bboxes"), attempt.bbox)
-            attempt.completed_at = now
+            attempt.completed_at = None if is_retry else now
             self._access_attempt = attempt
 
             if self._chat_session is not None and granted:

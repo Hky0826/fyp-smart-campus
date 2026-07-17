@@ -64,6 +64,26 @@ Each output message in the access control application is triggered by a specific
 
 ---
 
+### 2b. "Candidate identity is not consistent across frames"
+* **Authentication Result:** `AuthenticationResult.RETRY_INSUFFICIENT_SAMPLES` (non-terminal/retry) or `AuthenticationResult.DENY_NO_MATCH` (terminal denial)
+* **Trigger:** The aggregator is collecting face frames, but the matching results for the individual frames are fluctuating (e.g. matching different users, or alternating between unknown and a known user) such that no single candidate ID meets the consistency ratio.
+* **Biometric Lifecycle:**
+  * **Non-Terminal (`sample_count < max_embedding_samples`):** Returns `AuthenticationResult.RETRY_INSUFFICIENT_SAMPLES`. The kiosk displays the warning message but continues to capture frames, giving the candidate consistency ratio another chance to stabilize.
+  * **Terminal (`sample_count >= max_embedding_samples`):** Returns `AuthenticationResult.DENY_NO_MATCH`. The session terminates, and the user must retry the verification process.
+* **Key Tuning Parameters:**
+  * **`EDGE_ACCESS_CANDIDATE_CONSISTENCY_RATIO`** (Default: `0.8`)
+    * *Type:* Float ratio (from `0.0` to `1.0`) of matching frames required.
+    * *Tuning:* If the environment has variable lighting or the camera's angle causes occasional misidentifications, lower this to `0.70` or `0.65`. This will allow the system to authenticate users even if up to 30-35% of the frame embeddings in the track are noisy or fail to match.
+  * **`EDGE_ACCESS_EMBEDDING_OUTLIER_THRESHOLD`** (Default: `0.25`)
+    * *Type:* Distance threshold for filtering outliers during aggregation.
+    * *Tuning:* Outliers are discarded before computing the consistency ratio. If valid frames are being thrown away as outliers, raise this threshold (e.g. to `0.30`) to retain them. If noisy frames from backgrounds or other faces are corrupting the sample pool, lower it (e.g. to `0.20`).
+  * **`EDGE_ACCESS_RECOGNITION_THRESHOLD`** (Default: `0.75`)
+    * *Tuning:* Since per-frame matches require a similarity above this threshold, a threshold that is too high will cause many frames to match `None` (unknown), which dilutes the consistency ratio for the target user. Lowering the recognition threshold slightly helps keep the candidate ID consistent.
+  * **`EDGE_ACCESS_MAX_EMBEDDING_SAMPLES`** (Default: `10`)
+    * *Tuning:* Raising this to `12` or `15` allows the aggregator to collect a larger pool of samples, giving the consistency checks more frames to average out transient lighting or pose glitches.
+
+---
+
 ### 3. "Only one user is allowed within the frame."
 * **Authentication Result:** `AuthenticationResult.DENY_MULTIPLE_FACES`
 * **Trigger:** The object detector detects more than one face within the active region.

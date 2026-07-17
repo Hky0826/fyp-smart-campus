@@ -3,10 +3,29 @@ import unittest
 
 from edge.facial_recognition.src.api.kiosk import KioskStateStore, KioskTimingConfig
 from edge.facial_recognition.src.config import RuntimeConfig
+from edge.facial_recognition.src.face.types import AuthenticationResult
 from edge.facial_recognition.src.pipelines.access_audio import EdgeAuthToken
 
 
 class KioskStateTests(unittest.TestCase):
+    def test_retry_access_result_keeps_attempt_verifying(self):
+        store = KioskStateStore(RuntimeConfig(sync_device_id="door-1", sync_device_name="Door 1"))
+
+        store.start_access_attempt()
+        attempt = store.complete_access_attempt(
+            {
+                "access_granted": False,
+                "authentication_result": AuthenticationResult.RETRY_INSUFFICIENT_SAMPLES.value,
+                "reason": "Candidate identity is not consistent across frames",
+                "face_count": 1,
+                "sample_count": 4,
+            }
+        )
+
+        self.assertEqual(attempt.access_decision, "VERIFYING")
+        self.assertIsNone(attempt.completed_at)
+        self.assertEqual(attempt.reason, "Candidate identity is not consistent across frames")
+
     def test_different_access_user_does_not_lock_chat_session_before_absence_timeout(self):
         store = KioskStateStore(RuntimeConfig(sync_device_id="door-1", sync_device_name="Door 1"))
         token = EdgeAuthToken(

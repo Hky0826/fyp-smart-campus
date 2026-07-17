@@ -46,6 +46,11 @@ class FakeRepository:
         self.events.append((user_id, status, confidence))
 
 
+class FailingLogRepository(FakeRepository):
+    def log_auth_event(self, user_id, status, confidence, image_path=None):
+        raise RuntimeError("database unavailable")
+
+
 class FakeSpoof:
     def __init__(self, state="live"):
         self.state = state
@@ -131,6 +136,15 @@ class AccessControlLogicTests(unittest.TestCase):
         result = pipeline.process_frame(self.frame)
         self.assertEqual(result["authentication_result"], AuthenticationResult.RETRY_ALIGNMENT.value)
 
+    def test_describe_faces_skips_alignment_failure_without_raising(self):
+        pipeline = self.pipeline([face(landmarks=None)], [1, 0], [], aligner=FailAligner())
+
+        result = pipeline.describe_faces(self.frame, include_embeddings=True)
+
+        self.assertEqual(result["face_count"], 1)
+        self.assertFalse(result["faces"][0]["alignment_passed"])
+        self.assertNotIn("embedding", result["faces"][0])
+
     def test_spoof_is_not_reported_as_identity_failure(self):
         pipeline = self.pipeline([face()], [1, 0], [], spoof="spoof")
         result = pipeline.process_frame(self.frame)
@@ -193,6 +207,31 @@ class AccessControlLogicTests(unittest.TestCase):
         # Match against low_light which is not filtered out, so it should grant (as user_001 has low_light)
         pipeline = self.pipeline(detector.faces, [0.0, 1.0], templates, samples=1)
         result = pipeline.process_frame(self.frame)
+        self.assertEqual(result["authentication_result"], AuthenticationResult.GRANT.value)
+
+    def test_access_grant_survives_auth_log_failure(self):
+        config = AccessControlConfig(
+            recognition_threshold=0.75,
+            recognition_delay_seconds=0.0,
+            min_embedding_samples=1,
+            max_embedding_samples=3,
+            min_stable_frames=1,
+            min_stable_duration_ms=0,
+            snapshot_enabled=False,
+        )
+        pipeline = AccessControlPipeline(
+            FakeDetector([face()]),
+            FakeEmbedder([1, 0]),
+            FailingLogRepository([FaceTemplate("user_001", np.array([1.0, 0.0]), "front")]),
+            config,
+            aligner=PassAligner(),
+            spoof_detector=FakeSpoof("live"),
+            quality_checker=AlwaysQuality(),
+            clock=self.clock.monotonic,
+        )
+
+        result = pipeline.process_frame(self.frame)
+
         self.assertEqual(result["authentication_result"], AuthenticationResult.GRANT.value)
 
 

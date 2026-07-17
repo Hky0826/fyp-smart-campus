@@ -85,7 +85,20 @@ class SurveillancePipeline:
 
     def process_frame(self, frame: np.ndarray) -> dict:
         timer = StageTimer()
-        faces = self._detect(frame)
+        try:
+            faces = self._detect(frame)
+        except Exception:
+            logger.exception("Surveillance face detection failed")
+            timer.total()
+            return {
+                "success": False,
+                "mode": "surveillance",
+                "face_count": 0,
+                "results": [],
+                "active_tracks": self._active_track_results(),
+                "error": "face_detection_failed",
+                "metrics": timer.metrics,
+            }
         timer.mark("detection")
         logger.info("Surveillance detected %s faces", len(faces))
 
@@ -97,32 +110,80 @@ class SurveillancePipeline:
         for index, face in enumerate(faces):
             track = tracks_by_face[index]
             identity_source = "track" if track.is_recognized else "recognition"
+            recognition_error: str | None = None
 
             if not track.is_recognized:
                 recognition_started = time.perf_counter()
-                face_image = self.aligner.extract(frame, face)
-                embedding = self.embedder.embed(face_image)
-                recognition_latency_ms += (time.perf_counter() - recognition_started) * 1000.0
-
-                if templates is None:
-                    templates = self.repository.load_templates()
-                matching_started = time.perf_counter()
-                match = self.matcher.match(
-                    embedding,
-                    templates,
-                    threshold=self.config.recognition_threshold,
-                    include_inactive=False,
-                )
-                database_matching_latency_ms += (time.perf_counter() - matching_started) * 1000.0
-
-                if match.matched:
-                    track.remember_match(match)
-                else:
+                alignment = self.aligner.align(frame, face)
+                if not alignment.success or alignment.aligned_face is None:
+                    recognition_error = f"alignment_failed:{alignment.failure_reason or 'unknown'}"
                     track.identity = "unknown"
                     track.user_id = None
-                    track.similarity = float(match.similarity)
-                    track.matched_template = match.matched_template
+                    track.similarity = 0.0
+                    track.matched_template = None
                     track.status = "unknown"
+                    recognition_latency_ms += (time.perf_counter() - recognition_started) * 1000.0
+                else:
+                    try:
+                        embedding = self.embedder.embed(alignment.aligned_face)
+                    except Exception:
+                        logger.exception("Surveillance embedding failed for track %s", track.track_id)
+                        recognition_error = "embedding_failed"
+                        track.identity = "unknown"
+                        track.user_id = None
+                        track.similarity = 0.0
+                        track.matched_template = None
+                        track.status = "unknown"
+                        recognition_latency_ms += (time.perf_counter() - recognition_started) * 1000.0
+                        embedding = None
+                    else:
+                        recognition_latency_ms += (time.perf_counter() - recognition_started) * 1000.0
+
+                if recognition_error is not None:
+                    identity_source = "recognition_error"
+                    embedding = None
+                if embedding is None:
+                    pass
+                else:
+                    if templates is None:
+                        try:
+                            templates = self.repository.load_templates()
+                        except Exception:
+                            logger.exception("Surveillance template loading failed")
+                            templates = []
+                            recognition_error = "template_loading_failed"
+                    matching_started = time.perf_counter()
+                    try:
+                        match = self.matcher.match(
+                            embedding,
+                            templates,
+                            threshold=self.config.recognition_threshold,
+                            include_inactive=False,
+                        )
+                    except Exception:
+                        logger.exception("Surveillance matching failed for track %s", track.track_id)
+                        recognition_error = "matching_failed"
+                        database_matching_latency_ms += (time.perf_counter() - matching_started) * 1000.0
+                        match = None
+                    else:
+                        database_matching_latency_ms += (time.perf_counter() - matching_started) * 1000.0
+
+                    if match is None:
+                        track.identity = "unknown"
+                        track.user_id = None
+                        track.similarity = 0.0
+                        track.matched_template = None
+                        track.status = "unknown"
+                    elif match.matched:
+                        track.remember_match(match)
+                    else:
+                        track.identity = "unknown"
+                        track.user_id = None
+                        track.similarity = float(match.similarity)
+                        track.matched_template = match.matched_template
+                        track.status = "unknown"
+                if recognition_error is not None:
+                    identity_source = "recognition_error"
 
             status = track.status
             identity = track.identity if status == "recognized" else "unknown"
@@ -139,20 +200,21 @@ class SurveillancePipeline:
                 identity_source,
             )
             self._maybe_log_track_event(frame, face, track, face_count=len(faces), timestamp=timestamp)
-            results.append(
-                {
-                    "track_id": track.track_id,
-                    "bbox": bbox,
-                    "detection_confidence": float(face.confidence),
-                    "identity": identity,
-                    "user_id": track.user_id if status == "recognized" else None,
-                    "similarity": float(track.similarity),
-                    "matched_template": track.matched_template if status == "recognized" else None,
-                    "status": status,
-                    "identity_source": identity_source,
-                    "timestamp": timestamp,
-                }
-            )
+            item = {
+                "track_id": track.track_id,
+                "bbox": bbox,
+                "detection_confidence": float(face.confidence),
+                "identity": identity,
+                "user_id": track.user_id if status == "recognized" else None,
+                "similarity": float(track.similarity),
+                "matched_template": track.matched_template if status == "recognized" else None,
+                "status": status,
+                "identity_source": identity_source,
+                "timestamp": timestamp,
+            }
+            if recognition_error is not None:
+                item["recognition_error"] = recognition_error
+            results.append(item)
 
         timer.metrics["recognition_latency_ms"] = recognition_latency_ms
         timer.metrics["database_matching_latency_ms"] = database_matching_latency_ms
@@ -232,19 +294,26 @@ class SurveillancePipeline:
         else:
             recognition_status = "UNKNOWN"
 
-        image_path = self._save_face_snapshot(frame, face, track, recognition_status, timestamp)
+        try:
+            image_path = self._save_face_snapshot(frame, face, track, recognition_status, timestamp)
+        except Exception:
+            logger.exception("Failed to save surveillance face snapshot")
+            image_path = None
         log_method = getattr(self.repository, "log_surveillance_event", None)
         if callable(log_method):
-            log_method(
-                track.user_id if recognition_status == "RECOGNIZED" else None,
-                recognition_status,
-                track.similarity,
-                matched_template=track.matched_template if recognition_status == "RECOGNIZED" else None,
-                face_count=face_count,
-                bbox=track.bbox,
-                image_path=image_path,
-                timestamp=timestamp,
-            )
+            try:
+                log_method(
+                    track.user_id if recognition_status == "RECOGNIZED" else None,
+                    recognition_status,
+                    track.similarity,
+                    matched_template=track.matched_template if recognition_status == "RECOGNIZED" else None,
+                    face_count=face_count,
+                    bbox=track.bbox,
+                    image_path=image_path,
+                    timestamp=timestamp,
+                )
+            except Exception:
+                logger.exception("Failed to log surveillance event")
 
         track.entry_logged = True
         if recognition_status == "RECOGNIZED":
@@ -274,17 +343,21 @@ class SurveillancePipeline:
         if crop.size == 0:
             return None
 
-        snapshot_dir = Path(self.config.snapshot_dir) / datetime.now(timezone.utc).strftime("%Y%m%d")
-        snapshot_dir.mkdir(parents=True, exist_ok=True)
-        safe_timestamp = (
-            timestamp.replace("-", "")
-            .replace(":", "")
-            .replace(".", "")
-            .replace("+", "")
-        )
-        filename = f"{safe_timestamp}_track_{track.track_id}_{recognition_status.lower()}.jpg"
-        path = snapshot_dir / filename
-        if not cv2.imwrite(str(path), crop):
+        try:
+            snapshot_dir = Path(self.config.snapshot_dir) / datetime.now(timezone.utc).strftime("%Y%m%d")
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            safe_timestamp = (
+                timestamp.replace("-", "")
+                .replace(":", "")
+                .replace(".", "")
+                .replace("+", "")
+            )
+            filename = f"{safe_timestamp}_track_{track.track_id}_{recognition_status.lower()}.jpg"
+            path = snapshot_dir / filename
+            if not cv2.imwrite(str(path), crop):
+                return None
+        except Exception:
+            logger.exception("Failed to save surveillance face snapshot")
             return None
         return str(path)
 

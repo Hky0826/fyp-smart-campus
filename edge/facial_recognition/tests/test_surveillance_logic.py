@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 
 from edge.facial_recognition.src.config import SurveillanceConfig
+from edge.facial_recognition.src.face.alignment import AlignmentResult
 from edge.facial_recognition.src.face.matching import FaceTemplate
 from edge.facial_recognition.src.face.types import DetectedFace
 from edge.facial_recognition.src.pipelines.surveillance import SurveillancePipeline
@@ -58,6 +59,26 @@ class FakeRepository:
                 "timestamp": timestamp,
             }
         )
+
+
+class FailingLogRepository(FakeRepository):
+    def log_surveillance_event(
+        self,
+        user_id,
+        recognition_status,
+        confidence_score,
+        matched_template=None,
+        face_count=1,
+        bbox=None,
+        image_path=None,
+        timestamp=None,
+    ):
+        raise RuntimeError("database unavailable")
+
+
+class FailingAligner:
+    def align(self, frame, face):
+        return AlignmentResult(False, failure_reason="bad_landmarks")
 
 
 def face(x1=10, y1=10, x2=80, y2=80):
@@ -140,6 +161,23 @@ class SurveillanceLogicTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["identity"], "unknown")
         self.assertEqual(result["results"][0]["status"], "unknown")
 
+    def test_surveillance_alignment_failure_does_not_crash_frame(self):
+        pipeline = self.pipeline(
+            [face()],
+            [[1.0, 0.0]],
+            [FaceTemplate("user_001", np.array([1.0, 0.0]), "front")],
+        )
+        pipeline.aligner = FailingAligner()
+
+        result = pipeline.process_frame(self.frame)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["results"][0]["identity"], "unknown")
+        self.assertEqual(result["results"][0]["status"], "unknown")
+        self.assertEqual(result["results"][0]["identity_source"], "recognition_error")
+        self.assertEqual(result["results"][0]["recognition_error"], "alignment_failed:bad_landmarks")
+        self.assertEqual(pipeline.embedder.index, 0)
+
     def test_surveillance_keeps_identity_on_same_track_without_rematching(self):
         pipeline = self.pipeline(
             [face()],
@@ -209,6 +247,22 @@ class SurveillanceLogicTests(unittest.TestCase):
         self.assertEqual([event["recognition_status"] for event in pipeline.repository.events], ["UNKNOWN", "RECOGNIZED"])
         self.assertIsNone(pipeline.repository.events[0]["user_id"])
         self.assertEqual(pipeline.repository.events[1]["user_id"], "7")
+
+    def test_surveillance_recognition_survives_log_failure(self):
+        pipeline = SurveillancePipeline(
+            detector=FakeDetector([face()]),
+            embedder=SequenceEmbedder([[1.0, 0.0]]),
+            repository=FailingLogRepository([FaceTemplate("7", np.array([1.0, 0.0]), "front")]),
+            config=SurveillanceConfig(
+                recognition_threshold=0.8,
+                snapshot_enabled=False,
+            ),
+        )
+
+        result = pipeline.process_frame(self.frame)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["results"][0]["status"], "recognized")
 
 
 if __name__ == "__main__":

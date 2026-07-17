@@ -291,7 +291,7 @@ class AccessControlPipeline:
             if not self.embedding_aggregator.has_enough_samples():
                 timer.mark("database_matching")
                 timer.total()
-                return cache_and_return(self._deny(
+                return self._deny(
                     "Collecting valid face samples",
                     face_count,
                     AuthenticationResult.RETRY_INSUFFICIENT_SAMPLES,
@@ -300,7 +300,7 @@ class AccessControlPipeline:
                     bboxes=bboxes,
                     sample_count=self.embedding_aggregator.sample_count,
                     quality=self._quality_payload(quality),
-                ))
+                )
 
             consistent_candidate = self.embedding_aggregator.consistent_candidate()
             if consistent_candidate is None:
@@ -310,7 +310,7 @@ class AccessControlPipeline:
                 if terminal:
                     image_path = self._save_face_snapshot(frame, face)
                     self._log_event(None, "FAILED", match.similarity, image_path=image_path)
-                return cache_and_return(self._deny(
+                result = self._deny(
                     "Candidate identity is not consistent across frames",
                     face_count,
                     AuthenticationResult.DENY_NO_MATCH if terminal else AuthenticationResult.RETRY_INSUFFICIENT_SAMPLES,
@@ -319,7 +319,8 @@ class AccessControlPipeline:
                     bbox=bbox,
                     bboxes=bboxes,
                     sample_count=self.embedding_aggregator.sample_count,
-                ))
+                )
+                return cache_and_return(result) if terminal else result
 
             aggregated_embedding = self.embedding_aggregator.get_aggregated_embedding()
             if target_user_id is not None:
@@ -406,7 +407,18 @@ class AccessControlPipeline:
     def describe_faces(self, frame: np.ndarray, include_embeddings: bool = False) -> dict:
         """Return detected face boxes, optionally with embeddings, without access gating."""
         timer = StageTimer()
-        faces = self._detect(frame)
+        try:
+            faces = self._detect(frame)
+        except Exception:
+            logger.exception("Face detection failed during face description")
+            timer.total()
+            return {
+                "face_count": 0,
+                "bboxes": [],
+                "faces": [],
+                "error": "face_detection_failed",
+                "metrics": timer.metrics,
+            }
         timer.mark("detection")
         descriptions: list[dict[str, Any]] = []
 
@@ -416,12 +428,26 @@ class AccessControlPipeline:
                 "confidence": float(face.confidence),
             }
             if include_embeddings:
-                quality = self.quality_checker.check(frame, face)
-                item["quality_passed"] = quality.passed
-                item["quality_reason"] = quality.reason
+                try:
+                    quality = self.quality_checker.check(frame, face)
+                    item["quality_passed"] = quality.passed
+                    item["quality_reason"] = quality.reason
+                except Exception:
+                    logger.exception("Face quality check failed during face description")
+                    item["quality_passed"] = False
+                    item["quality_reason"] = "quality_check_error"
+                    descriptions.append(item)
+                    continue
                 if quality.passed:
-                    face_image = self.aligner.extract(frame, face)
-                    item["embedding"] = self.embedder.embed(face_image)
+                    alignment = self.aligner.align(frame, face)
+                    item["alignment_passed"] = alignment.success
+                    item["alignment_reason"] = alignment.failure_reason
+                    if alignment.success and alignment.aligned_face is not None:
+                        try:
+                            item["embedding"] = self.embedder.embed(alignment.aligned_face)
+                        except Exception:
+                            logger.exception("Face embedding failed during face description")
+                            item["embedding_error"] = "embedding_error"
             descriptions.append(item)
 
         if include_embeddings:
@@ -537,13 +563,17 @@ class AccessControlPipeline:
         if crop.size == 0:
             return None
 
-        snapshot_dir = Path(getattr(self.config, 'snapshot_dir', 'data/snapshots')) / datetime.now(timezone.utc).strftime("%Y%m%d")
-        snapshot_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{datetime.now(timezone.utc).strftime('%H%M%S_%f')}_access.jpg"
-        path = snapshot_dir / filename
-        
-        if not cv2.imwrite(str(path), crop):
-            logger.warning("Failed to save face snapshot to %s", path)
+        try:
+            snapshot_dir = Path(getattr(self.config, 'snapshot_dir', 'data/snapshots')) / datetime.now(timezone.utc).strftime("%Y%m%d")
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"{datetime.now(timezone.utc).strftime('%H%M%S_%f')}_access.jpg"
+            path = snapshot_dir / filename
+
+            if not cv2.imwrite(str(path), crop):
+                logger.warning("Failed to save face snapshot to %s", path)
+                return None
+        except Exception:
+            logger.exception("Failed to save access face snapshot")
             return None
         return str(path)
 
@@ -553,7 +583,12 @@ class AccessControlPipeline:
             try:
                 log_method(user_id, status, confidence, image_path=image_path)
             except TypeError:
-                log_method(user_id, status, confidence)
+                try:
+                    log_method(user_id, status, confidence)
+                except Exception:
+                    logger.exception("Failed to log access-control event")
+            except Exception:
+                logger.exception("Failed to log access-control event")
 
 
 def build_pipeline(config: AccessControlConfig) -> AccessControlPipeline:
