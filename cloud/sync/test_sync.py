@@ -270,6 +270,33 @@ class TestDatabaseSynchronization(unittest.TestCase):
         self.assertEqual(cursor.fetchone()[0], 0)
         conn.close()
 
+    def test_user_roles_update_clears_old_ones(self):
+        """
+        Verify that save_user_roles_delta deletes old user-role mappings for updated users.
+        """
+        # Insert user and roles
+        users_payload = [{"user_id": 99, "face_vector_b64": "AAAA", "is_active": 1}]
+        self.db.save_users_delta(users_payload)
+        roles_payload = [{"role_id": 3, "role_name": "LECTURER"}, {"role_id": 4, "role_name": "STUDENT"}]
+        self.db.save_roles_delta(roles_payload)
+
+        # 1. Map to role 3
+        self.db.save_user_roles_delta([{"user_id": 99, "role_id": 3}])
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT role_id FROM device_user_roles WHERE user_id = 99")
+        roles = [row[0] for row in cursor.fetchall()]
+        self.assertEqual(roles, [3])
+
+        # 2. Update mapping to role 4
+        self.db.save_user_roles_delta([{"user_id": 99, "role_id": 4}])
+
+        cursor.execute("SELECT role_id FROM device_user_roles WHERE user_id = 99")
+        roles = [row[0] for row in cursor.fetchall()]
+        self.assertEqual(roles, [4])
+        conn.close()
+
     def test_load_embeddings_with_active_flag(self):
         """
         Verify that load_templates returns user_id, embedding, and is_active status.

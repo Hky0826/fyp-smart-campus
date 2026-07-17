@@ -63,9 +63,15 @@ class NodeRbacSyncResponse(BaseModel):
     role_id: int
     last_synced_at: str
 
+class UserRoleSyncResponse(BaseModel):
+    user_id: int
+    role_id: int
+    last_synced_at: str
+
 class DeltaSyncResponse(BaseModel):
     users: List[UserSyncResponse]
     roles: List[RoleSyncResponse]
+    user_roles: List[UserRoleSyncResponse]
     node_rbac: List[NodeRbacSyncResponse]
     deleted_user_ids: List[int] = Field(default_factory=list)
     timestamp: str
@@ -284,6 +290,19 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
             ) for rb in rbac_list
         ]
 
+        # Fetching User-Role Mappings for users returned in the current delta
+        sync_user_roles = []
+        user_ids = [u.user_id for u in users_list]
+        if user_ids:
+            user_roles_list = db.query(UserRole).filter(UserRole.user_id.in_(user_ids)).all()
+            sync_user_roles = [
+                UserRoleSyncResponse(
+                    user_id=ur.user_id,
+                    role_id=ur.role_id,
+                    last_synced_at=datetime.datetime.utcnow().isoformat()
+                ) for ur in user_roles_list
+            ]
+
         # Fetching Deleted User IDs
         deleted_query = db.query(DeletedUser)
         if last_synced_at:
@@ -294,6 +313,7 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
         return {
             "users": sync_users,
             "roles": sync_roles,
+            "user_roles": sync_user_roles,
             "node_rbac": sync_rbac,
             "deleted_user_ids": deleted_user_ids,
             "timestamp": datetime.datetime.utcnow().isoformat()

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 import bcrypt
 import os
+import datetime
 import json
 import re
 import random
@@ -157,6 +158,9 @@ def check_and_delete_user_if_orphaned(db: Session, user):
     has_visitor = db.query(Visitor).filter_by(user_id=user.user_id).first() is not None
     has_admin = db.query(Admin).filter_by(user_id=user.user_id).first() is not None
     if not (has_student or has_lecturer or has_staff or has_visitor or has_admin):
+        from app.models.models import DeletedUser
+        deleted_record = DeletedUser(user_id=user.user_id, deleted_at=datetime.datetime.utcnow())
+        db.add(deleted_record)
         db.delete(user)
 
 def apply_user_update(db: Session, user: User, user_data: dict):
@@ -176,6 +180,7 @@ def apply_user_update(db: Session, user: User, user_data: dict):
         if field in ["role_id", "role_ids"]:
             continue
         setattr(user, field, val)
+    user.updated_at = datetime.datetime.utcnow()
 
 # Import the edge push helper from the downstream sync service
 try:
@@ -352,6 +357,9 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current_admin=Depen
     user = db.query(User).filter_by(user_id=user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    from app.models.models import DeletedUser
+    deleted_record = DeletedUser(user_id=user_id, deleted_at=datetime.datetime.utcnow())
+    db.add(deleted_record)
     db.delete(user)
     db.commit()
     return {"detail": "User deleted successfully"}
@@ -1066,6 +1074,7 @@ def upload_user_face_photo(
     )
     db.add(db_emb_low)
 
+    user.updated_at = datetime.datetime.utcnow()
     db.commit()
     db.refresh(user)
 
@@ -1372,6 +1381,7 @@ def enroll_live_complete(
             # Update progress
             enrollment_progress[user_id] = int((idx + 1) / len(poses) * 100)
 
+        user.updated_at = datetime.datetime.utcnow()
         db.commit()
         db.refresh(user)
 
@@ -1567,6 +1577,7 @@ async def enroll_user_video(
         )
         db.add(db_emb)
 
+    user.updated_at = datetime.datetime.utcnow()
     db.commit()
     db.refresh(user)
 
@@ -1600,6 +1611,7 @@ async def reembed_all_users(
 
         success_count = 0
         failed_count = 0
+        success_user_ids = set()
 
         for img_rec in images:
             user_id = img_rec.user_id
@@ -1648,7 +1660,12 @@ async def reembed_all_users(
                 db.add(db_emb)
             
             success_count += 1
+            success_user_ids.add(user_id)
 
+        if success_user_ids:
+            db.query(User).filter(User.user_id.in_(list(success_user_ids))).update(
+                {User.updated_at: datetime.datetime.utcnow()}, synchronize_session=False
+            )
         db.commit()
 
         # Trigger sync to all edge camera nodes
