@@ -201,7 +201,7 @@ def get_scrfd_detector():
     if scrfd_detector_instance is None:
         router_dir = os.path.dirname(os.path.abspath(__file__))
         app_dir = os.path.dirname(router_dir)
-        model_path = os.path.join(app_dir, "facial_recognition", "models", "scrfd_10g.onnx")
+        model_path = os.path.join(app_dir, "facial_recognition", "models", "scrfd_2.5g_bnkps.onnx")
         from app.facial_recognition.scrfd_detector import SCRFDDetector
         scrfd_detector_instance = SCRFDDetector(model_path)
     return scrfd_detector_instance
@@ -1153,8 +1153,6 @@ async def enroll_live_frame(
                 "pitch_ratio": 0.4
             }
 
-        aligned_crop = extract_aligned_face(img, face)
-
         gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
         blur_score = float(cv2.Laplacian(gray_crop, cv2.CV_64F).var())
 
@@ -1262,6 +1260,8 @@ async def enroll_live_frame(
                 "yaw_ratio": yaw_ratio,
                 "pitch_ratio": pitch_ratio
             }
+
+        aligned_crop = extract_aligned_face(img, face)
 
         if user_id not in enrollment_sessions:
             enrollment_sessions[user_id] = {}
@@ -1438,8 +1438,6 @@ async def enroll_user_video(
         if crop.size == 0 or (x2 - x1) < 100 or (y2 - y1) < 100:
             continue
 
-        aligned_crop = extract_aligned_face(frame, face)
-
         gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
         blur_score = float(cv2.Laplacian(gray_crop, cv2.CV_64F).var())
         if blur_score < 50.0:
@@ -1481,6 +1479,7 @@ async def enroll_user_video(
                 detected_pose = "front"
 
         if detected_pose in required_poses:
+            aligned_crop = extract_aligned_face(frame, face)
             existing_blur = harvested_blurs.get(detected_pose, 0.0)
             if detected_pose not in harvested_crops or blur_score > existing_blur:
                 harvested_crops[detected_pose] = aligned_crop.copy()

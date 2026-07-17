@@ -106,13 +106,13 @@ function dashboardPath(tab, subTab) {
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
             // ── Guided recording state ────────────────────────────
-            const [recordingPhase, setRecordingPhase] = useState('idle'); // idle|countdown|recording|processing|success|failed
+            const [recordingPhase, setRecordingPhase] = useState('idle'); // idle|countdown|recording|embedding|success|failed
             const [recordingCountdown, setRecordingCountdown] = useState(3);
             const [guidePoseIndex, setGuidePoseIndex] = useState(0);
             const [enrollFeedback, setEnrollFeedback] = useState('');
             const [recordingProgress, setRecordingProgress] = useState(0);
-            const mediaRecorderRef = useRef(null);
-            const recordedChunksRef = useRef([]);
+            const [embeddingProgress, setEmbeddingProgress] = useState(0);
+            const guidedCaptureRef = useRef({ active: false });
 
             // ── Record modal ──────────────────────────────────
             const [showModal, setShowModal] = useState(false);
@@ -672,11 +672,9 @@ function dashboardPath(tab, subTab) {
             };
 
             const stopCamera = () => {
+                guidedCaptureRef.current.active = false;
                 if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); setCameraStream(null); }
                 setLiveScanActive(false);
-                if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-                    mediaRecorderRef.current.stop();
-                }
             };
 
             // ── Guided video recording flow ───────────────────────
@@ -699,42 +697,80 @@ function dashboardPath(tab, subTab) {
                     setGuidePoseIndex(0);
                     setEnrollFeedback('');
                     setRecordingProgress(0);
+                    setEmbeddingProgress(0);
                     if (videoRef.current) videoRef.current.srcObject = stream;
                 } catch (err) {
                     setEnrollFeedback('Could not access camera: ' + err.message);
                 }
             };
 
-            const startGuidedRecording = () => {
+            const completeLiveEnrollment = async () => {
+                setRecordingPhase('embedding');
+                setEmbeddingProgress(8);
+                setEnrollFeedback('');
+
+                let progress = 8;
+                const progressTimer = setInterval(() => {
+                    progress = Math.min(92, progress + (progress < 60 ? 8 : progress < 84 ? 4 : 2));
+                    setEmbeddingProgress(progress);
+                }, 350);
+
+                try {
+                    const response = await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/complete`, {
+                        method: "POST",
+                        headers: { "Authorization": `Bearer ${token}` }
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.detail || "Face embedding failed.");
+                    setEmbeddingProgress(100);
+                    setRecordingPhase('success');
+                    showSuccessToast(`Face ID enrolled for ${selectedItem.full_name}!`);
+                    setTimeout(() => { stopCamera(); setShowFaceModal(false); fetchTabData(); }, 1200);
+                } catch (err) {
+                    setRecordingPhase('failed');
+                    setEnrollFeedback(err.message);
+                } finally {
+                    clearInterval(progressTimer);
+                }
+            };
+
+            const startGuidedRecording = async () => {
                 if (!cameraStream) return;
-                recordedChunksRef.current = [];
-                const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-                    ? 'video/webm;codecs=vp9' : 'video/webm';
-                const mr = new MediaRecorder(cameraStream, { mimeType });
-                mr.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data); };
-                mr.onstop = () => processGuidedVideo();
-                mediaRecorderRef.current = mr;
+                try {
+                    const startResponse = await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/start`, {
+                        method: "POST",
+                        headers: { "Authorization": `Bearer ${token}` }
+                    });
+                    const startData = await startResponse.json();
+                    if (!startResponse.ok) throw new Error(startData.detail || "Could not start live enrollment.");
+                } catch (err) {
+                    setRecordingPhase('failed');
+                    setEnrollFeedback(err.message);
+                    return;
+                }
 
                 // Countdown 3-2-1 then start
                 setRecordingPhase('countdown');
                 setRecordingCountdown(3);
+                setRecordingProgress(0);
+                setEmbeddingProgress(0);
+                setEnrollFeedback('');
+                guidedCaptureRef.current.active = true;
                 let c = 3;
                 const cdTimer = setInterval(() => {
                     c--;
                     setRecordingCountdown(c);
                     if (c <= 0) {
                         clearInterval(cdTimer);
-                        mr.start(200);
                         setRecordingPhase('recording');
                         setGuidePoseIndex(0);
                         setRecordingProgress(0);
 
                         // Advance guide arrow through poses
                         let pIdx = 0;
-                        let activePolling = true;
 
                         const pollVideoFrame = async () => {
-                            if (!activePolling || !mediaRecorderRef.current || mediaRecorderRef.current.state !== 'recording') return;
+                            if (!guidedCaptureRef.current.active) return;
                             if (pIdx >= GUIDE_POSES.length) return;
 
                             if (videoRef.current && canvasRef.current) {
@@ -754,59 +790,34 @@ function dashboardPath(tab, subTab) {
                                                     setGuidePoseIndex(pIdx);
                                                     setTimeout(pollVideoFrame, 500); // small delay before next pose
                                                 } else {
-                                                    activePolling = false;
+                                                    guidedCaptureRef.current.active = false;
                                                     setRecordingProgress(100);
-                                                    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-                                                        mediaRecorderRef.current.stop();
-                                                    }
+                                                    await completeLiveEnrollment();
                                                 }
                                                 return; // advanced, exit callback
                                             }
+                                            setEnrollFeedback(d.guidance || "Adjust your pose and try again.");
                                         } catch (e) { console.error("Poll error:", e); }
                                     }
-                                    if (activePolling) setTimeout(pollVideoFrame, 300);
-                                }, "image/jpeg", 0.85);
+                                    if (guidedCaptureRef.current.active) setTimeout(pollVideoFrame, 300);
+                                }, "image/jpeg", 0.78);
                             } else {
-                                if (activePolling) setTimeout(pollVideoFrame, 300);
+                                if (guidedCaptureRef.current.active) setTimeout(pollVideoFrame, 300);
                             }
                         };
                         
                         pollVideoFrame();
-
-                        // Stop polling when recording ends unexpectedly
-                        mediaRecorderRef.current.addEventListener('stop', () => { activePolling = false; });
                     }
                 }, 1000);
             };
 
-            const processGuidedVideo = async () => {
-                setRecordingPhase('processing');
-                try {
-                    const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-                    const formData = new FormData();
-                    formData.append('file', new File([blob], 'enrollment.webm', { type: 'video/webm' }));
-                    const response = await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-video`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${token}` },
-                        body: formData
-                    });
-                    const data = await response.json();
-                    if (!response.ok) throw new Error(data.detail || 'Enrollment failed — not enough face angles detected.');
-                    setRecordingPhase('success');
-                    showSuccessToast(`Face ID enrolled for ${selectedItem.full_name}!`);
-                    setTimeout(() => { stopCamera(); setShowFaceModal(false); fetchTabData(); }, 2000);
-                } catch (err) {
-                    setEnrollFeedback(err.message);
-                    setRecordingPhase('failed');
-                }
-            };
-
             const retryRecording = () => {
+                guidedCaptureRef.current.active = false;
                 setRecordingPhase('idle');
                 setGuidePoseIndex(0);
                 setEnrollFeedback('');
                 setRecordingProgress(0);
-                recordedChunksRef.current = [];
+                setEmbeddingProgress(0);
             };
 
             const handleVideoFileChange = (e) => { setSelectedVideoFile(e.target.files[0]); setVideoError(""); };
@@ -2348,6 +2359,7 @@ function dashboardPath(tab, subTab) {
                                             stopCamera(); setShowFaceModal(false); setScanning(false);
                                             setScanStep(0); setConfidence(0); setSelectedPhotoFile(null);
                                             setSelectedVideoFile(null); setVideoError("");
+                                            setEmbeddingProgress(0); setRecordingProgress(0); setRecordingPhase('idle');
                                             if (uploadedPhoto) { URL.revokeObjectURL(uploadedPhoto); setUploadedPhoto(null); }
                                         }} className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-all ml-4 shrink-0 bg-slate-900/50 border border-transparent hover:border-slate-700">
                                             <Icon name="x" className="w-5 h-5" />
@@ -2361,6 +2373,7 @@ function dashboardPath(tab, subTab) {
                                                 stopCamera(); setEnrollMethod(m.id);
                                                 setScanStep(0); setConfidence(0); setSelectedPhotoFile(null);
                                                 setSelectedVideoFile(null); setVideoError("");
+                                                setEmbeddingProgress(0); setRecordingProgress(0); setRecordingPhase('idle');
                                             }} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${enrollMethod === m.id ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-900'}`}>
                                                 {m.label}
                                             </button>
@@ -2488,6 +2501,7 @@ function dashboardPath(tab, subTab) {
                                         }[dir] || 'absolute inset-0 flex items-center justify-center pointer-events-none');
 
                                         const curPose = GUIDE_POSES[guidePoseIndex] || GUIDE_POSES[0];
+                                        const phaseProgress = recordingPhase === 'embedding' ? embeddingProgress : recordingProgress;
 
                                         return (
                                             <div className='space-y-4'>
@@ -2536,11 +2550,11 @@ function dashboardPath(tab, subTab) {
                                                     )}
 
                                                     {/* ── Processing overlay ── */}
-                                                    {recordingPhase === 'processing' && (
+                                                    {recordingPhase === 'embedding' && (
                                                         <div className='absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-4 pointer-events-none'>
                                                             <div className='w-12 h-12 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin'></div>
-                                                            <p className='text-white font-bold text-sm'>Analyzing face angles...</p>
-                                                            <p className='text-slate-400 text-xs'>This may take a few seconds</p>
+                                                            <p className='text-white font-bold text-sm'>Embedding Face ID...</p>
+                                                            <p className='text-slate-400 text-xs'>{embeddingProgress}% complete</p>
                                                         </div>
                                                     )}
 
@@ -2582,15 +2596,15 @@ function dashboardPath(tab, subTab) {
                                                 </div>
 
                                                 {/* ── Recording progress bar ── */}
-                                                {recordingPhase === 'recording' && (
+                                                {(recordingPhase === 'recording' || recordingPhase === 'embedding') && (
                                                     <div className='space-y-1.5'>
                                                         <div className='flex justify-between text-[10px] font-mono font-bold text-slate-500'>
-                                                            <span>Recording in progress...</span>
-                                                            <span>{recordingProgress}%</span>
+                                                            <span>{recordingPhase === 'embedding' ? 'Embedding Face ID...' : 'Recording in progress...'}</span>
+                                                            <span>{phaseProgress}%</span>
                                                         </div>
                                                         <div className='w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800 shadow-inner'>
                                                             <div className='h-full bg-gradient-to-r from-indigo-500 to-red-500 transition-all duration-200 rounded-full'
-                                                                style={{width:`${recordingProgress}%`}}></div>
+                                                                style={{width:`${phaseProgress}%`}}></div>
                                                         </div>
                                                     </div>
                                                 )}
@@ -2651,9 +2665,9 @@ function dashboardPath(tab, subTab) {
                                                         <div className='flex-1 bg-slate-900 border border-slate-800 rounded-xl py-3 text-center text-sm font-bold text-slate-400 shadow-inner'>Get ready...</div>
                                                     ) : recordingPhase === 'recording' ? (
                                                         <button type='button' onClick={() => {
-                                                            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-                                                                mediaRecorderRef.current.stop();
-                                                            }
+                                                            guidedCaptureRef.current.active = false;
+                                                            setRecordingPhase('failed');
+                                                            setEnrollFeedback('Capture stopped before enrollment completed.');
                                                         }} className='flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-md shadow-red-900/20'>
                                                             <Icon name='square' className='w-3.5 h-3.5 fill-white'/><span>Stop Early</span>
                                                         </button>

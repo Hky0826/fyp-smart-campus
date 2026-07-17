@@ -11,6 +11,11 @@ os.makedirs(TARGET_DIR, exist_ok=True)
 # URLs for models. ArcFace R50 must match the Hailo Model Zoo source used to
 # compile edge/facial_recognition/models/surveillance/arcface_r50.hef.
 MODELS = {
+    "scrfd_2.5g_bnkps.onnx": {
+        "url": "https://huggingface.co/hsuyabc/scrfd_2.5g_bnkps.onnx/resolve/main/scrfd_2.5g_bnkps.onnx",
+        "sha256": "bc24bb349491481c3ca793cf89306723162c280cb284c5a5e49df3760bf5c2ce",
+        "min_size": 1_000_000,
+    },
     "scrfd_10g.onnx": {
         "url": "https://huggingface.co/DIAMONIK7777/antelopev2/resolve/main/scrfd_10g_bnkps.onnx",
         "min_size": 1_000_000,
