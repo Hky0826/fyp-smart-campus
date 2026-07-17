@@ -245,6 +245,11 @@ class SQLiteEdgeDB:
             conn = self._get_connection()
             cursor = conn.cursor()
             try:
+                # Clear existing roles for updated users to avoid accumulation
+                user_ids_to_clear = {ur["user_id"] for ur in user_roles}
+                for uid in user_ids_to_clear:
+                    cursor.execute("DELETE FROM device_user_roles WHERE user_id = ?", (uid,))
+
                 saved_count = 0
                 for user_role in user_roles:
                     user_id = user_role["user_id"]
