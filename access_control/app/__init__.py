@@ -1,0 +1,1 @@
+"""Standalone access-control application."""
