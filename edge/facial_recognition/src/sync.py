@@ -707,7 +707,8 @@ class DownstreamSyncWorker:
             logger.exception("Network error during startup user validation")
 
     def perform_sync(self) -> None:
-        params = {}
+        # This legacy Hailo pipeline is ArcFace-R50 only; never request SFace/AuraFace templates.
+        params = {"module": "edge"}
         last_sync = self.db.get_last_sync_timestamp()
         if last_sync:
             params["last_synced_at"] = last_sync
