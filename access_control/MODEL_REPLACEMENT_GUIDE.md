@@ -78,6 +78,8 @@ A recognizer returns `Embedding` with:
 
 Normalize the vector if the chosen similarity method expects normalized features. Metadata must accurately distinguish incompatible embedding spaces.
 
+The shared edge-style database stores `model_name` and the embedding BLOB, but not model version or dimension. The repository filters by `model_name` and validates the decoded vector dimension against the active probe. When replacing SFace, update the `model_name` CHECK constraint in `app/database/schema.sql` to the new canonical recognizer name and coordinate the same model name with the cloud payload. Never reuse a model name for an incompatible embedding space.
+
 ## Interfaces
 
 The protocols are defined in `app/interfaces.py`.

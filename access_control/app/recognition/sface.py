@@ -15,7 +15,7 @@ class IncompatibleEmbeddingError(ValueError):
 
 
 class SFaceRecognizer:
-    def __init__(self, model_path, model_name='opencv_sface', model_version='2021dec'):
+    def __init__(self, model_path, model_name='openvc_sface', model_version='2021dec'):
         if not Path(model_path).is_file():
             raise FileNotFoundError(f'SFace model not found: {model_path}')
         self.model_name = model_name

@@ -1,6 +1,6 @@
 # Standalone Access Control
 
-This folder is a self-contained local access-control application. It preserves the native QML kiosk, RAG chatbot, cloud database synchronization, authenticated chatbot presence checks, cloud-managed identity embeddings, access logs, and GPIO/mock door control. YuNet is the authoritative detector, OpenCV SFace is the recognizer, and KCF is display-only localization between detections. It imports no runtime code from `edge/` or `legacy/`; webapp and surveillance features are intentionally absent.
+This folder is a self-contained local access-control application. It preserves the native QML kiosk, RAG chatbot, cloud database synchronization, authenticated chatbot presence checks, cloud-managed identity embeddings, authentication and surveillance log storage, and GPIO/mock door control. YuNet is the authoritative detector, OpenCV SFace is the recognizer, and KCF is display-only localization between detections. It imports no runtime code from `edge/` or `legacy/`. The surveillance pipeline is not implemented yet, but the local database retains the shared `device_surveillance_logs` table and its cloud replay path for that future mode.
 
 ## Security model
 
@@ -61,13 +61,13 @@ Paths resolve from this module, so entry points work from another working direct
 
 Useful endpoints include `GET /health`, `/models/status`, `/database/status`, `/sync/status`, `/metrics`, `/kiosk/state`, and `/kiosk/events`; `POST /api/edge/deactivate` accepts JSON such as `{"user_id":7}`. Metrics report measured display/detector/tracker rates, inference latency, forced detections, and dropped frames.
 
-Database sync and chatbot HTTP work run outside the display loop. Sync failures are contained, unsent access logs remain ordered in SQLite, and retries use bounded backoff.
+Database sync and chatbot HTTP work run outside the display loop. Sync failures are contained, unsent authentication and surveillance logs remain ordered in SQLite, and retries use bounded backoff. Surveillance logs are sent to `/api/sync/upstream/surveillance-logs`.
 
 ## Cloud-managed identities and embeddings
 
-The device has no identity-capture or template-creation API. The cloud is authoritative for users, model metadata, embedding vectors, and any migration strategy. Downstream synchronization accepts embedding payloads in the user delta and stores their model name, version, dimension, vector, and optional quality metadata.
+The device has no identity-capture or template-creation API. The cloud is authoritative for users, embedding vectors, and any migration strategy. The SQLite layout matches `edge/facial_recognition/setup_sqlite.sql`, except its embedding model constraint is `opencv_sface` for this device pipeline.
 
-Cloud user payloads can provide templates through `embeddings`, `face_embeddings`, `user_face_embeddings`, or `templates`. Each template should include `model_name`, `model_version`, `embedding_dimension`, and either `embedding` or `embedding_b64`. Only embeddings compatible with the active recognizer are considered during matching.
+Cloud user payloads can provide templates through `embeddings`, `face_embeddings`, `user_face_embeddings`, or `templates`. Each template should include `model_name` (`opencv_sface`) and either `embedding` or `embedding_b64`; `template_name` is optional. Model version and vector dimension remain runtime compatibility metadata rather than database columns. Only SFace rows with the active probe dimension are considered during matching.
 
 Use `POST /api/edge/trigger-sync` for an immediate pull and inspect `GET /sync/status` and `GET /database/status`. The device does not automatically alter legacy embedding schemas or generate replacement templates.
 

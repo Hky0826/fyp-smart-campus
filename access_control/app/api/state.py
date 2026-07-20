@@ -24,9 +24,9 @@ class KioskStateStore:
             else:attempt.access_decision='VERIFYING';attempt.completed_at=None
             self._attempt=attempt;return attempt.model_copy(deep=True)
     def start_chat(self,token=None,full_name=None,owner_embedding=None):
-        now=utcnow();user_id=getattr(token,'user_id',None);username=getattr(token,'username',None);roles=list(getattr(token,'roles',()) or ());session_id=getattr(token,'session_id',None);expires=getattr(token,'expires_at',None)
+        now=utcnow();user_id=getattr(token,'user_id',None);email=getattr(token,'email',None);roles=list(getattr(token,'roles',()) or ());session_id=getattr(token,'session_id',None);expires=getattr(token,'expires_at',None)
         with self._lock:
-            self._token=token;self._owner_embedding=owner_embedding;self._owner_absent_at=None;self._chat=ChatSessionView(session_id=str(uuid4()),authenticated_user_id=user_id,username=username,full_name=full_name,roles=roles,cloud_session_id=session_id,last_owner_seen_at=now,last_interaction_at=now,expires_at=expires.isoformat() if expires else None,conversation_history=[ChatMessage(role='assistant',content='Hi, how may I help you?',created_at=now)]);return self._safe_chat()
+            self._token=token;self._owner_embedding=owner_embedding;self._owner_absent_at=None;self._chat=ChatSessionView(session_id=str(uuid4()),authenticated_user_id=user_id,email=email,full_name=full_name,roles=roles,cloud_session_id=session_id,last_owner_seen_at=now,last_interaction_at=now,expires_at=expires.isoformat() if expires else None,conversation_history=[ChatMessage(role='assistant',content='Hi, how may I help you?',created_at=now)]);return self._safe_chat()
     def append_chat(self,query,answer,citations):
         now=utcnow()
         with self._lock:
@@ -64,5 +64,5 @@ class KioskStateStore:
     def _safe_chat(self):
         if self._chat is None:return None
         view=self._chat.model_copy(deep=True)
-        if view.locked:view.username=None;view.full_name=None;view.roles=[];view.expires_at=None;view.conversation_history=[]
+        if view.locked:view.email=None;view.full_name=None;view.roles=[];view.expires_at=None;view.conversation_history=[]
         return view

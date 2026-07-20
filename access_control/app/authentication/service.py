@@ -42,7 +42,7 @@ class AuthenticationService:
         if self.machine.state is S.QUALITY_CHECK:self.machine.dispatch(E.QUALITY_PASSED)
         try:embedding=self.recognizer.embed(frame,detection);match=self.repository.find_match(embedding,self.policy.match_threshold)
         except Exception as exc:
-            self.machine.dispatch(E.FAILURE);self._log(None,'ERROR',None,1,'recognition_error');return self._out('Recognition error',1,detection,reason=str(exc))
+            self.machine.dispatch(E.FAILURE);self._log(None,'FAILED',None,1,'recognition_error');return self._out('Recognition error',1,detection,reason=str(exc))
         if match is None:
             self._candidate=None;self._confirmations=0
             if self.machine.state in {S.RECOGNIZING,S.FINAL_VERIFY}:self.machine.dispatch(E.NO_MATCH if self.machine.state is S.RECOGNIZING else E.FINAL_REJECT)
@@ -62,7 +62,7 @@ class AuthenticationService:
         if now<self._cooldown_until:
             self.machine.dispatch(E.FINAL_REJECT);return self._out('Authentication cooldown',1,detection,match,reason='cooldown_active')
         self.machine.dispatch(E.FINAL_FRESH_MATCH);physical=bool(self.access.unlock(match.identity_id,self.policy.unlock_seconds))
-        if not physical:self.machine.dispatch(E.FAILURE);self._log(match.identity_id,'ERROR',match.similarity,1,'physical_unlock_failed');return self._out('Identity verified; door unavailable',1,detection,match,verified=True,reason='physical_unlock_failed')
+        if not physical:self.machine.dispatch(E.FAILURE);self._log(match.identity_id,'FAILED',match.similarity,1,'physical_unlock_failed');return self._out('Identity verified; door unavailable',1,detection,match,verified=True,reason='physical_unlock_failed')
         self._cooldown_until=now+self.policy.cooldown_seconds;self._log(match.identity_id,'SUCCESS',match.similarity,1,'fresh_sface_verified');return self._out('Access granted',1,detection,match,verified=True,physical=True)
     def display_complete(self):
         if self.machine.state in {S.ACCESS_GRANTED,S.ACCESS_DENIED}:self.machine.dispatch(E.DISPLAY_COMPLETE)
