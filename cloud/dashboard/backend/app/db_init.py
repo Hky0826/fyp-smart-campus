@@ -161,7 +161,7 @@ def seed_data():
         # STAGE 4: SEED SECURE IDENTITY ROOT (User -> Staff -> Admin Linkage)
         # =========================================================================
         admin_role = roles_map["ADMIN"]
-        existing_admin = db.query(User).filter_by(username="admin").first()
+        existing_admin = db.query(User).filter_by(email="admin").first()
         
         if not existing_admin:
             password_plain = "admin123"
@@ -172,7 +172,6 @@ def seed_data():
                 given_name="Super",
                 family_name="Administrator",
                 email="super.administrator@qiu.edu.my",
-                username="admin",
                 is_active=True
             )
             db.add(user)
@@ -204,7 +203,7 @@ def seed_data():
             )
             db.add(admin)
             print("Seeded default SUPER_ADMIN profile credentials:")
-            print(" -> Username: 'admin'")
+            print(" -> email: 'admin'")
             print(" -> Password: 'admin123'")
             
         db.commit()

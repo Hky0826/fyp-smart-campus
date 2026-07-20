@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, FileResponse
 
-from app.routers import auth, iam, rag, infrastructure, academics, references
+from app.routers import auth, iam, rag, infrastructure, academics, references, embeddings
 from app.routers.edge_auth import router as edge_auth_router
 from sync.cloud_to_edge import cloud_sync_service as downstream_sync
 from sync.edge_to_cloud import cloud_sync_service as upstream_sync
@@ -46,6 +46,7 @@ app.add_middleware(
 # Register API routers with '/api' prefix
 app.include_router(auth.router, prefix="/api")
 app.include_router(iam.router, prefix="/api")
+app.include_router(embeddings.router, prefix="/api")
 app.include_router(rag.router, prefix="/api")
 app.include_router(infrastructure.router, prefix="/api")
 app.include_router(academics.router, prefix="/api")

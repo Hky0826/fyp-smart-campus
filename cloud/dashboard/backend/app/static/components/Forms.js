@@ -153,7 +153,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
     const [givenName, setGivenName] = useState(item?.given_name || "");
     const [familyName, setFamilyName] = useState(item?.family_name || "");
     const [email, setEmail] = useState(item?.email || "");
-    const [username, setUsername] = useState(item?.username || "");
+    const [email, setEmail] = useState(item?.email || "");
     const [roleId, setRoleId] = useState(item?.role_id || item?.roles?.[0]?.role_id || "");
     const [isActive, setIsActive] = useState(item ? item.is_active : true);
     const [locationId, setLocationId] = useState(item?.last_known_location || "");
@@ -188,7 +188,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
     const filteredUsers = systemUsers.filter(u => {
         const q = userSearchQuery.toLowerCase();
         return u.full_name?.toLowerCase().includes(q) ||
-               u.username?.toLowerCase().includes(q) ||
+               u.email?.toLowerCase().includes(q) ||
                String(u.user_id).includes(q);
     });
 
@@ -197,15 +197,15 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
         setGivenName(u.given_name || "");
         setFamilyName(u.family_name || "");
         setEmail(u.email);
-        setUsername(u.username);
+        setEmail(u.email);
         setRoleId(u.role_id || u.roles?.[0]?.role_id || "");
-        setUserSearchQuery(`${u.full_name} (@${u.username})`);
+        setUserSearchQuery(`${u.full_name} (@${u.email})`);
         setUserDropdownOpen(false);
     };
 
     const handleUnlink = () => {
         setLinkedUserId(null);
-        setGivenName(""); setFamilyName(""); setEmail(""); setUsername(""); setRoleId("");
+        setGivenName(""); setFamilyName(""); setEmail(""); setEmail(""); setRoleId("");
         setUserSearchQuery("");
     };
 
@@ -268,7 +268,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
         if (!linkExisting || isEdit) {
             if (!givenName.trim()) err.givenName = "Given name is required";
             if (!familyName.trim()) err.familyName = "Family name is required";
-            if (!username.trim()) err.username = "Username is required";
+            if (!email.trim()) err.email = "email is required";
         }
         if (!roleId) err.roleId = "Role selection is required";
 
@@ -371,7 +371,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
             user_payload: {
                 given_name: givenName,
                 family_name: familyName,
-                username: username,
+                email: email,
                 role_id: parseInt(roleId),
                 is_active: isActive,
                 last_known_location: locationId ? parseInt(locationId) : null
@@ -410,7 +410,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                             <div className="relative flex items-center">
                                 <input
                                     type="text"
-                                    placeholder="Search by name, username or user ID..."
+                                    placeholder="Search by name, email or user ID..."
                                     value={userSearchQuery}
                                     onChange={e => { setUserSearchQuery(e.target.value); setUserDropdownOpen(true); if (!e.target.value) handleUnlink(); }}
                                     onFocus={() => setUserDropdownOpen(true)}
@@ -429,7 +429,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                             className="p-3 hover:bg-slate-900 cursor-pointer transition-colors duration-150"
                                         >
                                             <p className="text-sm font-semibold text-slate-200">{u.full_name}</p>
-                                            <p className="text-xs text-slate-500 mt-0.5">@{u.username} &bull; UID: {u.user_id} &bull; {u.email}</p>
+                                            <p className="text-xs text-slate-500 mt-0.5">@{u.email} &bull; UID: {u.user_id} &bull; {u.email}</p>
                                         </div>
                                     ))}
                                 </div>
@@ -503,20 +503,20 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     />
                 </div>
                 <div>
-                    <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Username</label>
+                    <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">email</label>
                     <input 
                         type="text" 
-                        value={username} 
+                        value={email} 
                         onChange={e => {
-                            setUsername(e.target.value);
-                            if (errors.username) setErrors(prev => ({ ...prev, username: "" }));
+                            setEmail(e.target.value);
+                            if (errors.email) setErrors(prev => ({ ...prev, email: "" }));
                         }} 
-                        className={getInputClass(errors.username)} 
+                        className={getInputClass(errors.email)} 
                     />
-                    {errors.username && (
+                    {errors.email && (
                         <p className="text-rose-500 text-xs mt-1.5 flex items-center gap-1.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                            <span>{errors.username}</span>
+                            <span>{errors.email}</span>
                         </p>
                     )}
                 </div>
@@ -1032,7 +1032,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
             // Nested User properties
             const [fullName, setFullName] = useState(item?.user?.full_name || "");
             const [email, setEmail] = useState(item?.user?.email || "");
-            const [username, setUsername] = useState(item?.user?.username || "");
+            const [email, setEmail] = useState(item?.user?.email || "");
             const [roleId, setRoleId] = useState(item?.user?.role_id || "");
             const [editRole, setEditRole] = useState(false);
 
@@ -1070,7 +1070,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     user: (isEdit || !linkExisting) ? {
                         full_name: fullName,
                         email: email,
-                        username: username,
+                        email: email,
                         role_id: parseInt(roleId),
                         is_active: true
                     } : null
@@ -1106,22 +1106,22 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                         <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Search Existing User (Similarity Search)</label>
                                         <AutocompleteSearch
                                             list={systemUsers}
-                                            placeholder="Type name, email, username or user ID..."
+                                            placeholder="Type name, email, email or user ID..."
                                             filterFn={(u, q) => (
                                                 u.full_name?.toLowerCase().includes(q) ||
-                                                u.username?.toLowerCase().includes(q) ||
+                                                u.email?.toLowerCase().includes(q) ||
                                                 u.email?.toLowerCase().includes(q) ||
                                                 String(u.user_id).includes(q)
                                             )}
                                             renderItem={(u) => (
                                                 <div>
                                                     <div className="font-bold text-slate-200">{u.full_name}</div>
-                                                    <div className="text-xs text-slate-400">ID: {u.user_id} | Username: {u.username} | Email: {u.email}</div>
+                                                    <div className="text-xs text-slate-400">ID: {u.user_id} | email: {u.email} | Email: {u.email}</div>
                                                 </div>
                                             )}
                                             onSelect={(u, setQ) => {
                                                 setUserId(u.user_id);
-                                                setQ(`${u.full_name} (${u.username})`);
+                                                setQ(`${u.full_name} (${u.email})`);
                                             }}
                                         />
                                     </div>
@@ -1157,8 +1157,8 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                     <input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Username</label>
-                                    <input type="text" required disabled={isEdit} value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" />
+                                    <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">email</label>
+                                    <input type="text" required disabled={isEdit} value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" />
                                 </div>
                             </div>
                             <div>
@@ -1236,7 +1236,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
             
             const [fullName, setFullName] = useState(item?.user?.full_name || "");
             const [email, setEmail] = useState(item?.user?.email || "");
-            const [username, setUsername] = useState(item?.user?.username || "");
+            const [email, setEmail] = useState(item?.user?.email || "");
             const [roleId, setRoleId] = useState(item?.user?.role_id || "");
             const [editRole, setEditRole] = useState(false);
 
@@ -1275,7 +1275,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     user: (isEdit || !linkExisting) ? {
                         full_name: fullName,
                         email: email,
-                        username: username,
+                        email: email,
                         role_id: parseInt(roleId),
                         is_active: true
                     } : null
@@ -1311,22 +1311,22 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                         <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Search Existing User (Similarity Search)</label>
                                         <AutocompleteSearch
                                             list={systemUsers}
-                                            placeholder="Type name, email, username or user ID..."
+                                            placeholder="Type name, email, email or user ID..."
                                             filterFn={(u, q) => (
                                                 u.full_name?.toLowerCase().includes(q) ||
-                                                u.username?.toLowerCase().includes(q) ||
+                                                u.email?.toLowerCase().includes(q) ||
                                                 u.email?.toLowerCase().includes(q) ||
                                                 String(u.user_id).includes(q)
                                             )}
                                             renderItem={(u) => (
                                                 <div>
                                                     <div className="font-bold text-slate-200">{u.full_name}</div>
-                                                    <div className="text-xs text-slate-400">ID: {u.user_id} | Username: {u.username} | Email: {u.email}</div>
+                                                    <div className="text-xs text-slate-400">ID: {u.user_id} | email: {u.email} | Email: {u.email}</div>
                                                 </div>
                                             )}
                                             onSelect={(u, setQ) => {
                                                 setUserId(u.user_id);
-                                                setQ(`${u.full_name} (${u.username})`);
+                                                setQ(`${u.full_name} (${u.email})`);
                                             }}
                                         />
                                     </div>
@@ -1362,8 +1362,8 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                     <input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Username</label>
-                                    <input type="text" required disabled={isEdit} value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" />
+                                    <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">email</label>
+                                    <input type="text" required disabled={isEdit} value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" />
                                 </div>
                             </div>
                             <div>
@@ -1448,7 +1448,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
 
             const [fullName, setFullName] = useState(item?.user?.full_name || "");
             const [email, setEmail] = useState(item?.user?.email || "");
-            const [username, setUsername] = useState(item?.user?.username || "");
+            const [email, setEmail] = useState(item?.user?.email || "");
             const [roleId, setRoleId] = useState(item?.user?.role_id || "");
             const [editRole, setEditRole] = useState(false);
 
@@ -1486,7 +1486,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     user: (isEdit || !linkExisting) ? {
                         full_name: fullName,
                         email: email,
-                        username: username,
+                        email: email,
                         role_id: parseInt(roleId),
                         is_active: true
                     } : null
@@ -1522,22 +1522,22 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                         <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Search Existing User (Similarity Search)</label>
                                         <AutocompleteSearch
                                             list={systemUsers}
-                                            placeholder="Type name, email, username or user ID..."
+                                            placeholder="Type name, email, email or user ID..."
                                             filterFn={(u, q) => (
                                                 u.full_name?.toLowerCase().includes(q) ||
-                                                u.username?.toLowerCase().includes(q) ||
+                                                u.email?.toLowerCase().includes(q) ||
                                                 u.email?.toLowerCase().includes(q) ||
                                                 String(u.user_id).includes(q)
                                             )}
                                             renderItem={(u) => (
                                                 <div>
                                                     <div className="font-bold text-slate-200">{u.full_name}</div>
-                                                    <div className="text-xs text-slate-400">ID: {u.user_id} | Username: {u.username} | Email: {u.email}</div>
+                                                    <div className="text-xs text-slate-400">ID: {u.user_id} | email: {u.email} | Email: {u.email}</div>
                                                 </div>
                                             )}
                                             onSelect={(u, setQ) => {
                                                 setUserId(u.user_id);
-                                                setQ(`${u.full_name} (${u.username})`);
+                                                setQ(`${u.full_name} (${u.email})`);
                                             }}
                                         />
                                     </div>
@@ -1573,8 +1573,8 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                     <input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Username</label>
-                                    <input type="text" required disabled={isEdit} value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" />
+                                    <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">email</label>
+                                    <input type="text" required disabled={isEdit} value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" />
                                 </div>
                             </div>
                             <div>
@@ -1660,7 +1660,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
 
             const [fullName, setFullName] = useState(item?.user?.full_name || "");
             const [email, setEmail] = useState(item?.user?.email || "");
-            const [username, setUsername] = useState(item?.user?.username || "");
+            const [email, setEmail] = useState(item?.user?.email || "");
             const [roleId, setRoleId] = useState(item?.user?.role_id || "");
             const [editRole, setEditRole] = useState(false);
 
@@ -1699,7 +1699,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     user: (isEdit || !linkExisting) ? {
                         full_name: fullName,
                         email: email,
-                        username: username,
+                        email: email,
                         role_id: parseInt(roleId),
                         is_active: true
                     } : null
@@ -1741,22 +1741,22 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                         <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Search Existing User (Similarity Search)</label>
                                         <AutocompleteSearch
                                             list={systemUsers}
-                                            placeholder="Type name, email, username or user ID..."
+                                            placeholder="Type name, email, email or user ID..."
                                             filterFn={(u, q) => (
                                                 u.full_name?.toLowerCase().includes(q) ||
-                                                u.username?.toLowerCase().includes(q) ||
+                                                u.email?.toLowerCase().includes(q) ||
                                                 u.email?.toLowerCase().includes(q) ||
                                                 String(u.user_id).includes(q)
                                             )}
                                             renderItem={(u) => (
                                                 <div>
                                                     <div className="font-bold text-slate-200">{u.full_name}</div>
-                                                    <div className="text-xs text-slate-400">ID: {u.user_id} | Username: {u.username} | Email: {u.email}</div>
+                                                    <div className="text-xs text-slate-400">ID: {u.user_id} | email: {u.email} | Email: {u.email}</div>
                                                 </div>
                                             )}
                                             onSelect={(u, setQ) => {
                                                 setUserId(u.user_id);
-                                                setQ(`${u.full_name} (${u.username})`);
+                                                setQ(`${u.full_name} (${u.email})`);
                                             }}
                                         />
                                     </div>
@@ -1792,8 +1792,8 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                     <input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Username</label>
-                                    <input type="text" required disabled={isEdit} value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" />
+                                    <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">email</label>
+                                    <input type="text" required disabled={isEdit} value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" />
                                 </div>
                             </div>
                             <div>
@@ -1898,7 +1898,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                         <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-2">
                             <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Linked Staff Member</span>
                             <div className="text-sm font-bold text-slate-200">{item.user.full_name}</div>
-                            <div className="text-xs text-slate-400">Username: {item.user.username} | Email: {item.user.email}</div>
+                            <div className="text-xs text-slate-400">email: {item.user.email} | Email: {item.user.email}</div>
                         </div>
                     )}
 

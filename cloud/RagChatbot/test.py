@@ -345,7 +345,7 @@ def _make_fake_jwt(user_id: int, db_session) -> tuple[str, int]:
     payload = {
         "sub": str(user_id),
         "user_id": user_id,
-        "username": "test_runner",
+        "email": "test_runner@example.test",
         "exp": expire,
     }
     token = pyjwt.encode(payload, rag_settings.JWT_SECRET, algorithm=rag_settings.JWT_ALGORITHM)
@@ -396,7 +396,7 @@ def test_full_pipeline(user_id: int = 1, query: str = "What is the campus librar
     try:
         from app.models.models import User, UploadedDocument, DocumentChunk, EmbeddingVector
         user = db.query(User).filter_by(user_id=user_id, is_active=True).first()
-        _assert(user is not None, f"User user_id={user_id} found ({getattr(user, 'username', 'N/A')})")
+        _assert(user is not None, f"User user_id={user_id} found ({getattr(user, 'email', 'N/A')})")
         if user is None:
             print(_warn(f"  ▸ Change `user_id` in the test call or insert a user with user_id={user_id}"))
             db.close()

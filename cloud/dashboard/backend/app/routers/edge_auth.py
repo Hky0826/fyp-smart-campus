@@ -61,7 +61,7 @@ class EdgeTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user_id: int
-    username: str
+    email: str
     full_name: str
     roles: list
     session_id: int
@@ -108,7 +108,7 @@ def issue_edge_token(
     token_payload = {
         "sub": str(user.user_id),
         "user_id": user.user_id,
-        "username": user.username,
+        "email": user.email,
         "device_id": body.device_id,
         "exp": expire,
     }
@@ -146,7 +146,7 @@ def issue_edge_token(
         access_token=access_token,
         token_type="bearer",
         user_id=user.user_id,
-        username=user.username,
+        email=user.email,
         full_name=user.full_name,
         roles=roles,
         session_id=session.session_id,

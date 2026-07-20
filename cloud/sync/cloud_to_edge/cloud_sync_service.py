@@ -6,7 +6,7 @@ import base64
 import logging
 import datetime
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Set
 import numpy as np
 
 # Add backend directory to sys.path to allow importing from app
@@ -94,7 +94,7 @@ class AbstractDownstreamHandler(ABC):
         pass
 
     @abstractmethod
-    def get_delta_updates(self, db: Session, last_synced_at: Optional[datetime.datetime]) -> Dict[str, Any]:
+    def get_delta_updates(self, db: Session, last_synced_at: Optional[datetime.datetime], embedding_models: Optional[Set[str]] = None) -> Dict[str, Any]:
         pass
 
     @abstractmethod
@@ -221,7 +221,7 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
             
         return None
 
-    def get_delta_updates(self, db: Session, last_synced_at: Optional[datetime.datetime]) -> Dict[str, Any]:
+    def get_delta_updates(self, db: Session, last_synced_at: Optional[datetime.datetime], embedding_models: Optional[Set[str]] = None) -> Dict[str, Any]:
         """
         Retrieves database entries changed since last_synced_at.
         If last_synced_at is None, retrieves full dataset.
@@ -248,6 +248,8 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
             embeddings_payload = []
             legacy_face_vector_b64 = None
             for emb in u.embeddings:
+                if embedding_models is not None and emb.model_name not in embedding_models:
+                    continue
                 b64 = base64.b64encode(emb.embedding).decode('utf-8')
                 embeddings_payload.append({
                     "template_name": emb.template_name,
@@ -406,7 +408,7 @@ def register_edge(registration: EdgeRegistration, db: Session = Depends(get_db))
     return handler.register_edge_node(db, registration)
 
 @router.get("/delta", response_model=DeltaSyncResponse)
-def get_deltas(last_synced_at: Optional[str] = None, db: Session = Depends(get_db)):
+def get_deltas(last_synced_at: Optional[str] = None, module: Optional[str] = None, db: Session = Depends(get_db)):
     """
     Retrieves database deltas (users, roles, permissions) modified since last_synced_at.
     Input format: ISO datetime string (e.g. 2026-06-10T00:00:00).
@@ -418,7 +420,10 @@ def get_deltas(last_synced_at: Optional[str] = None, db: Session = Depends(get_d
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid datetime format. Please use ISO 8601 string.")
     
-    return handler.get_delta_updates(db, parsed_time)
+    model_by_module = {"access_control": {"openvc_sface"}, "surveillance": {"auraface"}, "edge": {"arcface_r50"}}
+    if module is not None and module not in model_by_module:
+        raise HTTPException(status_code=400, detail="module must be access_control, surveillance, or edge")
+    return handler.get_delta_updates(db, parsed_time, model_by_module.get(module))
 
 @router.post("/deactivate")
 def administrative_deactivate(req: DeactivateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):

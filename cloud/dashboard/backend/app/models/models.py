@@ -115,7 +115,6 @@ class User(Base):
     given_name = Column(String(150), nullable=False)
     family_name = Column(String(150), nullable=False)
     email = Column(String(255), unique=True, nullable=False)
-    username = Column(String(100), unique=True, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     enrolled_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
@@ -144,7 +143,7 @@ class User(Base):
     @property
     def face_vector(self) -> Optional[str]:
         for emb in self.embeddings:
-            if emb.template_name == "front" and emb.model_name == "arcface_r50":
+            if emb.template_name == "front" and emb.model_name == "openvc_sface":
                 try:
                     import json
                     import numpy as np
@@ -193,7 +192,7 @@ class UserFaceEmbedding(Base):
     embedding_id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     template_name = Column(String(50), nullable=False)
-    model_name = Column(Enum("arcface_mobilefacenet", "arcface_r50"), nullable=False)
+    model_name = Column(Enum("arcface_mobilefacenet", "arcface_r50", "openvc_sface", "auraface"), nullable=False)
     embedding = Column(LargeBinary, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
@@ -515,8 +514,8 @@ class AuthenticationLog(Base):
     device = relationship("Device")
     
     @property
-    def username(self):
-        return self.user.username if self.user else ""
+    def email(self):
+        return self.user.email if self.user else ""
         
     @property
     def status(self):

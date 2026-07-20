@@ -236,26 +236,26 @@ def list_jwt_sessions(
 def list_auth_logs(
     skip: int = 0, 
     limit: int = 50, 
-    username: Optional[str] = None,
+    email: Optional[str] = None,
     db: Session = Depends(get_db), 
     current_admin=Depends(verify_super_admin)
 ):
     query = db.query(AuthenticationLog)
-    if username is not None:
-        query = query.join(User).filter(User.username == username)
+    if email is not None:
+        query = query.join(User).filter(User.email == email)
     return query.order_by(AuthenticationLog.timestamp.desc()).offset(skip).limit(limit).all()
 
 @router.get("/surveillance-logs", response_model=List[schemas.SurveillanceLogResponse])
 def list_surveillance_logs(
     skip: int = 0,
     limit: int = 50,
-    username: Optional[str] = None,
+    email: Optional[str] = None,
     db: Session = Depends(get_db),
     current_admin=Depends(verify_super_admin)
 ):
     query = db.query(SurveillanceLog)
-    if username is not None:
-        query = query.join(User).filter(User.username == username)
+    if email is not None:
+        query = query.join(User).filter(User.email == email)
     return query.order_by(SurveillanceLog.timestamp.desc()).offset(skip).limit(limit).all()
 
 @router.get("/last-known-locations", response_model=List[schemas.LastKnownLocationResponse])
@@ -279,7 +279,7 @@ def list_last_known_locations(
         results.append(
             schemas.LastKnownLocationResponse(
                 user_id=user.user_id,
-                username=user.username,
+                email=user.email,
                 full_name=user.full_name,
                 is_active=user.is_active,
                 last_seen=user.last_seen,
@@ -297,8 +297,8 @@ def create_auth_log(
     db: Session = Depends(get_db)
 ):
     user_id = log_in.user_id
-    if user_id is None and log_in.username:
-        user = db.query(User).filter_by(username=log_in.username).first()
+    if user_id is None and log_in.email:
+        user = db.query(User).filter_by(email=log_in.email).first()
         if user:
             user_id = user.user_id
             

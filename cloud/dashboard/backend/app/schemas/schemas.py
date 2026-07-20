@@ -80,14 +80,14 @@ class ClearanceStatusEnum(str, Enum):
 # Auth Schemas
 # ==========================================
 class LoginRequest(BaseModel):
-    username: str
+    email: str
     password: str
 
 class Token(BaseSchema):
     access_token: str
     token_type: str
     admin_type: str
-    username: str
+    email: str
     full_name: str
     admin_id: str
 
@@ -174,7 +174,7 @@ class UserBase(BaseSchema):
     given_name: str
     family_name: str
     email: Optional[EmailStr] = None
-    username: str
+    email: str
     is_active: bool = True
     last_known_location: Optional[int] = None
 
@@ -447,7 +447,7 @@ class AuthenticationLogResponse(BaseSchema):
     image_path: Optional[str] = None
     
     # Backwards compatibility fields
-    username: Optional[str] = None
+    email: Optional[str] = None
     status: Optional[AuthStatusEnum] = None
     attempted_at: Optional[datetime.datetime] = None
 
@@ -464,7 +464,7 @@ class AuthenticationLogCreate(BaseSchema):
     image_path: Optional[str] = None
     
     # Backwards compatibility fields
-    username: Optional[str] = None
+    email: Optional[str] = None
     status: Optional[AuthStatusEnum] = None
 
 class SurveillanceLogResponse(BaseSchema):
@@ -482,7 +482,7 @@ class SurveillanceLogResponse(BaseSchema):
 
 class LastKnownLocationResponse(BaseSchema):
     user_id: int
-    username: str
+    email: str
     full_name: str
     is_active: bool
     last_seen: Optional[datetime.datetime] = None

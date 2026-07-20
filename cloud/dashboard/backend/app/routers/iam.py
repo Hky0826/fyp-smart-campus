@@ -286,8 +286,8 @@ def list_users(db: Session = Depends(get_db), current_admin=Depends(verify_syste
 
 @router.post("/users", response_model=schemas.UserResponse)
 def create_user(user_in: schemas.UserCreate, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
-    if db.query(User).filter_by(username=user_in.username).first():
-        raise HTTPException(status_code=400, detail="Username already taken")
+    if db.query(User).filter_by(email=user_in.email).first():
+        raise HTTPException(status_code=400, detail="email already taken")
     
     email = generate_unique_email(db, user_in.given_name, user_in.family_name)
     
@@ -304,8 +304,7 @@ def create_user(user_in: schemas.UserCreate, db: Session = Depends(get_db), curr
     user = User(
         given_name=user_in.given_name,
         family_name=user_in.family_name,
-        email=email,
-        username=user_in.username,
+        email=user_in.email,
         is_active=user_in.is_active,
         last_known_location=user_in.last_known_location
     )
@@ -393,8 +392,8 @@ def create_student(student_in: schemas.StudentCreate, db: Session = Depends(get_
     else:
         if not student_in.user:
             raise HTTPException(status_code=400, detail="User registration data is required for a new user")
-        if db.query(User).filter_by(username=student_in.user.username).first():
-            raise HTTPException(status_code=400, detail="Username already taken")
+        if db.query(User).filter_by(email=student_in.user.email).first():
+            raise HTTPException(status_code=400, detail="email already taken")
             
         email = generate_unique_email(db, student_in.user.given_name, student_in.user.family_name)
         role_ids = []
@@ -410,8 +409,7 @@ def create_student(student_in: schemas.StudentCreate, db: Session = Depends(get_
         user = User(
             given_name=student_in.user.given_name,
             family_name=student_in.user.family_name,
-            email=email,
-            username=student_in.user.username,
+            email=student_in.user.email,
             is_active=student_in.user.is_active
         )
         if roles:
@@ -518,8 +516,8 @@ def create_lecturer(lecturer_in: schemas.LecturerCreate, db: Session = Depends(g
     else:
         if not lecturer_in.user:
             raise HTTPException(status_code=400, detail="User registration data is required for a new user")
-        if db.query(User).filter_by(username=lecturer_in.user.username).first():
-            raise HTTPException(status_code=400, detail="Username already taken")
+        if db.query(User).filter_by(email=lecturer_in.user.email).first():
+            raise HTTPException(status_code=400, detail="email already taken")
             
         email = generate_unique_email(db, lecturer_in.user.given_name, lecturer_in.user.family_name)
         role_ids = []
@@ -535,8 +533,7 @@ def create_lecturer(lecturer_in: schemas.LecturerCreate, db: Session = Depends(g
         user = User(
             given_name=lecturer_in.user.given_name,
             family_name=lecturer_in.user.family_name,
-            email=email,
-            username=lecturer_in.user.username,
+            email=lecturer_in.user.email,
             is_active=lecturer_in.user.is_active
         )
         if roles:
@@ -657,8 +654,8 @@ def create_staff(staff_in: schemas.StaffCreate, db: Session = Depends(get_db), c
     else:
         if not staff_in.user:
             raise HTTPException(status_code=400, detail="User registration data is required for a new user")
-        if db.query(User).filter_by(username=staff_in.user.username).first():
-            raise HTTPException(status_code=400, detail="Username already taken")
+        if db.query(User).filter_by(email=staff_in.user.email).first():
+            raise HTTPException(status_code=400, detail="email already taken")
             
         email = generate_unique_email(db, staff_in.user.given_name, staff_in.user.family_name)
         role_ids = []
@@ -674,8 +671,7 @@ def create_staff(staff_in: schemas.StaffCreate, db: Session = Depends(get_db), c
         user = User(
             given_name=staff_in.user.given_name,
             family_name=staff_in.user.family_name,
-            email=email,
-            username=staff_in.user.username,
+            email=staff_in.user.email,
             is_active=staff_in.user.is_active
         )
         if roles:
@@ -762,8 +758,8 @@ def create_visitor(visitor_in: schemas.VisitorCreate, db: Session = Depends(get_
     else:
         if not visitor_in.user:
             raise HTTPException(status_code=400, detail="User registration data is required for a new user")
-        if db.query(User).filter_by(username=visitor_in.user.username).first():
-            raise HTTPException(status_code=400, detail="Username already taken")
+        if db.query(User).filter_by(email=visitor_in.user.email).first():
+            raise HTTPException(status_code=400, detail="email already taken")
             
         email = generate_unique_email(db, visitor_in.user.given_name, visitor_in.user.family_name)
         role_ids = []
@@ -779,8 +775,7 @@ def create_visitor(visitor_in: schemas.VisitorCreate, db: Session = Depends(get_
         user = User(
             given_name=visitor_in.user.given_name,
             family_name=visitor_in.user.family_name,
-            email=email,
-            username=visitor_in.user.username,
+            email=visitor_in.user.email,
             is_active=visitor_in.user.is_active
         )
         if roles:
@@ -861,15 +856,14 @@ def create_admin(admin_in: schemas.AdminCreate, db: Session = Depends(get_db), c
     else:
         if not admin_in.user:
             raise HTTPException(status_code=400, detail="User registration data is required for a new user")
-        if db.query(User).filter_by(username=admin_in.user.username).first():
-            raise HTTPException(status_code=400, detail="Username already taken")
+        if db.query(User).filter_by(email=admin_in.user.email).first():
+            raise HTTPException(status_code=400, detail="email already taken")
             
         email = generate_unique_email(db, admin_in.user.given_name, admin_in.user.family_name)
         user = User(
             given_name=admin_in.user.given_name,
             family_name=admin_in.user.family_name,
-            email=email,
-            username=admin_in.user.username,
+            email=admin_in.user.email,
             is_active=admin_in.user.is_active
         )
         admin_role = db.query(Role).filter_by(role_name="ADMIN").first()
@@ -1074,6 +1068,11 @@ def upload_user_face_photo(
     )
     db.add(db_emb_low)
 
+    # Persist only model-specific templates. SFace is required for access control; AuraFace is created when its model is configured.
+    db.flush()
+    db.query(UserFaceEmbedding).filter_by(user_id=user_id).delete()
+    from app.services.multi_model_embeddings import MultiModelEmbeddingService, SFACE, AURAFACE
+    MultiModelEmbeddingService().reembed_all(db, (SFACE, AURAFACE))
     user.updated_at = datetime.datetime.utcnow()
     db.commit()
     db.refresh(user)
@@ -1381,6 +1380,10 @@ def enroll_live_complete(
             # Update progress
             enrollment_progress[user_id] = int((idx + 1) / len(poses) * 100)
 
+        db.flush()
+        db.query(UserFaceEmbedding).filter_by(user_id=user_id).delete()
+        from app.services.multi_model_embeddings import MultiModelEmbeddingService, SFACE, AURAFACE
+        MultiModelEmbeddingService().reembed_all(db, (SFACE, AURAFACE))
         user.updated_at = datetime.datetime.utcnow()
         db.commit()
         db.refresh(user)
@@ -1577,6 +1580,11 @@ async def enroll_user_video(
         )
         db.add(db_emb)
 
+    # Persist only model-specific templates. SFace is required for access control; AuraFace is created when its model is configured.
+    db.flush()
+    db.query(UserFaceEmbedding).filter_by(user_id=user_id).delete()
+    from app.services.multi_model_embeddings import MultiModelEmbeddingService, SFACE, AURAFACE
+    MultiModelEmbeddingService().reembed_all(db, (SFACE, AURAFACE))
     user.updated_at = datetime.datetime.utcnow()
     db.commit()
     db.refresh(user)

@@ -26,15 +26,15 @@ def login(
 ):
     ip_address = request.client.host if request.client else None
     
-    # Locate admin by username (which is on the users table)
+    # Locate admin by email (which is on the users table)
     admin = db.query(Admin).join(User, Admin.user_id == User.user_id).filter(
-        User.username == form_data.username
+        User.email == form_data.username
     ).first()
     
     if not admin or not verify_password(form_data.password, admin.Password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
         
@@ -71,7 +71,7 @@ def login(
         "access_token": access_token,
         "token_type": "bearer",
         "admin_type": admin.admin_type,
-        "username": admin.user.username,
+        "email": admin.user.email,
         "full_name": admin.user.full_name,
         "admin_id": admin.admin_id
     }
@@ -85,13 +85,13 @@ def login_json(
     ip_address = request.client.host if request.client else None
     
     admin = db.query(Admin).join(User, Admin.user_id == User.user_id).filter(
-        User.username == login_data.username
+        User.email == login_data.email
     ).first()
     
     if not admin or not verify_password(login_data.password, admin.Password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password"
+            detail="Incorrect email or password"
         )
         
     if not admin.user.is_active:
@@ -124,7 +124,7 @@ def login_json(
         "access_token": access_token,
         "token_type": "bearer",
         "admin_type": admin.admin_type,
-        "username": admin.user.username,
+        "email": admin.user.email,
         "full_name": admin.user.full_name,
         "admin_id": admin.admin_id
     }

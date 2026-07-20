@@ -34,7 +34,7 @@ function dashboardPath(tab, subTab) {
             // ── Core auth state ──────────────────────────────
             const [token, setToken] = useState(localStorage.getItem("access_token") || "");
             const [adminType, setAdminType] = useState(localStorage.getItem("admin_type") || "");
-            const [username, setUsername] = useState(localStorage.getItem("username") || "");
+            const [email, setEmail] = useState(localStorage.getItem("email") || "");
             const [fullName, setFullName] = useState(localStorage.getItem("full_name") || "");
             const [adminId, setAdminId] = useState(localStorage.getItem("admin_id") || "");
 
@@ -254,7 +254,7 @@ function dashboardPath(tab, subTab) {
                 setLoginError("");
                 try {
                     const formData = new URLSearchParams();
-                    formData.append("username", loginUser);
+                    formData.append("email", loginUser);
                     formData.append("password", loginPass);
                     const response = await fetch("/api/auth/login", {
                         method: "POST",
@@ -265,12 +265,12 @@ function dashboardPath(tab, subTab) {
                     if (!response.ok) throw new Error(data.detail || "Authentication failed. Please check your credentials.");
                     localStorage.setItem("access_token", data.access_token);
                     localStorage.setItem("admin_type", data.admin_type);
-                    localStorage.setItem("username", data.username);
+                    localStorage.setItem("email", data.email);
                     localStorage.setItem("full_name", data.full_name);
                     localStorage.setItem("admin_id", data.admin_id);
                     setToken(data.access_token);
                     setAdminType(data.admin_type);
-                    setUsername(data.username);
+                    setEmail(data.email);
                     setFullName(data.full_name);
                     setAdminId(data.admin_id);
                     showSuccessToast("Welcome back! You are now signed in.");
@@ -288,7 +288,7 @@ function dashboardPath(tab, subTab) {
                     await fetch("/api/auth/logout", { method: "POST", headers: { "Authorization": `Bearer ${token}` } });
                 } catch (e) {}
                 localStorage.clear();
-                setToken(""); setAdminType(""); setUsername(""); setFullName(""); setAdminId("");
+                setToken(""); setAdminType(""); setEmail(""); setFullName(""); setAdminId("");
                 setSelectedPhotoFile(null);
                 if (uploadedPhoto) { URL.revokeObjectURL(uploadedPhoto); setUploadedPhoto(null); }
                 setCurrentTab("overview");
@@ -864,13 +864,13 @@ function dashboardPath(tab, subTab) {
                     if (currentTab === "iam") {
                         if (subTab === "roles") return q === "" || item.role_name?.toLowerCase().includes(q) || item.description?.toLowerCase().includes(q);
                         if (subTab === "facial-recognition") {
-                            const mQ = q === "" || item.full_name?.toLowerCase().includes(q) || item.username?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q);
+                            const mQ = q === "" || item.full_name?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q);
                             const mR = faceRoleFilter === "ALL" || userHasRole(item, faceRoleFilter);
                             const mS = faceStatusFilter === "ALL" || (faceStatusFilter === "ENROLLED" ? !!item.face_vector : !item.face_vector);
                             return mQ && mR && mS;
                         }
                         if (subTab === "users") {
-                            const mQ = q === "" || item.full_name?.toLowerCase().includes(q) || item.username?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q) || item.student?.student_id?.toLowerCase().includes(q) || item.lecturer?.lecturer_id?.toLowerCase().includes(q) || item.staff?.staff_id?.toLowerCase().includes(q);
+                            const mQ = q === "" || item.full_name?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q) || item.student?.student_id?.toLowerCase().includes(q) || item.lecturer?.lecturer_id?.toLowerCase().includes(q) || item.staff?.staff_id?.toLowerCase().includes(q);
                             const mR = roleFilter === "ALL" || userHasRole(item, roleFilter);
                             const mS = statusFilter === "ALL" || (statusFilter === "ACTIVE" ? item.is_active : !item.is_active);
                             return mQ && mR && mS;
@@ -883,8 +883,8 @@ function dashboardPath(tab, subTab) {
                     }
                     if (currentTab === "infra") {
                         if (subTab === "devices") return q === "" || item.device_name?.toLowerCase().includes(q) || item.device_id?.toLowerCase().includes(q);
-                        if (subTab === "auth-logs") return q === "" || item.username?.toLowerCase().includes(q) || item.auth_status?.toLowerCase().includes(q);
-                        if (subTab === "jwt-sessions") return q === "" || item.user?.username?.toLowerCase().includes(q) || item.ip_address?.toLowerCase().includes(q);
+                        if (subTab === "auth-logs") return q === "" || item.email?.toLowerCase().includes(q) || item.auth_status?.toLowerCase().includes(q);
+                        if (subTab === "jwt-sessions") return q === "" || item.user?.email?.toLowerCase().includes(q) || item.ip_address?.toLowerCase().includes(q);
                     }
                     if (currentTab === "academics") {
                         if (subTab === "courses") return q === "" || item.course_name?.toLowerCase().includes(q) || item.course_code?.toLowerCase().includes(q);
@@ -1032,12 +1032,12 @@ function dashboardPath(tab, subTab) {
 
                                 <form onSubmit={handleLogin} className="space-y-5">
                                     <div>
-                                        <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Username</label>
+                                        <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">email</label>
                                         <div className="relative">
                                             <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-600">
                                                 <Icon name="user" className="w-4 h-4" />
                                             </span>
-                                            <input type="text" required value={loginUser} onChange={e => setLoginUser(e.target.value)} placeholder="Enter your username"
+                                            <input type="text" required value={loginUser} onChange={e => setLoginUser(e.target.value)} placeholder="Enter your email"
                                                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-slate-100 focus:outline-none focus:border-blue-500 placeholder-slate-700 text-sm transition-all duration-200" />
                                         </div>
                                     </div>
@@ -1922,7 +1922,7 @@ function dashboardPath(tab, subTab) {
                                                     <tbody className="divide-y divide-slate-800/50">
                                                         {paginatedData.map((item, idx) => (
                                                             <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
-                                                                <td className="p-4 pl-6 font-mono text-slate-200 text-sm font-semibold">{item.username || "Unknown"}</td>
+                                                                <td className="p-4 pl-6 font-mono text-slate-200 text-sm font-semibold">{item.email || "Unknown"}</td>
                                                                 <td className="p-4 text-xs font-mono text-slate-500">{item.device_id || "—"}</td>
                                                                 <td className="p-4 text-xs font-bold">
                                                                     {(item.auth_status === 'SUCCESS' || item.auth_status === 'GRANTED')
@@ -1948,7 +1948,7 @@ function dashboardPath(tab, subTab) {
                                                     <tbody className="divide-y divide-slate-800/50">
                                                         {paginatedData.map((item, idx) => (
                                                             <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
-                                                                <td className="p-4 pl-6 font-mono text-slate-200 text-sm font-bold"><Icon name="shield" className="inline-block w-4 h-4 mr-2 text-indigo-400"/>{item.user?.username || item.admin_id || "—"}</td>
+                                                                <td className="p-4 pl-6 font-mono text-slate-200 text-sm font-bold"><Icon name="shield" className="inline-block w-4 h-4 mr-2 text-indigo-400"/>{item.user?.email || item.admin_id || "—"}</td>
                                                                 <td className="p-4 text-xs font-mono text-slate-500">{item.ip_address || "—"}</td>
                                                                 <td className="p-4 text-xs font-mono text-slate-400">{item.expires_at}</td>
                                                                 <td className="p-4 pr-6 text-xs font-bold">

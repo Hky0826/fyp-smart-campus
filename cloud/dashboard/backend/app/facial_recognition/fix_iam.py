@@ -12,15 +12,14 @@ target = """    else:
 replacement = """    else:
         if not admin_in.user:
             raise HTTPException(status_code=400, detail="User registration data is required for a new user")
-        if db.query(User).filter_by(username=admin_in.user.username).first():
-            raise HTTPException(status_code=400, detail="Username already taken")
+        if db.query(User).filter_by(email=admin_in.user.email).first():
+            raise HTTPException(status_code=400, detail="email already taken")
             
         email = generate_unique_email(db, admin_in.user.given_name, admin_in.user.family_name)
         user = User(
             given_name=admin_in.user.given_name,
             family_name=admin_in.user.family_name,
-            email=email,
-            username=admin_in.user.username,
+            email=admin_in.user.email,
             is_active=admin_in.user.is_active
         )
         admin_role = db.query(Role).filter_by(role_name="ADMIN").first()

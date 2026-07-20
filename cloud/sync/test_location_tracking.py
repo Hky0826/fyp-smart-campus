@@ -88,7 +88,7 @@ class LocationTrackingTests(unittest.TestCase):
                     given_name="Test",
                     family_name="User",
                     email="test.user@example.com",
-                    username="testuser",
+                    email="testuser@example.test",
                 ),
             ]
         )
