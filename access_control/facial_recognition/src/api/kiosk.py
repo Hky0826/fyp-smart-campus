@@ -706,12 +706,23 @@ def _try_issue_registered_token(pipeline: Any, owner_embedding: np.ndarray, conf
         logger.warning("Could not match chatbot owner against registered templates: %s", exc)
         return None
 
+    if match:
+        logger.info(
+            "Chatbot owner recognition result: identity=%s recognition_score=%.4f matched=%s threshold=%.3f",
+            match.identity,
+            match.similarity,
+            match.matched,
+            pipeline.config.recognition_threshold,
+        )
+
     if not match.matched or not match.is_active or match.user_id is None:
         return None
 
     token_client = EdgeAuthTokenClient(config.sync_cloud_url, config.sync_device_id)
     try:
-        return token_client.issue_token(match.user_id)
+        token = token_client.issue_token(match.user_id)
+        logger.info("Chatbot JWT issued for user_id=%s with recognition_score=%.4f", match.user_id, match.similarity)
+        return token
     except Exception as exc:
         logger.warning("Chatbot token issuance failed for user_id=%s: %s", match.user_id, exc)
         return None
@@ -725,6 +736,7 @@ def _detect_owner_presence(pipeline: Any, frame: np.ndarray, owner_embedding: np
         if not isinstance(face, dict) or face.get("embedding") is None:
             continue
         similarity = pipeline.matcher.cosine_similarity(owner_embedding, face["embedding"])
+        logger.info("Owner presence check: recognition_score=%.4f threshold=%.3f matched=%s", similarity, threshold, similarity >= threshold)
         if similarity >= threshold:
             owner_present = True
             break

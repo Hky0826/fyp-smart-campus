@@ -336,14 +336,22 @@ class AccessControlPipeline:
             timer.mark("database_matching")
 
             logger.info(
-                "Access-control recognition result: identity=%s similarity=%.4f template=%s matched=%s",
+                "Access-control recognition result: identity=%s recognition_score=%.4f (similarity=%.4f) template=%s matched=%s threshold=%.3f",
                 match.identity,
+                match.similarity,
                 match.similarity,
                 match.matched_template,
                 match.matched,
+                self.config.recognition_threshold,
             )
 
             if not match.matched or str(match.user_id) != consistent_candidate:
+                logger.info(
+                    "ACCESS DENIED (low confidence / candidate mismatch): identity=%s recognition_score=%.4f threshold=%.3f",
+                    match.identity,
+                    match.similarity,
+                    self.config.recognition_threshold,
+                )
                 image_path = self._save_face_snapshot(frame, face)
                 self._log_event(None, "FAILED", match.similarity, image_path=image_path)
                 timer.total()
@@ -359,6 +367,12 @@ class AccessControlPipeline:
                 ))
 
             if not match.is_active:
+                logger.info(
+                    "ACCESS DENIED (user inactive): identity=%s recognition_score=%.4f threshold=%.3f",
+                    match.identity,
+                    match.similarity,
+                    self.config.recognition_threshold,
+                )
                 image_path = self._save_face_snapshot(frame, face)
                 self._log_event(match.user_id, "FAILED", match.similarity, image_path=image_path)
                 timer.total()
@@ -373,6 +387,14 @@ class AccessControlPipeline:
                     bbox=bbox,
                     bboxes=bboxes,
                 ))
+
+            logger.info(
+                "ACCESS GRANTED: user_id=%s identity=%s recognition_score=%.4f threshold=%.3f",
+                match.user_id,
+                match.identity,
+                match.similarity,
+                self.config.recognition_threshold,
+            )
 
             image_path = self._save_face_snapshot(frame, face)
             self._log_event(match.user_id, "SUCCESS", match.similarity, image_path=image_path)
