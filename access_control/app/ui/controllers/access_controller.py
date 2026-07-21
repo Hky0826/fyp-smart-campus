@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QObject, Property, QTimer, QThread, Signal, Slot
 
+from ...audio_io.access_feedback import AccessFeedbackPlayer
 from .api_client import KioskApiClient
 from .camera_controller import CameraController
 from .chatbot_controller import ChatbotController
@@ -77,6 +78,7 @@ class AccessController(QObject):
         self._api = api
         self._camera = camera
         self._chatbot = chatbot
+        self._access_feedback = AccessFeedbackPlayer()
         self._presence = PresenceController(api)
         self._state: dict[str, Any] | None = None
         self._mode = "offline"
@@ -105,6 +107,7 @@ class AccessController(QObject):
 
         self._chatbot.responseReceived.connect(self._on_audio_response)
         self._chatbot.errorChanged.connect(self._on_chatbot_error)
+        self.modeChanged.connect(self._play_access_feedback)
 
     @Slot()
     def start(self) -> None:
@@ -116,6 +119,7 @@ class AccessController(QObject):
 
     @Slot()
     def stop(self) -> None:
+        self._access_feedback.close()
         self._chatbot.shutdown()
         if self._events_worker:
             if self._events_worker.isRunning():
@@ -369,6 +373,10 @@ class AccessController(QObject):
             return
         self._mode = mode
         self.modeChanged.emit()
+
+    @Slot()
+    def _play_access_feedback(self) -> None:
+        self._access_feedback.play_for_mode(self._mode)
 
     def _derive_mode(self) -> str:
         if self._offline or not self._state:
