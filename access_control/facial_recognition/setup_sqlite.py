@@ -21,7 +21,7 @@ DEFAULT_EMBEDDING_MODEL = "openvc_sface"
 
 
 def default_database_path() -> Path:
-    configured = os.getenv("EDGE_HAILO_DB_PATH")
+    configured = os.getenv("EDGE_DB_PATH") or os.getenv("ACCESS_DB_PATH")
     if configured:
         return Path(configured).expanduser()
     return DEFAULT_DB_PATH
@@ -148,7 +148,7 @@ def main() -> None:
         "--database",
         "-d",
         default=None,
-        help="SQLite database path. Defaults to EDGE_HAILO_DB_PATH or edge/facial_recognition/data/device_local.db.",
+        help="SQLite database path. Defaults to EDGE_DB_PATH, ACCESS_DB_PATH, or access_control/facial_recognition/data/device_local.db.",
     )
     args = parser.parse_args()
 

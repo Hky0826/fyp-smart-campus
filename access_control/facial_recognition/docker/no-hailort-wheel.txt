@@ -1,1 +1,0 @@
-Placeholder used by the Dockerfile when no HailoRT Python wheel is supplied.

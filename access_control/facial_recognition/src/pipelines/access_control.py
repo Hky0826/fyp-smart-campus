@@ -612,7 +612,7 @@ def build_pipeline(config: AccessControlConfig) -> AccessControlPipeline:
 def main() -> None:
     from ..sync import SyncEngine
 
-    parser = argparse.ArgumentParser(description="Run Hailo access-control face recognition")
+    parser = argparse.ArgumentParser(description="Run YuNet/SFace access-control face recognition")
     parser.add_argument("--camera", default=None, help="Camera index, /dev/videoN, RTSP URL, or video file")
     parser.add_argument("--database", default=None, help="SQLite database path")
     parser.add_argument("--target-user-id", default=None, help="Optional 1:1 verification user ID")
@@ -623,7 +623,7 @@ def main() -> None:
     display_group = parser.add_mutually_exclusive_group()
     display_group.add_argument("--display", dest="display", action="store_true", default=True, help="Show an OpenCV camera window with overlays (default)")
     display_group.add_argument("--no-display", dest="display", action="store_false", help="Run without the OpenCV display window")
-    parser.add_argument("--window-name", default="Hailo Access Control", help="OpenCV display window name")
+    parser.add_argument("--window-name", default="Access Control", help="OpenCV display window name")
     parser.add_argument("--mirror", dest="mirror", action="store_true", default=True, help="Mirror the displayed frame")
     parser.add_argument("--no-mirror", dest="mirror", action="store_false", help="Do not mirror the displayed frame")
     args = parser.parse_args()

@@ -1,1 +1,1 @@
-"""Runtime modules for the independent Hailo face-recognition pipelines."""
+"""Runtime modules for access control face-recognition pipelines."""

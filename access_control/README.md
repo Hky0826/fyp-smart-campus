@@ -1,106 +1,113 @@
-# Edge Device Pipelines
+# Standalone Access Control Module
 
-The edge code is split into independent runtime areas:
+The `access_control` directory is a standalone module extracted for edge access control, voice chatbot interactions, kiosk frontend serving, and cloud synchronization. It uses OpenCV **YuNet** (face detection) and **SFace** (facial recognition), loading configuration directly from `.env` on every startup.
 
 ```text
-edge/
-  facial_recognition/   Hailo face-recognition, access-control, surveillance, sync, and local API code
-  audio_io/             Spacebar activation, recording, cloud Gemini transcription/RAG/TTS, and playback
-  README.md             This folder overview
+access_control/
+├── .env                     Active environment configuration file (loaded automatically on start)
+├── .env.example             Configuration template with descriptions
+├── audio_io/                Voice chatbot recording, Gemini cloud RAG proxy, audio feedback, and playback
+│   └── sounds/              Prerecorded voice feedback (access_granted.wav, access_denied.wav)
+├── facial_recognition/      Face detection (YuNet), recognition (SFace), sync, database, and FastAPI endpoints
+│   ├── models/
+│   │   └── access_control/  ONNX models (face_detection_yunet_2023mar_int8bq.onnx, face_recognition_sface_2021dec.onnx)
+│   ├── src/
+│   │   ├── api/             FastAPI server (main.py) & kiosk facade (kiosk.py)
+│   │   ├── face/            YuNet detector, SFace embedder, tracking, quality & spoofing checks
+│   │   ├── pipelines/       Access control pipeline (access_control.py) & audio coordinator (access_audio.py)
+│   │   └── sync.py          Cloud synchronization engine for openvc_sface embeddings
+│   └── tests/               Pytest automated test suite
+├── ui/
+│   ├── access_control_frontend/  React / Vite kiosk web interface
+│   └── access_control_gui/       PySide6 / QML native desktop GUI application
+└── test/                    Evaluation & benchmarking framework
 ```
 
-## Facial Recognition
+---
 
-The existing facial-recognition pipeline was moved to `edge/facial_recognition/`.
+## Quick Start
 
-Install dependencies:
+### 1. Environment & Dependencies
+
+Install required Python dependencies:
 
 ```bash
-python3 -m pip install -r edge/facial_recognition/requirements.txt
+pip install -r access_control/facial_recognition/requirements.txt
 ```
 
-Prepare HailoRT and HEF models:
+Create `.env` from `.env.example`:
 
 ```bash
-bash edge/facial_recognition/install_hailort.sh
-bash edge/facial_recognition/download_models.sh
+cp access_control/.env.example access_control/.env
 ```
 
-Prepare the local SQLite database:
+### 2. Initialize Database
+
+Setup local SQLite database (`device_local.db`):
 
 ```bash
-python edge/facial_recognition/setup_sqlite.py
+python access_control/facial_recognition/setup_sqlite.py
 ```
 
-Run the direct pipelines:
+### 3. Unified Launcher (`run.py`)
+
+Run both the FastAPI backend server and the PySide6 QML GUI together with a single command:
 
 ```bash
-python3 -m access_control.facial_recognition.src.pipelines.run_both
-python3 -m access_control.facial_recognition.src.pipelines.access_control
-python3 -m access_control.facial_recognition.src.pipelines.surveillance
+python access_control/run.py
 ```
 
-The access-control runner starts the audio I/O chatbot automatically. Press the
-space bar while the access-control OpenCV window is focused to start one
-chatbot recording.
-After a successful face match, it requests a JWT from
-`${EDGE_SYNC_CLOUD_URL}/api/edge-auth/token` and shares that token with the
-audio chatbot client. Surveillance does not start audio.
+Other available modes:
 
-Run the optional facial API:
+```bash
+# Run API server only
+python access_control/run.py api
+
+# Run GUI only
+python access_control/run.py gui
+```
+
+### 4. Direct Pipeline Execution
+
+Run direct access control pipeline with camera display and voice feedback:
+
+```bash
+python -m access_control.facial_recognition.src.pipelines.access_control
+```
+
+*Press spacebar while the window is focused to initiate a voice chatbot interaction.*
+
+### 5. Run Kiosk API Server Manually
+
+Start FastAPI kiosk backend server:
 
 ```bash
 uvicorn access_control.facial_recognition.src.api.main:app --host 0.0.0.0 --port 8080
 ```
 
-Detailed facial-recognition setup remains in `edge/facial_recognition/README.md`.
+---
 
-## Audio I/O
+## Configuration (`.env`)
 
-The local voice interaction pipeline lives in `edge/audio_io/` and can run independently from facial recognition.
+All parameters are configurable via `access_control/.env`. Key parameters include:
 
-Install dependencies:
+| Setting | Default | Description |
+|---|---|---|
+| `EDGE_CAMERA` | `0` | Camera device index or RTSP stream URL |
+| `EDGE_ACCESS_DETECTOR_MODEL_PATH` | `models/access_control/face_detection_yunet_2023mar_int8bq.onnx` | Path to YuNet ONNX detection model |
+| `EDGE_ACCESS_EMBEDDING_MODEL_PATH` | `models/access_control/face_recognition_sface_2021dec.onnx` | Path to SFace ONNX recognition model |
+| `EDGE_ACCESS_DETECTION_THRESHOLD` | `0.60` | Detector confidence threshold |
+| `EDGE_ACCESS_RECOGNITION_THRESHOLD` | `0.363` | SFace cosine similarity threshold |
+| `EDGE_ACCESS_REQUIRE_LIVENESS` | `true` | Enable motion/liveness anti-spoofing |
+| `EDGE_ACCESS_AUDIO_ENABLED` | `true` | Enable voice feedback & chatbot |
+| `EDGE_SYNC_CLOUD_URL` | `http://127.0.0.1:8000` | Central cloud database sync server |
 
-```bash
-python3 -m pip install -r edge/audio_io/requirements.txt
-```
+---
 
-Download local STT and TTS assets:
+## Automated Tests
 
-```bash
-python -m edge.audio_io.download_models
-```
-
-Run the audio pipeline:
-
-```bash
-export EDGE_SYNC_CLOUD_URL=http://<cloud-host>:8000
-python -m edge.audio_io.main
-```
-
-Press the space bar in the terminal to start each chatbot recording.
-
-Without `EDGE_AUDIO_CLOUD_BEARER_TOKEN`, chatbot queries use visitor/PUBLIC
-access. A JWT is only needed when the chatbot needs documents above visitor
-access.
-
-For a local smoke run that records immediately instead of waiting for the space bar:
+Run test suite:
 
 ```bash
-python -m edge.audio_io.main --once --skip-activation
+pytest access_control/facial_recognition/tests
 ```
-
-For a local-only hardware test of spacebar activation, microphone, STT, TTS, and playback:
-
-```bash
-python -m edge.audio_io.local_audio_test
-```
-
-For a no-JWT smoke test of local audio and chatbot reachability:
-
-```bash
-export EDGE_SYNC_CLOUD_URL=http://<cloud-host>:8000
-python -m edge.audio_io.smoke_test
-```
-
-Detailed audio setup, environment variables, and hardware notes are in `edge/audio_io/README.md`.

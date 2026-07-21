@@ -1,4 +1,4 @@
-"""Cloud synchronization engine for the Hailo edge pipelines."""
+"""Cloud synchronization engine for the access-control edge pipelines."""
 
 from __future__ import annotations
 

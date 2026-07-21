@@ -1,4 +1,4 @@
-"""Independent Hailo face-recognition package for EdgeMind devices."""
+"""Face recognition package for access control."""
 
 __all__ = ["__version__"]
 

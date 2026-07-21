@@ -1,1 +1,1 @@
-"""FastAPI endpoints for Hailo face pipelines."""
+"""FastAPI endpoints for access control pipelines."""
