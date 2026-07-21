@@ -109,7 +109,7 @@ class RuntimeConfig:
     sync_device_id: str = _env_str("EDGE_SYNC_DEVICE_ID", "ACCESS_DEVICE_ID", "entry-gate-01")
     sync_device_name: str = _env_str("EDGE_SYNC_DEVICE_NAME", "ACCESS_DEVICE_NAME", "North Entry Gate Kiosk")
     sync_local_ip: str = _env_str("EDGE_SYNC_LOCAL_IP", "ACCESS_LOCAL_IP", "127.0.0.1")
-    sync_local_port: int = _int_env("EDGE_SYNC_LOCAL_PORT", 8001, "ACCESS_API_PORT")
+    sync_local_port: int = _int_env("EDGE_SYNC_LOCAL_PORT", 8001, "ACCESS_SYNC_LOCAL_PORT")
     sync_downstream_poll_seconds: int = _int_env("EDGE_SYNC_DOWNSTREAM_POLL_SECONDS", 30, "ACCESS_SYNC_INTERVAL_SECONDS")
     sync_log_push_interval_seconds: int = _int_env("EDGE_SYNC_LOG_PUSH_INTERVAL_SECONDS", 60)
 

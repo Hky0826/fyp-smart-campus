@@ -916,6 +916,22 @@ class UpstreamSyncClient:
             return None, path.name
 
 
+def _find_available_sync_port(host: str, starting_port: int, max_attempts: int = 20) -> int:
+    """Find an open TCP port for the local sync receiver starting from starting_port."""
+    import socket
+
+    bind_host = "" if host == "0.0.0.0" else host
+    for p in range(starting_port, starting_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind((bind_host, p))
+                return p
+        except OSError:
+            continue
+    return starting_port
+
+
 class SyncEngine:
     """Owns all background sync components for a pipeline process."""
 
@@ -984,16 +1000,27 @@ class SyncEngine:
             log_push_interval_sec=self.log_push_interval_sec,
         )
 
+        actual_sync_port = _find_available_sync_port("0.0.0.0", self.local_port)
+        if actual_sync_port != self.local_port:
+            logger.info("Sync receiver port %s in use; using free port %s", self.local_port, actual_sync_port)
+
         app = create_edge_app(self.db, downstream_worker=self.downstream)
-        uvicorn_config = uvicorn.Config(app, host="0.0.0.0", port=self.local_port, log_level="warning")
+        uvicorn_config = uvicorn.Config(app, host="0.0.0.0", port=actual_sync_port, log_level="warning")
         self._server = uvicorn.Server(uvicorn_config)
 
         self.upstream.start()
         self.downstream.start()
-        self._server_thread = threading.Thread(target=self._server.run, daemon=True)
+
+        def _safe_run_server():
+            try:
+                self._server.run()
+            except Exception as exc:
+                logger.warning("Sync receiver server stopped: %s", exc)
+
+        self._server_thread = threading.Thread(target=_safe_run_server, daemon=True, name="sync-receiver-server")
         self._server_thread.start()
         self._running = True
-        logger.info("Sync engine started for %s using %s", self.device_id, self.db_path)
+        logger.info("Sync engine started for %s using %s on port %s", self.device_id, self.db_path, actual_sync_port)
 
     def stop(self) -> None:
         if not self._running:
