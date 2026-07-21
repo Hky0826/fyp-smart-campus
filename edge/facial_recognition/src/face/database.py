@@ -40,7 +40,7 @@ class DeviceUserRepository:
         "templates_json",
     )
     TEMPLATE_COLUMNS = ("template_name", "template", "pose", "pose_name", "view", "image_name")
-    IDENTITY_COLUMNS = ("identity", "person_id", "username", "name", "display_name")
+    IDENTITY_COLUMNS = ("identity", "person_id", "email", "name", "display_name")
 
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)

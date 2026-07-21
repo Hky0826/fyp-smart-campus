@@ -47,7 +47,7 @@ class AccessAudioIntegrationTests(unittest.TestCase):
         payload = {
             "access_token": "jwt-value",
             "user_id": 7,
-            "username": "user7",
+            "email": "user7",
             "roles": ["STUDENT"],
             "session_id": 99,
             "expires_at": "2026-06-24T12:00:00",

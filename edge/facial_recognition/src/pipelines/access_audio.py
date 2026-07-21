@@ -26,7 +26,7 @@ class EdgeAuthToken:
     access_token: str
     session_id: int | None
     user_id: int
-    username: str | None = None
+    email: str | None = None
     roles: tuple[str, ...] = ()
     expires_at: dt.datetime | None = None
 
@@ -37,7 +37,7 @@ class EdgeAuthToken:
             access_token=str(payload["access_token"]),
             session_id=_optional_int(payload.get("session_id")),
             user_id=int(payload["user_id"]),
-            username=str(payload["username"]) if payload.get("username") else None,
+            email=str(payload["email"]) if payload.get("email") else None,
             roles=tuple(str(role) for role in payload.get("roles", [])),
             expires_at=expires_at,
         )

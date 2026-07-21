@@ -173,8 +173,7 @@ class UserFaceEmbeddingResponse(BaseSchema):
 class UserBase(BaseSchema):
     given_name: str
     family_name: str
-    email: Optional[EmailStr] = None
-    email: str
+    email: EmailStr
     is_active: bool = True
     last_known_location: Optional[int] = None
 

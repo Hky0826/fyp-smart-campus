@@ -18,7 +18,8 @@ from ..recognition.sface import SFaceRecognizer
 
 
 def _sync_key():
-    return f"{int(time.time() * 1000):x}-{secrets.token_hex(8)}"
+    # Match the cloud's compact ULID-compatible sync-key contract.
+    return secrets.token_hex(13)
 
 
 def _utc(value=None):

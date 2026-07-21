@@ -5,6 +5,8 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:sys.path.insert(0,str(ROOT))
+from app.env import load_dotenv
+load_dotenv()
 def args():
     parser=argparse.ArgumentParser();parser.add_argument('mode',choices=('api','ui','all'),nargs='?',default='all');return parser.parse_args()
 def serve(runtime,server_holder=None):

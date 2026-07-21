@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends, Form, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import jwt
@@ -21,17 +20,18 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 @router.post("/login", response_model=Token)
 def login(
     request: Request,
-    form_data: OAuth2PasswordRequestForm = Depends(),
+    email: str = Form(...),
+    password: str = Form(...),
     db: Session = Depends(get_db)
 ):
     ip_address = request.client.host if request.client else None
     
     # Locate admin by email (which is on the users table)
     admin = db.query(Admin).join(User, Admin.user_id == User.user_id).filter(
-        User.email == form_data.username
+        User.email == email
     ).first()
     
-    if not admin or not verify_password(form_data.password, admin.Password_hash):
+    if not admin or not verify_password(password, admin.Password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",

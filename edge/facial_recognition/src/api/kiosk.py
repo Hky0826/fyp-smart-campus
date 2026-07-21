@@ -76,7 +76,7 @@ class ChatMessage(BaseModel):
 class ChatSessionView(BaseModel):
     session_id: str
     authenticated_user_id: Optional[int] = None
-    username: Optional[str] = None
+    email: Optional[str] = None
     full_name: Optional[str] = None
     roles: list[str] = Field(default_factory=list)
     cloud_session_id: Optional[int] = None
@@ -266,7 +266,7 @@ class KioskStateStore:
         view = ChatSessionView(
             session_id=str(uuid.uuid4()),
             authenticated_user_id=token.user_id if token else None,
-            username=token.username if token else None,
+            email=token.email if token else None,
             full_name=full_name,
             roles=list(token.roles) if token else [],
             cloud_session_id=token.session_id if token else None,
@@ -424,7 +424,7 @@ class KioskStateStore:
         view = self._chat_session.view.model_copy(deep=True)
         view.conversation_history = [] if view.locked else list(self._chat_session.history)
         if view.locked:
-            view.username = None
+            view.email = None
             view.full_name = None
             view.roles = []
             view.expires_at = None

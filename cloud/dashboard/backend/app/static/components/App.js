@@ -68,7 +68,7 @@ function dashboardPath(tab, subTab) {
             };
 
             // ── Login form state ──────────────────────────────
-            const [loginUser, setLoginUser] = useState("");
+            const [loginEmail, setLoginEmail] = useState("");
             const [loginPass, setLoginPass] = useState("");
             const [loginLoading, setLoginLoading] = useState(false);
             const [loginError, setLoginError] = useState("");
@@ -254,7 +254,7 @@ function dashboardPath(tab, subTab) {
                 setLoginError("");
                 try {
                     const formData = new URLSearchParams();
-                    formData.append("email", loginUser);
+                    formData.append("email", loginEmail);
                     formData.append("password", loginPass);
                     const response = await fetch("/api/auth/login", {
                         method: "POST",
@@ -1032,12 +1032,12 @@ function dashboardPath(tab, subTab) {
 
                                 <form onSubmit={handleLogin} className="space-y-5">
                                     <div>
-                                        <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">email</label>
+                                        <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Email</label>
                                         <div className="relative">
                                             <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-600">
                                                 <Icon name="user" className="w-4 h-4" />
                                             </span>
-                                            <input type="text" required value={loginUser} onChange={e => setLoginUser(e.target.value)} placeholder="Enter your email"
+                                            <input type="email" required value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="Enter your email"
                                                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-slate-100 focus:outline-none focus:border-blue-500 placeholder-slate-700 text-sm transition-all duration-200" />
                                         </div>
                                     </div>

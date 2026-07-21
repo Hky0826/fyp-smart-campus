@@ -32,7 +32,7 @@ class KioskStateTests(unittest.TestCase):
             access_token="secret",
             session_id=123,
             user_id=10,
-            username="owner",
+            email="owner",
             roles=("STAFF",),
             expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1),
         )
@@ -54,7 +54,7 @@ class KioskStateTests(unittest.TestCase):
         self.assertIsNotNone(state.active_chat_session)
         self.assertFalse(state.active_chat_session.locked)
         self.assertEqual(state.active_chat_session.presence_state, "OWNER_PRESENT")
-        self.assertEqual(state.active_chat_session.username, "owner")
+        self.assertEqual(state.active_chat_session.email, "owner")
         self.assertEqual(state.active_chat_session.full_name, "Original Owner")
         self.assertEqual(state.active_chat_session.roles, ["STAFF"])
         self.assertEqual(len(state.active_chat_session.conversation_history), 3)
@@ -69,7 +69,7 @@ class KioskStateTests(unittest.TestCase):
             access_token="secret",
             session_id=123,
             user_id=10,
-            username="owner",
+            email="owner",
             roles=("STAFF",),
             expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1),
         )

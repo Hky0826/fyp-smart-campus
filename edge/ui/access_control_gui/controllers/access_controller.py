@@ -438,7 +438,7 @@ class AccessController(QObject):
 
     def _get_session_name(self) -> str:
         session = self._session or {}
-        return str(session.get("full_name") or session.get("username") or "Visitor")
+        return str(session.get("full_name") or session.get("email") or "Visitor")
 
     def _get_presence_state(self) -> str:
         session = self._session or {}

@@ -33,7 +33,7 @@ export interface ChatMessage {
 export interface ChatSessionView {
   session_id: string
   authenticated_user_id?: number | null
-  username?: string | null
+  email?: string | null
   full_name?: string | null
   roles: string[]
   cloud_session_id?: number | null

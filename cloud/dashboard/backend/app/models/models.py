@@ -498,7 +498,7 @@ class AuthenticationLog(Base):
     __tablename__ = "authentication_logs"
     
     log_id = Column(Integer, primary_key=True, autoincrement=True)
-    sync_key = Column(String(26), unique=True, nullable=False)
+    sync_key = Column(String(64), unique=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
     device_id = Column(String(100), ForeignKey("devices.device_id", ondelete="RESTRICT"), nullable=False)
     auth_status = Column(Enum("SUCCESS", "FAILED", "SPOOFING"), nullable=False)
@@ -530,7 +530,7 @@ class SurveillanceLog(Base):
     __tablename__ = "surveillance_logs"
     
     log_id = Column(Integer, primary_key=True, autoincrement=True)
-    sync_key = Column(String(26), unique=True, nullable=False)
+    sync_key = Column(String(64), unique=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
     device_id = Column(String(100), ForeignKey("devices.device_id", ondelete="RESTRICT"), nullable=False)
     recognition_status = Column(Enum("RECOGNIZED", "UNKNOWN"), nullable=False)
