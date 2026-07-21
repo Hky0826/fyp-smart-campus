@@ -9,6 +9,7 @@ from time import monotonic
 from .access_control import GPIOAccessController, MockAccessController
 from .api.state import KioskStateStore
 from .api.schemas import KioskTimingConfig
+from .audio_io import AccessControlAudioCoordinator
 from .authentication import AuthenticationPolicy, AuthenticationService, IdentityVerificationService, VerificationPolicy
 from .chatbot import ChatbotClient, EdgeAuthTokenClient
 from .config import AppConfig
@@ -19,8 +20,9 @@ from .processing import DetectionScheduler, RealTimeAccessPipeline
 from .quality import FaceQualityConfig, FaceQualityEvaluator
 from .recognition import SFaceRecognizer
 from .services import BiometricWorker
+from .spoofing import MotionSpoofDetector
 from .synchronization import BackgroundDatabaseSyncService, SyncConfig
-from .tracking.kcf import KCFTracker
+from .tracking import FaceTracker, FaceTrackerConfig, TrackEmbeddingAggregator, EmbeddingAggregationConfig
 from .tracking.validation import TrackerValidationConfig
 from .utilities import RuntimeMetrics
 
@@ -42,6 +44,7 @@ class AppRuntime:
     chatbot: object
     token_client: object
     kiosk: object
+    audio_coordinator: object = None
 
     def __post_init__(self):
         self._frame_lock = threading.Lock()
@@ -54,11 +57,15 @@ class AppRuntime:
             return
         self.pipeline.start()
         self.sync.start()
+        if self.audio_coordinator:
+            self.audio_coordinator.start()
         self._started = True
 
     def stop(self):
         if not self._started:
             return
+        if self.audio_coordinator:
+            self.audio_coordinator.stop()
         self.sync.stop()
         self.pipeline.stop()
         close = getattr(self.access_controller, 'close', None)
@@ -74,7 +81,10 @@ class AppRuntime:
         return FramePacket.create(frame_id, image)
 
     def process_access(self, image):
-        return self.pipeline.process(self.packet(image))
+        res = self.pipeline.process(self.packet(image))
+        if self.audio_coordinator and isinstance(res, dict):
+            self.audio_coordinator.handle_access_result(res)
+        return res
 
     def biometric_command(self, image, mode, payload=None, timeout=10):
         self.start()
@@ -96,16 +106,54 @@ def build_runtime(config=None):
         max_brightness=config.quality_max_brightness,
     ))
     access = GPIOAccessController(config.gpio_pin, config.gpio_active_high) if config.hardware_mode == 'gpio' else MockAccessController()
-    auth = AuthenticationService(recognizer, quality, repository, access, AuthenticationPolicy(config.sface_threshold, config.confirmations, config.max_result_age_seconds, config.unlock_seconds, config.cooldown_seconds, config.max_faces, config.max_similarity_drop))
+
+    face_tracker = FaceTracker(FaceTrackerConfig(
+        min_stable_frames=config.min_stable_frames,
+        min_stable_duration_ms=config.min_stable_duration_ms,
+        max_missed_frames=config.max_missed_frames,
+        track_timeout_ms=config.track_timeout_ms,
+        min_iou_for_match=config.min_iou_for_match,
+        max_landmark_jump_ratio=config.max_landmark_jump_ratio,
+    ))
+    aggregator = TrackEmbeddingAggregator(EmbeddingAggregationConfig(
+        min_embedding_samples=config.min_embedding_samples,
+        max_embedding_samples=config.max_embedding_samples,
+        embedding_outlier_threshold=config.embedding_outlier_threshold,
+        candidate_consistency_ratio=config.candidate_consistency_ratio,
+    ))
+    spoof_detector = MotionSpoofDetector(
+        motion_threshold=config.motion_threshold,
+        pose_threshold=config.pose_threshold,
+        spoof_frames=config.spoof_frames,
+    )
+
+    auth = AuthenticationService(
+        recognizer, quality, repository, access,
+        policy=AuthenticationPolicy(
+            match_threshold=config.sface_threshold,
+            consecutive_confirmations=config.confirmations,
+            max_result_age_seconds=config.max_result_age_seconds,
+            unlock_seconds=config.unlock_seconds,
+            cooldown_seconds=config.cooldown_seconds,
+            max_faces=config.max_faces,
+            max_similarity_drop=config.max_similarity_drop,
+            require_liveness=config.require_liveness,
+        ),
+        tracker=face_tracker,
+        aggregator=aggregator,
+        spoof_detector=spoof_detector,
+    )
     verifier = IdentityVerificationService(recognizer, quality, repository, VerificationPolicy(config.sface_threshold, config.confirmations, config.max_result_age_seconds, config.max_faces))
     worker = BiometricWorker(detector, auth, verifier)
-    tracker = KCFTracker()
-    scheduler = DetectionScheduler(config.detector_interval, config.max_tracker_age)
-    validation = TrackerValidationConfig(config.tracker_area_change, config.tracker_width_change, config.tracker_height_change, config.tracker_aspect_change, config.tracker_position_change, config.max_tracker_age)
+
+    scheduler = DetectionScheduler(config.detector_interval, 24)
+    validation = TrackerValidationConfig()
     metrics = RuntimeMetrics(config.debug_metrics)
-    pipeline = RealTimeAccessPipeline(worker, tracker, scheduler, validation, metrics)
+    pipeline = RealTimeAccessPipeline(worker, face_tracker, scheduler, validation, metrics)
     sync = BackgroundDatabaseSyncService(repository, SyncConfig(config.cloud_url, config.device_id, config.device_name, config.local_ip, config.api_port, config.sync_interval, config.sync_interval, 30, config.offline_retry_max))
     chatbot = ChatbotClient(config.cloud_url)
     tokens = EdgeAuthTokenClient(config.cloud_url, config.device_id)
-    kiosk = KioskStateStore(config.device_id, config.device_name, config.cloud_url, KioskTimingConfig(owner_missing_grace_seconds=config.owner_missing_grace_seconds,owner_absent_lock_seconds=config.owner_lock_seconds,owner_absent_terminate_seconds=config.owner_terminate_seconds,access_result_hold_seconds=round(config.granted_display_seconds)))
-    return AppRuntime(config, repository, detector, recognizer, quality, access, auth, verifier, worker, pipeline, metrics, sync, chatbot, tokens, kiosk)
+    kiosk = KioskStateStore(config.device_id, config.device_name, config.cloud_url, KioskTimingConfig(owner_missing_grace_seconds=config.owner_missing_grace_seconds, owner_absent_lock_seconds=config.owner_lock_seconds, owner_absent_terminate_seconds=config.owner_terminate_seconds, access_result_hold_seconds=round(config.granted_display_seconds)))
+    audio_coordinator = AccessControlAudioCoordinator(config)
+
+    return AppRuntime(config, repository, detector, recognizer, quality, access, auth, verifier, worker, pipeline, metrics, sync, chatbot, tokens, kiosk, audio_coordinator)
