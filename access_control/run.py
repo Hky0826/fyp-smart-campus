@@ -18,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from access_control.facial_recognition.src.config import AccessControlConfig
+from access_control.facial_recognition.src.utils.logging import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,7 @@ def serve_api(host: str, port: int, server_holder: list | None = None) -> None:
 
 def main() -> int:
     args = parse_args()
+    configure_logging(os.getenv("EDGE_LOG_LEVEL", "INFO"))
     config = AccessControlConfig()
 
     # Cloud connectivity diagnostic

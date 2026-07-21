@@ -288,6 +288,19 @@ class AccessControlPipeline:
             self.embedding_aggregator.add_sample(
                 embedding, float(quality.score), timestamp, candidate_id=candidate_id
             )
+
+            logger.info(
+                "Face frame recognition evaluation: identity=%s recognition_score=%.4f (similarity=%.4f) template=%s matched=%s sample_count=%d/%d threshold=%.3f",
+                match.identity,
+                match.similarity,
+                match.similarity,
+                match.matched_template,
+                match.matched,
+                self.embedding_aggregator.sample_count,
+                self.config.min_embedding_samples,
+                self.config.recognition_threshold,
+            )
+
             if not self.embedding_aggregator.has_enough_samples():
                 timer.mark("database_matching")
                 timer.total()

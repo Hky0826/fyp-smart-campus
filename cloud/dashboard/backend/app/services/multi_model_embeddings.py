@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[5]
 
 class MultiModelEmbeddingService:
     def __init__(self):
-        self.sface_path = Path(os.getenv('SFACE_MODEL_PATH', ROOT / 'access_control/models/sface/face_recognition_sface_2021dec.onnx'))
-        self.auraface_path = os.getenv('AURAFACE_MODEL_PATH', str(ROOT / 'surveillance/models/glintr100.onnx'))
+        self.sface_path = Path(os.getenv('SFACE_MODEL_PATH', ROOT / 'cloud/models/sface/face_recognition_sface_2021dec.onnx'))
+        self.auraface_path = os.getenv('AURAFACE_MODEL_PATH', str(ROOT / 'cloud/models/auraface/glintr100.onnx'))
         self._sface = None
         self._auraface = None
     def _sface_embedding(self, image):
