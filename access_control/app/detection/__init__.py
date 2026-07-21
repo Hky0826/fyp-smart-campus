@@ -1,1 +1,0 @@
-from .yunet import YuNetDetector
