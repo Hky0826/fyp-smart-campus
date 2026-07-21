@@ -104,14 +104,13 @@ def main() -> int:
     diagnose_cloud_connectivity(config.sync_cloud_url)
 
     requested_host = args.host or os.getenv("ACCESS_API_HOST") or "0.0.0.0"
-    requested_port = args.port or config.sync_local_port or 8080
+    requested_api_port = args.port or int(os.getenv("ACCESS_API_PORT", "8080"))
 
-    actual_port = find_available_port(requested_host, requested_port)
-    if actual_port != requested_port:
-        print(f"[Port Manager] Port {requested_port} is occupied or restricted. Automatically bound to free port {actual_port}.")
+    actual_api_port = find_available_port(requested_host, requested_api_port)
+    if actual_api_port != requested_api_port:
+        print(f"[Port Manager] API Port {requested_api_port} is occupied or restricted. Automatically bound to free port {actual_api_port}.")
 
-    os.environ["ACCESS_API_PORT"] = str(actual_port)
-    os.environ["EDGE_SYNC_LOCAL_PORT"] = str(actual_port)
+    os.environ["ACCESS_API_PORT"] = str(actual_api_port)
 
     mode = args.mode.lower()
     if mode in ("gui", "ui"):
@@ -120,16 +119,16 @@ def main() -> int:
         return gui_main()
 
     if mode == "api":
-        print(f"Starting Access Control API server at http://{requested_host}:{actual_port}...")
-        serve_api(requested_host, actual_port)
+        print(f"Starting Access Control API server at http://{requested_host}:{actual_api_port}...")
+        serve_api(requested_host, actual_api_port)
         return 0
 
     # Mode: 'all' -> Launch API in background thread and GUI in main thread
-    print(f"Starting Access Control Backend API at http://{requested_host}:{actual_port}...")
+    print(f"Starting Access Control Backend API at http://{requested_host}:{actual_api_port}...")
     server_holder: list = []
     api_thread = threading.Thread(
         target=serve_api,
-        args=(requested_host, actual_port, server_holder),
+        args=(requested_host, actual_api_port, server_holder),
         daemon=True,
         name="access-control-api",
     )
@@ -150,7 +149,7 @@ def main() -> int:
 
     srv = server_holder[0].get("server") if server_holder else None
     if srv and getattr(srv, "started", False):
-        print(f"Backend API is ready at http://127.0.0.1:{actual_port}! Starting Access Control GUI...")
+        print(f"Backend API is ready at http://127.0.0.1:{actual_api_port}! Starting Access Control GUI...")
     else:
         print("[Warning] API server did not signal ready state; launching GUI anyway...")
 
