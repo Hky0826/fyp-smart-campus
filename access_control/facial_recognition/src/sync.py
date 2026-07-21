@@ -733,8 +733,10 @@ class DownstreamSyncWorker:
             timestamp = data.get("timestamp")
             if timestamp:
                 self.db.update_last_sync_timestamp(timestamp)
+        except requests.exceptions.RequestException as exc:
+            logger.warning("Downstream cloud sync offline (%s: %s). Operating in local offline mode.", url, type(exc).__name__)
         except Exception:
-            logger.exception("Downstream sync network failure")
+            logger.exception("Downstream sync unexpected error")
 
 
 class UpstreamSyncClient:

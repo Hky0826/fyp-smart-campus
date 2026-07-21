@@ -16,7 +16,11 @@ from typing import Any
 import requests
 
 
-DEFAULT_API_BASE_URL = "http://127.0.0.1:8080"
+def get_default_api_base_url() -> str:
+    port = os.getenv("ACCESS_API_PORT") or os.getenv("EDGE_SYNC_LOCAL_PORT") or "8080"
+    return f"http://127.0.0.1:{port}"
+
+
 CONNECT_TIMEOUT_SECONDS = 5
 READ_TIMEOUT_SECONDS = 90
 
@@ -37,7 +41,7 @@ class KioskApiClient:
             base_url
             or os.getenv("EDGE_GUI_API_BASE_URL")
             or os.getenv("VITE_EDGE_API_BASE_URL")
-            or DEFAULT_API_BASE_URL
+            or get_default_api_base_url()
         )
         self.base_url = configured.rstrip("/")
         self._session = requests.Session()
