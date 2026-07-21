@@ -104,3 +104,7 @@ class AudioIOConfig:
     speaker_device: str | int | None = _audio_device_env("EDGE_AUDIO_SPEAKER_DEVICE")
     playback_backend: str = os.getenv("EDGE_AUDIO_PLAYBACK_BACKEND", _default_audio_backend()).strip().lower()
     output_sample_rate: int = _int_env("EDGE_AUDIO_OUTPUT_SAMPLE_RATE", 24000)
+
+
+# Alias for backward compatibility / access control module
+AudioConfig = AudioIOConfig
