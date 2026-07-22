@@ -1,5 +1,13 @@
+import sys
+import os
 import unittest
 import numpy as np
+
+# Ensure eval_framework directory is in sys.path
+eval_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if eval_dir not in sys.path:
+    sys.path.insert(0, eval_dir)
+
 from metrics import calculate_metrics, calculate_eer, get_tar_at_far
 
 class TestMetrics(unittest.TestCase):

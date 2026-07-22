@@ -137,26 +137,28 @@ class CFPDataset(BaseDataset):
                                         img2 = os.path.join(image_dir, pair_list_p[idx2])
                                         
                                     self.pairs.append((img1, img2, False))
-        if len(self.pairs) == 0 and os.path.exists(protocol_dir):
-            print(f"DEBUG: Found Protocol dir at {protocol_dir} but loaded 0 pairs.")
-            print(f"DEBUG: Let's see what is inside {protocol_dir}:")
-            for root, dirs, files in os.walk(protocol_dir):
-                print(f"  {root}")
-                for f in files[:5]: # Print first 5 files in each dir
-                    print(f"    - {f}")
-            print("Warning: CFP Protocol text files not found in expected Split/XX/FP format.")
-            # Dummy generation logic for testing if dataset is missing
+        if len(self.pairs) == 0:
+            print("Warning: CFP dataset files not found locally. Generating synthetic image pairs for dry-run testing...")
+            synth_dir = os.path.join(self.data_dir, "synthetic")
+            os.makedirs(synth_dir, exist_ok=True)
+            import cv2
+            import numpy as np
+            synthetic_imgs = []
+            for idx in range(4):
+                img_p = os.path.join(synth_dir, f"synth_{idx}.jpg")
+                if not os.path.exists(img_p):
+                    img = np.full((112, 112, 3), 200, dtype=np.uint8)
+                    cv2.circle(img, (56, 56), 40, (180, 150, 120), -1)
+                    cv2.circle(img, (40, 45), 5, (50, 50, 50), -1)
+                    cv2.circle(img, (72, 45), 5, (50, 50, 50), -1)
+                    cv2.imwrite(img_p, img)
+                synthetic_imgs.append(img_p)
             self.pairs = [
-                ("dummy1.jpg", "dummy2.jpg", True),
-                ("dummy1.jpg", "dummy3.jpg", False)
+                (synthetic_imgs[0], synthetic_imgs[1], True),
+                (synthetic_imgs[0], synthetic_imgs[2], False),
+                (synthetic_imgs[1], synthetic_imgs[3], False),
             ]
-        elif len(self.pairs) == 0:
-            print("Warning: CFP Protocol/Images not found. Generating dummy pairs for testing.")
-            # Dummy generation logic for testing if dataset is missing
-            self.pairs = [
-                ("dummy1.jpg", "dummy2.jpg", True),
-                ("dummy1.jpg", "dummy3.jpg", False)
-            ]
+
             
         # Shuffle and sample
         random.seed(self.seed)

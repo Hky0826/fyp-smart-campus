@@ -1,10 +1,15 @@
 import os
+import sys
 import yaml
 import json
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
+
+eval_dir = os.path.dirname(os.path.abspath(__file__))
+if eval_dir not in sys.path:
+    sys.path.insert(0, eval_dir)
 
 from datasets.lfw import LFWDataset
 from datasets.cfp import CFPDataset
@@ -13,6 +18,10 @@ from metrics import calculate_eer, evaluate_thresholds, get_tar_at_far
 from visualize import plot_roc_curve, plot_det_curve, plot_score_distributions, plot_threshold_vs_error
 
 def load_config(config_path="config.yaml"):
+    if not os.path.isabs(config_path):
+        alt_path = os.path.join(eval_dir, config_path)
+        if os.path.exists(alt_path) or not os.path.exists(config_path):
+            config_path = alt_path
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
 
@@ -73,8 +82,6 @@ def run_evaluation(dataset, model_interface, thresholds, far_targets, results_di
     print(f"Genuine matches successfully scored: {len(genuine_scores)}")
     print(f"Impostor matches successfully scored: {len(impostor_scores)}\n")
     
-    eer, eer_threshold, fpr, tpr, roc_thresholds = calculate_eer(labels, scores)
-    
     # 4. Generate Visualizations
     plot_roc_curve(fpr, tpr, os.path.join(results_dir, "roc_curve.png"))
     plot_det_curve(fpr, 1 - tpr, os.path.join(results_dir, "det_curve.png"))
@@ -105,13 +112,16 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="Evaluate Facial Recognition Models")
     parser.add_argument("--dataset", type=str, choices=['all', 'lfw', 'cfp'], default='all', help="Which dataset to evaluate")
-    parser.add_argument("--detector", type=str, default="scrfd_10g.hef", help="Filename of the detector model (must be in models/surveillance/)")
-    parser.add_argument("--embedder", type=str, default="arcface_r50.hef", help="Filename of the embedder model (must be in models/surveillance/)")
+    parser.add_argument("--detector", type=str, default="face_detection_yunet_2023mar_int8bq.onnx", help="Filename of the detector model")
+    parser.add_argument("--embedder", type=str, default="face_recognition_sface_2021dec.onnx", help="Filename of the embedder model")
     args = parser.parse_args()
 
     config = load_config()
     
-    models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "facial_recognition", "models", "surveillance"))
+    models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "facial_recognition", "models", "access_control"))
+    if not os.path.exists(models_dir):
+        models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "facial_recognition", "models", "surveillance"))
+
     detector_path = os.path.join(models_dir, args.detector)
     embedder_path = os.path.join(models_dir, args.embedder)
     
@@ -131,14 +141,19 @@ def main():
     
     far_targets = config['far_targets']
     
-    results_base = "./results"
+    results_base = os.path.join(eval_dir, "results")
     
     datasets = []
     
+    def resolve_data_dir(raw_dir):
+        if os.path.isabs(raw_dir):
+            return raw_dir
+        return os.path.abspath(os.path.join(eval_dir, raw_dir))
+
     if args.dataset in ['all', 'lfw']:
         datasets.append(
             LFWDataset(
-                data_dir=config['datasets']['lfw']['data_dir'],
+                data_dir=resolve_data_dir(config['datasets']['lfw']['data_dir']),
                 sample_size=config['datasets']['lfw'].get('sample_size'),
                 seed=config['random_seed']
             )
@@ -147,7 +162,7 @@ def main():
     if args.dataset in ['all', 'cfp']:
         datasets.append(
             CFPDataset(
-                data_dir=config['datasets']['cfp']['data_dir'],
+                data_dir=resolve_data_dir(config['datasets']['cfp']['data_dir']),
                 sample_size=config['datasets']['cfp'].get('sample_size'),
                 seed=config['random_seed']
             )
@@ -172,3 +187,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

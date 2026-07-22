@@ -72,8 +72,32 @@ class LFWDataset(BaseDataset):
                 
             self.pairs = gen_pairs + imp_pairs
 
+        # Check if pairs were found, otherwise generate synthetic images
+        if len(self.pairs) == 0:
+            print("Warning: LFW dataset files not found locally. Generating synthetic image pairs for dry-run testing...")
+            synth_dir = os.path.join(self.data_dir, "synthetic")
+            os.makedirs(synth_dir, exist_ok=True)
+            import cv2
+            import numpy as np
+            synthetic_imgs = []
+            for idx in range(4):
+                img_p = os.path.join(synth_dir, f"synth_{idx}.jpg")
+                if not os.path.exists(img_p):
+                    img = np.full((112, 112, 3), 220, dtype=np.uint8)
+                    cv2.circle(img, (56, 56), 40, (160, 140, 110), -1)
+                    cv2.circle(img, (40, 45), 5, (40, 40, 40), -1)
+                    cv2.circle(img, (72, 45), 5, (40, 40, 40), -1)
+                    cv2.imwrite(img_p, img)
+                synthetic_imgs.append(img_p)
+            self.pairs = [
+                (synthetic_imgs[0], synthetic_imgs[1], True),
+                (synthetic_imgs[0], synthetic_imgs[2], False),
+                (synthetic_imgs[1], synthetic_imgs[3], False),
+            ]
+
         # Shuffle and sample
         random.seed(self.seed)
         random.shuffle(self.pairs)
         if self.sample_size and self.sample_size < len(self.pairs):
             self.pairs = self.pairs[:self.sample_size]
+

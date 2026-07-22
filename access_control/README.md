@@ -1,6 +1,6 @@
 # Standalone Access Control Module
 
-The `access_control` directory is a standalone module extracted for edge access control, voice chatbot interactions, kiosk frontend serving, and cloud synchronization. It uses OpenCV **YuNet** (face detection) and **SFace** (facial recognition), loading configuration directly from `.env` on every startup.
+The `access_control` directory is a standalone module extracted for edge access control, voice chatbot interactions, PySide6 GUI interface, and cloud synchronization. It uses OpenCV **YuNet** (face detection) and **SFace** (facial recognition), loading configuration directly from `.env` on every startup.
 
 ```text
 access_control/
@@ -18,7 +18,6 @@ access_control/
 │   │   └── sync.py          Cloud synchronization engine for openvc_sface embeddings
 │   └── tests/               Pytest automated test suite
 ├── ui/
-│   ├── access_control_frontend/  React / Vite kiosk web interface
 │   └── access_control_gui/       PySide6 / QML native desktop GUI application
 └── test/                    Evaluation & benchmarking framework
 ```

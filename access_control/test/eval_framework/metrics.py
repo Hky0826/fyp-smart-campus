@@ -61,8 +61,11 @@ def calculate_eer(labels, scores):
     
     eer = (fpr[eer_index] + fnr[eer_index]) / 2.0
     eer_threshold = thresholds[eer_index]
+    if np.isinf(eer_threshold):
+        eer_threshold = float(np.max(scores)) if len(scores) > 0 else 0.0
     
     return eer, eer_threshold, fpr, tpr, thresholds
+
 
 def evaluate_thresholds(labels, scores, thresholds):
     """
