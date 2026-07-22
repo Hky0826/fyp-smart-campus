@@ -249,16 +249,36 @@ class UserResponse(UserBase):
     visitor: Optional[VisitorBase] = None
     admin: Optional[AdminBase] = None
 
+    office_node_id: Optional[int] = None
+    staff_id: Optional[str] = None
+
+class UserResponse(UserBase):
+    user_id: int
+    full_name: str
+    enrolled_at: datetime.datetime
+    last_seen: Optional[datetime.datetime] = None
+    roles: List[RoleResponse] = []
+    imagepath: Optional[str] = None
+    face_vector: Optional[str] = None
+    
+    student: Optional[StudentBase] = None
+    lecturer: Optional[LecturerBase] = None
+    staff: Optional[StaffBase] = None
+    visitor: Optional[VisitorBase] = None
+    admin: Optional[AdminBase] = None
+
 class StudentCreate(StudentBase):
     user: Optional[UserCreate] = None
     user_id: Optional[int] = None
 
 class StudentUpdate(BaseSchema):
+    student_id: Optional[str] = None
     program: Optional[str] = None
     faculty: Optional[str] = None
     programme_id: Optional[str] = None
     faculty_id: Optional[str] = None
     intake: Optional[int] = None
+    enrolled_since: Optional[datetime.date] = None
     enrollment_status: Optional[EnrollmentStatusEnum] = None
     user: Optional[UserUpdate] = None
 
@@ -271,6 +291,7 @@ class LecturerCreate(LecturerBase):
     user_id: Optional[int] = None
 
 class LecturerUpdate(BaseSchema):
+    lecturer_id: Optional[str] = None
     department: Optional[str] = None
     faculty: Optional[str] = None
     department_id: Optional[str] = None
@@ -289,6 +310,7 @@ class StaffCreate(StaffBase):
     user_id: Optional[int] = None
 
 class StaffUpdate(BaseSchema):
+    staff_id: Optional[str] = None
     department: Optional[str] = None
     department_id: Optional[str] = None
     position: Optional[str] = None
@@ -305,6 +327,8 @@ class VisitorCreate(VisitorBase):
     user_id: Optional[int] = None
 
 class VisitorUpdate(BaseSchema):
+    visitor_id: Optional[str] = None
+    id_number: Optional[str] = None
     organization: Optional[str] = None
     visit_purpose: Optional[str] = None
     access_expiry: Optional[datetime.datetime] = None
@@ -320,16 +344,14 @@ class AdminCreate(AdminBase):
     password: Optional[str] = None
 
 class AdminUpdate(BaseSchema):
+    admin_id: Optional[str] = None
     admin_type: Optional[AdminTypeEnum] = None
     department: Optional[str] = None
     department_id: Optional[str] = None
-    office_node_id: Optional[int] = None
-    password: Optional[str] = None
-    user: Optional[UserUpdate] = None
 
 class AdminResponse(AdminBase):
     user_id: int
-    user: UserResponse
+    user: Optional[UserResponse] = None
 
 # ==========================================
 # Category 2: RAG Schemas

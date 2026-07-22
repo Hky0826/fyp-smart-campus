@@ -37,13 +37,13 @@ from RagChatbot.generation.google_llm_service import (
 )
 from RagChatbot.retrieval.retriever import retrieve_chunks
 from RagChatbot.schemas import ChatRequest, ChatResponse, CitationSchema
-from RagChatbot.security.audit_logger import log_access_denied, log_chatbot_interaction
+from RagChatbot.security.audit_logger import log_access_denied, log_chatbot_interaction, log_personal_interaction
 from RagChatbot.security.prompt_guard import check_query
 from RagChatbot.security.rbac import get_allowed_access_levels_for_user
 from RagChatbot.security.auth_context import resolve_auth_context
 from RagChatbot.personalisation.intents import parse_personal_intent
 from RagChatbot.personalisation.service import handle_personal_request
-from RagChatbot.security.audit_logger import log_personal_interaction
+from RagChatbot.logging.inference_logger import InferenceMetrics, StageTimer, log_inference_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ def _verify_session(token: str, db: Session) -> tuple[int, int]:
 
     Supports two JWT formats:
       - Edge user tokens: payload contains 'user_id' (int) field.
-      - Admin tokens: payload contains 'sub' (admin_id str) â€” these can
+      - Admin tokens: payload contains 'sub' (admin_id str) - these can
         also use the chatbot if they want, but are less likely to.
 
     Returns:
@@ -158,9 +158,13 @@ def process_chat(
         ChatResponse containing the answer, citations, and audit info.
     """
     start_time = time.monotonic()
+    metrics = InferenceMetrics()
 
 # Step 1: Prompt injection guard
-    guard_result = check_query(request.query)
+    with StageTimer() as timer:
+        guard_result = check_query(request.query)
+    metrics.prompt_injection_ms += timer.elapsed_ms
+
     if not guard_result.is_safe:
         logger.warning("Prompt injection blocked. pattern=%s", guard_result.matched_pattern)
 
@@ -181,6 +185,16 @@ def process_chat(
                 query_text=request.query,
                 reason=f"prompt_injection:{guard_result.matched_pattern}",
             )
+
+        metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+        log_inference_metrics(
+            request_type="text",
+            user_id=user_id,
+            session_id=session_id,
+            query_text=request.query,
+            metrics=metrics,
+            status="blocked",
+        )
 
         return ChatResponse(
             answer=(
@@ -205,8 +219,11 @@ def process_chat(
         allowed_levels = VISITOR_ACCESS_LEVELS
         logger.info("Chat: anonymous visitor allowed_levels=%s", allowed_levels)
 
-    personal_route = parse_personal_intent(sanitized_query)
-    personal_result = handle_personal_request(personal_route, context, db)
+    with StageTimer() as timer:
+        personal_route = parse_personal_intent(sanitized_query)
+        personal_result = handle_personal_request(personal_route, context, db)
+    metrics.prompt_classification_ms += timer.elapsed_ms
+
     if personal_result is not None:
         response_time_ms = int((time.monotonic() - start_time) * 1000)
         query_id = None
@@ -216,12 +233,26 @@ def process_chat(
         navigation = None
         if personal_result.navigation_target:
             navigation = {"label": personal_result.navigation_target.label, "location": personal_result.navigation_target.location.display}
+
+        metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+        log_inference_metrics(
+            request_type="text",
+            user_id=user_id,
+            session_id=session_id,
+            query_text=sanitized_query,
+            metrics=metrics,
+            status="ok" if personal_result.access_granted else "no_access",
+        )
+
         return ChatResponse(answer=personal_result.answer, citations=[], access_granted=personal_result.access_granted, status_message=personal_result.status_message, response_time_ms=response_time_ms, query_id=query_id, response_scope=personal_result.response_scope, personal_intent=personal_result.intent.value, authentication_required=personal_result.authentication_required, navigation_target=navigation)
 
 # Step 2.5: Query routing
     from RagChatbot.generation.query_router import classify_query, get_capabilities_summary
     
-    route = classify_query(sanitized_query)
+    with StageTimer() as timer:
+        route = classify_query(sanitized_query)
+    metrics.prompt_classification_ms += timer.elapsed_ms
+
     fast_answer = None
 
     if route.category == "GREETING":
@@ -251,6 +282,16 @@ def process_chat(
             )
             query_id = logged_query_id if logged_query_id > 0 else None
 
+        metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+        log_inference_metrics(
+            request_type="text",
+            user_id=user_id,
+            session_id=session_id,
+            query_text=sanitized_query,
+            metrics=metrics,
+            status="ok",
+        )
+
         return ChatResponse(
             answer=fast_answer,
             citations=[],
@@ -263,60 +304,66 @@ def process_chat(
 # Step 3: RBAC access levels
 
 # Step 4: Embed the query
-    try:
-        query_embedding = embed_text(sanitized_query)
-    except RuntimeError as exc:
-        logger.error("Embedding failed for user_id=%d: %s", user_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Embedding service is temporarily unavailable. Please try again later.",
-        )
-
-# Steps 5-6: Retrieve and re-rank authorized chunks
-    ranked_chunks = retrieve_chunks(
-        query_embedding=query_embedding,
-        allowed_access_levels=allowed_levels,
-        db=db,
-    )
-
-# Step 7: Generate answer
-    if not ranked_chunks:
-        if not bearer_token and _has_relevant_protected_chunks(query_embedding, db):
-            answer = AUTH_REQUIRED_ANSWER
-            access_granted = False
-            status_message = AUTH_REQUIRED_STATUS
-        else:
-            answer = generate_no_access_response()
-            access_granted = False
-            status_message = "No relevant documents found for your access level."
-    else:
+    with StageTimer() as timer:
         try:
-            chat_history = []
-            if session_id:
-                from app.models.models import ChatbotQuery
-                recent_queries = (
-                    db.query(ChatbotQuery)
-                    .filter(ChatbotQuery.session_id == session_id)
-                    .filter(ChatbotQuery.response_text.isnot(None))
-                    .order_by(ChatbotQuery.timestamp.desc())
-                    .limit(3)
-                    .all()
-                )
-                for q in reversed(recent_queries):
-                    chat_history.append({
-                        "user": q.query_text,
-                        "assistant": q.response_text
-                    })
-
-            answer = generate_answer(sanitized_query, ranked_chunks, chat_history=chat_history)
-            access_granted = True
-            status_message = None
+            query_embedding = embed_text(sanitized_query)
         except RuntimeError as exc:
-            logger.error("LLM generation failed for user_id=%d: %s", user_id, exc)
+            logger.error("Embedding failed for user_id=%s: %s", user_id, exc)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Answer generation is temporarily unavailable. Please try again later.",
+                detail="Embedding service is temporarily unavailable. Please try again later.",
             )
+    metrics.embedding_return_ms += timer.elapsed_ms
+
+# Steps 5-6: Retrieve and re-rank authorized chunks
+    with StageTimer() as timer:
+        ranked_chunks = retrieve_chunks(
+            query_embedding=query_embedding,
+            allowed_access_levels=allowed_levels,
+            db=db,
+        )
+    metrics.embedding_db_search_ms += timer.elapsed_ms
+
+# Step 7: Generate answer
+    with StageTimer() as timer:
+        if not ranked_chunks:
+            if not bearer_token and _has_relevant_protected_chunks(query_embedding, db):
+                answer = AUTH_REQUIRED_ANSWER
+                access_granted = False
+                status_message = AUTH_REQUIRED_STATUS
+            else:
+                answer = generate_no_access_response()
+                access_granted = False
+                status_message = "No relevant documents found for your access level."
+        else:
+            try:
+                chat_history = []
+                if session_id:
+                    from app.models.models import ChatbotQuery
+                    recent_queries = (
+                        db.query(ChatbotQuery)
+                        .filter(ChatbotQuery.session_id == session_id)
+                        .filter(ChatbotQuery.response_text.isnot(None))
+                        .order_by(ChatbotQuery.timestamp.desc())
+                        .limit(3)
+                        .all()
+                    )
+                    for q in reversed(recent_queries):
+                        chat_history.append({
+                            "user": q.query_text,
+                            "assistant": q.response_text
+                        })
+
+                answer = generate_answer(sanitized_query, ranked_chunks, chat_history=chat_history)
+                access_granted = True
+                status_message = None
+            except RuntimeError as exc:
+                logger.error("LLM generation failed for user_id=%s: %s", user_id, exc)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Answer generation is temporarily unavailable. Please try again later.",
+                )
+    metrics.rag_ms += timer.elapsed_ms
 
 # Step 8: Build citation objects
     citations: List[CitationSchema] = [
@@ -346,6 +393,16 @@ def process_chat(
             response_time_ms=response_time_ms,
         )
         query_id = logged_query_id if logged_query_id > 0 else None
+
+    metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+    log_inference_metrics(
+        request_type="text",
+        user_id=user_id,
+        session_id=session_id,
+        query_text=sanitized_query,
+        metrics=metrics,
+        status="ok" if access_granted else "no_access",
+    )
 
 # Step 10: Return response
     return ChatResponse(
@@ -382,10 +439,23 @@ def process_public_smoke_chat(
     not write chatbot_queries because that table requires a JWT session.
     """
     start_time = time.monotonic()
+    metrics = InferenceMetrics()
 
-    guard_result = check_query(request.query)
+    with StageTimer() as timer:
+        guard_result = check_query(request.query)
+    metrics.prompt_injection_ms += timer.elapsed_ms
+
     if not guard_result.is_safe:
         logger.warning("Public smoke-test prompt injection blocked. pattern=%s", guard_result.matched_pattern)
+        metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+        log_inference_metrics(
+            request_type="text",
+            user_id=None,
+            session_id=None,
+            query_text=request.query,
+            metrics=metrics,
+            status="blocked",
+        )
         return ChatResponse(
             answer=(
                 "I'm not able to process that request. "
@@ -404,7 +474,10 @@ def process_public_smoke_chat(
 # Step 2.5: Query routing
     from RagChatbot.generation.query_router import classify_query, get_capabilities_summary
     
-    route = classify_query(sanitized_query)
+    with StageTimer() as timer:
+        route = classify_query(sanitized_query)
+    metrics.prompt_classification_ms += timer.elapsed_ms
+
     fast_answer = None
 
     if route.category == "GREETING":
@@ -419,6 +492,15 @@ def process_public_smoke_chat(
         fast_answer = route.clarification_question or "Could you please clarify what university information you are looking for?"
 
     if fast_answer:
+        metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+        log_inference_metrics(
+            request_type="text",
+            user_id=None,
+            session_id=None,
+            query_text=sanitized_query,
+            metrics=metrics,
+            status="ok",
+        )
         return ChatResponse(
             answer=fast_answer,
             citations=[],
@@ -428,36 +510,42 @@ def process_public_smoke_chat(
             query_id=None,
         )
 
-    try:
-        query_embedding = embed_text(sanitized_query)
-    except RuntimeError as exc:
-        logger.error("Public smoke-test embedding failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Embedding service is temporarily unavailable. Please try again later.",
-        )
-
-    ranked_chunks = retrieve_chunks(
-        query_embedding=query_embedding,
-        allowed_access_levels=allowed_levels,
-        db=db,
-    )
-
-    if not ranked_chunks:
-        answer = generate_no_access_response()
-        access_granted = False
-        status_message = "No relevant public documents found."
-    else:
+    with StageTimer() as timer:
         try:
-            answer = generate_answer(sanitized_query, ranked_chunks)
-            access_granted = True
-            status_message = None
+            query_embedding = embed_text(sanitized_query)
         except RuntimeError as exc:
-            logger.error("Public smoke-test LLM generation failed: %s", exc)
+            logger.error("Public smoke-test embedding failed: %s", exc)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Answer generation is temporarily unavailable. Please try again later.",
+                detail="Embedding service is temporarily unavailable. Please try again later.",
             )
+    metrics.embedding_return_ms += timer.elapsed_ms
+
+    with StageTimer() as timer:
+        ranked_chunks = retrieve_chunks(
+            query_embedding=query_embedding,
+            allowed_access_levels=allowed_levels,
+            db=db,
+        )
+    metrics.embedding_db_search_ms += timer.elapsed_ms
+
+    with StageTimer() as timer:
+        if not ranked_chunks:
+            answer = generate_no_access_response()
+            access_granted = False
+            status_message = "No relevant public documents found."
+        else:
+            try:
+                answer = generate_answer(sanitized_query, ranked_chunks)
+                access_granted = True
+                status_message = None
+            except RuntimeError as exc:
+                logger.error("Public smoke-test LLM generation failed: %s", exc)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Answer generation is temporarily unavailable. Please try again later.",
+                )
+    metrics.rag_ms += timer.elapsed_ms
 
     citations: List[CitationSchema] = [
         CitationSchema(
@@ -470,6 +558,16 @@ def process_public_smoke_chat(
         )
         for chunk in ranked_chunks
     ]
+
+    metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+    log_inference_metrics(
+        request_type="text",
+        user_id=None,
+        session_id=None,
+        query_text=sanitized_query,
+        metrics=metrics,
+        status="ok" if access_granted else "no_access",
+    )
 
     return ChatResponse(
         answer=answer,

@@ -54,13 +54,13 @@ from RagChatbot.generation.response_validator import (
 )
 from RagChatbot.retrieval.retriever import retrieve_chunks
 from RagChatbot.schemas import AudioChatResponse, CitationSchema
-from RagChatbot.security.audit_logger import log_access_denied, log_chatbot_interaction
+from RagChatbot.security.audit_logger import log_access_denied, log_chatbot_interaction, log_personal_interaction
 from RagChatbot.security.prompt_guard import check_query
 from RagChatbot.security.rbac import get_allowed_access_levels_for_user
 from RagChatbot.security.auth_context import resolve_auth_context
 from RagChatbot.personalisation.intents import parse_personal_intent
 from RagChatbot.personalisation.service import handle_personal_request
-from RagChatbot.security.audit_logger import log_personal_interaction
+from RagChatbot.logging.inference_logger import InferenceMetrics, StageTimer, log_inference_metrics
 from RagChatbot.services.chat_service import (
     AUTH_REQUIRED_ANSWER,
     AUTH_REQUIRED_STATUS,
@@ -159,12 +159,34 @@ def _audio_response(
     personal_intent: Optional[str] = None,
     authentication_required: bool = False,
     navigation_target: Optional[dict] = None,
+    metrics: Optional[InferenceMetrics] = None,
+    user_id: Optional[int] = None,
+    session_id: Optional[int] = None,
 ) -> AudioChatResponse:
     """Build the audio API response with consistent transcription and TTS fields."""
+    if metrics is None:
+        metrics = InferenceMetrics()
+
+    audio_data = None
+    if include_audio and text_response:
+        with StageTimer() as timer:
+            audio_data = _tts_base64(text_response or "")
+        metrics.tts_ms += timer.elapsed_ms
+
+    metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+    log_inference_metrics(
+        request_type="audio",
+        user_id=user_id,
+        session_id=session_id,
+        query_text=transcribed_input,
+        metrics=metrics,
+        status=status,
+    )
+
     return AudioChatResponse(
         transcribed_input=transcribed_input,
         text_response=text_response,
-        audio_response=_tts_base64(text_response or "") if include_audio and text_response else None,
+        audio_response=audio_data,
         sources=sources or [],
         status=status,
         access_granted=access_granted,
@@ -212,6 +234,15 @@ def process_audio_chat(
         mime_type: MIME type of the audio data (e.g. ``audio/wav``).
         bearer_token: The raw JWT from the Authorization header, or None.
         device_id: Edge device identifier (for audit logging).
+    12. Build CitationSchema objects
+    13. Audit log the interaction
+    14. Return AudioChatResponse
+
+    Args:
+        audio_bytes: Raw audio data from the edge device.
+        mime_type: MIME type of the audio data (e.g. ``audio/wav``).
+        bearer_token: The raw JWT from the Authorization header, or None.
+        device_id: Edge device identifier (for audit logging).
         session_id: Existing session ID hint from the request body.
         db: Active SQLAlchemy session.
 
@@ -219,6 +250,7 @@ def process_audio_chat(
         AudioChatResponse with text and/or audio, sources, and status.
     """
     start_time = time.monotonic()
+    metrics = InferenceMetrics()
 
 # Step 1: Verify JWT
     user_id: Optional[int] = None
@@ -239,6 +271,9 @@ def process_audio_chat(
                 error_message=AUTH_REQUIRED_STATUS,
                 start_time=start_time,
                 include_audio=include_audio,
+                metrics=metrics,
+                user_id=user_id,
+                session_id=resolved_session_id,
             )
 
 # Step 2: Resolve RBAC access levels
@@ -253,10 +288,12 @@ def process_audio_chat(
 
 # Step 3: Extract query from audio
     try:
-        extraction_result = extract_query_from_audio(
-            audio_bytes=audio_bytes,
-            mime_type=mime_type,
-        )
+        with StageTimer() as timer:
+            extraction_result = extract_query_from_audio(
+                audio_bytes=audio_bytes,
+                mime_type=mime_type,
+            )
+        metrics.prompt_injection_ms += timer.elapsed_ms
     except AudioQueryExtractionError as exc:
         logger.error("Audio chat: query extraction failed: %s", exc)
         return _audio_response(
@@ -267,6 +304,9 @@ def process_audio_chat(
             error_message="Could not process the audio. Please try speaking clearly and try again.",
             start_time=start_time,
             include_audio=include_audio,
+            metrics=metrics,
+            user_id=user_id,
+            session_id=resolved_session_id,
         )
 
 # Step 3b: Check audio extraction prompt-injection flag
@@ -289,6 +329,9 @@ def process_audio_chat(
             ),
             start_time=start_time,
             include_audio=include_audio,
+            metrics=metrics,
+            user_id=user_id,
+            session_id=resolved_session_id,
         )
 
     user_query = extraction_result.user_query
@@ -302,10 +345,16 @@ def process_audio_chat(
             error_message="No speech detected. Please try speaking clearly and try again.",
             start_time=start_time,
             include_audio=include_audio,
+            metrics=metrics,
+            user_id=user_id,
+            session_id=resolved_session_id,
         )
 
 # Step 4: Prompt-injection detection on extracted query
-    guard_result = check_query(user_query)
+    with StageTimer() as timer:
+        guard_result = check_query(user_query)
+    metrics.prompt_injection_ms += timer.elapsed_ms
+
     if not guard_result.is_safe:
         logger.warning(
             "Audio chat: prompt injection blocked. pattern=%s",
@@ -332,13 +381,19 @@ def process_audio_chat(
             access_granted=False,
             start_time=start_time,
             include_audio=include_audio,
+            metrics=metrics,
+            user_id=user_id,
+            session_id=resolved_session_id,
         )
 
     sanitized_query = guard_result.sanitized_query or user_query
 
-    context = resolve_auth_context(bearer_token, db)
-    personal_route = parse_personal_intent(sanitized_query)
-    personal_result = handle_personal_request(personal_route, context, db)
+    with StageTimer() as timer:
+        context = resolve_auth_context(bearer_token, db)
+        personal_route = parse_personal_intent(sanitized_query)
+        personal_result = handle_personal_request(personal_route, context, db)
+    metrics.prompt_classification_ms += timer.elapsed_ms
+
     if personal_result is not None:
         response_time_ms = int((time.monotonic() - start_time) * 1000)
         query_id = None
@@ -348,31 +403,38 @@ def process_audio_chat(
         if context.session_id is not None and context.user_id is not None:
             logged_query_id = log_personal_interaction(db, session_id=context.session_id, user_id=context.user_id, intent=personal_result.intent.value, response_time_ms=response_time_ms, is_navigational=personal_result.navigation_target is not None)
             query_id = logged_query_id if logged_query_id > 0 else None
-        return _audio_response(transcribed_input=user_query, text_response=personal_result.answer, status="ok" if personal_result.access_granted else ("auth_required" if personal_result.authentication_required else "no_access"), access_granted=personal_result.access_granted, error_message=personal_result.status_message, start_time=start_time, query_id=query_id, include_audio=include_audio, response_scope=personal_result.response_scope, personal_intent=personal_result.intent.value, authentication_required=personal_result.authentication_required, navigation_target=navigation)
+        return _audio_response(transcribed_input=user_query, text_response=personal_result.answer, status="ok" if personal_result.access_granted else ("auth_required" if personal_result.authentication_required else "no_access"), access_granted=personal_result.access_granted, error_message=personal_result.status_message, start_time=start_time, query_id=query_id, include_audio=include_audio, response_scope=personal_result.response_scope, personal_intent=personal_result.intent.value, authentication_required=personal_result.authentication_required, navigation_target=navigation, metrics=metrics, user_id=user_id, session_id=resolved_session_id)
 
 # Step 5: Continue to retrieval
 
 # Step 6: Embed the extracted query
-    try:
-        query_embedding = embed_text(sanitized_query)
-    except RuntimeError as exc:
-        logger.error("Audio chat: embedding failed for user_id=%s: %s", user_id, exc)
-        return _audio_response(
-            transcribed_input=user_query,
-            text_response=None,
-            status="error",
-            access_granted=False,
-            error_message="The search service is temporarily unavailable. Please try again later.",
-            start_time=start_time,
-            include_audio=include_audio,
-        )
+    with StageTimer() as timer:
+        try:
+            query_embedding = embed_text(sanitized_query)
+        except RuntimeError as exc:
+            logger.error("Audio chat: embedding failed for user_id=%s: %s", user_id, exc)
+            return _audio_response(
+                transcribed_input=user_query,
+                text_response=None,
+                status="error",
+                access_granted=False,
+                error_message="The search service is temporarily unavailable. Please try again later.",
+                start_time=start_time,
+                include_audio=include_audio,
+                metrics=metrics,
+                user_id=user_id,
+                session_id=resolved_session_id,
+            )
+    metrics.embedding_return_ms += timer.elapsed_ms
 
 # Step 7: Retrieve authorized document chunks
-    ranked_chunks = retrieve_chunks(
-        query_embedding=query_embedding,
-        allowed_access_levels=allowed_levels,
-        db=db,
-    )
+    with StageTimer() as timer:
+        ranked_chunks = retrieve_chunks(
+            query_embedding=query_embedding,
+            allowed_access_levels=allowed_levels,
+            db=db,
+        )
+    metrics.embedding_db_search_ms += timer.elapsed_ms
 
 # Check whether authentication upgrade could help
     if not ranked_chunks:
@@ -385,6 +447,9 @@ def process_audio_chat(
                 access_granted=False,
                 start_time=start_time,
                 include_audio=include_audio,
+                metrics=metrics,
+                user_id=user_id,
+                session_id=resolved_session_id,
             )
         else:
             # No relevant chunks at all
@@ -399,31 +464,39 @@ def process_audio_chat(
                 access_granted=False,
                 start_time=start_time,
                 include_audio=include_audio,
+                metrics=metrics,
+                user_id=user_id,
+                session_id=resolved_session_id,
             )
 
 # Step 8: Build context block and separated prompt
     context_block = build_context_block(ranked_chunks)
 
 # Step 9: Generate text response
-    try:
-        live_result = generate_response(
-            system_instruction=_LIVE_SYSTEM_INSTRUCTION,
-            user_role=user_role,
-            retrieved_context=context_block,
-            user_query=sanitized_query,
-            sources=ranked_chunks,
-        )
-    except GeminiLiveError as exc:
-        logger.error("Audio chat: generation failed for user_id=%s: %s", user_id, exc)
-        return _audio_response(
-            transcribed_input=user_query,
-            text_response=None,
-            status="error",
-            access_granted=False,
-            error_message="The answer service is temporarily unavailable. Please try again later.",
-            start_time=start_time,
-            include_audio=include_audio,
-        )
+    with StageTimer() as timer:
+        try:
+            live_result = generate_response(
+                system_instruction=_LIVE_SYSTEM_INSTRUCTION,
+                user_role=user_role,
+                retrieved_context=context_block,
+                user_query=sanitized_query,
+                sources=ranked_chunks,
+            )
+        except GeminiLiveError as exc:
+            logger.error("Audio chat: generation failed for user_id=%s: %s", user_id, exc)
+            return _audio_response(
+                transcribed_input=user_query,
+                text_response=None,
+                status="error",
+                access_granted=False,
+                error_message="The answer service is temporarily unavailable. Please try again later.",
+                start_time=start_time,
+                include_audio=include_audio,
+                metrics=metrics,
+                user_id=user_id,
+                session_id=resolved_session_id,
+            )
+    metrics.rag_ms += timer.elapsed_ms
 
     answer_text = live_result.text
 
@@ -491,6 +564,9 @@ def process_audio_chat(
         start_time=start_time,
         query_id=audit_query_id,
         include_audio=include_response_audio,
+        metrics=metrics,
+        user_id=user_id,
+        session_id=resolved_session_id,
     )
 
 

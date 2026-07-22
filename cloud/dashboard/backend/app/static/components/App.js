@@ -158,6 +158,15 @@ function dashboardPath(tab, subTab) {
                 'programmes': 'Programmes',
             }[t] || t);
 
+            const getSingleTabLabel = (t) => {
+                if (t === 'faculties') return 'Faculty';
+                if (t === 'categories') return 'Category';
+                const label = subTabLabel(t);
+                if (label.endsWith('ies')) return label.replace(/ies$/, 'y');
+                if (label.endsWith('s')) return label.replace(/s$/, '');
+                return label;
+            };
+
             // ── Lucide icon refresh ───────────────────────────
             useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [currentTab, subTab, listData, showModal, showFaceModal, toast]);
 
@@ -994,7 +1003,7 @@ function dashboardPath(tab, subTab) {
                 if (currentTab === "rag" && subTab === "documents") return <DocumentForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "infra" && subTab === "devices") return <DeviceForm item={selectedItem} nodes={refs.nodes} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "courses") return <CourseForm item={selectedItem} programmes={refs.programmes} faculties={refs.faculties} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
-                if (currentTab === "academics" && subTab === "enrollments") return <EnrollmentForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
+                if (currentTab === "academics" && subTab === "enrollments") return <EnrollmentForm item={selectedItem} courses={refs.courses} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "timetables") return <TimetableForm item={selectedItem} nodes={refs.nodes} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "appointments") return <AppointmentForm item={selectedItem} nodes={refs.nodes} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "faculties") return <FacultyForm item={selectedItem} staff={refs.staff} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
@@ -1990,7 +1999,7 @@ function dashboardPath(tab, subTab) {
                                         "System notification announcements sent to users."
                                     }
                                     onCreateClick={subTab !== "notifications" ? () => { setSelectedItem(null); setModalType("create"); setShowModal(true); } : null}
-                                    createLabel={`Add ${subTabLabel(subTab).replace(/s$/, '')}`}
+                                    createLabel={`Add ${getSingleTabLabel(subTab)}`}
                                 />
 
                                 {listLoading ? (

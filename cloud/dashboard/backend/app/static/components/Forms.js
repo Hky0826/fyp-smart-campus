@@ -494,11 +494,20 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Email Address</label>
                     <input 
                         type="email" 
-                        disabled
                         value={email} 
+                        onChange={e => {
+                            setEmail(e.target.value);
+                            if (errors.email) setErrors(prev => ({ ...prev, email: "" }));
+                        }}
                         placeholder="given_name.familyname@qiu.edu.my"
-                        className="w-full bg-slate-950/40 border border-slate-800/80 rounded-xl px-4 py-2.5 text-sm text-slate-400 opacity-60 focus:outline-none font-mono" 
+                        className={getInputClass(errors.email)} 
                     />
+                    {errors.email && (
+                        <p className="text-rose-500 text-xs mt-1.5 flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                            <span>{errors.email}</span>
+                        </p>
+                    )}
                 </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -508,7 +517,6 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     </label>
                     <select 
                         value={roleId} 
-                        disabled={isEdit && !editRole}
                         onChange={e => {
                             setRoleId(e.target.value);
                             if (errors.roleId) setErrors(prev => ({ ...prev, roleId: "" }));
@@ -516,24 +524,8 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                         className={getInputClass(errors.roleId)}
                     >
                         <option value="">Select Role</option>
-                        {isEdit && !editRole ? (
-                            roles.filter(r => r.role_id === (item?.role_id || item?.roles?.[0]?.role_id)).map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)
-                        ) : (
-                            roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)
-                        )}
+                        {roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
                     </select>
-                    {isEdit && (
-                        <div className="mt-1.5 flex items-center gap-1.5">
-                            <input 
-                                type="checkbox" 
-                                id="editRoleCheck" 
-                                checked={editRole} 
-                                onChange={e => setEditRole(e.target.checked)} 
-                                className="w-3.5 h-3.5 text-emerald-600 bg-slate-950 border-slate-800 rounded focus:ring-emerald-500"
-                            />
-                            <label htmlFor="editRoleCheck" className="text-[11px] text-slate-400 font-medium">Edit Role</label>
-                        </div>
-                    )}
                     {errors.roleId && (
                         <p className="text-rose-500 text-xs mt-1.5 flex items-center gap-1.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
@@ -554,9 +546,9 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                             <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Student ID</label>
                             <input 
                                 type="text" 
-                                disabled 
                                 value={studentId} 
-                                className="w-full bg-slate-950 border border-slate-800/50 rounded-xl px-4 py-2.5 text-sm text-slate-400 opacity-60" 
+                                onChange={e => setStudentId(e.target.value)} 
+                                className={getInputClass(errors.studentId)} 
                             />
                         </div>
                     )}
@@ -658,7 +650,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     {isEdit && (
                         <div>
                             <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Lecturer ID</label>
-                            <input type="text" disabled value={lecturerId} className="w-full bg-slate-950 border border-slate-800/50 rounded-xl px-4 py-2.5 text-sm text-slate-400 opacity-60" />
+                            <input type="text" value={lecturerId} onChange={e => setLecturerId(e.target.value)} className={getInputClass(errors.lecturerId)} />
                         </div>
                     )}
 
@@ -757,7 +749,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     {isEdit && (
                         <div>
                             <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Staff ID</label>
-                            <input type="text" disabled value={staffId} className="w-full bg-slate-950 border border-slate-800/50 rounded-xl px-4 py-2.5 text-sm text-slate-400 opacity-60" />
+                            <input type="text" value={staffId} onChange={e => setStaffId(e.target.value)} className={getInputClass(errors.staffId)} />
                         </div>
                     )}
 
@@ -848,7 +840,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     {isEdit && (
                         <div>
                             <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Visitor ID</label>
-                            <input type="text" disabled value={visitorId} className="w-full bg-slate-950 border border-slate-800/50 rounded-xl px-4 py-2.5 text-sm text-slate-400 opacity-60" />
+                            <input type="text" value={visitorId} onChange={e => setVisitorId(e.target.value)} className={getInputClass(errors.visitorId)} />
                         </div>
                     )}
 
@@ -910,7 +902,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     {isEdit && (
                         <div>
                             <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Admin ID</label>
-                            <input type="text" disabled value={adminId} className="w-full bg-slate-950 border border-slate-800/50 rounded-xl px-4 py-2.5 text-sm text-slate-400 opacity-60" />
+                            <input type="text" value={adminId} onChange={e => setAdminId(e.target.value)} className={getInputClass(errors.adminId)} />
                         </div>
                     )}
 
@@ -2162,14 +2154,36 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
         }
 
         // 11. Student Course Enrollment Form
-        function EnrollmentForm({ item, onSubmit, onCancel }) {
+        function EnrollmentForm({ item, students = [], courses = [], onSubmit, onCancel }) {
             const isEdit = !!item;
             const [studentId, setStudentId] = useState(item?.student_id || "");
             const [courseId, setCourseId] = useState(item?.course_id || "");
             const [semester, setSemester] = useState(item?.semester || 202607);
             const [academicYear, setAcademicYear] = useState(item?.academic_year || "2025/2026");
 
+            const [studentOptions, setStudentOptions] = useState(students);
+            const [courseOptions, setCourseOptions] = useState(courses);
+
+            useEffect(() => {
+                const token = localStorage.getItem("access_token");
+                const headers = { "Authorization": `Bearer ${token}` };
+                
+                if (!students || students.length === 0) {
+                    fetch("/api/iam/students", { headers })
+                        .then(res => res.json())
+                        .then(data => { if (Array.isArray(data)) setStudentOptions(data); })
+                        .catch(() => {});
+                }
+                if (!courses || courses.length === 0) {
+                    fetch("/api/academics/courses", { headers })
+                        .then(res => res.json())
+                        .then(data => { if (Array.isArray(data)) setCourseOptions(data); })
+                        .catch(() => {});
+                }
+            }, []);
+
             const handleSubmit = (e) => {
+                e.preventDefault();
                 onSubmit(e, {
                     student_id: studentId,
                     course_id: parseInt(courseId),
@@ -2182,12 +2196,41 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
             return (
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Student Profile ID</label>
-                        <input type="text" required disabled={isEdit} value={studentId} onChange={e => setStudentId(e.target.value)} placeholder="e.g. STU-10020" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-55 disabled:cursor-not-allowed focus:outline-none focus:border-emerald-500" />
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Student Profile (Search by Name or Student ID)</label>
+                        <SearchableDropdown
+                            list={studentOptions}
+                            value={studentId}
+                            onChange={(val, s) => setStudentId(val)}
+                            placeholder="Search student by name, email, or student ID..."
+                            filterFn={(s, q) => {
+                                const name = (s.user?.full_name || s.full_name || s.user?.given_name || '').toLowerCase();
+                                const email = (s.user?.email || s.email || '').toLowerCase();
+                                const sid = String(s.student_id || '').toLowerCase();
+                                return name.includes(q) || email.includes(q) || sid.includes(q);
+                            }}
+                            displayFn={s => {
+                                const name = s.user?.full_name || s.full_name || (s.user?.given_name ? `${s.user.given_name} ${s.user.family_name || ''}` : '');
+                                return `${s.student_id}${name ? ' — ' + name : ''}`;
+                            }}
+                            valueFn={s => s.student_id}
+                        />
                     </div>
                     <div>
-                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Course Database Index ID</label>
-                        <input type="number" required disabled={isEdit} value={courseId} onChange={e => setCourseId(e.target.value)} placeholder="e.g. 1" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-55 disabled:cursor-not-allowed focus:outline-none focus:border-emerald-500" />
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Course (Search by Course Code or Course Name)</label>
+                        <SearchableDropdown
+                            list={courseOptions}
+                            value={courseId}
+                            onChange={(val, c) => setCourseId(val)}
+                            placeholder="Search course by code, name, or ID..."
+                            filterFn={(c, q) => {
+                                const code = (c.course_code || '').toLowerCase();
+                                const name = (c.course_name || '').toLowerCase();
+                                const id = String(c.course_id || '').toLowerCase();
+                                return code.includes(q) || name.includes(q) || id.includes(q);
+                            }}
+                            displayFn={c => `[${c.course_code}] ${c.course_name}`}
+                            valueFn={c => c.course_id}
+                        />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
