@@ -223,12 +223,7 @@ def generate_audio_from_text_stream(text: str) -> Iterator[bytes]:
     """
     Stream audio chunks from the configured TTS model.
 
-    Since we are using Google Cloud TTS batch synthesis for simplicity and
-    stability, we generate the full audio and yield it as a single chunk.
-    This maintains compatibility with the edge device's streaming endpoint.
-
-    Raises:
-        RuntimeError: If TTS fails.
+    Synthesizes the given text string and yields its PCM bytes.
     """
     if not text or not text.strip():
         logger.warning("generate_audio_from_text_stream called with empty text.")
@@ -241,3 +236,49 @@ def generate_audio_from_text_stream(text: str) -> Iterator[bytes]:
     except Exception as exc:
         logger.error("Streaming TTS failed: %s", exc)
         raise RuntimeError(f"Streaming TTS failed: {exc}") from exc
+
+
+def validate_sentence(sentence: str) -> ValidationResult:
+    """
+    Validate a single sentence before sending to TTS.
+    """
+    if not sentence or not sentence.strip():
+        return ValidationResult(valid=False, reason="Sentence is empty.")
+
+    sentence_lower = sentence.lower()
+    for pattern in _LEAKAGE_PATTERNS:
+        if pattern.lower() in sentence_lower:
+            logger.warning("Sentence validation: leakage pattern detected: '%s'", pattern)
+            return ValidationResult(
+                valid=False,
+                reason=f"Sentence contains prompt leakage ('{pattern}').",
+                sanitized_text=_remove_leakage(sentence, pattern),
+            )
+    return ValidationResult(valid=True)
+
+
+def stream_audio_by_sentences(sentence_stream: Iterator[str]) -> Iterator[tuple[str, Optional[bytes]]]:
+    """
+    Synthesize audio sentence by sentence as sentence strings arrive from the splitter.
+
+    Yields:
+        Tuples of (sentence_text, pcm_audio_bytes or None)
+    """
+    for sentence in sentence_stream:
+        clean_sentence = sentence.strip()
+        if not clean_sentence:
+            continue
+
+        validation = validate_sentence(clean_sentence)
+        if not validation.valid:
+            logger.warning("Aborting TTS for sentence due to validation failure: %s", validation.reason)
+            clean_sentence = validation.sanitized_text or clean_sentence
+
+        try:
+            audio_pcm = generate_audio_from_text(clean_sentence)
+        except Exception as exc:
+            logger.warning("TTS generation failed for sentence '%s...': %s", clean_sentence[:30], exc)
+            audio_pcm = None
+
+        yield clean_sentence, audio_pcm
+

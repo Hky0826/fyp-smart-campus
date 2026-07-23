@@ -26,6 +26,7 @@ def test_inference_metrics_defaults():
     assert metrics.embedding_db_search_ms == 0.0
     assert metrics.rag_ms == 0.0
     assert metrics.tts_ms == 0.0
+    assert metrics.time_to_first_tts_ms == 0.0
     assert metrics.total_inference_ms == 0.0
 
     d = metrics.to_dict()
@@ -35,6 +36,7 @@ def test_inference_metrics_defaults():
     assert d["embedding_db_search_ms"] == 0.0
     assert d["rag_ms"] == 0.0
     assert d["tts_ms"] == 0.0
+    assert d["time_to_first_tts_ms"] == 0.0
     assert d["total_inference_ms"] == 0.0
 
 
@@ -59,6 +61,7 @@ def test_log_inference_metrics_enabled(tmp_path: Path, monkeypatch: pytest.Monke
         embedding_db_search_ms=18.7,
         rag_ms=320.1,
         tts_ms=110.0,
+        time_to_first_tts_ms=85.0,
         total_inference_ms=511.5,
     )
 
@@ -87,6 +90,7 @@ def test_log_inference_metrics_enabled(tmp_path: Path, monkeypatch: pytest.Monke
     assert record["timings_ms"]["embedding_db_search_ms"] == 18.7
     assert record["timings_ms"]["rag_ms"] == 320.1
     assert record["timings_ms"]["tts_ms"] == 110.0
+    assert record["timings_ms"]["time_to_first_tts_ms"] == 85.0
     assert record["timings_ms"]["total_inference_ms"] == 511.5
     assert "timestamp" in record
 

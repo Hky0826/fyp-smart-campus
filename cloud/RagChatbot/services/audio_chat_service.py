@@ -45,13 +45,17 @@ from RagChatbot.generation.audio_query_extractor import (
 from RagChatbot.generation.gemini_live_service import (
     GeminiLiveError,
     generate_response,
+    generate_response_stream,
 )
+from RagChatbot.generation.sentence_splitter import StreamingSentenceSplitter
 from RagChatbot.generation.prompt_builder import build_context_block
 from RagChatbot.generation.response_validator import (
     ValidationResult,
     generate_audio_from_text,
     validate_response,
+    validate_sentence,
 )
+from RagChatbot.generation.query_router import classify_query, get_capabilities_summary
 from RagChatbot.retrieval.retriever import retrieve_chunks
 from RagChatbot.schemas import AudioChatResponse, CitationSchema
 from RagChatbot.security.audit_logger import log_access_denied, log_chatbot_interaction, log_personal_interaction
@@ -172,6 +176,8 @@ def _audio_response(
         with StageTimer() as timer:
             audio_data = _tts_base64(text_response or "")
         metrics.tts_ms += timer.elapsed_ms
+        if audio_data and metrics.time_to_first_tts_ms == 0.0:
+            metrics.time_to_first_tts_ms = (time.monotonic() - start_time) * 1000.0
 
     metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
     log_inference_metrics(
@@ -405,7 +411,39 @@ def process_audio_chat(
             query_id = logged_query_id if logged_query_id > 0 else None
         return _audio_response(transcribed_input=user_query, text_response=personal_result.answer, status="ok" if personal_result.access_granted else ("auth_required" if personal_result.authentication_required else "no_access"), access_granted=personal_result.access_granted, error_message=personal_result.status_message, start_time=start_time, query_id=query_id, include_audio=include_audio, response_scope=personal_result.response_scope, personal_intent=personal_result.intent.value, authentication_required=personal_result.authentication_required, navigation_target=navigation, metrics=metrics, user_id=user_id, session_id=resolved_session_id)
 
-# Step 5: Continue to retrieval
+    # Query routing: check if query is related to university information
+    from RagChatbot.generation.query_router import classify_query, get_capabilities_summary
+
+    with StageTimer() as timer:
+        route = classify_query(sanitized_query)
+    metrics.prompt_classification_ms += timer.elapsed_ms
+
+    if route.category != "UNIVERSITY_INFO":
+        if route.category == "GREETING":
+            fast_answer = "Hi! How can I help you with Quest International University today?"
+        elif route.category == "CAPABILITY":
+            fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
+        elif route.category == "NAVIGATIONAL":
+            fast_answer = "Navigational request detected. Routing to map module..."
+        elif route.category == "OUT_OF_SCOPE":
+            fast_answer = "I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics."
+        elif route.category == "UNCLEAR":
+            fast_answer = route.clarification_question or "Could you please clarify what university information you are looking for?"
+        else:
+            fast_answer = "I'm sorry, I could not process your query."
+
+        # Bypass embedding and retrieval completely
+        return _audio_response(
+            transcribed_input=user_query,
+            text_response=fast_answer,
+            status="ok",
+            access_granted=True,
+            start_time=start_time,
+            include_audio=include_audio,
+            metrics=metrics,
+            user_id=user_id,
+            session_id=resolved_session_id,
+        )
 
 # Step 6: Embed the extracted query
     with StageTimer() as timer:
@@ -582,3 +620,327 @@ def _has_relevant_protected_chunks(
         top_k_context=1,
     )
     return bool(protected_chunks)
+
+
+def process_audio_chat_stream(
+    audio_bytes: bytes,
+    mime_type: str,
+    bearer_token: Optional[str],
+    device_id: Optional[str],
+    session_id: Optional[int],
+    db: Session,
+):
+    """
+    Execute the audio RAG pipeline in sentence-by-sentence streaming mode.
+
+    Yields stream dictionary events:
+      - {"event": "metadata", "data": response_payload}
+      - {"event": "audio", "data": {"chunk": b64_pcm, "text": sentence_text}}
+      - {"event": "done", "data": final_response_payload}
+    """
+    start_time = time.monotonic()
+    metrics = InferenceMetrics()
+
+    user_id: Optional[int] = None
+    resolved_session_id: Optional[int] = None
+
+    if bearer_token:
+        try:
+            user_id, resolved_session_id = _verify_session(bearer_token, db)
+        except HTTPException:
+            logger.warning("Audio chat stream: invalid/expired JWT.")
+            res = _audio_response(
+                transcribed_input=None,
+                text_response=AUTH_REQUIRED_ANSWER,
+                status="auth_required",
+                access_granted=False,
+                error_message=AUTH_REQUIRED_STATUS,
+                start_time=start_time,
+                include_audio=False,
+                metrics=metrics,
+                user_id=user_id,
+                session_id=resolved_session_id,
+            )
+            yield {"event": "metadata", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+            yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+            return
+
+    if user_id is not None:
+        allowed_levels = get_allowed_access_levels_for_user(user_id, db)
+    else:
+        allowed_levels = VISITOR_ACCESS_LEVELS
+
+    user_role = _derive_role_from_access_levels(allowed_levels)
+
+    # Extract audio
+    extraction_result = extract_query_from_audio(
+        audio_bytes=audio_bytes,
+        mime_type=mime_type,
+    )
+
+    if extraction_result.possible_prompt_injection or not extraction_result.user_query:
+        msg = (
+            "I'm not able to process that request."
+            if extraction_result.possible_prompt_injection
+            else "No speech detected."
+        )
+        status_str = "blocked" if extraction_result.possible_prompt_injection else "error"
+        res = _audio_response(
+            transcribed_input=extraction_result.user_query,
+            text_response=msg,
+            status=status_str,
+            access_granted=False,
+            error_message=msg,
+            start_time=start_time,
+            include_audio=False,
+            metrics=metrics,
+            user_id=user_id,
+            session_id=resolved_session_id,
+        )
+        yield {"event": "metadata", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        return
+
+    user_query = extraction_result.user_query
+    guard_result = check_query(user_query)
+    if not guard_result.is_safe:
+        res = _audio_response(
+            transcribed_input=user_query,
+            text_response="I'm not able to process that request.",
+            status="blocked",
+            access_granted=False,
+            start_time=start_time,
+            include_audio=False,
+            metrics=metrics,
+            user_id=user_id,
+            session_id=resolved_session_id,
+        )
+        yield {"event": "metadata", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        return
+
+    sanitized_query = guard_result.sanitized_query or user_query
+    context = resolve_auth_context(bearer_token, db)
+    personal_route = parse_personal_intent(sanitized_query)
+    personal_result = handle_personal_request(personal_route, context, db)
+
+    if personal_result is not None:
+        res = _audio_response(
+            transcribed_input=user_query,
+            text_response=personal_result.answer,
+            status=personal_result.status,
+            access_granted=personal_result.access_granted,
+            start_time=start_time,
+            include_audio=False,
+            metrics=metrics,
+            user_id=user_id,
+            session_id=resolved_session_id,
+        )
+        yield {"event": "metadata", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        if rag_settings.AUDIO_TTS_ENABLED and personal_result.answer:
+            audio_pcm = generate_audio_from_text(personal_result.answer)
+            if audio_pcm:
+                yield {
+                    "event": "audio",
+                    "data": {
+                        "encoding": "pcm_s16le",
+                        "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
+                        "chunk": base64.b64encode(audio_pcm).decode("ascii"),
+                        "text": personal_result.answer,
+                    },
+                }
+        yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        return
+
+    # Query routing: check if query is related to university information
+    with StageTimer() as timer:
+        route = classify_query(sanitized_query)
+    metrics.prompt_classification_ms += timer.elapsed_ms
+
+    if route.category != "UNIVERSITY_INFO":
+        if route.category == "GREETING":
+            fast_answer = "Hi! How can I help you with Quest International University today?"
+        elif route.category == "CAPABILITY":
+            fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
+        elif route.category == "NAVIGATIONAL":
+            fast_answer = "Navigational request detected. Routing to map module..."
+        elif route.category == "OUT_OF_SCOPE":
+            fast_answer = "I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics."
+        elif route.category == "UNCLEAR":
+            fast_answer = route.clarification_question or "Could you please clarify what university information you are looking for?"
+        else:
+            fast_answer = "I'm sorry, I could not process your query."
+
+        res = _audio_response(
+            transcribed_input=user_query,
+            text_response=fast_answer,
+            status="ok",
+            access_granted=True,
+            start_time=start_time,
+            include_audio=False,
+            metrics=metrics,
+            user_id=user_id,
+            session_id=resolved_session_id,
+        )
+        yield {"event": "metadata", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        if rag_settings.AUDIO_TTS_ENABLED and fast_answer:
+            audio_pcm = generate_audio_from_text(fast_answer)
+            if audio_pcm:
+                yield {
+                    "event": "audio",
+                    "data": {
+                        "encoding": "pcm_s16le",
+                        "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
+                        "chunk": base64.b64encode(audio_pcm).decode("ascii"),
+                        "text": fast_answer,
+                    },
+                }
+        yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        return
+
+    query_embedding = embed_text(sanitized_query)
+    ranked_chunks = retrieve_chunks(
+        query_embedding=query_embedding,
+        allowed_access_levels=allowed_levels,
+        db=db,
+        top_k_retrieval=rag_settings.TOP_K_RETRIEVAL,
+        top_k_context=rag_settings.TOP_K_CONTEXT,
+    )
+
+    if not ranked_chunks:
+        if user_id is None and _has_relevant_protected_chunks(query_embedding, db):
+            res = _audio_response(
+                transcribed_input=user_query,
+                text_response=AUTH_REQUIRED_ANSWER,
+                status="auth_required",
+                access_granted=False,
+                start_time=start_time,
+                include_audio=False,
+                metrics=metrics,
+                user_id=user_id,
+                session_id=resolved_session_id,
+            )
+        else:
+            res = _audio_response(
+                transcribed_input=user_query,
+                text_response="I'm sorry, I don't have enough information in the available documents to answer that question.",
+                status="no_access" if user_id is None else "ok",
+                access_granted=True,
+                start_time=start_time,
+                include_audio=False,
+                metrics=metrics,
+                user_id=user_id,
+                session_id=resolved_session_id,
+            )
+        yield {"event": "metadata", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        if res.text_response and rag_settings.AUDIO_TTS_ENABLED:
+            audio_pcm = generate_audio_from_text(res.text_response)
+            if audio_pcm:
+                yield {
+                    "event": "audio",
+                    "data": {
+                        "encoding": "pcm_s16le",
+                        "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
+                        "chunk": base64.b64encode(audio_pcm).decode("ascii"),
+                        "text": res.text_response,
+                    },
+                }
+        yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        return
+
+    context_block = build_context_block(ranked_chunks)
+    citations = [
+        CitationSchema(
+            chunk_id=chunk.chunk_id,
+            document_id=chunk.document_id,
+            document_title=chunk.document_title,
+            chunk_index=chunk.chunk_index,
+            access_level=chunk.access_level,
+            excerpt=chunk.chunk_text[:200],
+        )
+        for chunk in ranked_chunks
+    ]
+
+    initial_res = _audio_response(
+        transcribed_input=user_query,
+        text_response="",
+        sources=citations,
+        status="ok",
+        access_granted=True,
+        start_time=start_time,
+        include_audio=False,
+        metrics=metrics,
+        user_id=user_id,
+        session_id=resolved_session_id,
+    )
+    yield {"event": "metadata", "data": initial_res.model_dump(mode="json", exclude={"audio_response"})}
+
+    splitter = StreamingSentenceSplitter()
+    accumulated_text: List[str] = []
+
+    llm_stream = generate_response_stream(
+        system_instruction=_LIVE_SYSTEM_INSTRUCTION,
+        user_role=user_role,
+        retrieved_context=context_block,
+        user_query=sanitized_query,
+        sources=ranked_chunks,
+    )
+
+    for token in llm_stream:
+        for sentence in splitter.feed(token):
+            accumulated_text.append(sentence)
+            val = validate_sentence(sentence)
+            clean_sentence = val.sanitized_text or sentence if not val.valid else sentence
+            audio_pcm = None
+            if rag_settings.AUDIO_TTS_ENABLED:
+                with StageTimer() as tts_timer:
+                    audio_pcm = generate_audio_from_text(clean_sentence)
+                metrics.tts_ms += tts_timer.elapsed_ms
+                if audio_pcm and metrics.time_to_first_tts_ms == 0.0:
+                    metrics.time_to_first_tts_ms = (time.monotonic() - start_time) * 1000.0
+
+            event_data = {"text": clean_sentence}
+            if audio_pcm:
+                event_data.update({
+                    "encoding": "pcm_s16le",
+                    "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
+                    "chunk": base64.b64encode(audio_pcm).decode("ascii"),
+                })
+            yield {"event": "audio" if audio_pcm else "sentence", "data": event_data}
+
+    for sentence in splitter.flush():
+        accumulated_text.append(sentence)
+        val = validate_sentence(sentence)
+        clean_sentence = val.sanitized_text or sentence if not val.valid else sentence
+        audio_pcm = None
+        if rag_settings.AUDIO_TTS_ENABLED:
+            with StageTimer() as tts_timer:
+                audio_pcm = generate_audio_from_text(clean_sentence)
+            metrics.tts_ms += tts_timer.elapsed_ms
+            if audio_pcm and metrics.time_to_first_tts_ms == 0.0:
+                metrics.time_to_first_tts_ms = (time.monotonic() - start_time) * 1000.0
+
+        event_data = {"text": clean_sentence}
+        if audio_pcm:
+            event_data.update({
+                "encoding": "pcm_s16le",
+                "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
+                "chunk": base64.b64encode(audio_pcm).decode("ascii"),
+            })
+        yield {"event": "audio" if audio_pcm else "sentence", "data": event_data}
+
+    full_answer = " ".join(accumulated_text)
+    final_res = _audio_response(
+        transcribed_input=user_query,
+        text_response=full_answer,
+        sources=citations,
+        status="ok",
+        access_granted=True,
+        start_time=start_time,
+        include_audio=False,
+        metrics=metrics,
+        user_id=user_id,
+        session_id=resolved_session_id,
+    )
+    yield {"event": "done", "data": final_res.model_dump(mode="json", exclude={"audio_response"})}
+

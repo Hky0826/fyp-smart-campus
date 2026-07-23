@@ -36,6 +36,7 @@ class InferenceMetrics:
     embedding_db_search_ms: float = 0.0
     rag_ms: float = 0.0
     tts_ms: float = 0.0
+    time_to_first_tts_ms: float = 0.0
     total_inference_ms: float = 0.0
 
     def to_dict(self) -> dict[str, float]:
@@ -47,6 +48,7 @@ class InferenceMetrics:
             "embedding_db_search_ms": round(self.embedding_db_search_ms, 2),
             "rag_ms": round(self.rag_ms, 2),
             "tts_ms": round(self.tts_ms, 2),
+            "time_to_first_tts_ms": round(self.time_to_first_tts_ms, 2),
             "total_inference_ms": round(self.total_inference_ms, 2),
         }
 
@@ -114,7 +116,7 @@ def log_inference_metrics(
     # 1. Log human-readable summary to system logger
     logger.info(
         "INFERENCE_METRICS [%s] type=%s user_id=%s session_id=%s status=%s "
-        "total=%.2fms (injection=%.2fms classification=%.2fms embedding=%.2fms db_search=%.2fms rag=%.2fms tts=%.2fms)",
+        "total=%.2fms (injection=%.2fms classification=%.2fms embedding=%.2fms db_search=%.2fms rag=%.2fms tts=%.2fms first_tts=%.2fms)",
         timestamp_str,
         request_type,
         user_id,
@@ -127,6 +129,7 @@ def log_inference_metrics(
         timings["embedding_db_search_ms"],
         timings["rag_ms"],
         timings["tts_ms"],
+        timings["time_to_first_tts_ms"],
     )
 
     # 2. Append JSON Line record to inference log file

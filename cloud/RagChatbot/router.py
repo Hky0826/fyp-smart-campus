@@ -43,7 +43,7 @@ from RagChatbot.schemas import (
     IngestionRequest,
     IngestionResponse,
 )
-from RagChatbot.services.audio_chat_service import process_audio_chat
+from RagChatbot.services.audio_chat_service import process_audio_chat, process_audio_chat_stream
 from RagChatbot.services.chat_service import process_chat, process_public_smoke_chat
 from RagChatbot.services.ingestion_service import ingest_document
 
@@ -150,17 +150,18 @@ def _audio_chat_stream_events(
     session_id: int | None,
     db: Session,
 ) -> Iterator[str]:
-    """Run the audio RAG pipeline and stream TTS PCM chunks as NDJSON."""
+    """Run the audio RAG pipeline and stream TTS PCM chunks as NDJSON line by line."""
     try:
-        response = process_audio_chat(
+        stream_gen = process_audio_chat_stream(
             audio_bytes=audio_bytes,
             mime_type=mime_type,
             bearer_token=bearer_token,
             device_id=device_id,
             session_id=session_id,
             db=db,
-            include_audio=False,
         )
+        for event in stream_gen:
+            yield _ndjson_event(event["event"], event["data"])
     except AudioQueryExtractionError:
         yield _ndjson_event(
             "error",
@@ -181,30 +182,6 @@ def _audio_chat_stream_events(
         )
         return
 
-    response_payload = response.model_dump(mode="json", exclude={"audio_response"})
-    yield _ndjson_event("metadata", response_payload)
-
-    if _should_stream_tts_audio(response):
-        try:
-            for chunk in generate_audio_from_text_stream(response.text_response or ""):
-                if not chunk:
-                    continue
-                yield _ndjson_event(
-                    "audio",
-                    {
-                        "encoding": "pcm_s16le",
-                        "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
-                        "chunk": base64.b64encode(chunk).decode("ascii"),
-                    },
-                )
-        except Exception as exc:
-            logger.warning("Audio chat stream: TTS streaming failed: %s", exc)
-            yield _ndjson_event(
-                "tts_error",
-                {"message": "Audio playback stream could not be generated."},
-            )
-
-    yield _ndjson_event("done", response_payload)
 
 
 # ── Health Check ──────────────────────────────────────────────────────────────
