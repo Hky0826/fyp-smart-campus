@@ -483,6 +483,13 @@ def create_kiosk_router(
             logger.exception("Kiosk chatbot owner verification failed")
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
+        faces = result.get("faces", [])
+        if len(faces) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only one person can be in the frame.",
+            )
+
         owner_face = _first_face_with_embedding(result)
         if owner_face is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No usable face detected.")

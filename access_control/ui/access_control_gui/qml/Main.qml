@@ -3,15 +3,16 @@ import QtQuick.Controls
 
 ApplicationWindow {
     id: root
-    width: 1280
-    height: 720
+    width: 800
+    height: 480
     visible: true
     visibility: Window.FullScreen
     color: "#020617"
     title: "Edge Access Control"
     readonly property bool showAccessGlow: !accessController.chatExpanded
                                            && (accessController.mode === "access-granted"
-                                               || accessController.mode === "access-denied")
+                                               || accessController.mode === "access-denied"
+                                               || accessController.mode === "only-one-person")
 
     CameraView {
         id: cameraView
@@ -36,8 +37,9 @@ ApplicationWindow {
         errorText: accessController.chatError
         verifying: accessController.chatVerificationActive
         onCloseRequested: accessController.exitChat()
-        onMessageRequested: function(message) { accessController.sendMessage(message) }
-        onToggleMuteRequested: accessController.toggleMute()
+        onPushToTalkStarted: chatbotController.startPushToTalk()
+        onPushToTalkStopped: chatbotController.stopPushToTalk()
+        onPushToTalkToggled: chatbotController.togglePushToTalk()
     }
 
     ChatbotButton {

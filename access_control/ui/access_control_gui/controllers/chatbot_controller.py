@@ -24,19 +24,20 @@ from .api_client import KioskApiClient
 
 
 logger = logging.getLogger(__name__)
-VOICE_RECORDING_MS = int(os.getenv("EDGE_GUI_VOICE_RECORDING_MS", "4000"))
+PTT_MAX_RECORD_SECONDS = float(os.getenv("EDGE_GUI_PTT_MAX_RECORD_SECONDS", "60.0"))
+VOICE_RECORDING_MS = int(os.getenv("EDGE_GUI_VOICE_RECORDING_MS", "60000"))
 VOICE_RESTART_DELAY_MS = int(os.getenv("EDGE_GUI_VOICE_RESTART_DELAY_MS", "250"))
 TTS_OUTPUT_SAMPLE_RATE = int(os.getenv("EDGE_GUI_TTS_OUTPUT_SAMPLE_RATE", "24000"))
-VOICE_MIN_RECORD_SECONDS = float(os.getenv("EDGE_GUI_VOICE_MIN_RECORD_SECONDS", "0.35"))
-VOICE_SILENCE_SECONDS = float(os.getenv("EDGE_GUI_VOICE_SILENCE_SECONDS", "0.55"))
-VOICE_SILENCE_RMS = float(os.getenv("EDGE_GUI_VOICE_SILENCE_RMS", "700"))
-MIN_AUDIO_RMS = float(os.getenv("EDGE_GUI_AUDIO_MIN_RMS", "500"))
-MIN_AUDIO_PEAK = float(os.getenv("EDGE_GUI_AUDIO_MIN_PEAK", "1500"))
-MIN_VOICED_RATIO = float(os.getenv("EDGE_GUI_AUDIO_MIN_VOICED_RATIO", "0.03"))
+VOICE_MIN_RECORD_SECONDS = float(os.getenv("EDGE_GUI_VOICE_MIN_RECORD_SECONDS", "0.1"))
+VOICE_SILENCE_SECONDS = float(os.getenv("EDGE_GUI_VOICE_SILENCE_SECONDS", "300.0"))
+VOICE_SILENCE_RMS = float(os.getenv("EDGE_GUI_VOICE_SILENCE_RMS", "0.0"))
+MIN_AUDIO_RMS = float(os.getenv("EDGE_GUI_AUDIO_MIN_RMS", "50.0"))
+MIN_AUDIO_PEAK = float(os.getenv("EDGE_GUI_AUDIO_MIN_PEAK", "100.0"))
+MIN_VOICED_RATIO = float(os.getenv("EDGE_GUI_AUDIO_MIN_VOICED_RATIO", "0.001"))
 VOICE_BLOCK_MS = int(os.getenv("EDGE_GUI_AUDIO_VOICE_BLOCK_MS", "100"))
 
 
-class _AudioLoopWorker(QThread):
+class _PushToTalkWorker(QThread):
     listeningChanged = Signal(bool)
     busyChanged = Signal(bool)
     responseReceived = Signal(dict)
@@ -45,48 +46,37 @@ class _AudioLoopWorker(QThread):
     def __init__(self, api: KioskApiClient) -> None:
         super().__init__()
         self._api = api
-        self._running = False
         self._stop_requested = threading.Event()
 
     def run(self) -> None:
-        self._running = True
         self._stop_requested.clear()
         config = AudioIOConfig()
         config = replace(
             config,
-            max_record_seconds=max(0.5, VOICE_RECORDING_MS / 1000.0),
-            min_record_seconds=max(0.1, VOICE_MIN_RECORD_SECONDS),
-            silence_duration_seconds=max(0.1, VOICE_SILENCE_SECONDS),
-            silence_rms_threshold=VOICE_SILENCE_RMS,
+            max_record_seconds=max(30.0, PTT_MAX_RECORD_SECONDS),
+            min_record_seconds=0.1,
+            silence_duration_seconds=300.0,  # Never auto-cut on silence while holding Push-to-Talk
+            silence_rms_threshold=0.0,
             recording_block_ms=max(20, VOICE_BLOCK_MS),
         )
         recorder = AudioRecorder(config)
         player = AudioPlayer(config, sample_rate=TTS_OUTPUT_SAMPLE_RATE)
+        recording_path: Path | None = None
 
-        while self._running:
-            recording_path: Path | None = None
-            try:
-                self.listeningChanged.emit(True)
-                result = recorder.record(cancel_requested=self._stop_requested.is_set)
-                recording_path = result.path
-                self.listeningChanged.emit(False)
-                if not self._running:
-                    break
+        try:
+            self.listeningChanged.emit(True)
+            result = recorder.record(cancel_requested=self._stop_requested.is_set)
+            recording_path = result.path
+            self.listeningChanged.emit(False)
 
-                if recording_path.stat().st_size < 1024:
-                    self.msleep(VOICE_RESTART_DELAY_MS)
-                    continue
-
+            if recording_path and recording_path.exists() and recording_path.stat().st_size >= 512:
                 voice_stats = _wav_voice_stats(recording_path)
-                if not _has_voice(voice_stats):
-                    self.msleep(VOICE_RESTART_DELAY_MS)
-                    continue
-
+                logger.info("Push-to-Talk recorded stats: %s", voice_stats)
                 self.busyChanged.emit(True)
                 response = self._api.send_chat_audio_file(recording_path, "audio/wav")
                 self.responseReceived.emit(response)
                 audio_response = response.get("audio_response")
-                if audio_response and self._running:
+                if audio_response:
                     audio_pcm = base64.b64decode(str(audio_response))
                     logger.info(
                         "GUI audio chat TTS received. base64_chars=%d pcm_bytes=%d",
@@ -94,19 +84,16 @@ class _AudioLoopWorker(QThread):
                         len(audio_pcm),
                     )
                     player.play_pcm(audio_pcm)
-            except Exception as exc:  # pragma: no cover - hardware/network runtime
-                self.errorOccurred.emit(str(exc))
-                time.sleep(max(0.25, VOICE_RESTART_DELAY_MS / 1000.0))
-            finally:
-                self.listeningChanged.emit(False)
-                self.busyChanged.emit(False)
-                if recording_path is not None:
-                    recording_path.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.error("Push-to-Talk audio processing error: %s", exc)
+            self.errorOccurred.emit(str(exc))
+        finally:
+            self.listeningChanged.emit(False)
+            self.busyChanged.emit(False)
+            if recording_path is not None:
+                recording_path.unlink(missing_ok=True)
 
-            self.msleep(VOICE_RESTART_DELAY_MS)
-
-    def stop(self) -> None:
-        self._running = False
+    def stop_recording(self) -> None:
         self._stop_requested.set()
 
 
@@ -120,25 +107,20 @@ class ChatbotController(QObject):
     def __init__(self, api: KioskApiClient) -> None:
         super().__init__()
         self._api = api
-        self._worker: _AudioLoopWorker | None = None
-        self._stopping_workers: list[_AudioLoopWorker] = []
-        self._start_requested = False
+        self._worker: _PushToTalkWorker | None = None
         self._listening = False
         self._busy = False
         self._error = ""
         self._muted = False
 
     @Slot()
-    def startVoiceLoop(self) -> None:
-        if self._muted or self._stopping_workers:
-            self._start_requested = bool(self._stopping_workers and not self._muted)
-            self._set_listening(False)
-            self._set_busy(False)
+    def startPushToTalk(self) -> None:
+        """Start recording speech when Push-to-Talk button is pressed."""
+        if self._busy or self._listening:
             return
-        if self._worker and self._worker.isRunning():
-            return
-        self._start_requested = False
-        worker = _AudioLoopWorker(self._api)
+        self._error = ""
+        self.errorChanged.emit()
+        worker = _PushToTalkWorker(self._api)
         worker.listeningChanged.connect(self._set_listening)
         worker.busyChanged.connect(self._set_busy)
         worker.errorOccurred.connect(self._set_error)
@@ -148,53 +130,45 @@ class ChatbotController(QObject):
         worker.start()
 
     @Slot()
+    def stopPushToTalk(self) -> None:
+        """Stop recording speech and process audio when Push-to-Talk button is released."""
+        if self._worker and self._listening:
+            self._worker.stop_recording()
+
+    @Slot()
+    def togglePushToTalk(self) -> None:
+        """Toggle Push-to-Talk recording (Tap to Start / Tap to Stop)."""
+        if self._listening:
+            self.stopPushToTalk()
+        elif not self._busy:
+            self.startPushToTalk()
+
+    @Slot()
+    def startVoiceLoop(self) -> None:
+        pass
+
+    @Slot()
     def stopVoiceLoop(self) -> None:
-        self._start_requested = False
-        if not self._worker:
-            self._set_listening(False)
-            self._set_busy(False)
-            return
-        worker = self._worker
-        self._worker = None
-        worker.stop()
-        if worker.isRunning():
-            self._stopping_workers.append(worker)
-        else:
-            self._cleanup_worker(worker)
-        self._set_listening(False)
-        self._set_busy(False)
+        if self._worker and self._listening:
+            self.stopPushToTalk()
 
     @Slot()
     def toggleMute(self) -> None:
-        self.setMuted(not self._muted)
+        pass
 
     @Slot(bool)
     def setMuted(self, muted: bool) -> None:
-        if muted == self._muted:
-            return
-        self._muted = muted
-        if self._muted:
-            self.stopVoiceLoop()
-        self.mutedChanged.emit()
+        pass
 
     def shutdown(self) -> None:
-        self.stopVoiceLoop()
-        workers = list(self._stopping_workers)
-        if self._worker is not None:
-            workers.append(self._worker)
-        for worker in workers:
-            worker.stop()
-            worker.wait(3000)
+        if self._worker:
+            self._worker.stop_recording()
+            self._worker.wait(2000)
 
-    def _cleanup_worker(self, worker: _AudioLoopWorker) -> None:
+    def _cleanup_worker(self, worker: _PushToTalkWorker) -> None:
         if self._worker is worker:
             self._worker = None
-        if worker in self._stopping_workers:
-            self._stopping_workers.remove(worker)
         worker.deleteLater()
-        if self._start_requested and not self._stopping_workers and not self._muted:
-            self._start_requested = False
-            self.startVoiceLoop()
 
     @Slot(bool)
     def _set_listening(self, value: bool) -> None:

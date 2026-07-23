@@ -33,7 +33,7 @@ from .access_audio import AccessControlAudioCoordinator
 
 
 logger = logging.getLogger(__name__)
-MULTIPLE_FACE_REASON = "Only one user is allowed within the frame."
+MULTIPLE_FACE_REASON = "Only one person can be in the frame."
 SPACE_KEY = ord(" ")
 QUIT_KEY = ord("q")
 
