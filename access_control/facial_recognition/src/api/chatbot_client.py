@@ -49,6 +49,7 @@ class ChatbotClient:
         self._base_url = config.sync_cloud_url.rstrip("/")
         self._chat_endpoint = f"{self._base_url}/api/chatbot/chat"
         self._audio_chat_endpoint = f"{self._base_url}/api/chatbot/chat/audio"
+        self._audio_chat_stream_endpoint = f"{self._base_url}/api/chatbot/chat/audio/stream"
         self._health_endpoint = f"{self._base_url}/api/chatbot/health"
 
     def health_check(self) -> Dict[str, Any]:
@@ -180,27 +181,18 @@ class ChatbotClient:
         jwt_token: Optional[str] = None,
         device_id: Optional[str] = None,
         session_id: Optional[int] = None,
+        audio_consumer: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Send user audio to the cloud audio RAG chatbot and return its response.
 
-        Returns a dict matching the cloud AudioChatResponse schema:
-        {
-            "transcribed_input": str | null,
-            "text_response": str | null,
-            "audio_response": str | null,
-            "sources": [...],
-            "status": str,
-            "access_granted": bool,
-            "error_message": str | null,
-            "response_time_ms": int | null,
-            "query_id": int | null,
-        }
+        Returns a dict matching the cloud AudioChatResponse schema.
+        Supports real-time sentence-by-sentence PCM streaming via audio_consumer.
         """
         if not audio_bytes:
             raise ChatbotClientError("Audio recording is empty.", status_code=400)
 
-        headers = {"Accept": "application/json"}
+        headers = {"Accept": "application/x-ndjson"}
         if jwt_token:
             headers["Authorization"] = f"Bearer {jwt_token}"
 
@@ -213,11 +205,12 @@ class ChatbotClient:
 
         try:
             resp = requests.post(
-                self._audio_chat_endpoint,
+                self._audio_chat_stream_endpoint,
                 files=files,
                 data=data,
                 headers=headers,
                 timeout=(_CONNECT_TIMEOUT, _READ_TIMEOUT),
+                stream=True,
             )
 
             if resp.status_code == 401:
@@ -234,29 +227,82 @@ class ChatbotClient:
                 )
 
             if resp.status_code == 422:
-                detail = resp.json().get("detail", "Invalid request format.")
+                detail = resp.json().get("detail", "Invalid request format.") if resp.headers.get("content-type", "").startswith("application/json") else "Invalid request format."
                 raise ChatbotClientError(
                     f"Request validation error: {detail}",
                     status_code=422,
                 )
 
             if resp.status_code == 503:
-                detail = resp.json().get("detail", "Service unavailable.")
+                detail = resp.json().get("detail", "Service unavailable.") if resp.headers.get("content-type", "").startswith("application/json") else "Service unavailable."
                 raise ChatbotClientError(
                     f"Cloud service temporarily unavailable: {detail}",
                     status_code=503,
                 )
 
             resp.raise_for_status()
-            payload = resp.json()
-            audio_response = payload.get("audio_response")
+
+            # Parse streaming NDJSON response line by line
+            import base64
+            import json
+            final_payload: Dict[str, Any] = {}
+            audio_chunks: list[str] = []
+            text_chunks: list[str] = []
+            for raw_line in resp.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                try:
+                    event_payload = json.loads(raw_line)
+                except json.JSONDecodeError:
+                    continue
+                event = event_payload.get("event")
+                data_obj = event_payload.get("data", {})
+                if event in {"audio", "sentence"}:
+                    text = data_obj.get("text")
+                    if text:
+                        text_chunks.append(text)
+                    chunk = data_obj.get("chunk")
+                    if chunk:
+                        audio_chunks.append(chunk)
+                        if callable(audio_consumer):
+                            try:
+                                audio_consumer(base64.b64decode(chunk))
+                            except Exception as exc:
+                                logger.warning("audio_consumer playback failed: %s", exc)
+                elif event == "done":
+                    final_payload = data_obj
+
+            # Combine all PCM audio chunks into complete base64 payload
+            combined_base64 = None
+            if audio_chunks:
+                try:
+                    pcm_bytes = b"".join(base64.b64decode(c) for c in audio_chunks if c)
+                    combined_base64 = base64.b64encode(pcm_bytes).decode("ascii")
+                except Exception as exc:
+                    logger.warning("Failed to concatenate PCM audio chunks: %s", exc)
+                    combined_base64 = audio_chunks[0]
+
+            if not final_payload:
+                final_payload = {
+                    "transcribed_input": None,
+                    "text_response": " ".join(text_chunks),
+                    "audio_response": combined_base64,
+                    "status": "ok",
+                    "access_granted": True,
+                }
+            else:
+                if combined_base64:
+                    final_payload["audio_response"] = combined_base64
+                if text_chunks and not final_payload.get("text_response"):
+                    final_payload["text_response"] = " ".join(text_chunks)
+
             logger.info(
-                "Cloud audio chat response received. status=%s text_len=%d audio_base64_chars=%d",
-                payload.get("status"),
-                len(str(payload.get("text_response") or "")),
-                len(str(audio_response or "")),
+                "Cloud audio chat stream complete. status=%s text_len=%d audio_chunks=%d",
+                final_payload.get("status"),
+                len(str(final_payload.get("text_response") or "")),
+                len(audio_chunks),
             )
-            return payload
+            return final_payload
 
         except requests.Timeout:
             raise ChatbotClientError(

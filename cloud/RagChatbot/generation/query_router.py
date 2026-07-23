@@ -7,8 +7,7 @@ or if they can be answered directly (e.g., greetings, out of scope, navigational
 
 import json
 import logging
-from google import genai
-from google.genai import types
+import re
 from pydantic import BaseModel, Field
 
 from RagChatbot.config import rag_settings
@@ -29,6 +28,24 @@ KNOWLEDGE_BASE_MANIFEST = [
     "News and events"
 ]
 
+_GREETING_PATTERN = re.compile(
+    r"\b(hi|hello|hey|good\s+(morning|afternoon|evening|day)|greetings|howdy|sup|yo|how\s+are\s+you|who\s+are\s+you|what\s+is\s+your\s+name|nice\s+to\s+meet\s+you)\b",
+    re.IGNORECASE,
+)
+
+_CAPABILITY_PATTERN = re.compile(
+    r"\b(what\s+can\s+you\s+do|how\s+can\s+you\s+help|what\s+are\s+your\s+capabilities|what\s+do\s+you\s+know|features)\b",
+    re.IGNORECASE,
+)
+
+_NAVIGATIONAL_PATTERN = re.compile(
+    r"\b(where\s+is|how\s+to\s+get\s+to|directions?\s+to|map\s+of|location\s+of|find\s+the\s+building|way\s+to)\b",
+    re.IGNORECASE,
+)
+
+_UNCLEAR_WORDS = {"fees", "help", "science", "info", "test", "school"}
+
+
 class RouteClassification(BaseModel):
     category: str = Field(description="The classification category of the query.")
     clarification_question: str | None = Field(
@@ -36,70 +53,47 @@ class RouteClassification(BaseModel):
         description="If category is UNCLEAR, provide a short clarifying question."
     )
 
+
 def classify_query(query: str) -> RouteClassification:
     """
-    Classifies the user query into one of the supported categories.
+    Local Regex Guard & Intent Router (~2ms — 0 LLM calls).
     
-    Returns a RouteClassification object.
+    Classifies queries locally using pattern matching without invoking any LLM API.
     """
-    manifest_str = "\n".join([f"- {item}" for item in KNOWLEDGE_BASE_MANIFEST])
-    
-    system_instruction = f"""
-You are a highly accurate query routing assistant for a university chatbot (Quest International University).
-Your job is to analyze the user's query and classify it into exactly ONE of the following categories:
-
-- GREETING: The user is saying hi, hello, or engaging in simple small talk (e.g., "how are you").
-- CAPABILITY: The user is asking what you can do, what you know, or how you can help.
-- NAVIGATIONAL: The user is asking for physical directions or locations on campus (e.g., "where is the library?", "how do I get to the cafeteria?").
-- UNIVERSITY_INFO: The user is asking a substantive question that likely requires searching the university database.
-  The database contains information on:
-{manifest_str}
-- OUT_OF_SCOPE: The user is asking a substantive question that is completely unrelated to the university (e.g., coding help, live sports, general world trivia).
-- UNCLEAR: The query is a single ambiguous word (e.g., "fees", "help", "science") or incomplete thought where you need more context to search effectively.
-
-If the category is UNCLEAR, you MUST provide a short, polite `clarification_question` asking the user what specific aspect they want to know about. Otherwise, set it to null.
-
-Output your response strictly as a JSON object matching this schema:
-{{
-    "category": "GREETING | CAPABILITY | NAVIGATIONAL | UNIVERSITY_INFO | OUT_OF_SCOPE | UNCLEAR",
-    "clarification_question": "string or null"
-}}
-Do NOT wrap the JSON in markdown code blocks.
-"""
-
-    # We use a low temperature for deterministic routing.
-    try:
-        client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
-
-        response = client.models.generate_content(
-            model=rag_settings.LLM_MODEL,
-            contents=query,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.0,
-                response_mime_type="application/json",
-            ),
+    clean_query = query.strip()
+    if not clean_query:
+        return RouteClassification(
+            category="UNCLEAR",
+            clarification_question="Could you please ask a question about campus services or documents?",
         )
 
-        raw_text = response.text.strip()
-        
-        data = json.loads(raw_text)
-        category = data.get("category", "UNIVERSITY_INFO") # default fallback
-        clarification = data.get("clarification_question")
-        
-        # Guardrail against hallucinatory categories
-        valid_categories = {"GREETING", "CAPABILITY", "NAVIGATIONAL", "UNIVERSITY_INFO", "OUT_OF_SCOPE", "UNCLEAR"}
-        if category not in valid_categories:
-            logger.warning(f"Router returned invalid category: {category}. Falling back to UNIVERSITY_INFO.")
-            category = "UNIVERSITY_INFO"
-            
-        logger.info(f"Query Router classified '{query}' as {category}")
-        return RouteClassification(category=category, clarification_question=clarification)
-        
-    except Exception as exc:
-        logger.error(f"Query router LLM call failed: {exc}. Falling back to UNIVERSITY_INFO.")
-        # If the router fails, default to running the RAG pipeline so the user still gets a chance at an answer.
-        return RouteClassification(category="UNIVERSITY_INFO")
+    # 1. GREETING Fast-Path
+    if _GREETING_PATTERN.match(clean_query):
+        logger.info("Local Regex Router classified '%s' as GREETING (0 LLM calls)", query)
+        return RouteClassification(category="GREETING")
+
+    # 2. CAPABILITY Fast-Path
+    if _CAPABILITY_PATTERN.search(clean_query):
+        logger.info("Local Regex Router classified '%s' as CAPABILITY (0 LLM calls)", query)
+        return RouteClassification(category="CAPABILITY")
+
+    # 3. NAVIGATIONAL Fast-Path
+    if _NAVIGATIONAL_PATTERN.search(clean_query):
+        logger.info("Local Regex Router classified '%s' as NAVIGATIONAL (0 LLM calls)", query)
+        return RouteClassification(category="NAVIGATIONAL")
+
+    # 4. UNCLEAR check
+    query_words = clean_query.lower().split()
+    if len(query_words) == 1 and (query_words[0] in _UNCLEAR_WORDS or len(query_words[0]) < 3):
+        logger.info("Local Regex Router classified '%s' as UNCLEAR (0 LLM calls)", query)
+        return RouteClassification(
+            category="UNCLEAR",
+            clarification_question=f"Could you please specify what information about {query_words[0]} you are looking for?",
+        )
+
+    # 5. Default: Substantive RAG Query (UNIVERSITY_INFO)
+    logger.info("Local Regex Router classified '%s' as UNIVERSITY_INFO (0 LLM calls)", query)
+    return RouteClassification(category="UNIVERSITY_INFO")
 
 
 def get_capabilities_summary(*, authenticated: bool = False, personalisation_enabled: bool = False) -> str:

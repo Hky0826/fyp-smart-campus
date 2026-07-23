@@ -7,7 +7,7 @@ access_control/
 ├── .env                     Active environment configuration file (loaded automatically on start)
 ├── .env.example             Configuration template with descriptions
 ├── audio_io/                Voice chatbot recording, Gemini cloud RAG proxy, audio feedback, and playback
-│   └── sounds/              Prerecorded voice feedback (access_granted.wav, access_denied.wav)
+│   └── sounds/              Prerecorded voice feedback (access_granted.wav, access_denied.wav, only_one_person.wav)
 ├── facial_recognition/      Face detection (YuNet), recognition (SFace), sync, database, and FastAPI endpoints
 │   ├── models/
 │   │   └── access_control/  ONNX models (face_detection_yunet_2023mar_int8bq.onnx, face_recognition_sface_2021dec.onnx)

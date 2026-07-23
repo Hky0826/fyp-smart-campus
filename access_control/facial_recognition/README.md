@@ -8,7 +8,7 @@ OpenCV YuNet & SFace face-recognition pipeline for access control and kiosk auth
 - **Face Alignment**: 5-landmark affine alignment
 - **Face Recognition**: OpenCV `SFace` (`face_recognition_sface_2021dec.onnx`) generating 128D feature vectors
 - **Cloud Synchronization**: Downstream sync pulls `openvc_sface` templates from cloud backend (`module=access_control`)
-- **Voice Feedback**: Prerecorded `access_granted.wav` and `access_denied.wav` spoken audio
+- **Voice Feedback**: Prerecorded `access_granted.wav`, `access_denied.wav`, and `only_one_person.wav` spoken audio
 
 ---
 

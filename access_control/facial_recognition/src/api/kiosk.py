@@ -625,6 +625,44 @@ def create_kiosk_router(
             navigation_target=response.get("navigation_target"),
         )
 
+    @router.post("/kiosk/chat/audio/stream")
+    async def send_chat_audio_stream(audio: UploadFile = File(...)):
+        if audio.content_type and not audio.content_type.startswith("audio/"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Expected an audio file, got {audio.content_type}.",
+            )
+
+        token = store.current_token()
+        audio_bytes = await audio.read()
+        if not audio_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded audio file is empty.",
+            )
+
+        headers = {"Accept": "application/x-ndjson"}
+        if token:
+            headers["Authorization"] = f"Bearer {token.access_token}"
+
+        files = {"audio": (audio.filename or "recording.webm", audio_bytes, audio.content_type or "audio/webm")}
+        data = {"device_id": runtime_config().sync_device_id}
+        if token and token.session_id is not None:
+            data["session_id"] = str(token.session_id)
+
+        def stream_generator():
+            cloud_url = f"{runtime_config().sync_cloud_url.rstrip('/')}/api/chatbot/chat/audio/stream"
+            try:
+                with requests.post(cloud_url, files=files, data=data, headers=headers, stream=True, timeout=(5, 90)) as resp:
+                    for line in resp.iter_lines(decode_unicode=True):
+                        if line:
+                            yield f"{line}\n"
+            except Exception as exc:
+                logger.warning("Kiosk audio stream proxy error: %s", exc)
+                yield f'{{"event": "error", "data": {{"message": "{exc}"}}}}\n'
+
+        return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+
     @router.post("/chat/lock", response_model=ChatVerifyResponse)
     def lock_chat() -> ChatVerifyResponse:
         session = store.lock_chat_session("OWNER_TEMPORARILY_MISSING")

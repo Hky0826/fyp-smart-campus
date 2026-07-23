@@ -11,6 +11,12 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent
 DEFAULT_TEMP_DIR = PACKAGE_ROOT / "tmp"
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(dotenv_path=PACKAGE_ROOT / ".env")
+except ImportError:
+    pass
+
 
 def _bool_env(name: str, default: bool) -> bool:
     value = os.getenv(name)

@@ -32,7 +32,9 @@ class RagSettings:
 
     # The Google API key for the AI Studio API. This is used for LLM and embedding calls.
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
+    GOOGLE_CLOUD_STT_API_KEY: str = os.getenv("GOOGLE_CLOUD_STT_API_KEY", "")
     GOOGLE_CLOUD_TTS_API_KEY: str = os.getenv("GOOGLE_CLOUD_TTS_API_KEY", "")
+    GOOGLE_CLOUD_PROJECT: str = os.getenv("GOOGLE_CLOUD_PROJECT", os.getenv("GCP_PROJECT", "")).strip()
     RAG_PERSONALISATION_ENABLED: bool = os.getenv("RAG_PERSONALISATION_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
     RAG_ACTIVE_SEMESTER: str = os.getenv("RAG_ACTIVE_SEMESTER", "").strip()
     RAG_ACTIVE_ACADEMIC_YEAR: str = os.getenv("RAG_ACTIVE_ACADEMIC_YEAR", "").strip()
@@ -41,6 +43,8 @@ class RagSettings:
     EMBEDDING_DIM: int = int(os.getenv("RAG_EMBEDDING_DIM", "3072"))
     # Primary LLM used by both the audio path and the migrated text path.
     LLM_MODEL: str = os.getenv("RAG_LLM_MODEL", "gemini-3.1-flash-lite")
+
+    AUDIO_STT_MODEL: str = os.getenv("RAG_AUDIO_STT_MODEL", "chirp_3")
 
     # One-shot model used to extract a structured query from raw audio.
     AUDIO_EXTRACTION_MODEL: str = os.getenv(
