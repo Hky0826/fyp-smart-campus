@@ -1670,15 +1670,28 @@ function dashboardPath(tab, subTab) {
                                                                 </td>
                                                                 <td className="p-4 text-xs font-mono text-slate-400">{item.uploaded_at}</td>
                                                                 <td className="p-4">
-                                                                    {item.is_chunked ? (
+                                                                    {item.chunking_status === "COMPLETED" && (
                                                                         <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold">
                                                                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                                                                             Chunked
                                                                         </span>
-                                                                    ) : (
+                                                                    )}
+                                                                    {item.chunking_status === "PROCESSING" && (
                                                                         <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full text-xs font-bold">
                                                                             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
                                                                             Processing
+                                                                        </span>
+                                                                    )}
+                                                                    {item.chunking_status === "PENDING" && (
+                                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-500/10 text-slate-400 border border-slate-500/20 rounded-full text-xs font-bold">
+                                                                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                                                                            Pending
+                                                                        </span>
+                                                                    )}
+                                                                    {item.chunking_status === "FAILED" && (
+                                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-full text-xs font-bold">
+                                                                            <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span>
+                                                                            Failed
                                                                         </span>
                                                                     )}
                                                                 </td>

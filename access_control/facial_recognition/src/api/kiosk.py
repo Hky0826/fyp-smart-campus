@@ -625,7 +625,7 @@ def create_kiosk_router(
             navigation_target=response.get("navigation_target"),
         )
 
-    @router.post("/kiosk/chat/audio/stream")
+    @router.post("/chat/audio/stream")
     async def send_chat_audio_stream(audio: UploadFile = File(...)):
         if audio.content_type and not audio.content_type.startswith("audio/"):
             raise HTTPException(
@@ -650,16 +650,35 @@ def create_kiosk_router(
         if token and token.session_id is not None:
             data["session_id"] = str(token.session_id)
 
-        def stream_generator():
+        async def stream_generator():
             cloud_url = f"{runtime_config().sync_cloud_url.rstrip('/')}/api/chatbot/chat/audio/stream"
             try:
-                with requests.post(cloud_url, files=files, data=data, headers=headers, stream=True, timeout=(5, 90)) as resp:
-                    for line in resp.iter_lines(decode_unicode=True):
-                        if line:
-                            yield f"{line}\n"
+                import httpx
+                import json
+                async with httpx.AsyncClient() as client:
+                    async with client.stream(
+                        "POST", cloud_url, data=data, headers=headers, files=files, timeout=httpx.Timeout(90.0, connect=5.0)
+                    ) as resp:
+                        async for line in resp.aiter_lines():
+                            if line:
+                                import time
+                                logger.info("STREAM_DEBUG [%.3f]: Kiosk streaming proxy received line of length %d", time.time(), len(line))
+                                yield line.encode("utf-8") + b"\n"
+                                try:
+                                    obj = json.loads(line)
+                                    if obj.get("event") == "done":
+                                        metadata = obj.get("data", {})
+                                        store.append_chat_exchange(
+                                            metadata.get("transcribed_input") or "[Audio input]",
+                                            metadata.get("text_response") or "",
+                                            metadata.get("sources") or []
+                                        )
+                                        await events_manager.broadcast_state(store.serialize_state())
+                                except Exception as json_exc:
+                                    logger.warning("Kiosk stream proxy json parse error: %s", json_exc)
             except Exception as exc:
                 logger.warning("Kiosk audio stream proxy error: %s", exc)
-                yield f'{{"event": "error", "data": {{"message": "{exc}"}}}}\n'
+                yield f'{{"event": "error", "data": {{"message": "{exc}"}}}}\n'.encode("utf-8")
 
         return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
 

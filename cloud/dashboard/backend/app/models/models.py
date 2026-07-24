@@ -382,13 +382,12 @@ class UploadedDocument(Base):
     access_level = Column(Enum("PUBLIC", "STUDENT", "LECTURER", "ADMIN"), default="PUBLIC", nullable=False)
     uploaded_at = Column(DateTime, default=datetime.datetime.utcnow)
     is_active = Column(Boolean, default=True, nullable=False)
+    chunking_status = Column(Enum("PENDING", "PROCESSING", "COMPLETED", "FAILED"), default="PENDING", nullable=False)
     
     uploader = relationship("User", back_populates="uploaded_documents")
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
 
-    @property
-    def is_chunked(self) -> bool:
-        return len(self.chunks) > 0
+
 
 
 class DocumentChunk(Base):

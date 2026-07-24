@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PySide6.QtCore import QObject, Property, QThread, Signal, Slot
+from PySide6.QtCore import QObject, Property, QThread, Signal, Slot, QTimer
 
 from edge.audio_io.audio_player import AudioPlayer
 from edge.audio_io.config import AudioIOConfig
@@ -42,6 +42,8 @@ class _PushToTalkWorker(QThread):
     busyChanged = Signal(bool)
     responseReceived = Signal(dict)
     errorOccurred = Signal(str)
+    textChunkReceived = Signal(str)
+    transcribedTextReceived = Signal(str)
 
     def __init__(self, api: KioskApiClient) -> None:
         super().__init__()
@@ -55,7 +57,7 @@ class _PushToTalkWorker(QThread):
             config,
             max_record_seconds=max(30.0, PTT_MAX_RECORD_SECONDS),
             min_record_seconds=0.1,
-            silence_duration_seconds=300.0,  # Never auto-cut on silence while holding Push-to-Talk
+            silence_duration_seconds=300.0,
             silence_rms_threshold=0.0,
             recording_block_ms=max(20, VOICE_BLOCK_MS),
         )
@@ -73,17 +75,25 @@ class _PushToTalkWorker(QThread):
                 voice_stats = _wav_voice_stats(recording_path)
                 logger.info("Push-to-Talk recorded stats: %s", voice_stats)
                 self.busyChanged.emit(True)
-                response = self._api.send_chat_audio_file(recording_path, "audio/wav")
-                self.responseReceived.emit(response)
-                audio_response = response.get("audio_response")
-                if audio_response:
-                    audio_pcm = base64.b64decode(str(audio_response))
-                    logger.info(
-                        "GUI audio chat TTS received. base64_chars=%d pcm_bytes=%d",
-                        len(str(audio_response)),
-                        len(audio_pcm),
-                    )
-                    player.play_pcm(audio_pcm)
+                def stream_audio():
+                    for event_obj in self._api.send_chat_audio_stream_file(recording_path, "audio/wav"):
+                        event = event_obj.get("event")
+                        data = event_obj.get("data", {})
+                        if event == "metadata":
+                            text = data.get("transcribed_input")
+                            if text:
+                                self.transcribedTextReceived.emit(text)
+                        elif event == "chunk":
+                            text = data.get("text")
+                            if text:
+                                self.textChunkReceived.emit(text)
+                        elif event == "audio":
+                            chunk = data.get("chunk")
+                            if chunk:
+                                yield base64.b64decode(chunk)
+                
+                logger.info("GUI audio chat TTS stream started.")
+                player.play_pcm_stream(stream_audio())
         except Exception as exc:
             logger.error("Push-to-Talk audio processing error: %s", exc)
             self.errorOccurred.emit(str(exc))
@@ -102,6 +112,8 @@ class ChatbotController(QObject):
     busyChanged = Signal()
     errorChanged = Signal()
     mutedChanged = Signal()
+    partialTextChanged = Signal()
+    transcribedTextChanged = Signal()
     responseReceived = Signal(dict)
 
     def __init__(self, api: KioskApiClient) -> None:
@@ -112,32 +124,72 @@ class ChatbotController(QObject):
         self._busy = False
         self._error = ""
         self._muted = False
+        self._partial_text = ""
+        self._transcribed_text = ""
+        
+        self._typing_queue = ""
+        self._typing_timer = QTimer(self)
+        self._typing_timer.setInterval(40)  # 40ms per chunk (25 cps)
+        self._typing_timer.timeout.connect(self._on_typing_tick)
 
     @Slot()
     def startPushToTalk(self) -> None:
-        """Start recording speech when Push-to-Talk button is pressed."""
         if self._busy or self._listening:
             return
         self._error = ""
+        self._partial_text = ""
+        self._transcribed_text = ""
+        self._typing_queue = ""
+        self._typing_timer.stop()
         self.errorChanged.emit()
+        self.partialTextChanged.emit()
+        self.transcribedTextChanged.emit()
         worker = _PushToTalkWorker(self._api)
         worker.listeningChanged.connect(self._set_listening)
         worker.busyChanged.connect(self._set_busy)
         worker.errorOccurred.connect(self._set_error)
         worker.responseReceived.connect(self.responseReceived)
+        worker.textChunkReceived.connect(self._on_text_chunk)
+        worker.transcribedTextReceived.connect(self._on_transcribed_text)
         worker.finished.connect(lambda: self._cleanup_worker(worker))
         self._worker = worker
         worker.start()
 
+    @Slot(str)
+    def _on_text_chunk(self, chunk: str) -> None:
+        self._typing_queue += chunk
+        if not self._typing_timer.isActive():
+            self._typing_timer.start()
+
+    @Slot()
+    def _on_typing_tick(self) -> None:
+        if not self._typing_queue:
+            self._typing_timer.stop()
+            if self._worker is None:
+                self._partial_text = ""
+                self._transcribed_text = ""
+                self.partialTextChanged.emit()
+                self.transcribedTextChanged.emit()
+            return
+            
+        # Type a small chunk of characters per tick to keep up with fast reading
+        chars_to_type = 1
+        self._partial_text += self._typing_queue[:chars_to_type]
+        self._typing_queue = self._typing_queue[chars_to_type:]
+        self.partialTextChanged.emit()
+
+    @Slot(str)
+    def _on_transcribed_text(self, text: str) -> None:
+        self._transcribed_text = text
+        self.transcribedTextChanged.emit()
+
     @Slot()
     def stopPushToTalk(self) -> None:
-        """Stop recording speech and process audio when Push-to-Talk button is released."""
         if self._worker and self._listening:
             self._worker.stop_recording()
 
     @Slot()
     def togglePushToTalk(self) -> None:
-        """Toggle Push-to-Talk recording (Tap to Start / Tap to Stop)."""
         if self._listening:
             self.stopPushToTalk()
         elif not self._busy:
@@ -168,6 +220,11 @@ class ChatbotController(QObject):
     def _cleanup_worker(self, worker: _PushToTalkWorker) -> None:
         if self._worker is worker:
             self._worker = None
+            if not self._typing_queue and not self._typing_timer.isActive():
+                self._partial_text = ""
+                self._transcribed_text = ""
+                self.partialTextChanged.emit()
+                self.transcribedTextChanged.emit()
         worker.deleteLater()
 
     @Slot(bool)
@@ -201,10 +258,18 @@ class ChatbotController(QObject):
     def _get_muted(self) -> bool:
         return self._muted
 
+    def _get_partial_text(self) -> str:
+        return self._partial_text
+
+    def _get_transcribed_text(self) -> str:
+        return self._transcribed_text
+
     listening = Property(bool, _get_listening, notify=listeningChanged)
     busy = Property(bool, _get_busy, notify=busyChanged)
     error = Property(str, _get_error, notify=errorChanged)
     muted = Property(bool, _get_muted, notify=mutedChanged)
+    partialText = Property(str, _get_partial_text, notify=partialTextChanged)
+    transcribedText = Property(str, _get_transcribed_text, notify=transcribedTextChanged)
 
 
 def _has_voice(stats: dict[str, float]) -> bool:

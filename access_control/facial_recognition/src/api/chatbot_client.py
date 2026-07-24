@@ -255,8 +255,10 @@ class ChatbotClient:
                     event_payload = json.loads(raw_line)
                 except json.JSONDecodeError:
                     continue
+                import time
                 event = event_payload.get("event")
                 data_obj = event_payload.get("data", {})
+                logger.info("STREAM_DEBUG [%.3f]: Chatbot client parsed event: %s", time.time(), event)
                 if event in {"audio", "sentence"}:
                     text = data_obj.get("text")
                     if text:

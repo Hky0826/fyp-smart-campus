@@ -105,6 +105,8 @@ class AccessController(QObject):
 
         self._chatbot.responseReceived.connect(self._on_audio_response)
         self._chatbot.errorChanged.connect(self._on_chatbot_error)
+        self._chatbot.transcribedTextChanged.connect(self._on_chatbot_transcribed_text)
+        self._chatbot.partialTextChanged.connect(self._on_chatbot_partial_text)
 
         try:
             from access_control.audio_io.access_feedback import AccessFeedbackPlayer
@@ -233,6 +235,16 @@ class AccessController(QObject):
         self._offline = True
         self._update_mode()
         self.statusChanged.emit()
+
+    @Slot()
+    def _on_chatbot_transcribed_text(self) -> None:
+        self._transcribed_text = self._chatbot.transcribedText
+        self.messagesChanged.emit()
+
+    @Slot()
+    def _on_chatbot_partial_text(self) -> None:
+        self._partial_text = self._chatbot.partialText
+        self.messagesChanged.emit()
 
     @Slot(str, dict)
     def _on_worker_success(self, name: str, payload: dict[str, Any]) -> None:
@@ -454,7 +466,27 @@ class AccessController(QObject):
         session = self._session
         if not session or session.get("locked"):
             return []
-        return session.get("conversation_history") or []
+        history = list(session.get("conversation_history") or [])
+        
+        has_temp_user = bool(getattr(self, "_transcribed_text", ""))
+        has_temp_bot = bool(getattr(self, "_partial_text", ""))
+        
+        # Deduplicate: if the permanent message has already arrived from the server,
+        # it will be the last items in the history array.
+        # We identify the permanent exchange by matching the transcribed text.
+        if has_temp_user and len(history) >= 2:
+            last_user = history[-2]
+            if last_user.get("role") == "user" and last_user.get("content") == self._transcribed_text:
+                # The permanent exchange has already synced! Hide it while we type.
+                history.pop() # remove the permanent chatbot message
+                history.pop() # remove the permanent user message
+
+        if has_temp_user:
+            history.append({"role": "user", "content": self._transcribed_text})
+        if has_temp_bot:
+            history.append({"role": "chatbot", "content": self._partial_text + " ✍️"})
+            
+        return history
 
     def _get_session_name(self) -> str:
         session = self._session or {}

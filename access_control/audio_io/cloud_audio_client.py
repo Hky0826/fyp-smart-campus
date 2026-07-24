@@ -279,6 +279,7 @@ class CloudAudioClient:
 
                     event = event_payload.get("event")
                     data_payload = event_payload.get("data") or {}
+                    logger.info("STREAM_DEBUG [%.3f]: Edge received event %s", time.time(), event)
                     if event == "metadata":
                         metadata = self._parse_stream_payload(data_payload, elapsed_ms())
                     elif event == "audio":

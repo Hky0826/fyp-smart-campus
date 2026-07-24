@@ -85,6 +85,21 @@ class KioskApiClient:
                 files={"audio": (Path(path).name, handle, mime_type)},
             )
 
+    def send_chat_audio_stream_file(self, path: str | Path, mime_type: str = "audio/wav") -> Iterator[dict[str, Any]]:
+        import json
+        url = f"{self.base_url}/kiosk/chat/audio/stream"
+        with Path(path).open("rb") as handle:
+            files = {"audio": (Path(path).name, handle, mime_type)}
+            with self._session.post(url, files=files, stream=True, timeout=(5, 90)) as response:
+                if response.status_code >= 400:
+                    raise self._error_from_response(response)
+                for line in response.iter_lines(decode_unicode=True):
+                    if line:
+                        try:
+                            yield json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
     def lock_chat(self) -> dict[str, Any]:
         return self._request_json("POST", "/kiosk/chat/lock")
 

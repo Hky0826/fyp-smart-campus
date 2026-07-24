@@ -370,7 +370,7 @@ class UploadedDocumentCreate(UploadedDocumentBase):
 class UploadedDocumentResponse(UploadedDocumentBase):
     document_id: int
     uploaded_at: datetime.datetime
-    is_chunked: bool
+    chunking_status: str
 
 
 class DocumentChunkBase(BaseSchema):

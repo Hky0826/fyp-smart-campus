@@ -27,6 +27,7 @@ from collections.abc import Iterator
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.concurrency import iterate_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -84,9 +85,9 @@ def _sse_event(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-def _ndjson_event(event: str, payload: dict) -> str:
+def _ndjson_event(event: str, payload: dict) -> bytes:
     """Serialize one newline-delimited JSON streaming event."""
-    return json.dumps({"event": event, "data": payload}, ensure_ascii=False) + "\n"
+    return (json.dumps({"event": event, "data": payload}, ensure_ascii=False) + "\n").encode("utf-8")
 
 
 def _chat_response_events(response: ChatResponse) -> Iterator[str]:
@@ -141,7 +142,9 @@ def _should_stream_tts_audio(response: AudioChatResponse) -> bool:
     )
 
 
-def _audio_chat_stream_events(
+from typing import AsyncIterator
+
+async def _audio_chat_stream_events(
     *,
     audio_bytes: bytes,
     mime_type: str,
@@ -149,7 +152,7 @@ def _audio_chat_stream_events(
     device_id: str | None,
     session_id: int | None,
     db: Session,
-) -> Iterator[str]:
+) -> AsyncIterator[bytes]:
     """Run the audio RAG pipeline and stream TTS PCM chunks as NDJSON line by line."""
     try:
         stream_gen = process_audio_chat_stream(
@@ -160,8 +163,10 @@ def _audio_chat_stream_events(
             session_id=session_id,
             db=db,
         )
-        for event in stream_gen:
-            yield _ndjson_event(event["event"], event["data"])
+        async for event in iterate_in_threadpool(stream_gen):
+            event_type = event["event"]
+            logger.info("STREAM_DEBUG [%.3f]: Streaming out %s event over network", datetime.datetime.now().timestamp(), event_type)
+            yield _ndjson_event(event_type, event["data"])
     except AudioQueryExtractionError:
         yield _ndjson_event(
             "error",

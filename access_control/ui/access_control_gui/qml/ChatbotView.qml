@@ -93,6 +93,7 @@ Item {
                 spacing: 8
                 model: root.messages || []
                 onCountChanged: Qt.callLater(function() { history.positionViewAtEnd() })
+                onContentHeightChanged: Qt.callLater(function() { history.positionViewAtEnd() })
 
                 delegate: Item {
                     width: history.width
@@ -118,9 +119,10 @@ Item {
 
                             Text {
                                 width: parent.width
-                                text: String(modelData.content || "")
+                                text: String(modelData.content || "").replace(/\n/g, "\n\n")
                                 color: modelData.role === "user" ? "#1e3a8a" : modelData.role === "system" ? "#334155" : "#164e63"
                                 font.pixelSize: 14
+                                textFormat: Text.MarkdownText
                                 wrapMode: Text.WordWrap
                             }
 

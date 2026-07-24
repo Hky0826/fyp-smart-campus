@@ -23,11 +23,25 @@ def background_ingest(document_id: int, force_reindex: bool = False):
     logger = logging.getLogger(__name__)
     db = SessionLocal()
     try:
+        doc = db.query(UploadedDocument).filter_by(document_id=document_id).first()
+        if doc:
+            doc.chunking_status = "PROCESSING"
+            db.commit()
+            
         logger.info(f"Starting background ingestion for document_id={document_id} (force_reindex={force_reindex})")
         ingest_document(document_id, db, force_reindex=force_reindex)
         logger.info(f"Finished background ingestion for document_id={document_id}")
+        
+        doc = db.query(UploadedDocument).filter_by(document_id=document_id).first()
+        if doc:
+            doc.chunking_status = "COMPLETED"
+            db.commit()
     except Exception as e:
         logger.error(f"Failed background ingestion for document_id={document_id}: {e}", exc_info=True)
+        doc = db.query(UploadedDocument).filter_by(document_id=document_id).first()
+        if doc:
+            doc.chunking_status = "FAILED"
+            db.commit()
     finally:
         db.close()
 

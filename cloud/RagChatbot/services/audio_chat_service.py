@@ -876,7 +876,7 @@ def process_audio_chat_stream(
     yield {"event": "metadata", "data": initial_res.model_dump(mode="json", exclude={"audio_response"})}
 
     splitter = StreamingSentenceSplitter()
-    accumulated_text: List[str] = []
+    full_answer_parts: List[str] = []
 
     llm_stream = generate_response_stream(
         system_instruction=_LIVE_SYSTEM_INSTRUCTION,
@@ -887,10 +887,14 @@ def process_audio_chat_stream(
     )
 
     for token in llm_stream:
+        full_answer_parts.append(token)
+        yield {"event": "chunk", "data": {"text": token}}
         for sentence in splitter.feed(token):
-            accumulated_text.append(sentence)
             val = validate_sentence(sentence)
             clean_sentence = val.sanitized_text or sentence if not val.valid else sentence
+            logger.info("STREAM_DEBUG [%.3f]: Yielding sentence text: %s", time.time(), clean_sentence)
+            yield {"event": "sentence", "data": {"text": clean_sentence}}
+
             audio_pcm = None
             if rag_settings.AUDIO_TTS_ENABLED:
                 with StageTimer() as tts_timer:
@@ -899,19 +903,19 @@ def process_audio_chat_stream(
                 if audio_pcm and metrics.time_to_first_tts_ms == 0.0:
                     metrics.time_to_first_tts_ms = (time.monotonic() - start_time) * 1000.0
 
-            event_data = {"text": clean_sentence}
             if audio_pcm:
-                event_data.update({
+                logger.info("STREAM_DEBUG [%.3f]: Yielding audio chunk for sentence: %s", time.time(), clean_sentence)
+                audio_data = {
                     "encoding": "pcm_s16le",
                     "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
                     "chunk": base64.b64encode(audio_pcm).decode("ascii"),
-                })
-            yield {"event": "audio" if audio_pcm else "sentence", "data": event_data}
+                }
+                yield {"event": "audio", "data": audio_data}
 
     for sentence in splitter.flush():
-        accumulated_text.append(sentence)
         val = validate_sentence(sentence)
         clean_sentence = val.sanitized_text or sentence if not val.valid else sentence
+        yield {"event": "sentence", "data": {"text": clean_sentence}}
         audio_pcm = None
         if rag_settings.AUDIO_TTS_ENABLED:
             with StageTimer() as tts_timer:
@@ -920,16 +924,15 @@ def process_audio_chat_stream(
             if audio_pcm and metrics.time_to_first_tts_ms == 0.0:
                 metrics.time_to_first_tts_ms = (time.monotonic() - start_time) * 1000.0
 
-        event_data = {"text": clean_sentence}
         if audio_pcm:
-            event_data.update({
+            audio_data = {
                 "encoding": "pcm_s16le",
                 "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
                 "chunk": base64.b64encode(audio_pcm).decode("ascii"),
-            })
-        yield {"event": "audio" if audio_pcm else "sentence", "data": event_data}
+            }
+            yield {"event": "audio", "data": audio_data}
 
-    full_answer = " ".join(accumulated_text)
+    full_answer = "".join(full_answer_parts)
     final_res = _audio_response(
         transcribed_input=user_query,
         text_response=full_answer,
