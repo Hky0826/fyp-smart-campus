@@ -23,7 +23,7 @@ from app.routers import auth, iam, rag, infrastructure, academics, references, e
 from app.routers.edge_auth import router as edge_auth_router
 from sync.cloud_to_edge import cloud_sync_service as downstream_sync
 from sync.edge_to_cloud import cloud_sync_service as upstream_sync
-from app.core.database import Base, engine
+from app.core.database import Base, engine, SessionLocal
 from RagChatbot.router import router as chatbot_router
 
 # Create the FastAPI app instance
@@ -32,6 +32,12 @@ app = FastAPI(
     description="Enterprise-grade administrative API and database manager.",
     version="1.0.0"
 )
+
+@app.on_event("startup")
+def load_vector_store():
+    from RagChatbot.retrieval.vector_store import vector_store
+    with SessionLocal() as db:
+        vector_store.load_from_db(db)
 
 # CORS Middleware Configuration
 # Allows React frontend (e.g. running on Vite dev server port 5173) to consume APIs

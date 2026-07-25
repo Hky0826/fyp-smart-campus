@@ -68,9 +68,19 @@ def retrieve_chunks(
         logger.warning("Retrieval called with empty allowed_access_levels; returning empty.")
         return []
 
-    # Build the parameterized access-level IN clause
-    placeholders = ", ".join(f":level_{i}" for i in range(len(allowed_access_levels)))
-    level_params = {f"level_{i}": lv for i, lv in enumerate(allowed_access_levels)}
+    from RagChatbot.retrieval.vector_store import vector_store
+
+    if not vector_store.is_loaded:
+        logger.warning("Vector store not loaded, falling back to empty retrieval.")
+        return []
+
+    top_chunk_ids = vector_store.search(query_embedding, allowed_access_levels, candidate_limit)
+    if not top_chunk_ids:
+        logger.debug("Retrieval: no chunks found in vector store.")
+        return []
+
+    id_placeholders = ", ".join(f":id_{i}" for i in range(len(top_chunk_ids)))
+    params = {f"id_{i}": cid for i, cid in enumerate(top_chunk_ids)}
 
     sql = text(f"""
         SELECT
@@ -88,11 +98,8 @@ def retrieve_chunks(
         INNER JOIN uploaded_documents ud
             ON dc.document_id = ud.document_id
            AND ud.is_active = 1
-        WHERE dc.access_level IN ({placeholders})
-        LIMIT :k_ret
+        WHERE dc.chunk_id IN ({id_placeholders})
     """)
-
-    params = {"k_ret": candidate_limit, **level_params}
 
     try:
         rows = db.execute(sql, params).fetchall()

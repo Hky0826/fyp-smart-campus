@@ -163,6 +163,7 @@ def ingest_document(
     chunks_created = 0
     embeddings_created = 0
     skipped = 0
+    new_vectors = []
 
     for idx, chunk_text in enumerate(text_chunks):
         # Create DocumentChunk row
@@ -198,6 +199,7 @@ def ingest_document(
             model_version=rag_settings.EMBEDDING_MODEL,
         )
         db.add(emb_record)
+        new_vectors.append((chunk_record.chunk_id, doc.access_level, embedding_vec))
         chunks_created += 1
         embeddings_created += 1
 
@@ -213,6 +215,11 @@ def ingest_document(
             skipped=len(text_chunks),
             message=f"Database commit failed: {exc}",
         )
+
+    from RagChatbot.retrieval.vector_store import vector_store
+    if vector_store.is_loaded:
+        for cid, alvl, evec in new_vectors:
+            vector_store.add_chunk(cid, alvl, evec)
 
     return IngestionResult(
         document_id=document_id,
