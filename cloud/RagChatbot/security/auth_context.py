@@ -58,6 +58,7 @@ def resolve_auth_context(token: Optional[str], db: Session) -> AuthenticatedChat
     staff_id = getattr(getattr(user, "staff", None), "staff_id", None) if highest_role in {"STAFF", "LECTURER", "ADMIN", "SUPER_ADMIN", "SYSTEM_ADMIN", "CONTENT_ADMIN"} else None
     visitor_id = getattr(getattr(user, "visitor", None), "visitor_id", None) if highest_role == "VISITOR" else None
     admin_id = getattr(getattr(user, "admin", None), "admin_id", None) if highest_role in {"ADMIN", "SUPER_ADMIN", "SYSTEM_ADMIN", "CONTENT_ADMIN"} else None
+    full_name = getattr(user, "full_name", None) or getattr(user, "name", None)
 
     return AuthenticatedChatContext(
         user_id=user_id, session_id=int(session.session_id), roles=roles,
@@ -66,5 +67,6 @@ def resolve_auth_context(token: Optional[str], db: Session) -> AuthenticatedChat
         staff_id=staff_id,
         visitor_id=visitor_id,
         admin_id=admin_id,
+        full_name=full_name,
         authenticated=True,
     )

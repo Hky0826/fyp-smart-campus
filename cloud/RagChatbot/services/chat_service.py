@@ -256,7 +256,11 @@ def process_chat(
     fast_answer = None
 
     if route.category == "GREETING":
-        fast_answer = "Hi! How can I help you with Quest International University today?"
+        first_name = context.full_name.strip().split()[0] if (context.authenticated and context.full_name and context.full_name.strip()) else ""
+        if first_name:
+            fast_answer = f"Hi {first_name}! How can I help you with Quest International University today?"
+        else:
+            fast_answer = "Hi! How can I help you with Quest International University today?"
     elif route.category == "CAPABILITY":
         fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
     elif route.category == "NAVIGATIONAL":

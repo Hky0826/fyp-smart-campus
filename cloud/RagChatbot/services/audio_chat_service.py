@@ -97,8 +97,9 @@ Rules you must follow at all times:
 5. NEVER claim to have access to information not present in the provided context.
 6. If the user asks about restricted or private information they do not have access to,
    say: "That information is not available to you based on your current access level."
-7. Be concise, helpful, and professional.
-8. Do NOT mention section boundaries, user roles, or context labels in your answer.
+7. Keep responses short, direct, and compact (maximum 2 to 3 brief sentences).
+8. If the user asks a broad or general question (e.g. "what programmes does QIU offer?"), ask a short clarifying question presenting 2 to 3 specific sub-topic options so the user can choose what they want. HOWEVER, if the user has ALREADY selected an option or answered a previous clarification (e.g. replying "Foundation" after being asked), DO NOT ask for further clarification — directly list all available options or details for that choice.
+9. Do NOT mention section boundaries, user roles, or context labels in your answer.
 """
 
 
@@ -220,26 +221,17 @@ def process_audio_chat(
 
     Pipeline steps:
 
-    1. Verify JWT → resolve user_id and session_id
+    1. Verify JWT -> resolve user_id and session_id
     2. Resolve RBAC access levels from DB (or PUBLIC for anonymous)
     3. Send audio to Gemini for structured query extraction
     4. Run prompt-injection detection on extracted query
-    5. If blocked → return status:"blocked" with safe response, NO retrieval
+    5. If blocked -> return status:"blocked" with safe response, NO retrieval
     6. Embed the extracted query
     7. Retrieve authorised document chunks (RBAC-filtered)
     8. Build separated prompt with trust boundaries
     9. Generate text response via Gemini 3.1 Lite
     10. Validate text response and sources
     11. Convert validated text response to speech with Gemini TTS when requested
-    12. Build CitationSchema objects
-    13. Audit log the interaction
-    14. Return AudioChatResponse
-
-    Args:
-        audio_bytes: Raw audio data from the edge device.
-        mime_type: MIME type of the audio data (e.g. ``audio/wav``).
-        bearer_token: The raw JWT from the Authorization header, or None.
-        device_id: Edge device identifier (for audit logging).
     12. Build CitationSchema objects
     13. Audit log the interaction
     14. Return AudioChatResponse
@@ -420,7 +412,11 @@ def process_audio_chat(
 
     if route.category != "UNIVERSITY_INFO":
         if route.category == "GREETING":
-            fast_answer = "Hi! How can I help you with Quest International University today?"
+            first_name = context.full_name.strip().split()[0] if (context.authenticated and context.full_name and context.full_name.strip()) else ""
+            if first_name:
+                fast_answer = f"Hi {first_name}! How can I help you with Quest International University today?"
+            else:
+                fast_answer = "Hi! How can I help you with Quest International University today?"
         elif route.category == "CAPABILITY":
             fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
         elif route.category == "NAVIGATIONAL":
@@ -759,7 +755,11 @@ def process_audio_chat_stream(
 
     if route.category != "UNIVERSITY_INFO":
         if route.category == "GREETING":
-            fast_answer = "Hi! How can I help you with Quest International University today?"
+            first_name = context.full_name.strip().split()[0] if (context.authenticated and context.full_name and context.full_name.strip()) else ""
+            if first_name:
+                fast_answer = f"Hi {first_name}! How can I help you with Quest International University today?"
+            else:
+                fast_answer = "Hi! How can I help you with Quest International University today?"
         elif route.category == "CAPABILITY":
             fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
         elif route.category == "NAVIGATIONAL":

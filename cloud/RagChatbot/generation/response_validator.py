@@ -145,6 +145,32 @@ def _remove_leakage(text: str, pattern: str) -> str:
     return text.replace(pattern, "[redacted]")
 
 
+import re
+
+
+def sanitize_text_for_speech(text: str) -> str:
+    """
+    Remove Markdown formatting, bullet symbols, asterisks, hashtags, and backticks
+    so Text-to-Speech synthesis doesn't read out punctuation like 'asterisk', 'star', or 'hashtag'.
+    """
+    if not text:
+        return ""
+    # Remove markdown headers and hash symbols (#, ##, ###)
+    cleaned = re.sub(r'#+', '', text)
+    # Remove bold / italics markdown delimiters: **, *, __, _
+    cleaned = re.sub(r'\*{1,3}', '', cleaned)
+    cleaned = re.sub(r'_{1,3}', '', cleaned)
+    # Remove backticks and inline code syntax
+    cleaned = re.sub(r'`+', '', cleaned)
+    # Remove bullet list markers at the start of lines (* , - , + )
+    cleaned = re.sub(r'^\s*[\-\*\+]\s+', '', cleaned, flags=re.MULTILINE)
+    # Remove citation brackets like [1], [Document 2]
+    cleaned = re.sub(r'\[\d+\]', '', cleaned)
+    # Collapse multiple spaces
+    cleaned = re.sub(r'[ \t]+', ' ', cleaned)
+    return cleaned.strip()
+
+
 def generate_audio_from_text(text: str) -> Optional[bytes]:
     """
     Generate audio from validated text using Google Cloud TTS.
@@ -163,6 +189,11 @@ def generate_audio_from_text(text: str) -> Optional[bytes]:
     """
     if not text or not text.strip():
         logger.warning("generate_audio_from_text called with empty text.")
+        return None
+
+    clean_speech_text = sanitize_text_for_speech(text)
+    if not clean_speech_text:
+        logger.warning("generate_audio_from_text called with empty text after sanitisation.")
         return None
 
     try:
@@ -199,7 +230,7 @@ def generate_audio_from_text(text: str) -> Optional[bytes]:
         sample_rate_hertz=24000
     )
 
-    synthesis_input = texttospeech.SynthesisInput(text=text)
+    synthesis_input = texttospeech.SynthesisInput(text=clean_speech_text)
 
     try:
         response = client.synthesize_speech(

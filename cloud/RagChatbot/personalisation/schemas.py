@@ -48,6 +48,7 @@ class AuthenticatedChatContext:
     staff_id: Optional[str] = None
     visitor_id: Optional[str] = None
     admin_id: Optional[str] = None
+    full_name: Optional[str] = None
     authenticated: bool = False
     reason: Optional[str] = None
 
