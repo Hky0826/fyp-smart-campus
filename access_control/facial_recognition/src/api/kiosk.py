@@ -277,7 +277,9 @@ class KioskStateStore:
             expires_at=_format_datetime(token.expires_at) if token else None,
             locked=False,
         )
-        history = [ChatMessage(role="assistant", content="Hi, how may I help you?", created_at=now)]
+        first_name = full_name.strip().split()[0] if full_name and full_name.strip() else ""
+        greeting_text = f"Hi {first_name}! How can I help you with Quest International University today?" if first_name else "Hi! How can I help you with Quest International University today?"
+        history = [ChatMessage(role="assistant", content=greeting_text, created_at=now)]
         with self._lock:
             self._chat_session = _StoredChatSession(
                 view=view,

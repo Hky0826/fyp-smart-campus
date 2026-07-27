@@ -90,6 +90,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
+                boundsBehavior: Flickable.StopAtBounds
                 spacing: 8
                 model: root.messages || []
                 onCountChanged: Qt.callLater(function() { history.positionViewAtEnd() })
@@ -104,6 +105,7 @@ Item {
                         width: Math.min(parent.width * 0.86, 540)
                         x: modelData.role === "user" ? parent.width - width : 0
                         implicitHeight: messageColumn.implicitHeight + 16
+                        height: implicitHeight
                         radius: 8
                         color: modelData.role === "user" ? "#dbeafe" : modelData.role === "system" ? "#f1f5f9" : "#ecfeff"
                         border.width: 1
@@ -128,7 +130,7 @@ Item {
 
                             Text {
                                 width: parent.width
-                                visible: modelData.citations && modelData.citations.length > 0
+                                visible: false
                                 text: citationText(modelData.citations)
                                 color: "#64748b"
                                 font.pixelSize: 11

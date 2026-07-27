@@ -484,7 +484,7 @@ class AccessController(QObject):
         if has_temp_user:
             history.append({"role": "user", "content": self._transcribed_text})
         if has_temp_bot:
-            history.append({"role": "chatbot", "content": self._partial_text + " ✍️"})
+            history.append({"role": "chatbot", "content": self._partial_text})
             
         return history
 
