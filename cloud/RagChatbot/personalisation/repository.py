@@ -47,23 +47,61 @@ class PersonalDataRepository:
             return SafeProfile(name=name, role="VISITOR")
         return SafeProfile(name=name, role=(context.roles[0] if context.roles else "USER"))
 
-    def courses(self, context: AuthenticatedChatContext, term: tuple[int, str]) -> list[SafeCourse]:
+    def courses(self, context: AuthenticatedChatContext, term: Optional[tuple[int, str]] = None) -> list[SafeCourse]:
         from app.models.models import Course, CourseEnrollment, Student
-        rows = (self.db.query(CourseEnrollment).join(Course, Course.course_id == CourseEnrollment.course_id).join(Student, Student.student_id == CourseEnrollment.student_id).options(joinedload(CourseEnrollment.course)).filter(Student.user_id == context.user_id, CourseEnrollment.status == "ENROLLED", CourseEnrollment.semester == term[0], CourseEnrollment.academic_year == term[1], Course.is_active.is_(True)).order_by(Course.course_code).all())
-        return [SafeCourse(code=row.course.course_code, name=row.course.course_name, credits=getattr(row.course, "credit_hours", None)) for row in rows]
+        base_query = (self.db.query(CourseEnrollment)
+            .join(Course, Course.course_id == CourseEnrollment.course_id)
+            .join(Student, Student.student_id == CourseEnrollment.student_id)
+            .options(joinedload(CourseEnrollment.course))
+            .filter(
+                Student.user_id == context.user_id,
+                CourseEnrollment.status == "ENROLLED",
+                Course.is_active.is_(True),
+            ))
+
+        rows = []
+        if term is not None:
+            rows = base_query.filter(
+                CourseEnrollment.semester == term[0],
+                CourseEnrollment.academic_year == term[1],
+            ).all()
+
+        # Course enrolments use a compound semester value in this project
+        # (for example, 202607), while older configuration may contain a
+        # simple semester number such as 1. If the configured term has no
+        # rows, use the user's latest enrolled term instead of returning a
+        # misleading empty result.
+        if not rows:
+            all_rows = base_query.order_by(
+                CourseEnrollment.semester.desc(),
+                CourseEnrollment.academic_year.desc(),
+                Course.course_code,
+            ).all()
+            if all_rows:
+                latest_term = (all_rows[0].semester, all_rows[0].academic_year)
+                rows = [row for row in all_rows if (row.semester, row.academic_year) == latest_term]
+
+        seen_course_ids = set()
+        courses = []
+        for row in rows:
+            if row.course_id in seen_course_ids:
+                continue
+            seen_course_ids.add(row.course_id)
+            courses.append(SafeCourse(code=row.course.course_code, name=row.course.course_name, credits=getattr(row.course, "credit_hours", None)))
+        return courses
 
     def student_timetable(self, context: AuthenticatedChatContext, term: tuple[int, str]) -> list[SafeTimetableEntry]:
-        from app.models.models import Course, CourseEnrollment, Student, Timetable
-        rows = (self.db.query(Timetable).join(Course, Course.course_id == Timetable.course_id).join(CourseEnrollment, CourseEnrollment.course_id == Timetable.course_id).join(Student, Student.student_id == CourseEnrollment.student_id).options(joinedload(Timetable.course), joinedload(Timetable.classroom).joinedload("floorplan").joinedload("building")).filter(Student.user_id == context.user_id, CourseEnrollment.status == "ENROLLED", CourseEnrollment.semester == term[0], CourseEnrollment.academic_year == term[1], Timetable.semester == term[0], Timetable.academic_year == term[1], Course.is_active.is_(True)).distinct().order_by(Timetable.day_of_week, Timetable.start_time).all())
+        from app.models.models import Course, CourseEnrollment, Student, Timetable, Node, Floorplan
+        rows = (self.db.query(Timetable).join(Course, Course.course_id == Timetable.course_id).join(CourseEnrollment, CourseEnrollment.course_id == Timetable.course_id).join(Student, Student.student_id == CourseEnrollment.student_id).options(joinedload(Timetable.course), joinedload(Timetable.classroom).joinedload(Node.floorplan).joinedload(Floorplan.building)).filter(Student.user_id == context.user_id, CourseEnrollment.status == "ENROLLED", CourseEnrollment.semester == term[0], CourseEnrollment.academic_year == term[1], Timetable.semester == term[0], Timetable.academic_year == term[1], Course.is_active.is_(True)).distinct().order_by(Timetable.day_of_week, Timetable.start_time).all())
         return [self._timetable_dto(row) for row in rows]
 
     def lecturer_timetable(self, context: AuthenticatedChatContext, term: tuple[int, str]) -> list[SafeTimetableEntry]:
-        from app.models.models import Course, Lecturer, Timetable
-        rows = (self.db.query(Timetable).join(Lecturer, Lecturer.lecturer_id == Timetable.lecturer_id).join(Course, Course.course_id == Timetable.course_id).options(joinedload(Timetable.course), joinedload(Timetable.classroom).joinedload("floorplan").joinedload("building")).filter(Lecturer.user_id == context.user_id, Timetable.semester == term[0], Timetable.academic_year == term[1], Course.is_active.is_(True)).order_by(Timetable.day_of_week, Timetable.start_time).all())
+        from app.models.models import Course, Lecturer, Timetable, Node, Floorplan
+        rows = (self.db.query(Timetable).join(Lecturer, Lecturer.lecturer_id == Timetable.lecturer_id).join(Course, Course.course_id == Timetable.course_id).options(joinedload(Timetable.course), joinedload(Timetable.classroom).joinedload(Node.floorplan).joinedload(Floorplan.building)).filter(Lecturer.user_id == context.user_id, Timetable.semester == term[0], Timetable.academic_year == term[1], Course.is_active.is_(True)).order_by(Timetable.day_of_week, Timetable.start_time).all())
         return [self._timetable_dto(row) for row in rows]
 
     def appointments(self, context: AuthenticatedChatContext, start: Optional[dt.datetime] = None, end: Optional[dt.datetime] = None) -> list[SafeAppointment]:
-        from app.models.models import Appointment, Visitor
+        from app.models.models import Appointment, Visitor, Node, Floorplan
         if context.visitor_id:
             visitor = self.db.query(Visitor).filter_by(visitor_id=context.visitor_id, user_id=context.user_id).first()
             if not visitor or self._visitor_expired(getattr(visitor, "access_expiry", None)):
@@ -75,7 +113,7 @@ class PersonalDataRepository:
             filters.append(Appointment.scheduled_at >= start.replace(tzinfo=None))
         if end is not None:
             filters.append(Appointment.scheduled_at < end.replace(tzinfo=None))
-        rows = (self.db.query(Appointment).options(joinedload(Appointment.guest), joinedload(Appointment.host), joinedload(Appointment.location).joinedload("floorplan").joinedload("building")).filter(and_(*filters)).order_by(Appointment.scheduled_at).all())
+        rows = (self.db.query(Appointment).options(joinedload(Appointment.guest), joinedload(Appointment.host), joinedload(Appointment.location).joinedload(Node.floorplan).joinedload(Floorplan.building)).filter(and_(*filters)).order_by(Appointment.scheduled_at).all())
         result = []
         for row in rows:
             if str(getattr(row, "status", "")).upper() == "CANCELLED":

@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 #   parents[1]  = cloud/
 # So the .env is at  cloud/dashboard/backend/.env  -> parents[1] / dashboard / backend / .env
 _DOTENV_PATH = Path(__file__).resolve().parents[1] / "dashboard" / "backend" / ".env"
-load_dotenv(dotenv_path=_DOTENV_PATH)
+load_dotenv(dotenv_path=_DOTENV_PATH, override=True)
 
 
 class RagSettings:
@@ -148,8 +148,8 @@ class RagSettings:
             if self.RAG_CAMPUS_TIMEZONE == "Asia/Kuala_Lumpur":
                 return
             raise ValueError(f"RAG_CAMPUS_TIMEZONE is not a valid timezone: {self.RAG_CAMPUS_TIMEZONE}") from exc
-        if self.RAG_ACTIVE_SEMESTER and not re.fullmatch(r"\d{4,8}", self.RAG_ACTIVE_SEMESTER):
-            raise ValueError("RAG_ACTIVE_SEMESTER must contain only 4-8 digits")
+        if self.RAG_ACTIVE_SEMESTER and not re.fullmatch(r"\d{1,8}", self.RAG_ACTIVE_SEMESTER):
+            raise ValueError("RAG_ACTIVE_SEMESTER must contain only 1-8 digits")
         if self.RAG_ACTIVE_ACADEMIC_YEAR and not re.fullmatch(r"\d{4}/\d{4}", self.RAG_ACTIVE_ACADEMIC_YEAR):
             raise ValueError("RAG_ACTIVE_ACADEMIC_YEAR must use the YYYY/YYYY format")
 
@@ -165,7 +165,7 @@ class RagSettings:
     def active_term(self) -> tuple[int, str] | None:
         if not self.RAG_ACTIVE_SEMESTER or not self.RAG_ACTIVE_ACADEMIC_YEAR:
             return None
-        if not re.fullmatch(r"\d{4,8}", self.RAG_ACTIVE_SEMESTER) or not re.fullmatch(r"\d{4}/\d{4}", self.RAG_ACTIVE_ACADEMIC_YEAR):
+        if not re.fullmatch(r"\d{1,8}", self.RAG_ACTIVE_SEMESTER) or not re.fullmatch(r"\d{4}/\d{4}", self.RAG_ACTIVE_ACADEMIC_YEAR):
             return None
         try:
             return int(self.RAG_ACTIVE_SEMESTER), self.RAG_ACTIVE_ACADEMIC_YEAR

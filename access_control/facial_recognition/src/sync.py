@@ -212,12 +212,16 @@ class SQLiteEdgeDB:
         return None
 
     def save_roles_delta(self, roles: List[Dict[str, Any]]) -> None:
-        if not roles:
-            return
+        """Replace the local role snapshot, including an empty snapshot."""
         with self.lock:
             conn = self._get_connection()
             cursor = conn.cursor()
             try:
+                # Mappings reference roles, so clear them before replacing the
+                # role table.  The downstream worker uses the combined atomic
+                # method below when applying a server snapshot.
+                cursor.execute("DELETE FROM device_user_roles")
+                cursor.execute("DELETE FROM device_roles")
                 for role in roles:
                     cursor.execute(
                         """
@@ -239,16 +243,12 @@ class SQLiteEdgeDB:
                 conn.close()
 
     def save_user_roles_delta(self, user_roles: List[Dict[str, Any]]) -> None:
-        if not user_roles:
-            return
+        """Replace the complete local user-role assignment snapshot."""
         with self.lock:
             conn = self._get_connection()
             cursor = conn.cursor()
             try:
-                # Clear existing roles for updated users to avoid accumulation
-                user_ids_to_clear = {ur["user_id"] for ur in user_roles}
-                for uid in user_ids_to_clear:
-                    cursor.execute("DELETE FROM device_user_roles WHERE user_id = ?", (uid,))
+                cursor.execute("DELETE FROM device_user_roles")
 
                 saved_count = 0
                 for user_role in user_roles:
@@ -275,6 +275,52 @@ class SQLiteEdgeDB:
             except Exception:
                 conn.rollback()
                 logger.exception("Failed to commit user-role assignments delta")
+                raise
+            finally:
+                conn.close()
+
+    def save_authorization_snapshot(
+        self,
+        roles: List[Dict[str, Any]],
+        user_roles: List[Dict[str, Any]],
+    ) -> None:
+        """Atomically replace roles and all user-role mappings."""
+        with self.lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            try:
+                cursor.execute("DELETE FROM device_user_roles")
+                cursor.execute("DELETE FROM device_roles")
+                for role in roles:
+                    cursor.execute(
+                        """
+                        INSERT INTO device_roles (role_id, role_name, last_synced_at)
+                        VALUES (?, ?, CURRENT_TIMESTAMP)
+                        """,
+                        (role["role_id"], role["role_name"]),
+                    )
+                saved_count = 0
+                for user_role in user_roles:
+                    cursor.execute(
+                        """
+                        INSERT INTO device_user_roles (user_id, role_id, last_synced_at)
+                        SELECT ?, ?, CURRENT_TIMESTAMP
+                        WHERE EXISTS (SELECT 1 FROM device_users WHERE user_id = ?)
+                          AND EXISTS (SELECT 1 FROM device_roles WHERE role_id = ?)
+                        """,
+                        (
+                            user_role["user_id"],
+                            user_role["role_id"],
+                            user_role["user_id"],
+                            user_role["role_id"],
+                        ),
+                    )
+                    saved_count += cursor.rowcount
+                conn.commit()
+                logger.info("Replaced authorization snapshot: %s roles, %s assignments", len(roles), saved_count)
+            except Exception:
+                conn.rollback()
+                logger.exception("Failed to replace authorization snapshot")
                 raise
             finally:
                 conn.close()
@@ -721,9 +767,11 @@ class DownstreamSyncWorker:
                 return
 
             data = response.json()
-            self.db.save_roles_delta(data.get("roles", []))
             self.db.save_users_delta(data.get("users", []))
-            self.db.save_user_roles_delta(data.get("user_roles", data.get("device_user_roles", [])))
+            self.db.save_authorization_snapshot(
+                data.get("roles", []),
+                data.get("user_roles", data.get("device_user_roles", [])),
+            )
             self.db.save_rbac_delta(data.get("node_rbac", []))
 
             deleted_ids = data.get("deleted_user_ids", [])
@@ -962,6 +1010,8 @@ class SyncEngine:
         self._server: Optional[uvicorn.Server] = None
         self._server_thread: Optional[threading.Thread] = None
         self._running = False
+        self.configured_local_port = local_port
+        self.actual_sync_port: Optional[int] = None
 
     @classmethod
     def from_config(cls, config: Any) -> "SyncEngine":
@@ -990,19 +1040,22 @@ class SyncEngine:
             cloud_url=self.cloud_url,
             poll_interval_sec=self.downstream_poll_interval_sec,
         )
+        # Reserve/select the listener before constructing the client so the
+        # heartbeat advertises the port that the receiver actually binds.
+        actual_sync_port = _find_available_sync_port("0.0.0.0", self.configured_local_port)
+        self.actual_sync_port = actual_sync_port
+        if actual_sync_port != self.configured_local_port:
+            logger.info("Sync receiver port %s in use; using free port %s", self.configured_local_port, actual_sync_port)
+
         self.upstream = UpstreamSyncClient(
             self.db,
             cloud_url=self.cloud_url,
             device_id=self.device_id,
             device_name=self.device_name,
             local_ip=self.local_ip,
-            local_port=self.local_port,
+            local_port=actual_sync_port,
             log_push_interval_sec=self.log_push_interval_sec,
         )
-
-        actual_sync_port = _find_available_sync_port("0.0.0.0", self.local_port)
-        if actual_sync_port != self.local_port:
-            logger.info("Sync receiver port %s in use; using free port %s", self.local_port, actual_sync_port)
 
         app = create_edge_app(self.db, downstream_worker=self.downstream)
         uvicorn_config = uvicorn.Config(app, host="0.0.0.0", port=actual_sync_port, log_level="warning")

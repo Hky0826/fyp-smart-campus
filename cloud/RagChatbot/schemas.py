@@ -94,6 +94,7 @@ class IngestionResponse(BaseModel):
     embeddings_created: int
     skipped: int
     message: str
+    status: str
 
 
 class HealthResponse(BaseModel):

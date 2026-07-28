@@ -296,6 +296,10 @@ def create_auth_log(
     log_in: schemas.AuthenticationLogCreate, 
     db: Session = Depends(get_db)
 ):
+    existing = db.query(AuthenticationLog).filter_by(sync_key=log_in.sync_key).first()
+    if existing:
+        return existing
+
     user_id = log_in.user_id
     if user_id is None and log_in.email:
         user = db.query(User).filter_by(email=log_in.email).first()
@@ -307,11 +311,16 @@ def create_auth_log(
         auth_status = log_in.status
         
     log = AuthenticationLog(
+        sync_key=log_in.sync_key,
         user_id=user_id,
         device_id=log_in.device_id,
         auth_status=auth_status or "SUCCESS",
         confidence_score=log_in.confidence_score,
-        ip_address=log_in.ip_address,
+        face_count=log_in.face_count,
+        reason=log_in.reason,
+        spoofing_checked=log_in.spoofing_checked,
+        spoofing_passed=log_in.spoofing_passed,
+        image_path=log_in.image_path,
         timestamp=datetime.utcnow()
     )
     db.add(log)

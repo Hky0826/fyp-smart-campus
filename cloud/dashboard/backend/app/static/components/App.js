@@ -96,6 +96,7 @@ function dashboardPath(tab, subTab) {
             const [scanLogs, setScanLogs] = useState([]);
             const logEndRef = useRef(null);
             const [enrollMethod, setEnrollMethod] = useState("photo");
+            const [photoPose, setPhotoPose] = useState("front");
             const [activeCameraPoseIndex, setActiveCameraPoseIndex] = useState(0);
             const [liveFeedback, setLiveFeedback] = useState("Align your face in the center of the camera.");
             const [liveScanActive, setLiveScanActive] = useState(false);
@@ -567,6 +568,7 @@ function dashboardPath(tab, subTab) {
                         setSelectedItem(createdUser);
                         setConfidence(0); setScanStep(0); setScanning(false);
                         setUploadedPhoto(null); setSelectedPhotoFile(null);
+                        setPhotoPose("front");
                         setEnrollMethod("video");
                         setShowFaceModal(true);
                     }
@@ -667,13 +669,15 @@ function dashboardPath(tab, subTab) {
             const saveFacialEnrollment = async () => {
                 try {
                     if (!selectedPhotoFile) throw new Error("No photo selected. Please upload a face photo first.");
-                    const formData = new FormData(); formData.append("file", selectedPhotoFile);
+                    const formData = new FormData();
+                    formData.append("file", selectedPhotoFile);
+                    formData.append("pose", photoPose);
                     const response = await fetch(`/api/iam/users/${selectedItem.user_id}/upload-photo`, {
                         method: "POST", headers: { "Authorization": `Bearer ${token}` }, body: formData
                     });
                     const data = await response.json();
                     if (!response.ok) throw new Error(data.detail || "Failed to save Face ID.");
-                    showSuccessToast(`Face ID enrolled for ${selectedItem.full_name}!`);
+                    showSuccessToast(`Face ID ${photoPose === "front" ? "photo" : `${photoPose} pose`} updated for ${selectedItem.full_name}!`);
                     setShowFaceModal(false); setSelectedPhotoFile(null);
                     if (uploadedPhoto) { URL.revokeObjectURL(uploadedPhoto); setUploadedPhoto(null); }
                     fetchTabData();
@@ -1505,13 +1509,11 @@ function dashboardPath(tab, subTab) {
                                                                     {item.face_vector ? `${item.face_vector.slice(0, 30)}…` : "—"}
                                                                 </td>
                                                                 <td className="p-4 pr-6 text-right">
-                                                                    {!item.face_vector && (
-                                                                        <button onClick={() => { setSelectedItem(item); setConfidence(0); setScanStep(0); setScanning(false); setShowFaceModal(true); }}
+                                                                    <button onClick={() => { setSelectedItem(item); setEnrollMethod("photo"); setPhotoPose("front"); setConfidence(0); setScanStep(0); setScanning(false); setShowFaceModal(true); }}
                                                                             className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-xl text-xs inline-flex items-center gap-2 transition-all shadow-sm shadow-indigo-900/20">
                                                                             <Icon name="camera" className="w-4 h-4" />
-                                                                            <span>Enroll Face ID</span>
+                                                                            <span>{item.face_vector ? "Re-enroll Face ID" : "Enroll Face ID"}</span>
                                                                         </button>
-                                                                    )}
                                                                 </td>
                                                             </tr>
                                                         );
@@ -1726,7 +1728,7 @@ function dashboardPath(tab, subTab) {
                                                         <tr className="bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80">
                                                             <th className="p-4 pl-6 font-semibold">Question Asked</th>
                                                             <th className="p-4 font-semibold">Response</th>
-                                                            <th className="p-4 w-36 font-semibold">Response Time</th>
+                                                            <th className="p-4 w-44 font-semibold">Time to First TTS</th>
                                                             <th className="p-4 pr-6 w-36 text-right font-semibold">Type</th>
                                                         </tr>
                                                     </thead>
@@ -2084,7 +2086,7 @@ function dashboardPath(tab, subTab) {
                                                         {paginatedData.map((item, idx) => (
                                                             <tr key={idx} className="hover:bg-slate-800/40 transition-colors group">
                                                                 <td className="p-4 pl-6 font-mono font-bold text-slate-200 text-sm">{item.student_id}</td>
-                                                                <td className="p-4 text-xs font-semibold text-slate-400">Course <span className="text-indigo-400">#{item.course_id}</span></td>
+                                                                <td className="p-4 text-xs font-semibold text-slate-400">Course <span className="text-indigo-400">{item.course_code || "Unknown"}</span></td>
                                                                 <td className="p-4 text-xs font-medium text-slate-400">{item.semester} ({item.academic_year})</td>
                                                                 <td className="p-4 text-xs">
                                                                     <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg font-bold tracking-wider uppercase text-[10px]">{item.status}</span>
@@ -2120,7 +2122,7 @@ function dashboardPath(tab, subTab) {
                                                     <tbody className="divide-y divide-slate-800/50">
                                                         {paginatedData.map((item, idx) => (
                                                             <tr key={idx} className="hover:bg-slate-800/40 transition-colors group">
-                                                                <td className="p-4 pl-6 font-mono text-slate-200 text-sm font-semibold">Course <span className="text-indigo-400">#{item.course_id}</span></td>
+                                                                <td className="p-4 pl-6 font-mono text-slate-200 text-sm font-semibold">Course <span className="text-indigo-400">{item.course_code || "Unknown"}</span></td>
                                                                 <td className="p-4 text-xs font-mono text-slate-400">{item.lecturer_id}</td>
                                                                 <td className="p-4">
                                                                     <div className="flex flex-col">
@@ -2394,6 +2396,7 @@ function dashboardPath(tab, subTab) {
                                         <button onClick={() => {
                                             stopCamera(); setShowFaceModal(false); setScanning(false);
                                             setScanStep(0); setConfidence(0); setSelectedPhotoFile(null);
+                                            setPhotoPose("front");
                                             setSelectedVideoFile(null); setVideoError("");
                                             setEmbeddingProgress(0); setRecordingProgress(0); setRecordingPhase('idle');
                                             if (uploadedPhoto) { URL.revokeObjectURL(uploadedPhoto); setUploadedPhoto(null); }
@@ -2419,6 +2422,19 @@ function dashboardPath(tab, subTab) {
                                     {/* PHOTO UPLOAD */}
                                     {enrollMethod === "photo" && (
                                         <div className="space-y-5">
+                                            <div className="space-y-2">
+                                                <label className="text-xs font-bold text-slate-300">Pose to add or update</label>
+                                                <select value={photoPose} onChange={e => setPhotoPose(e.target.value)}
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+                                                    <option value="front">Front (also refresh low-light template)</option>
+                                                    <option value="left_30">Turn left 30°</option>
+                                                    <option value="right_30">Turn right 30°</option>
+                                                    <option value="left_60">Turn left 60°</option>
+                                                    <option value="right_60">Turn right 60°</option>
+                                                    <option value="slightly_up">Look slightly up</option>
+                                                </select>
+                                                <p className="text-[11px] text-slate-500">Existing face poses are kept. Upload another pose later to complete or update the enrollment.</p>
+                                            </div>
                                             <div className="relative aspect-video bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden flex items-center justify-center shadow-inner">
                                                 {uploadedPhoto && <img src={uploadedPhoto} className="absolute inset-0 w-full h-full object-cover opacity-60" alt="Face" />}
                                                 <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-slate-900/80 border border-slate-800 px-2.5 py-1 rounded-lg text-[10px] font-bold">

@@ -629,7 +629,7 @@ def process_audio_chat(
         for chunk in ranked_chunks
     ]
 
-    response_time_ms = int((time.monotonic() - start_time) * 1000)
+    response_time_ms = int(metrics.time_to_first_tts_ms) if metrics.time_to_first_tts_ms > 0 else int((time.monotonic() - start_time) * 1000)
 
 # Step 13: Audit log
     audit_query_id: Optional[int] = None
@@ -805,13 +805,32 @@ def process_audio_chat_stream(
     personal_result = handle_personal_request(personal_route, context, db)
 
     if personal_result is not None:
+        navigation = None
+        if personal_result.navigation_target:
+            navigation = {
+                "label": personal_result.navigation_target.label,
+                "location": personal_result.navigation_target.location.display,
+            }
         res = _audio_response(
             transcribed_input=user_query,
             text_response=personal_result.answer,
-            status=personal_result.status,
+            status=(
+                "ok"
+                if personal_result.access_granted
+                else (
+                    "auth_required"
+                    if personal_result.authentication_required
+                    else "no_access"
+                )
+            ),
             access_granted=personal_result.access_granted,
+            error_message=personal_result.status_message,
             start_time=start_time,
             include_audio=False,
+            response_scope=personal_result.response_scope,
+            personal_intent=personal_result.intent.value,
+            authentication_required=personal_result.authentication_required,
+            navigation_target=navigation,
             metrics=metrics,
             user_id=user_id,
             session_id=resolved_session_id,
@@ -823,6 +842,9 @@ def process_audio_chat_stream(
         if rag_settings.AUDIO_TTS_ENABLED and personal_result.answer:
             pending.append((personal_result.answer, _TTS_EXECUTOR.submit(_tts_job, personal_result.answer, detected_language)))
         yield from _drain_tts_queue(pending, metrics, start_time, wait=True)
+        if resolved_session_id is not None and resolved_session_id > 0:
+            tts_time = int(metrics.time_to_first_tts_ms) if metrics.time_to_first_tts_ms > 0 else int((time.monotonic() - start_time) * 1000)
+            log_personal_interaction(db, session_id=resolved_session_id, user_id=user_id or 0, intent=personal_route.intent.name, response_time_ms=tts_time)
         yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
         return
 
@@ -867,6 +889,9 @@ def process_audio_chat_stream(
         if rag_settings.AUDIO_TTS_ENABLED and fast_answer:
             pending.append((fast_answer, _TTS_EXECUTOR.submit(_tts_job, fast_answer, detected_language)))
         yield from _drain_tts_queue(pending, metrics, start_time, wait=True)
+        if resolved_session_id is not None and resolved_session_id > 0:
+            tts_time = int(metrics.time_to_first_tts_ms) if metrics.time_to_first_tts_ms > 0 else int((time.monotonic() - start_time) * 1000)
+            log_chatbot_interaction(db, session_id=resolved_session_id, user_id=user_id, query_text=sanitized_query, response_text=fast_answer, retrieved_chunk_ids=[], response_time_ms=tts_time)
         yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
         return
 
@@ -982,6 +1007,7 @@ def process_audio_chat_stream(
     audit_query_id: Optional[int] = None
     if resolved_session_id is not None and resolved_session_id > 0:
         try:
+            tts_time = int(metrics.time_to_first_tts_ms) if metrics.time_to_first_tts_ms > 0 else int((time.monotonic() - start_time) * 1000)
             logged_id = log_chatbot_interaction(
                 db,
                 session_id=resolved_session_id,
@@ -989,7 +1015,7 @@ def process_audio_chat_stream(
                 query_text=sanitized_query,
                 response_text=full_answer,
                 retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
-                response_time_ms=int((time.monotonic() - start_time) * 1000),
+                response_time_ms=tts_time,
             )
             audit_query_id = logged_id if logged_id > 0 else None
         except Exception:

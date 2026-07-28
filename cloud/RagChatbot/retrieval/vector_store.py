@@ -28,6 +28,7 @@ class InMemoryVectorStore:
             return
         self.chunk_ids = np.array([], dtype=np.int64)
         self.access_levels = np.array([], dtype=object)
+        self.document_ids = np.array([], dtype=np.int64)
         self.embeddings = np.array([], dtype=np.float32).reshape(0, 0)
         self._initialized = True
         self.is_loaded = False
@@ -38,6 +39,7 @@ class InMemoryVectorStore:
         sql = text("""
             SELECT
                 dc.chunk_id,
+                dc.document_id,
                 dc.access_level,
                 VECTOR_TO_STRING(ev.embedding) AS chunk_embedding
             FROM document_chunks dc
@@ -55,12 +57,14 @@ class InMemoryVectorStore:
 
         chunk_ids = []
         access_levels = []
+        document_ids = []
         embeddings = []
 
         for row in rows:
             try:
                 emb = json.loads(row.chunk_embedding)
                 chunk_ids.append(row.chunk_id)
+                document_ids.append(row.document_id)
                 access_levels.append(row.access_level)
                 embeddings.append(emb)
             except Exception as e:
@@ -69,28 +73,48 @@ class InMemoryVectorStore:
         if embeddings:
             self.chunk_ids = np.array(chunk_ids, dtype=np.int64)
             self.access_levels = np.array(access_levels, dtype=object)
+            self.document_ids = np.array(document_ids, dtype=np.int64)
             self.embeddings = np.array(embeddings, dtype=np.float32)
         else:
             self.chunk_ids = np.array([], dtype=np.int64)
             self.access_levels = np.array([], dtype=object)
+            self.document_ids = np.array([], dtype=np.int64)
             self.embeddings = np.array([], dtype=np.float32).reshape(0, 0)
 
         self.is_loaded = True
         logger.info("Vector store loaded with %d chunks.", len(self.chunk_ids))
 
-    def add_chunk(self, chunk_id: int, access_level: str, embedding: list[float]):
+    def add_chunk(self, chunk_id: int, access_level: str, embedding: list[float], document_id: int | None = None):
         """Dynamically add a chunk to the in-memory store."""
         emb_arr = np.array([embedding], dtype=np.float32)
         
         if len(self.chunk_ids) == 0:
             self.chunk_ids = np.array([chunk_id], dtype=np.int64)
             self.access_levels = np.array([access_level], dtype=object)
+            self.document_ids = np.array([document_id if document_id is not None else -1], dtype=np.int64)
             self.embeddings = emb_arr
         else:
             self.chunk_ids = np.append(self.chunk_ids, chunk_id)
             self.access_levels = np.append(self.access_levels, access_level)
+            self.document_ids = np.append(self.document_ids, document_id if document_id is not None else -1)
             self.embeddings = np.vstack([self.embeddings, emb_arr])
         logger.debug("Added chunk %d to vector store.", chunk_id)
+
+    def remove_document(self, document_id: int) -> None:
+        """Remove every indexed vector belonging to a document."""
+        if len(self.chunk_ids) == 0:
+            return
+        keep = self.document_ids != document_id
+        self.chunk_ids = self.chunk_ids[keep]
+        self.access_levels = self.access_levels[keep]
+        self.document_ids = self.document_ids[keep]
+        self.embeddings = self.embeddings[keep] if self.embeddings.size else self.embeddings
+
+    def replace_document(self, document_id: int, chunks: list[tuple[int, str, list[float]]]) -> None:
+        """Atomically replace one document's vectors in the in-memory index."""
+        self.remove_document(document_id)
+        for chunk_id, access_level, embedding in chunks:
+            self.add_chunk(chunk_id, access_level, embedding, document_id=document_id)
 
     def search(self, query_embedding: list[float], allowed_access_levels: list[str], top_k: int) -> list[int]:
         """Search the top_k chunk_ids by cosine similarity with RBAC filtering."""

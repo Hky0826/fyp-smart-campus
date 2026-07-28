@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from sqlalchemy.engine import URL
 
 # Find .env in the parent directory of app (backend/)
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
@@ -13,10 +14,15 @@ class Settings:
     DB_NAME: str = os.getenv("DB_NAME", "biometric_rag_db")
     
     @property
-    def DATABASE_URL(self) -> str:
-        # We escape password characters just in case
-        password_part = f":{self.DB_PASSWORD}" if self.DB_PASSWORD else ""
-        return f"mysql+mysqlconnector://{self.DB_USER}{password_part}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+    def DATABASE_URL(self) -> URL:
+        return URL.create(
+            "mysql+mysqlconnector",
+            username=self.DB_USER,
+            password=self.DB_PASSWORD,
+            host=self.DB_HOST,
+            port=int(self.DB_PORT),
+            database=self.DB_NAME,
+        )
 
     JWT_SECRET: str = os.getenv("JWT_SECRET", "smart_campus_super_secret_jwt_key_2026_slate_emerald")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")

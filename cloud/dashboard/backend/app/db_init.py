@@ -80,8 +80,8 @@ def seed_data():
             # Locate your Node generation block and update the attributes:
             node1 = Node(
                 floorplan_id=floorplan.floorplan_id, 
-                cord_x=100.0, 
-                cord_y=150.0, 
+                coord_x=100.0, 
+                coord_y=150.0, 
                 room_label="Main Lobby", 
                 is_accessible="ALLOW",  # Changed from True/1 to the correct ENUM string
                 node_type="ENTRANCE"    # Changed from 'KIOSK' to a valid schema ENUM value
@@ -89,8 +89,8 @@ def seed_data():
 
             node2 = Node(
                 floorplan_id=floorplan.floorplan_id, 
-                cord_x=200.0, 
-                cord_y=250.0, 
+                coord_x=200.0, 
+                coord_y=250.0, 
                 room_label="Admin Office", 
                 is_accessible="ALLOW", 
                 node_type="OFFICE"      # Valid ENUM value
@@ -98,8 +98,8 @@ def seed_data():
 
             node3 = Node(
                 floorplan_id=floorplan.floorplan_id, 
-                cord_x=300.0, 
-                cord_y=350.0, 
+                coord_x=300.0, 
+                coord_y=350.0, 
                 room_label="Classroom 101", 
                 is_accessible="ALLOW", 
                 node_type="LECTURE_HALL" # Valid ENUM value

@@ -529,16 +529,11 @@ def ingest(
         force_reindex=body.force_reindex,
     )
 
-    if result.chunks_created == 0 and result.skipped == 0:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=result.message,
-        )
-
     return IngestionResponse(
         document_id=result.document_id,
         chunks_created=result.chunks_created,
         embeddings_created=result.embeddings_created,
         skipped=result.skipped,
         message=result.message,
+        status=result.status,
     )

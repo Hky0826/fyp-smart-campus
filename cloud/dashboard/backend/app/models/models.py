@@ -68,11 +68,11 @@ class Node(Base):
     
     node_id = Column(Integer, primary_key=True, autoincrement=True)
     floorplan_id = Column(Integer, ForeignKey("floorplans.floorplan_id"), nullable=False)
-    cord_x = Column(Float, nullable=False)
-    cord_y = Column(Float, nullable=False)
+    coord_x = Column(Float, nullable=False)
+    coord_y = Column(Float, nullable=False)
     room_label = Column(String(100), nullable=False)
     is_accessible = Column(Enum("ALLOW", "DENY"), default="ALLOW", nullable=False)
-    node_type = Column(Enum('ROOM','CORRIDOR','ENTRANCE','STAIRWELL','ELEVATOR','CAFETERIA','OFFICE','LABORATORY','LECTURE_HALL','RESTROOM','OUTDOOR','OTHER'), nullable=False)
+    node_type = Column(Enum('CLASSROOM','CORRIDOR','ENTRANCE','STAIRWELL','ELEVATOR','FOOD','OFFICE','FACILITIES','HALL','WASHROOM','OUTDOOR','SOCIAL SPACES','OTHER','ROOM','CAFETERIA','LABORATORY','LECTURE_HALL','RESTROOM'), nullable=False)
     
     floorplan = relationship("Floorplan", back_populates="nodes")
     
@@ -88,6 +88,7 @@ class Edge(Base):
     weight_distance = Column(Float, nullable=False)
     is_accessible = Column(Enum("ALLOW", "DENY"), default="ALLOW", nullable=False)
     is_bidirectional = Column(Boolean, default=True, nullable=False)
+    custom_path = Column(Text, nullable=True)
     
     source_node = relationship("Node", foreign_keys=[source_node_id])
     destination_node = relationship("Node", foreign_keys=[destination_node_id])
@@ -587,6 +588,10 @@ class CourseEnrollment(Base):
     
     student = relationship("Student", back_populates="enrollments")
     course = relationship("Course", back_populates="enrollments")
+
+    @property
+    def course_code(self):
+        return self.course.course_code if self.course else None
     
     __table_args__ = (
         UniqueConstraint("student_id", "course_id", "semester", name="uq_student_course_semester"),
@@ -609,6 +614,10 @@ class Timetable(Base):
     course = relationship("Course", back_populates="timetables")
     lecturer = relationship("Lecturer", back_populates="timetables")
     classroom = relationship("Node")
+
+    @property
+    def course_code(self):
+        return self.course.course_code if self.course else None
     
     __table_args__ = (
         UniqueConstraint("node_id", "day_of_week", "start_time", "semester", name="uq_node_time_semester"),
@@ -642,10 +651,16 @@ class Notification(Base):
     __tablename__ = "notifications"
     
     notification_id = Column(Integer, primary_key=True, autoincrement=True)
+    recipient_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    event_type = Column(String(100), nullable=True)
     title = Column(String(255), nullable=False)
     body = Column(Text, nullable=False)
-    appointment_id = Column(Integer, ForeignKey("appointments.appointment_id"), nullable=False)
-    sent_at = Column(DateTime, default=datetime.datetime.utcnow)
+    status = Column(Enum("PENDING", "SENT", "FAILED"), default="PENDING", nullable=True)
+    message_id = Column(String(255), nullable=True)
+    delivery_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=True)
+    appointment_id = Column(Integer, ForeignKey("appointments.appointment_id"), nullable=True)
+    sent_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=True)
     expires_at = Column(DateTime, nullable=True)
     
     appointment = relationship("Appointment", back_populates="notifications")

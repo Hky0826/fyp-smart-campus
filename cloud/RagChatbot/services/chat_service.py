@@ -40,7 +40,7 @@ from RagChatbot.schemas import ChatRequest, ChatResponse, CitationSchema
 from RagChatbot.security.audit_logger import log_access_denied, log_chatbot_interaction, log_personal_interaction
 from RagChatbot.security.prompt_guard import check_query
 from RagChatbot.security.rbac import get_allowed_access_levels_for_user
-from RagChatbot.security.auth_context import resolve_auth_context
+from RagChatbot.security.auth_context import resolve_auth_context, resolve_user_session
 from RagChatbot.personalisation.intents import parse_personal_intent
 from RagChatbot.personalisation.service import handle_personal_request
 from RagChatbot.logging.inference_logger import InferenceMetrics, StageTimer, log_inference_metrics
@@ -108,44 +108,8 @@ def _verify_session(token: str, db: Session) -> tuple[int, int]:
     Raises:
         HTTPException 401: If the session is not found, revoked, or expired.
     """
-    from app.models.models import JWTSession
-    import datetime
-
-    payload = _decode_jwt(token)
-
-    # Edge user tokens have an explicit 'user_id' field (int)
-    user_id: Optional[int] = payload.get("user_id")
-
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token payload missing user_id. Please re-authenticate via face recognition.",
-        )
-
-    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    session = (
-        db.query(JWTSession)
-        .filter_by(token_hash=token_hash, is_revoked=False)
-        .first()
-    )
-
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session not found or has been revoked.",
-        )
-    if session.expires_at < datetime.datetime.utcnow():
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session has expired. Please re-authenticate.",
-        )
-    if int(session.user_id) != int(user_id):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication session does not match the token user.")
-    from app.models.models import User
-    if not db.query(User).filter_by(user_id=user_id, is_active=True).first():
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User is inactive or unavailable. Please re-authenticate.")
-
-    return user_id, session.session_id
+    _, user_id, session = resolve_user_session(token, db)
+    return user_id, int(session.session_id)
 
 
 # Main chat pipeline

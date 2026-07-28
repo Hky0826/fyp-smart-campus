@@ -22,6 +22,7 @@ for path in (CLOUD_ROOT, BACKEND_ROOT):
 
 from RagChatbot.generation import response_validator
 from RagChatbot.generation.gemini_live_service import LiveResponseResult
+from RagChatbot.personalisation.schemas import AuthenticatedChatContext, PersonalIntent, PersonalResult
 from RagChatbot.retrieval.ranking import RankedChunk
 from RagChatbot.schemas import ExtractedQuery
 from RagChatbot.services import audio_chat_service
@@ -109,6 +110,48 @@ class RagTtsModelTests(unittest.TestCase):
         )
         self.assertEqual(response.sources[0].document_title, "Library Guide")
         generate_audio.assert_called_once_with(answer)
+
+    def test_process_audio_chat_stream_handles_personal_result_status(self):
+        """The streaming personal path should map PersonalResult to an audio status."""
+        personal_result = PersonalResult(
+            answer="Your next class is CS101 - Secure Systems.",
+            access_granted=True,
+            status_message=None,
+            intent=PersonalIntent.TIMETABLE,
+        )
+
+        with (
+            patch.object(audio_chat_service.rag_settings, "AUDIO_TTS_ENABLED", False),
+            patch.object(
+                audio_chat_service,
+                "extract_query_from_audio",
+                Mock(return_value=ExtractedQuery(user_query="What is my next class?")),
+            ),
+            patch.object(
+                audio_chat_service,
+                "resolve_auth_context",
+                Mock(return_value=AuthenticatedChatContext(7, 9, authenticated=True)),
+            ),
+            patch.object(
+                audio_chat_service,
+                "handle_personal_request",
+                Mock(return_value=personal_result),
+            ),
+        ):
+            events = list(
+                audio_chat_service.process_audio_chat_stream(
+                    audio_bytes=b"wav-bytes",
+                    mime_type="audio/wav",
+                    bearer_token=None,
+                    device_id="edge-001",
+                    session_id=None,
+                    db=Mock(),
+                )
+            )
+
+        self.assertEqual([event["event"] for event in events], ["metadata", "chunk", "done"])
+        self.assertEqual(events[0]["data"]["status"], "ok")
+        self.assertTrue(events[0]["data"]["access_granted"])
 
     def test_tts_wrapper_return_time_for_100_300_700_characters(self):
         """Measure app wrapper return time without making slow external TTS calls."""

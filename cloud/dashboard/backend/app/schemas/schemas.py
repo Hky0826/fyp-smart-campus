@@ -117,8 +117,8 @@ class FloorplanResponse(FloorplanBase):
 
 class NodeBase(BaseSchema):
     floorplan_id: int
-    cord_x: float
-    cord_y: float
+    coord_x: float
+    coord_y: float
     room_label: Optional[str] = None
     is_accessible: ClearanceStatusEnum = ClearanceStatusEnum.ALLOW
     node_type: str
@@ -135,6 +135,7 @@ class EdgeBase(BaseSchema):
     weight_distance: float
     is_accessible: ClearanceStatusEnum = ClearanceStatusEnum.ALLOW
     is_bidirectional: bool = True
+    custom_path: Optional[str] = None
 
 class EdgeCreate(EdgeBase):
     pass
@@ -545,6 +546,7 @@ class CourseEnrollmentCreate(CourseEnrollmentBase):
 class CourseEnrollmentResponse(CourseEnrollmentBase):
     enrollment_id: int
     enrolled_at: datetime.datetime
+    course_code: Optional[str] = None
 
 class TimetableBase(BaseSchema):
     course_id: int
@@ -562,6 +564,7 @@ class TimetableCreate(TimetableBase):
 class TimetableResponse(TimetableBase):
     timetable_id: int
     created_at: datetime.datetime
+    course_code: Optional[str] = None
 
 class AppointmentBase(BaseSchema):
     guest_user_id: int
@@ -591,7 +594,13 @@ class AppointmentResponse(AppointmentBase):
 class NotificationBase(BaseSchema):
     title: str
     body: str
-    appointment_id: int
+    appointment_id: Optional[int] = None
+    recipient_user_id: Optional[int] = None
+    event_type: Optional[str] = None
+    status: Optional[str] = None
+    message_id: Optional[str] = None
+    delivery_error: Optional[str] = None
+    created_at: Optional[datetime.datetime] = None
     expires_at: Optional[datetime.datetime] = None
 
 class NotificationCreate(NotificationBase):
@@ -599,7 +608,7 @@ class NotificationCreate(NotificationBase):
 
 class NotificationResponse(NotificationBase):
     notification_id: int
-    sent_at: datetime.datetime
+    sent_at: Optional[datetime.datetime] = None
 
 # ==========================================
 # Category 5: Structural & Org Schemas

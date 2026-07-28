@@ -29,12 +29,12 @@ def background_ingest(document_id: int, force_reindex: bool = False):
             db.commit()
             
         logger.info(f"Starting background ingestion for document_id={document_id} (force_reindex={force_reindex})")
-        ingest_document(document_id, db, force_reindex=force_reindex)
+        result = ingest_document(document_id, db, force_reindex=force_reindex)
         logger.info(f"Finished background ingestion for document_id={document_id}")
         
         doc = db.query(UploadedDocument).filter_by(document_id=document_id).first()
         if doc:
-            doc.chunking_status = "COMPLETED"
+            doc.chunking_status = result.status
             db.commit()
     except Exception as e:
         logger.error(f"Failed background ingestion for document_id={document_id}: {e}", exc_info=True)
@@ -138,6 +138,11 @@ def toggle_document_active(document_id: int, db: Session = Depends(get_db), curr
     for chunk in doc.chunks:
         chunk.is_outdated = not doc.is_active
     db.commit()
+    from RagChatbot.retrieval.vector_store import vector_store
+    if not doc.is_active:
+        vector_store.remove_document(document_id)
+    elif vector_store.is_loaded:
+        vector_store.load_from_db(db)
     return {"detail": f"Document active status toggled. Active: {doc.is_active}"}
 
 @router.delete("/documents/{document_id}")
@@ -145,7 +150,9 @@ def delete_document(document_id: int, db: Session = Depends(get_db), current_adm
     doc = db.query(UploadedDocument).filter_by(document_id=document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    # cascade delete will automatically clear chunks and embedding vectors due to sqlalchemy constraints
+    from RagChatbot.retrieval.vector_store import vector_store
+    vector_store.remove_document(document_id)
+    # Cascade delete clears the durable chunks and embedding vectors.
     db.delete(doc)
     db.commit()
     return {"detail": "Document and all corresponding chunks/embeddings deleted successfully"}

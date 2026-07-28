@@ -63,7 +63,11 @@ class KioskStateTests(unittest.TestCase):
     def test_owner_presence_expires_session_after_absence_timeout(self):
         store = KioskStateStore(
             RuntimeConfig(sync_device_id="door-1", sync_device_name="Door 1"),
-            timings=KioskTimingConfig(owner_absent_terminate_seconds=1),
+            timings=KioskTimingConfig(
+                owner_missing_grace_seconds=1,
+                owner_absent_lock_seconds=1,
+                owner_absent_terminate_seconds=1,
+            ),
         )
         token = EdgeAuthToken(
             access_token="secret",
@@ -80,7 +84,7 @@ class KioskStateTests(unittest.TestCase):
         self.assertIsNotNone(first_missing.session)
         self.assertFalse(first_missing.session.locked)
 
-        store._chat_session.owner_absent_since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=2)
+        store._chat_session.owner_absent_since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=4)
         expired = store.update_owner_presence(False)
 
         self.assertTrue(expired.ended)

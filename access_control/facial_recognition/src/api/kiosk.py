@@ -187,13 +187,23 @@ class KioskStateStore:
     backend/database layers.
     """
 
-    def __init__(self, config: RuntimeConfig, timings: KioskTimingConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: RuntimeConfig,
+        timings: KioskTimingConfig | None = None,
+        clock: Callable[[], dt.datetime] | None = None,
+    ) -> None:
         self.config = config
         self.timings = timings or KioskTimingConfig()
         self._lock = threading.Lock()
         self._access_attempt: AccessAttemptView | None = None
         self._chat_session: _StoredChatSession | None = None
         self._recoverable_chat_session: _StoredChatSession | None = None
+        self._clock = clock or (lambda: dt.datetime.now(dt.timezone.utc))
+
+    def _now(self) -> dt.datetime:
+        value = self._clock()
+        return value if value.tzinfo is not None else value.replace(tzinfo=dt.timezone.utc)
 
     def state(self, cloud_status: str, sync_status: str = "unknown") -> KioskStateResponse:
         with self._lock:
@@ -213,7 +223,7 @@ class KioskStateStore:
             )
 
     def start_access_attempt(self) -> AccessAttemptView:
-        now = _utc_now()
+        now = self._now().isoformat()
         with self._lock:
             self._access_attempt = AccessAttemptView(
                 attempt_id=str(uuid.uuid4()),
@@ -224,7 +234,7 @@ class KioskStateStore:
             return self._access_attempt
 
     def complete_access_attempt(self, result: dict[str, Any]) -> AccessAttemptView:
-        now = _utc_now()
+        now = self._now().isoformat()
         with self._lock:
             attempt = self._access_attempt or AccessAttemptView(
                 attempt_id=str(uuid.uuid4()),
@@ -271,7 +281,7 @@ class KioskStateStore:
         given_name: str | None = None,
         owner_embedding: np.ndarray | None = None,
     ) -> ChatSessionView:
-        now = _utc_now()
+        now = self._now().isoformat()
         full_name = full_name or (token.full_name if token else None)
         given_name = given_name or (token.given_name if token else None)
         view = ChatSessionView(
@@ -310,13 +320,16 @@ class KioskStateStore:
         with self._lock:
             if self._chat_session is None:
                 return None
-            now = dt.datetime.now(dt.timezone.utc)
+            now = self._now()
             if self._chat_session.owner_absent_since is None:
                 self._chat_session.owner_absent_since = now
                 self._chat_session.view.owner_absent_since = now.isoformat()
             self._chat_session.view.presence_state = presence_state
             self._chat_session.view.locked = True
-            return self._safe_chat_view_locked()
+            self._recoverable_chat_session = self._chat_session
+            locked_view = self._safe_chat_view_locked()
+            self._chat_session = None
+            return locked_view
 
     def end_chat_session(self) -> None:
         with self._lock:
@@ -329,11 +342,11 @@ class KioskStateStore:
         answer: str,
         citations: list[dict[str, Any]],
     ) -> ChatSessionView:
-        now = _utc_now()
+        now = self._now().isoformat()
         with self._lock:
             if self._chat_session is None:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No active chatbot session.")
-            if self._chat_session.view.locked:
+            if self._chat_session.view.locked or self._chat_session.view.presence_state != "OWNER_PRESENT":
                 raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Chatbot session is locked.")
             self._chat_session.history.append(ChatMessage(role="user", content=user_text, created_at=now))
             self._chat_session.history.append(
@@ -350,7 +363,7 @@ class KioskStateStore:
         with self._lock:
             if self._chat_session is None:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No active chatbot session.")
-            if self._chat_session.view.locked:
+            if self._chat_session.view.locked or self._chat_session.view.presence_state != "OWNER_PRESENT":
                 raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Chatbot session is locked.")
             return self._chat_session.token
 
@@ -378,11 +391,19 @@ class KioskStateStore:
             return _copy_embedding(self._recoverable_chat_session.owner_embedding)
 
     def update_owner_presence(self, owner_present: bool, bboxes: list[list[int]] | None = None) -> ChatPresenceResponse:
-        now = dt.datetime.now(dt.timezone.utc)
+        now = self._now()
         now_text = now.isoformat()
         frame_bboxes = bboxes or []
         with self._lock:
             if self._chat_session is None:
+                if self._recoverable_chat_session is not None and not owner_present:
+                    absent_since = self._recoverable_chat_session.owner_absent_since
+                    lock_after = self.timings.owner_missing_grace_seconds + self.timings.owner_absent_lock_seconds
+                    terminate_after = lock_after + self.timings.owner_absent_terminate_seconds
+                    if absent_since is not None and (now - absent_since).total_seconds() >= terminate_after:
+                        self._recoverable_chat_session = None
+                        return ChatPresenceResponse(owner_present=False, ended=True, bboxes=frame_bboxes)
+                    return ChatPresenceResponse(owner_present=False, ended=False, bboxes=frame_bboxes)
                 return ChatPresenceResponse(owner_present=False, ended=True, bboxes=frame_bboxes)
 
             if owner_present:
@@ -403,13 +424,22 @@ class KioskStateStore:
                 self._chat_session.view.owner_absent_since = now_text
 
             elapsed = (now - self._chat_session.owner_absent_since).total_seconds()
-            if elapsed >= self.timings.owner_absent_terminate_seconds:
+            lock_after = self.timings.owner_missing_grace_seconds + self.timings.owner_absent_lock_seconds
+            terminate_after = lock_after + self.timings.owner_absent_terminate_seconds
+            if elapsed >= terminate_after:
                 self._recoverable_chat_session = None
                 self._chat_session.view.owner_absent_since = now_text
                 self._chat_session.view.presence_state = "OWNER_LEFT"
                 self._chat_session.view.locked = False
                 self._chat_session = None
                 return ChatPresenceResponse(owner_present=False, ended=True, bboxes=frame_bboxes)
+
+            if elapsed >= lock_after:
+                self._chat_session.view.presence_state = "OWNER_TEMPORARILY_MISSING"
+                self._chat_session.view.locked = True
+                self._recoverable_chat_session = self._chat_session
+                self._chat_session = None
+                return ChatPresenceResponse(owner_present=False, ended=False, bboxes=frame_bboxes)
 
             self._chat_session.view.presence_state = "OWNER_TEMPORARILY_MISSING"
             self._chat_session.view.locked = False
@@ -421,10 +451,17 @@ class KioskStateStore:
             )
 
     def reopen_chat_session(self, bboxes: list[list[int]] | None = None) -> ChatPresenceResponse:
-        now = dt.datetime.now(dt.timezone.utc)
+        now = self._now()
         now_text = now.isoformat()
         with self._lock:
             if self._recoverable_chat_session is None:
+                return ChatPresenceResponse(owner_present=False, ended=True, bboxes=bboxes or [])
+
+            absent_since = self._recoverable_chat_session.owner_absent_since
+            lock_after = self.timings.owner_missing_grace_seconds + self.timings.owner_absent_lock_seconds
+            terminate_after = lock_after + self.timings.owner_absent_terminate_seconds
+            if absent_since is not None and (now - absent_since).total_seconds() >= terminate_after:
+                self._recoverable_chat_session = None
                 return ChatPresenceResponse(owner_present=False, ended=True, bboxes=bboxes or [])
 
             self._chat_session = self._recoverable_chat_session

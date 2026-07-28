@@ -105,16 +105,16 @@ class _PushToTalkWorker(QThread):
                                 text = data.get("transcribed_input")
                                 if text:
                                     self.transcribedTextReceived.emit(text)
-                                fallback = data.get("text_response")
-                                if fallback and not emitted_text:
-                                    emitted_text = True
-                                    self.textChunkReceived.emit(str(fallback))
                             elif event == "chunk":
                                 text = data.get("text")
                                 if text:
                                     emitted_text = True
                                     self.textChunkReceived.emit(str(text))
                             elif event == "done":
+                                fallback = data.get("text_response")
+                                if fallback and not emitted_text:
+                                    emitted_text = True
+                                    self.textChunkReceived.emit(str(fallback))
                                 self.responseReceived.emit(dict(data))
                             elif event == "error":
                                 self.errorOccurred.emit(str(data.get("message") or "Audio chat failed."))

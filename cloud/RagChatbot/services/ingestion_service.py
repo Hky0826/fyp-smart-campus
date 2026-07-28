@@ -1,18 +1,4 @@
-"""
-Document ingestion service.
-
-Handles the pipeline for processing a new or updated document into
-the RAG knowledge base:
-
-    1. Load document content from disk.
-    2. Split text into overlapping chunks.
-    3. Generate a Google AI embedding for each chunk.
-    4. Persist DocumentChunk and EmbeddingVector rows to MySQL.
-
-This service is intended to be called by the /api/chatbot/ingest endpoint
-and can also be triggered manually from scripts.
-"""
-
+"""Transactional document chunking and embedding ingestion."""
 from __future__ import annotations
 
 import logging
@@ -20,6 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import List
 
+import numpy as np
 from sqlalchemy.orm import Session
 
 from RagChatbot.config import rag_settings
@@ -28,10 +15,8 @@ from RagChatbot.embeddings.google_embedding_service import embed_document_chunk
 from RagChatbot.services.document_service import get_active_document
 
 logger = logging.getLogger(__name__)
-
-# Chunking parameters (can be moved to config in the future)
-_CHUNK_SIZE = 800        # characters per chunk
-_CHUNK_OVERLAP = 150     # overlap between consecutive chunks
+_CHUNK_SIZE = 800
+_CHUNK_OVERLAP = 150
 
 
 @dataclass
@@ -41,20 +26,10 @@ class IngestionResult:
     embeddings_created: int
     skipped: int
     message: str
+    status: str = "FAILED"
 
 
 def _split_into_chunks(text: str, chunk_size: int, overlap: int) -> List[str]:
-    """
-    Split a document text into overlapping fixed-size character chunks.
-
-    Args:
-        text: The full document text.
-        chunk_size: Maximum characters per chunk.
-        overlap: Number of characters shared between consecutive chunks.
-
-    Returns:
-        List of text chunk strings.
-    """
     chunks: List[str] = []
     start = 0
     while start < len(text):
@@ -67,168 +42,91 @@ def _split_into_chunks(text: str, chunk_size: int, overlap: int) -> List[str]:
 
 
 def _load_document_text(file_path: str) -> str:
-    """
-    Load plain text from a document file.
-    Currently supports .txt and .md files.
-    For PDF/DOCX, extend with appropriate libraries (e.g., pypdf, python-docx).
-
-    Args:
-        file_path: Absolute or relative path to the document file.
-
-    Returns:
-        The text content as a string.
-
-    Raises:
-        FileNotFoundError: If the file does not exist.
-        ValueError: If the file type is unsupported.
-    """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Document file not found: {file_path}")
-
     ext = os.path.splitext(file_path)[1].lower()
-    if ext in (".txt", ".md", ".csv"):
-        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read()
-    else:
-        raise ValueError(
-            f"Unsupported file type '{ext}'. "
-            "Supported: .txt, .md, .csv. For PDF/DOCX, extend _load_document_text()."
-        )
+    if ext not in (".txt", ".md", ".csv"):
+        raise ValueError(f"Unsupported file type '{ext}'. Supported: .txt, .md, .csv.")
+    with open(file_path, "r", encoding="utf-8", errors="replace") as file:
+        return file.read()
 
 
-def ingest_document(
-    document_id: int,
-    db: Session,
-    force_reindex: bool = False,
-) -> IngestionResult:
-    """
-    Ingest or re-index a document into the RAG knowledge base.
+def _failed(document_id: int, message: str, skipped: int = 0) -> IngestionResult:
+    return IngestionResult(document_id, 0, 0, skipped, message, status="FAILED")
 
-    Args:
-        document_id: ID of an existing UploadedDocument record.
-        db: Active SQLAlchemy session.
-        force_reindex: If True, existing chunks and embeddings are
-                       marked outdated and regenerated.
 
-    Returns:
-        IngestionResult summarizing what was created.
-    """
+def ingest_document(document_id: int, db: Session, force_reindex: bool = False) -> IngestionResult:
     from app.models.models import DocumentChunk, EmbeddingVector
 
     doc = get_active_document(document_id, db)
     if not doc:
-        return IngestionResult(
-            document_id=document_id,
-            chunks_created=0,
-            embeddings_created=0,
-            skipped=0,
-            message=f"Document ID {document_id} not found or is inactive.",
-        )
+        return _failed(document_id, f"Document ID {document_id} not found or is inactive.")
 
-    # Optionally mark existing chunks as outdated before reprocessing
-    if force_reindex:
-        existing_chunks = (
-            db.query(DocumentChunk).filter_by(document_id=document_id).all()
-        )
-        for chunk in existing_chunks:
-            chunk.is_outdated = True
-        db.flush()
-        logger.info(
-            "Reindex: marked %d existing chunks as outdated for document_id=%d",
-            len(existing_chunks),
-            document_id,
-        )
-
-    # Load text content from disk
     try:
         text = _load_document_text(doc.file_path)
     except (FileNotFoundError, ValueError) as exc:
         logger.error("Ingestion failed for document_id=%d: %s", document_id, exc)
-        return IngestionResult(
-            document_id=document_id,
-            chunks_created=0,
-            embeddings_created=0,
-            skipped=0,
-            message=str(exc),
-        )
+        return _failed(document_id, str(exc))
 
     text_chunks = _split_into_chunks(text, _CHUNK_SIZE, _CHUNK_OVERLAP)
-    logger.info(
-        "Ingestion: document_id=%d '%s' -> %d chunks",
-        document_id,
-        doc.title,
-        len(text_chunks),
-    )
-
-    chunks_created = 0
-    embeddings_created = 0
+    staged: list[tuple[int, str, object]] = []
     skipped = 0
-    new_vectors = []
-
     for idx, chunk_text in enumerate(text_chunks):
-        # Create DocumentChunk row
-        chunk_record = DocumentChunk(
-            document_id=document_id,
-            chunk_index=idx,
-            chunk_text=chunk_text,
-            char_count=len(chunk_text),
-            access_level=doc.access_level,
-            is_outdated=False,
-        )
-        db.add(chunk_record)
-        db.flush()  # populate chunk_id before embedding
-
-        # Generate embedding
         try:
-            embedding_vec = embed_document_chunk(chunk_text)
-        except RuntimeError as exc:
-            logger.error(
-                "Embedding failed for chunk %d of document_id=%d: %s",
-                idx,
-                document_id,
-                exc,
-            )
+            vector = embed_document_chunk(chunk_text)
+            array = np.asarray(vector, dtype=np.float32).reshape(-1)
+            if array.size == 0 or not np.isfinite(array).all() or float(np.linalg.norm(array)) <= 1e-12:
+                raise ValueError("embedding is empty, non-finite, or zero-norm")
+            # Convert now, while the old index is still untouched.  This also
+            # catches malformed provider output before any DB invalidation.
+            vector_to_mysql_string(array.tolist())
+            staged.append((idx, chunk_text, array.tolist()))
+        except Exception as exc:
             skipped += 1
-            continue
+            logger.error("Embedding failed for chunk %d of document_id=%d: %s", idx, document_id, exc)
 
-        # Persist EmbeddingVector
-        vec_str = vector_to_mysql_string(embedding_vec)
-        emb_record = EmbeddingVector(
-            chunk_id=chunk_record.chunk_id,
-            embedding=vec_str,
-            model_version=rag_settings.EMBEDDING_MODEL,
-        )
-        db.add(emb_record)
-        new_vectors.append((chunk_record.chunk_id, doc.access_level, embedding_vec))
-        chunks_created += 1
-        embeddings_created += 1
+    if not staged:
+        return _failed(document_id, f"No usable embeddings were produced for document '{doc.title}'.", skipped)
 
+    new_vectors: list[tuple[int, str, list[float]]] = []
     try:
+        # Invalidation happens only after at least one complete usable vector
+        # has been staged.  A failed reindex therefore leaves old chunks live.
+        for old_chunk in db.query(DocumentChunk).filter_by(document_id=document_id).all():
+            old_chunk.is_outdated = True
+        for chunk_index, chunk_text, vector in staged:
+            chunk_record = DocumentChunk(
+                document_id=document_id,
+                chunk_index=chunk_index,
+                chunk_text=chunk_text,
+                char_count=len(chunk_text),
+                access_level=doc.access_level,
+                is_outdated=False,
+            )
+            db.add(chunk_record)
+            db.flush()
+            db.add(EmbeddingVector(
+                chunk_id=chunk_record.chunk_id,
+                embedding=vector_to_mysql_string(vector),
+                model_version=rag_settings.EMBEDDING_MODEL,
+            ))
+            new_vectors.append((chunk_record.chunk_id, doc.access_level, vector))
         db.commit()
     except Exception as exc:
         db.rollback()
         logger.error("Ingestion DB commit failed for document_id=%d: %s", document_id, exc)
-        return IngestionResult(
-            document_id=document_id,
-            chunks_created=0,
-            embeddings_created=0,
-            skipped=len(text_chunks),
-            message=f"Database commit failed: {exc}",
-        )
+        return _failed(document_id, f"Database commit failed: {exc}", skipped + len(staged))
 
     from RagChatbot.retrieval.vector_store import vector_store
     if vector_store.is_loaded:
-        for cid, alvl, evec in new_vectors:
-            vector_store.add_chunk(cid, alvl, evec)
+        vector_store.replace_document(document_id, new_vectors)
 
     return IngestionResult(
         document_id=document_id,
-        chunks_created=chunks_created,
-        embeddings_created=embeddings_created,
+        chunks_created=len(staged),
+        embeddings_created=len(staged),
         skipped=skipped,
-        message=(
-            f"Document '{doc.title}' ingested successfully: "
-            f"{chunks_created} chunks, {embeddings_created} embeddings. "
-            f"{skipped} chunks skipped due to embedding errors."
-        ),
+        message=(f"Document '{doc.title}' ingested successfully: {len(staged)} chunks, "
+                 f"{len(staged)} embeddings. {skipped} chunks skipped."),
+        status="COMPLETED",
     )

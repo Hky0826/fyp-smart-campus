@@ -36,14 +36,19 @@ def parse_personal_intent(query: str, *, now=None) -> PersonalRoute:
     today = local_now.date()
     if _OTHER_PERSON_RE.search(text) and re.search(r"\b(timetable|schedule|class(?:es)?|course(?:s)?|appointment(?:s)?)\b", text):
         return PersonalRoute(intent=PersonalIntent.PRIVACY_DENIED, requires_authentication=True)
-    if not re.search(r"\b(my|me|i|mine)\b", text):
+    has_self_pronoun = bool(re.search(r"\b(my|me|i|mine)\b", text))
+    has_implicit_personal_query = bool(re.search(
+        r"\b(have\s+any\s+class(?:es)?|any\s+class(?:es)?|got\s+class(?:es)?|next\s+class|upcoming\s+class|today'?s\s+class(?:es)?|today'?s\s+schedule|classes\s+today|schedule\s+today|enrolled\s+in)\b",
+        text,
+    ))
+    if not (has_self_pronoun or has_implicit_personal_query):
         return PersonalRoute()
 
     scope, requested_date, week_start = _scope(text, today)
     location = bool(re.search(r"\b(where|location|room|which\s+room)\b", text))
     if re.search(r"\b(profile|about\s+me|my\s+details|my\s+information)\b", text):
         intent = PersonalIntent.PROFILE
-    elif re.search(r"\b(course|courses|enrol|enrolled|classes?\s+am\s+i\s+taking)\b", text) and not re.search(r"\b(class|timetable|schedule|lecture)\b", text):
+    elif re.search(r"\b(course|courses|cause|causes|enrol|enrolled|classes?\s+am\s+i\s+taking)\b", text) and not re.search(r"\b(class|timetable|schedule|lecture)\b", text):
         intent = PersonalIntent.COURSES
     elif re.search(r"\b(appointment|appointments|meeting|meetings)\b", text):
         intent = PersonalIntent.NEXT_APPOINTMENT if (scope == DateScope.NEXT or location) else PersonalIntent.APPOINTMENTS

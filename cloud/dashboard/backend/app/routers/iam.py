@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List
 import bcrypt
@@ -6,7 +6,6 @@ import os
 import datetime
 import json
 import re
-import random
 import cv2
 import numpy as np
 
@@ -200,7 +199,6 @@ except Exception as _e:
 enrollment_sessions = {}
 enrollment_progress = {}
 scrfd_detector_instance = None
-arcface_embedder_instance = None
 
 def get_scrfd_detector():
     global scrfd_detector_instance
@@ -212,15 +210,78 @@ def get_scrfd_detector():
         scrfd_detector_instance = SCRFDDetector(model_path)
     return scrfd_detector_instance
 
-def get_arcface_embedder():
-    global arcface_embedder_instance
-    if arcface_embedder_instance is None:
-        router_dir = os.path.dirname(os.path.abspath(__file__))
-        app_dir = os.path.dirname(router_dir)
-        model_path = os.path.join(app_dir, "facial_recognition", "models", "arcface_r50.onnx")
-        from app.facial_recognition.embedder import EdgeFaceEmbedder
-        arcface_embedder_instance = EdgeFaceEmbedder(model_path)
-    return arcface_embedder_instance
+def _replace_user_enrollment(
+    db: Session,
+    user: User,
+    crops: dict[str, np.ndarray],
+    merge_existing: bool = False,
+) -> None:
+    """Stage model outputs before replacing enrollment, optionally preserving other poses."""
+    from app.models.models import UserImage, UserFaceEmbedding
+    from app.services.multi_model_embeddings import MultiModelEmbeddingService, SFACE, AURAFACE, EnrollmentEmbeddingError
+
+    service = MultiModelEmbeddingService()
+    enrollment_crops = dict(crops)
+    if merge_existing:
+        existing_images = db.query(UserImage).filter_by(user_id=user.user_id).all()
+        for image_record in existing_images:
+            image_path = service._file_path(image_record.image_path)
+            existing_crop = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+            if existing_crop is None or existing_crop.size == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Enrollment failed: existing {image_record.template_name} image is unreadable",
+                )
+            enrollment_crops[image_record.template_name] = existing_crop
+        enrollment_crops.update(crops)
+
+    try:
+        staged = service.generate_images(enrollment_crops, (SFACE, AURAFACE))
+    except EnrollmentEmbeddingError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Enrollment failed: {exc}") from exc
+
+    static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
+    user_upload_dir = os.path.join(static_dir, "uploads", "faces", str(user.user_id))
+    os.makedirs(user_upload_dir, exist_ok=True)
+    paths = {pose: os.path.join(user_upload_dir, f"{pose}.jpg") for pose in enrollment_crops}
+    backups = {}
+    for path in paths.values():
+        if os.path.isfile(path):
+            with open(path, "rb") as file:
+                backups[path] = file.read()
+
+    try:
+        for pose, crop in enrollment_crops.items():
+            if not cv2.imwrite(paths[pose], crop):
+                raise HTTPException(status_code=400, detail=f"Enrollment failed: {pose}: could not save image")
+        db.query(UserImage).filter_by(user_id=user.user_id).delete()
+        db.query(UserFaceEmbedding).filter_by(user_id=user.user_id).delete()
+        for pose in enrollment_crops:
+            db.add(UserImage(
+                user_id=user.user_id,
+                template_name=pose,
+                image_path=f"/static/uploads/faces/{user.user_id}/{pose}.jpg",
+            ))
+        for (pose, model_name), embedding in staged.items():
+            db.add(UserFaceEmbedding(
+                user_id=user.user_id,
+                template_name=pose,
+                model_name=model_name,
+                embedding=embedding,
+            ))
+        user.updated_at = datetime.datetime.utcnow()
+        db.commit()
+        db.refresh(user)
+    except Exception:
+        db.rollback()
+        for path in paths.values():
+            if path in backups:
+                with open(path, "wb") as file:
+                    file.write(backups[path])
+            elif os.path.exists(path):
+                os.unlink(path)
+        raise
 
 router = APIRouter(prefix="/iam", tags=["Identity & Access Management"])
 
@@ -954,19 +1015,17 @@ def upload_user_face_photo(
     user_id: int,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    pose: str = Form("front"),
     db: Session = Depends(get_db),
     current_admin=Depends(verify_super_admin)
 ):
+    valid_poses = {"front", "left_30", "right_30", "left_60", "right_60", "slightly_up", "low_light"}
+    if pose not in valid_poses:
+        raise HTTPException(status_code=400, detail=f"Invalid enrollment pose: {pose}")
+
     user = db.query(User).filter_by(user_id=user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-
-    # Resolve paths
-    router_dir = os.path.dirname(os.path.abspath(__file__))
-    app_dir    = os.path.dirname(router_dir)
-    static_dir = os.path.join(app_dir, "static")
-    user_upload_dir = os.path.join(static_dir, "uploads", "faces", str(user_id))
-    os.makedirs(user_upload_dir, exist_ok=True)
 
     # Read uploaded file
     try:
@@ -978,8 +1037,7 @@ def upload_user_face_photo(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read/decode uploaded photo: {e}")
 
-    # Face detection using SCRFD
-    face_vector_list = None
+    # Detect and align first; all model work is staged before old templates are touched.
     crop = None
     try:
         detector = get_scrfd_detector()
@@ -1000,88 +1058,27 @@ def upload_user_face_photo(
 
             if raw_crop.size > 0:
                 crop = extract_aligned_face(img, f)
-                embedder = get_arcface_embedder()
-                embedding = embedder.embed(crop)
-                face_vector_list = [round(float(v), 6) for v in embedding.tolist()]
         else:
-            print(f"[upload-photo] No face detected in uploaded image for user {user_id}.")
+            raise HTTPException(status_code=400, detail=f"Enrollment failed: {pose}: no face detected")
+    except HTTPException:
+        raise
     except Exception as exc:
-        print(f"[upload-photo] SCRFD/ArcFace extraction failed: {exc}")
+        raise HTTPException(status_code=400, detail=f"Enrollment failed: {pose}: {exc}") from exc
 
-    # Fallback to mock vector if face detection or embedding failed
-    if not face_vector_list:
-        random.seed(user_id)
-        face_vector_list = [round(random.uniform(-1.0, 1.0), 4) for _ in range(512)]
-        if crop is None or crop.size == 0:
-            crop = cv2.resize(img, (112, 112))
+    if crop is None or crop.size == 0:
+        raise HTTPException(status_code=400, detail=f"Enrollment failed: {pose}: could not extract a usable face")
 
-    # Clear existing photos & embeddings for this user
-    from app.models.models import UserImage, UserFaceEmbedding
-    db.query(UserImage).filter_by(user_id=user_id).delete()
-    db.query(UserFaceEmbedding).filter_by(user_id=user_id).delete()
-
-    # Save front pose crop
-    front_path = os.path.join(user_upload_dir, "front.jpg")
-    cv2.imwrite(front_path, crop)
-
-    db_img_front = UserImage(
-        user_id=user_id,
-        template_name="front",
-        image_path=f"/static/uploads/faces/{user_id}/front.jpg"
-    )
-    db.add(db_img_front)
-
-    emb_bytes = np.array(face_vector_list, dtype=np.float32).tobytes()
-    db_emb_front = UserFaceEmbedding(
-        user_id=user_id,
-        template_name="front",
-        model_name="arcface_r50",
-        embedding=emb_bytes
-    )
-    db.add(db_emb_front)
-
-    # Generate low_light pose
-    low_light_crop = np.clip(crop.astype(np.float32) * 0.4, 0, 255).astype(np.uint8)
-    low_light_path = os.path.join(user_upload_dir, "low_light.jpg")
-    cv2.imwrite(low_light_path, low_light_crop)
-
-    db_img_low = UserImage(
-        user_id=user_id,
-        template_name="low_light",
-        image_path=f"/static/uploads/faces/{user_id}/low_light.jpg"
-    )
-    db.add(db_img_low)
-
-    try:
-        embedder = get_arcface_embedder()
-        low_light_emb = embedder.embed(low_light_crop)
-        low_light_emb_bytes = low_light_emb.astype(np.float32).tobytes()
-    except Exception as exc:
-        print(f"Failed to embed low light crop: {exc}. Using front embedding fallback.")
-        low_light_emb_bytes = emb_bytes
-
-    db_emb_low = UserFaceEmbedding(
-        user_id=user_id,
-        template_name="low_light",
-        model_name="arcface_r50",
-        embedding=low_light_emb_bytes
-    )
-    db.add(db_emb_low)
-
-    # Persist only model-specific templates. SFace is required for access control; AuraFace is created when its model is configured.
-    db.flush()
-    db.query(UserFaceEmbedding).filter_by(user_id=user_id).delete()
-    from app.services.multi_model_embeddings import MultiModelEmbeddingService, SFACE, AURAFACE
-    MultiModelEmbeddingService().reembed_all(db, (SFACE, AURAFACE))
-    user.updated_at = datetime.datetime.utcnow()
-    db.commit()
-    db.refresh(user)
+    crops = {pose: crop}
+    if pose == "front":
+        low_light_crop = np.clip(crop.astype(np.float32) * 0.4, 0, 255).astype(np.uint8)
+        crops["low_light"] = low_light_crop
+    _replace_user_enrollment(db, user, crops, merge_existing=True)
 
     if _PUSH_SYNC_AVAILABLE and _push_sync_to_all_edges is not None:
         background_tasks.add_task(_push_sync_to_all_edges, db)
 
     return {
-        "detail": "Face photo uploaded and EdgeFace vector enrolled successfully",
+        "detail": f"Face photo for {pose} uploaded and Face ID templates updated successfully",
         "face_vector": user.face_vector,
         "imagepath": user.imagepath
     }
@@ -1333,60 +1330,12 @@ def enroll_live_complete(
         low_light_crop = np.clip(front_crop.astype(np.float32) * 0.4, 0, 255).astype(np.uint8)
         session_data["low_light"] = low_light_crop
 
-        from app.models.models import UserImage, UserFaceEmbedding
-        db.query(UserImage).filter_by(user_id=user_id).delete()
-        db.query(UserFaceEmbedding).filter_by(user_id=user_id).delete()
-
-        router_dir = os.path.dirname(os.path.abspath(__file__))
-        app_dir = os.path.dirname(router_dir)
-        static_dir = os.path.join(app_dir, "static")
-        user_upload_dir = os.path.join(static_dir, "uploads", "faces", str(user_id))
-        os.makedirs(user_upload_dir, exist_ok=True)
-
-        embedder = get_arcface_embedder()
-
         poses = ["front", "left_30", "right_30", "left_60", "right_60", "slightly_up", "low_light"]
         for idx, pose in enumerate(poses):
-            crop = session_data[pose]
-            file_path = os.path.join(user_upload_dir, f"{pose}.jpg")
-            cv2.imwrite(file_path, crop)
-
-            db_img = UserImage(
-                user_id=user_id,
-                template_name=pose,
-                image_path=f"/static/uploads/faces/{user_id}/{pose}.jpg"
-            )
-            db.add(db_img)
-
-            try:
-                embedding_vec = embedder.embed(crop)
-                emb_bytes = embedding_vec.astype(np.float32).tobytes()
-            except Exception as e:
-                print(f"Failed to embed pose '{pose}' for user {user_id}: {e}")
-                random.seed(user_id + hash(pose))
-                fallback_vec = np.array([random.uniform(-1.0, 1.0) for _ in range(512)], dtype=np.float32)
-                norm = np.linalg.norm(fallback_vec) + 1e-10
-                fallback_vec = fallback_vec / norm
-                emb_bytes = fallback_vec.tobytes()
-
-            db_emb = UserFaceEmbedding(
-                user_id=user_id,
-                template_name=pose,
-                model_name="arcface_r50",
-                embedding=emb_bytes
-            )
-            db.add(db_emb)
-            
             # Update progress
             enrollment_progress[user_id] = int((idx + 1) / len(poses) * 100)
 
-        db.flush()
-        db.query(UserFaceEmbedding).filter_by(user_id=user_id).delete()
-        from app.services.multi_model_embeddings import MultiModelEmbeddingService, SFACE, AURAFACE
-        MultiModelEmbeddingService().reembed_all(db, (SFACE, AURAFACE))
-        user.updated_at = datetime.datetime.utcnow()
-        db.commit()
-        db.refresh(user)
+        _replace_user_enrollment(db, user, {pose: session_data[pose] for pose in poses})
 
         enrollment_sessions.pop(user_id, None)
 
@@ -1538,56 +1487,7 @@ async def enroll_user_video(
     low_light_crop = np.clip(front_crop.astype(np.float32) * 0.4, 0, 255).astype(np.uint8)
     harvested_crops["low_light"] = low_light_crop
 
-    from app.models.models import UserImage, UserFaceEmbedding
-    db.query(UserImage).filter_by(user_id=user_id).delete()
-    db.query(UserFaceEmbedding).filter_by(user_id=user_id).delete()
-
-    router_dir = os.path.dirname(os.path.abspath(__file__))
-    app_dir = os.path.dirname(router_dir)
-    static_dir = os.path.join(app_dir, "static")
-    user_upload_dir = os.path.join(static_dir, "uploads", "faces", str(user_id))
-    os.makedirs(user_upload_dir, exist_ok=True)
-
-    embedder = get_arcface_embedder()
-
-    for pose in ["front", "left_30", "right_30", "left_60", "right_60", "slightly_up", "low_light"]:
-        crop = harvested_crops[pose]
-        file_path = os.path.join(user_upload_dir, f"{pose}.jpg")
-        cv2.imwrite(file_path, crop)
-
-        db_img = UserImage(
-            user_id=user_id,
-            template_name=pose,
-            image_path=f"/static/uploads/faces/{user_id}/{pose}.jpg"
-        )
-        db.add(db_img)
-
-        try:
-            embedding_vec = embedder.embed(crop)
-            emb_bytes = embedding_vec.astype(np.float32).tobytes()
-        except Exception as e:
-            print(f"Failed to embed pose '{pose}' for user {user_id}: {e}")
-            random.seed(user_id + hash(pose))
-            fallback_vec = np.array([random.uniform(-1.0, 1.0) for _ in range(512)], dtype=np.float32)
-            norm = np.linalg.norm(fallback_vec) + 1e-10
-            fallback_vec = fallback_vec / norm
-
-        db_emb = UserFaceEmbedding(
-            user_id=user_id,
-            template_name=pose,
-            model_name="arcface_r50",
-            embedding=emb_bytes
-        )
-        db.add(db_emb)
-
-    # Persist only model-specific templates. SFace is required for access control; AuraFace is created when its model is configured.
-    db.flush()
-    db.query(UserFaceEmbedding).filter_by(user_id=user_id).delete()
-    from app.services.multi_model_embeddings import MultiModelEmbeddingService, SFACE, AURAFACE
-    MultiModelEmbeddingService().reembed_all(db, (SFACE, AURAFACE))
-    user.updated_at = datetime.datetime.utcnow()
-    db.commit()
-    db.refresh(user)
+    _replace_user_enrollment(db, user, harvested_crops)
 
     if _PUSH_SYNC_AVAILABLE and _push_sync_to_all_edges is not None:
         background_tasks.add_task(_push_sync_to_all_edges, db)
@@ -1607,82 +1507,23 @@ async def reembed_all_users(
     current_admin=Depends(verify_super_admin)
 ):
     try:
-        from app.models.models import UserImage, UserFaceEmbedding
+        from app.models.models import UserImage
         images = db.query(UserImage).all()
         if not images:
             return {"detail": "No enrolled images found in database."}
 
-        embedder = get_arcface_embedder()
-        router_dir = os.path.dirname(os.path.abspath(__file__))
-        app_dir = os.path.dirname(router_dir)
-        static_dir = os.path.join(app_dir, "static")
-
-        success_count = 0
-        failed_count = 0
-        success_user_ids = set()
-
-        for img_rec in images:
-            user_id = img_rec.user_id
-            pose = img_rec.template_name
-            db_path = img_rec.image_path
-
-            # Clean relative path: convert web path "/static/uploads/..." to filesystem path
-            # Remove leading slash and the "static/" prefix if present
-            rel_path = db_path.lstrip("/")
-            if rel_path.startswith("static/"):
-                rel_path = rel_path.replace("static/", "", 1)
-            
-            file_path = os.path.join(static_dir, rel_path)
-
-            if not os.path.exists(file_path):
-                print(f"[REEMBED] Warning: Image file not found: {file_path}")
-                failed_count += 1
-                continue
-
-            img = cv2.imread(file_path)
-            if img is None:
-                print(f"[REEMBED] Error: Could not read image: {file_path}")
-                failed_count += 1
-                continue
-
-            try:
-                embedding_vec = embedder.embed(img)
-                emb_bytes = embedding_vec.astype(np.float32).tobytes()
-            except Exception as e:
-                print(f"[REEMBED] Error: Embedding failed for user {user_id} pose {pose}: {e}")
-                failed_count += 1
-                continue
-
-            # Upsert UserFaceEmbedding
-            db_emb = db.query(UserFaceEmbedding).filter_by(user_id=user_id, template_name=pose).first()
-            if db_emb:
-                db_emb.embedding = emb_bytes
-                db_emb.model_name = "arcface_r50"
-            else:
-                db_emb = UserFaceEmbedding(
-                    user_id=user_id,
-                    template_name=pose,
-                    model_name="arcface_r50",
-                    embedding=emb_bytes
-                )
-                db.add(db_emb)
-            
-            success_count += 1
-            success_user_ids.add(user_id)
-
-        if success_user_ids:
-            db.query(User).filter(User.user_id.in_(list(success_user_ids))).update(
-                {User.updated_at: datetime.datetime.utcnow()}, synchronize_session=False
-            )
-        db.commit()
-
-        # Trigger sync to all edge camera nodes
+        from app.services.multi_model_embeddings import MultiModelEmbeddingService
+        result = MultiModelEmbeddingService().reembed_all(db)
+        if result["errors"]:
+            raise HTTPException(status_code=400, detail="; ".join(result["errors"]))
+        if not result["committed"]:
+            raise HTTPException(status_code=400, detail="No enrollment templates were re-embedded.")
         if _PUSH_SYNC_AVAILABLE and _push_sync_to_all_edges is not None:
             background_tasks.add_task(_push_sync_to_all_edges, db)
-
         return {
-            "detail": f"Successfully re-embedded {success_count} images for all users (failed: {failed_count}). Edge sync triggered."
+            "detail": f"Successfully re-embedded {result['written']} model templates for all users. Edge sync triggered."
         }
+
     except Exception as e:
         import traceback
         traceback.print_exc()

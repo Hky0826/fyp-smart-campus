@@ -130,7 +130,8 @@ def sync_status() -> dict:
         "device_name": config.sync_device_name,
         "database_path": str(config.database_path),
         "local_ip": config.sync_local_ip,
-        "local_port": config.sync_local_port,
+        "configured_local_port": config.sync_local_port,
+        "local_port": (_sync_engine.actual_sync_port if _sync_engine and _sync_engine.actual_sync_port else config.sync_local_port),
         "downstream_poll_seconds": config.sync_downstream_poll_seconds,
         "log_push_interval_seconds": config.sync_log_push_interval_seconds,
     }

@@ -225,7 +225,7 @@ def create_timetable(time_in: schemas.TimetableCreate, db: Session = Depends(get
     if overlapping:
         raise HTTPException(
             status_code=400, 
-            detail=f"Double-booking detected: Room is already occupied by Course ID {overlapping.course_id} on {time_in.day_of_week} between {overlapping.start_time} and {overlapping.end_time}"
+            detail=f"Double-booking detected: Room is already occupied by Course {overlapping.course_code or overlapping.course_id} on {time_in.day_of_week} between {overlapping.start_time} and {overlapping.end_time}"
         )
         
     timetable = Timetable(
@@ -291,7 +291,7 @@ def update_timetable(timetable_id: int, time_in: schemas.TimetableUpdate, db: Se
     if overlapping:
         raise HTTPException(
             status_code=400,
-            detail=f"Double-booking detected: Room is already occupied by Course ID {overlapping.course_id} on {day_of_week} between {overlapping.start_time} and {overlapping.end_time}"
+            detail=f"Double-booking detected: Room is already occupied by Course {overlapping.course_code or overlapping.course_id} on {day_of_week} between {overlapping.start_time} and {overlapping.end_time}"
         )
         
     for field, val in time_in.model_dump(exclude_unset=True).items():

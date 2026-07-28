@@ -84,6 +84,15 @@ class PersonalisationTests(unittest.TestCase):
         self.assertFalse(result.access_granted)
         self.assertFalse(repo.calls)
 
+    def test_courses_can_use_latest_enrolment_when_active_term_is_missing(self):
+        rag_settings.RAG_ACTIVE_SEMESTER = ""
+        rag_settings.RAG_ACTIVE_ACADEMIC_YEAR = ""
+        repo = FakeRepository()
+        context = AuthenticatedChatContext(7, 9, roles=("STUDENT",), student_id="S7", authenticated=True)
+        result = handle_personal_request(parse_personal_intent("What courses am I enrolled in?"), context, None, repository=repo)
+        self.assertTrue(result.access_granted)
+        self.assertEqual(repo.calls, [("courses", 7, None)])
+
     def test_multiple_roles_highest_role_access_student_lecturer(self):
         # When a user has both STUDENT and LECTURER roles, LECTURER is higher.
         from RagChatbot.security.rbac import get_highest_role, resolve_allowed_access_levels
@@ -105,6 +114,15 @@ class PersonalisationTests(unittest.TestCase):
         # Should call lecturer_timetable instead of student_timetable
         self.assertIn("lecturer_timetable", [call[0] for call in repo.calls])
         self.assertNotIn("student_timetable", [call[0] for call in repo.calls])
+
+    def test_implicit_schedule_query_without_my(self):
+        route = parse_personal_intent("have any classes today")
+        self.assertEqual(route.intent, PersonalIntent.TIMETABLE)
+        self.assertEqual(route.date_scope, DateScope.TODAY)
+
+    def test_causes_stt_mishearing_parses_to_courses(self):
+        route = parse_personal_intent("what are the causes that I have enrolled in")
+        self.assertEqual(route.intent, PersonalIntent.COURSES)
 
 
 if __name__ == "__main__":

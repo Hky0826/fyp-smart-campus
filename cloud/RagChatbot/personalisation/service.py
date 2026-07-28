@@ -110,7 +110,7 @@ def handle_personal_request(route: PersonalRoute, context: AuthenticatedChatCont
         if route.intent != PersonalIntent.COURSES and not (roles & {"STUDENT", "LECTURER"}):
             return _result(route, "Your role does not have a personal timetable in this service.", False, "No timetable context is available.")
         term = rag_settings.active_term
-        if term is None:
+        if term is None and route.intent != PersonalIntent.COURSES:
             return _result(route, TERM_UNAVAILABLE_ANSWER, False, "Active academic term is not configured.")
         try:
             if route.intent == PersonalIntent.COURSES:

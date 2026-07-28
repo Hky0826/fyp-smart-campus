@@ -48,7 +48,7 @@ def login(
     # Create token payload with admin_id as sub
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": admin.admin_id, "admin_type": admin.admin_type},
+        data={"sub": admin.admin_id, "user_id": admin.user_id, "admin_type": admin.admin_type},
         expires_delta=access_token_expires
     )
     
@@ -102,7 +102,7 @@ def login_json(
         
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": admin.admin_id, "admin_type": admin.admin_type},
+        data={"sub": admin.admin_id, "user_id": admin.user_id, "admin_type": admin.admin_type},
         expires_delta=access_token_expires
     )
     
