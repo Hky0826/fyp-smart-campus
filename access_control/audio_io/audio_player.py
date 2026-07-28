@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import threading
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Optional
@@ -33,6 +34,32 @@ class AudioPlayer:
     def __init__(self, config: Optional[AudioIOConfig] = None, sample_rate: int = 24000) -> None:
         self.config = config or AudioIOConfig()
         self.sample_rate = sample_rate or getattr(self.config, "output_sample_rate", 24000)
+        self._stop_requested = threading.Event()
+        self._active_stream = None
+        self._active_process: subprocess.Popen | None = None
+        self._state_lock = threading.Lock()
+
+    def stop(self) -> None:
+        """Interrupt any active playback immediately."""
+        self._stop_requested.set()
+        with self._state_lock:
+            stream = self._active_stream
+            process = self._active_process
+        if stream is not None:
+            try:
+                stream.abort()
+            except Exception:
+                pass
+        if process is not None and process.poll() is None:
+            try:
+                process.kill()
+            except Exception:
+                pass
+        try:
+            import sounddevice as sd
+            sd.stop()
+        except Exception:
+            pass
 
     def play_pcm(self, pcm_bytes: bytes) -> None:
         """Play raw PCM bytes as 24 kHz mono int16 audio.
@@ -134,17 +161,29 @@ class AudioPlayer:
                 channels=1,
                 dtype="int16",
             ) as stream:
+                with self._state_lock:
+                    self._active_stream = stream
                 for chunk in pcm_chunks:
+                    if self._stop_requested.is_set():
+                        break
                     if not chunk:
                         continue
                     audio_array: np.ndarray = np.frombuffer(chunk, dtype=np.int16)
                     if audio_array.size == 0:
                         continue
-                    stream.write(audio_array.reshape(-1, 1))
-                    samples += audio_array.size
+                    block_samples = max(1, self.sample_rate * 20 // 1000)
+                    for offset in range(0, audio_array.size, block_samples):
+                        if self._stop_requested.is_set():
+                            break
+                        block = audio_array[offset : offset + block_samples]
+                        stream.write(block.reshape(-1, 1))
+                        samples += block.size
             logger.info("Streamed %d PCM samples at %d Hz", samples, self.sample_rate)
         except Exception as exc:
             raise AudioPlaybackError(f"Failed to stream PCM audio: {exc}") from exc
+        finally:
+            with self._state_lock:
+                self._active_stream = None
 
     def _play_pcm_stream_alsa(self, pcm_chunks: Iterable[bytes]) -> None:
         command = [
@@ -169,6 +208,8 @@ class AudioPlayer:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
             )
+            with self._state_lock:
+                self._active_process = process
         except FileNotFoundError as exc:
             raise AudioPlaybackError(
                 "ALSA playback backend requires aplay. Install it on the edge device with: "
@@ -180,13 +221,21 @@ class AudioPlayer:
         try:
             assert process.stdin is not None
             for chunk in pcm_chunks:
+                if self._stop_requested.is_set():
+                    break
                 if not chunk:
                     continue
                 if len(chunk) % 2 != 0:
                     raise AudioPlaybackError("PCM audio byte length is not aligned to int16 samples")
-                process.stdin.write(chunk)
-                process.stdin.flush()
-                total_bytes += len(chunk)
+                block_bytes = max(2, self.sample_rate * 2 * 20 // 1000)
+                block_bytes -= block_bytes % 2
+                for offset in range(0, len(chunk), block_bytes):
+                    if self._stop_requested.is_set():
+                        break
+                    block = chunk[offset : offset + block_bytes]
+                    process.stdin.write(block)
+                    process.stdin.flush()
+                    total_bytes += len(block)
             process.stdin.close()
             stderr = process.stderr.read() if process.stderr is not None else b""
             return_code = process.wait()
@@ -194,6 +243,9 @@ class AudioPlayer:
             process.kill()
             process.wait()
             raise
+        finally:
+            with self._state_lock:
+                self._active_process = None
 
         if return_code != 0:
             message = stderr.decode(errors="ignore").strip()

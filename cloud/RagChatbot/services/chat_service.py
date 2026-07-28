@@ -56,6 +56,15 @@ AUTH_REQUIRED_ANSWER = (
 AUTH_REQUIRED_STATUS = "Authentication required: please scan your face to check protected document access."
 
 
+def _greeting_name(context) -> str:
+    """Prefer the stored given name, which may contain multiple words."""
+    given_name = " ".join(str(getattr(context, "given_name", "") or "").split())
+    if given_name:
+        return given_name
+    full_name = str(getattr(context, "full_name", "") or "").strip()
+    return full_name.split()[0] if full_name else ""
+
+
 # JWT helpers
 
 def _decode_jwt(token: str) -> dict:
@@ -256,11 +265,11 @@ def process_chat(
     fast_answer = None
 
     if route.category == "GREETING":
-        first_name = context.full_name.strip().split()[0] if (context.authenticated and context.full_name and context.full_name.strip()) else ""
+        first_name = _greeting_name(context) if context.authenticated else ""
         if first_name:
-            fast_answer = f"Hi {first_name}! How can I help you with Quest International University today?"
+            fast_answer = f"Hi {first_name}, how may I help you today?"
         else:
-            fast_answer = "Hi! How can I help you with Quest International University today?"
+            fast_answer = "Hi, how may I help you today?"
     elif route.category == "CAPABILITY":
         fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
     elif route.category == "NAVIGATIONAL":

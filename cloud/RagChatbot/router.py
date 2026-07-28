@@ -22,7 +22,9 @@ import base64
 import datetime
 import json
 import logging
+from collections import OrderedDict
 from collections.abc import Iterator
+from threading import Lock
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -36,6 +38,7 @@ from RagChatbot.config import rag_settings
 from RagChatbot.generation.audio_query_extractor import AudioQueryExtractionError
 from RagChatbot.generation.gemini_live_service import GeminiLiveError
 from RagChatbot.generation.response_validator import generate_audio_from_text_stream
+from RagChatbot.generation.response_validator import generate_audio_from_text
 from RagChatbot.schemas import (
     AudioChatResponse,
     ChatRequest,
@@ -45,8 +48,10 @@ from RagChatbot.schemas import (
     IngestionResponse,
 )
 from RagChatbot.services.audio_chat_service import process_audio_chat, process_audio_chat_stream
+from RagChatbot.services.greeting_audio_service import generate_greeting_audio
 from RagChatbot.services.chat_service import process_chat, process_public_smoke_chat
 from RagChatbot.services.ingestion_service import ingest_document
+from RagChatbot.security.auth_context import resolve_auth_context
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +59,43 @@ router = APIRouter(prefix="/chatbot", tags=["RAG Chatbot"])
 
 # Optional bearer scheme. Missing tokens use visitor/PUBLIC access.
 _bearer_scheme = HTTPBearer(auto_error=False)
+
+
+_GREETING_AUDIO_CACHE: OrderedDict[str, str] = OrderedDict()
+_GREETING_AUDIO_CACHE_LOCK = Lock()
+_GREETING_AUDIO_CACHE_SIZE = 128
+
+
+def _greeting_text(full_name: str | None, given_name: str | None = None) -> str:
+    # Use the database's given_name field so names such as "Nur Aisyah" are
+    # not truncated to the first whitespace-delimited token.
+    display_name = " ".join((given_name or "").split())
+    if not display_name and full_name:
+        display_name = full_name.strip().split()[0] if full_name.strip() else ""
+    return f"Hi {display_name}, how may I help you today?" if display_name else "Hi, how may I help you today?"
+
+
+def _cached_greeting_audio(text: str, given_name: str | None = None) -> str | None:
+    """Return cached greeting audio, synthesizing each unique greeting once."""
+    with _GREETING_AUDIO_CACHE_LOCK:
+        cached = _GREETING_AUDIO_CACHE.get(text)
+        if cached is not None:
+            _GREETING_AUDIO_CACHE.move_to_end(text)
+            return cached
+    try:
+        audio = generate_greeting_audio(text, given_name=given_name)
+    except Exception:
+        logger.warning("Greeting TTS failed; returning text greeting only.", exc_info=True)
+        return None
+    if not audio:
+        return None
+    encoded = base64.b64encode(audio).decode("ascii")
+    with _GREETING_AUDIO_CACHE_LOCK:
+        _GREETING_AUDIO_CACHE[text] = encoded
+        _GREETING_AUDIO_CACHE.move_to_end(text)
+        while len(_GREETING_AUDIO_CACHE) > _GREETING_AUDIO_CACHE_SIZE:
+            _GREETING_AUDIO_CACHE.popitem(last=False)
+    return encoded
 
 
 def _split_stream_text(text: str, max_chars: int = 240) -> Iterator[str]:
@@ -281,6 +323,31 @@ def chat(
     """
     bearer_token = credentials.credentials if credentials else None
     return process_chat(request=body, bearer_token=bearer_token, db=db)
+
+
+@router.post(
+    "/chat/greeting/audio",
+    response_model=AudioChatResponse,
+    summary="Generate the authenticated kiosk greeting",
+)
+def chat_greeting_audio(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    db: Session = Depends(get_db),
+):
+    """Return the short session greeting and optional PCM speech independently of chat input."""
+    bearer_token = credentials.credentials if credentials else None
+    context = resolve_auth_context(bearer_token, db)
+    given_name = context.given_name if context.authenticated else None
+    greeting = _greeting_text(context.full_name if context.authenticated else None, given_name)
+    audio_base64 = None
+    if rag_settings.AUDIO_TTS_ENABLED:
+        audio_base64 = _cached_greeting_audio(greeting, given_name=given_name)
+    return AudioChatResponse(
+        text_response=greeting,
+        audio_response=audio_base64,
+        status="ok",
+        access_granted=True,
+    )
 
 
 @router.post(

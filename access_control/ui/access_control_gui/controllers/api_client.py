@@ -11,7 +11,7 @@ import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import requests
 
@@ -73,6 +73,9 @@ class KioskApiClient:
     def send_chat_message(self, query: str) -> dict[str, Any]:
         return self._request_json("POST", "/kiosk/chat/message", json_body={"query": query})
 
+    def request_greeting_audio(self) -> dict[str, Any]:
+        return self._request_json("POST", "/kiosk/chat/greeting/audio")
+
     def send_chat_audio(self, audio_bytes: bytes, mime_type: str = "audio/wav") -> dict[str, Any]:
         files = {"audio": ("chat-audio.wav", audio_bytes, mime_type)}
         return self._request_json("POST", "/kiosk/chat/audio", files=files)
@@ -85,7 +88,12 @@ class KioskApiClient:
                 files={"audio": (Path(path).name, handle, mime_type)},
             )
 
-    def send_chat_audio_stream_file(self, path: str | Path, mime_type: str = "audio/wav") -> Iterator[dict[str, Any]]:
+    def send_chat_audio_stream_file(
+        self,
+        path: str | Path,
+        mime_type: str = "audio/wav",
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> Iterator[dict[str, Any]]:
         import json
         url = f"{self.base_url}/kiosk/chat/audio/stream"
         with Path(path).open("rb") as handle:
@@ -94,6 +102,8 @@ class KioskApiClient:
                 if response.status_code >= 400:
                     raise self._error_from_response(response)
                 for line in response.iter_lines(decode_unicode=True):
+                    if cancel_requested and cancel_requested():
+                        break
                     if line:
                         try:
                             yield json.loads(line)
@@ -192,4 +202,3 @@ class KioskApiClient:
             if response.text:
                 message = response.text[:300]
         return KioskApiError(message, response.status_code)
-

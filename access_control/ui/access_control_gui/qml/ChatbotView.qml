@@ -17,6 +17,7 @@ Item {
     signal pushToTalkStarted()
     signal pushToTalkStopped()
     signal pushToTalkToggled()
+    signal stopAnsweringRequested()
 
     Rectangle {
         anchors.fill: parent
@@ -93,12 +94,20 @@ Item {
                 boundsBehavior: Flickable.StopAtBounds
                 spacing: 8
                 model: root.messages || []
-                onCountChanged: Qt.callLater(function() { history.positionViewAtEnd() })
-                onContentHeightChanged: Qt.callLater(function() { history.positionViewAtEnd() })
+                onCountChanged: Qt.callLater(function() {
+                    if (history.contentHeight <= history.height || history.atYEnd || history.contentY >= history.contentHeight - history.height - 24)
+                        history.positionViewAtEnd()
+                })
+                onContentHeightChanged: Qt.callLater(function() {
+                    // Keep the viewport stable while a response grows. Only
+                    // follow the stream when the user was already at the end.
+                    if (history.contentHeight <= history.height || history.atYEnd || history.contentY >= history.contentHeight - history.height - 24)
+                        history.positionViewAtEnd()
+                })
 
                 delegate: Item {
                     width: history.width
-                    height: bubble.implicitHeight
+                    height: Math.max(1, bubble.implicitHeight)
 
                     Rectangle {
                         id: bubble
@@ -190,6 +199,7 @@ Item {
                     Item {
                         width: 20
                         height: 20
+                        visible: !root.busy
 
                         Rectangle {
                             x: 6
@@ -218,8 +228,23 @@ Item {
                         }
                     }
 
+                    // Interrupt icon shown while the answer is being spoken.
+                    Item {
+                        width: 20
+                        height: 20
+                        visible: root.busy
+
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: 14
+                            height: 14
+                            radius: 2
+                            color: "#ffffff"
+                        }
+                    }
+
                     Text {
-                        text: root.busy ? "Processing audio..." : root.listening ? "Listening... Release/Tap to Send" : "Hold or Tap to Speak"
+                        text: root.busy ? "Stop answering" : root.listening ? "Listening... Release/Tap to Send" : "Hold or Tap to Speak"
                         color: "#ffffff"
                         font.pixelSize: 14
                         font.bold: true
@@ -253,9 +278,10 @@ Item {
                 MouseArea {
                     id: pttMouseArea
                     anchors.fill: parent
-                    enabled: !root.busy && !root.verifying
+                    enabled: !root.verifying
 
                     property bool heldMode: false
+                    property bool interruptMode: false
 
                     Timer {
                         id: holdTimer
@@ -268,11 +294,19 @@ Item {
                     }
 
                     onPressed: {
+                        pttMouseArea.interruptMode = root.busy
+                        if (root.busy) {
+                            root.stopAnsweringRequested()
+                            return
+                        }
                         pttMouseArea.heldMode = false
                         holdTimer.start()
                     }
 
                     onReleased: {
+                        if (pttMouseArea.interruptMode) {
+                            return
+                        }
                         holdTimer.stop()
                         if (pttMouseArea.heldMode) {
                             root.pushToTalkStopped()
@@ -280,6 +314,10 @@ Item {
                     }
 
                     onClicked: {
+                        if (pttMouseArea.interruptMode) {
+                            pttMouseArea.interruptMode = false
+                            return
+                        }
                         if (!pttMouseArea.heldMode) {
                             if (root.listening) {
                                 root.pushToTalkStopped()

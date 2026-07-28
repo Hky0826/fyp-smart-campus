@@ -62,6 +62,7 @@ class EdgeTokenResponse(BaseModel):
     token_type: str = "bearer"
     user_id: int
     email: str
+    given_name: str
     full_name: str
     roles: list
     session_id: int
@@ -147,6 +148,7 @@ def issue_edge_token(
         token_type="bearer",
         user_id=user.user_id,
         email=user.email,
+        given_name=user.given_name,
         full_name=user.full_name,
         roles=roles,
         session_id=session.session_id,

@@ -6,6 +6,7 @@ import base64
 import logging
 import math
 import os
+import queue
 import threading
 import time
 import wave
@@ -14,11 +15,11 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PySide6.QtCore import QObject, Property, QThread, Signal, Slot, QTimer
+from PySide6.QtCore import QObject, Property, QThread, Signal, Slot
 
-from edge.audio_io.audio_player import AudioPlayer
-from edge.audio_io.config import AudioIOConfig
-from edge.audio_io.recorder import AudioRecorder
+from access_control.audio_io.audio_player import AudioPlayer
+from access_control.audio_io.config import AudioIOConfig
+from access_control.audio_io.recorder import AudioRecorder
 
 from .api_client import KioskApiClient
 
@@ -48,10 +49,17 @@ class _PushToTalkWorker(QThread):
     def __init__(self, api: KioskApiClient) -> None:
         super().__init__()
         self._api = api
-        self._stop_requested = threading.Event()
+        self._recording_stop_requested = threading.Event()
+        self._stream_cancel_requested = threading.Event()
+        self._audio_only_stop_requested = threading.Event()
+        self._recording_active = threading.Event()
+        self._player: AudioPlayer | None = None
+        self._player_lock = threading.Lock()
 
     def run(self) -> None:
-        self._stop_requested.clear()
+        self._recording_stop_requested.clear()
+        self._stream_cancel_requested.clear()
+        self._audio_only_stop_requested.clear()
         config = AudioIOConfig()
         config = replace(
             config,
@@ -63,11 +71,15 @@ class _PushToTalkWorker(QThread):
         )
         recorder = AudioRecorder(config)
         player = AudioPlayer(config, sample_rate=TTS_OUTPUT_SAMPLE_RATE)
+        with self._player_lock:
+            self._player = player
         recording_path: Path | None = None
 
         try:
             self.listeningChanged.emit(True)
-            result = recorder.record(cancel_requested=self._stop_requested.is_set)
+            self._recording_active.set()
+            result = recorder.record(cancel_requested=self._recording_stop_requested.is_set)
+            self._recording_active.clear()
             recording_path = result.path
             self.listeningChanged.emit(False)
 
@@ -75,36 +87,141 @@ class _PushToTalkWorker(QThread):
                 voice_stats = _wav_voice_stats(recording_path)
                 logger.info("Push-to-Talk recorded stats: %s", voice_stats)
                 self.busyChanged.emit(True)
+                audio_queue: queue.Queue[bytes | None] = queue.Queue()
+
+                def receive_stream() -> None:
+                    try:
+                        emitted_text = False
+                        for event_obj in self._api.send_chat_audio_stream_file(
+                            recording_path,
+                            "audio/wav",
+                            cancel_requested=self._stream_cancel_requested.is_set,
+                        ):
+                            if self._stream_cancel_requested.is_set():
+                                break
+                            event = event_obj.get("event")
+                            data = event_obj.get("data", {})
+                            if event == "metadata":
+                                text = data.get("transcribed_input")
+                                if text:
+                                    self.transcribedTextReceived.emit(text)
+                                fallback = data.get("text_response")
+                                if fallback and not emitted_text:
+                                    emitted_text = True
+                                    self.textChunkReceived.emit(str(fallback))
+                            elif event == "chunk":
+                                text = data.get("text")
+                                if text:
+                                    emitted_text = True
+                                    self.textChunkReceived.emit(str(text))
+                            elif event == "done":
+                                self.responseReceived.emit(dict(data))
+                            elif event == "error":
+                                self.errorOccurred.emit(str(data.get("message") or "Audio chat failed."))
+                            elif event == "tts_error":
+                                logger.warning("TTS unavailable for streamed sentence: %s", data.get("message"))
+                            if event == "audio":
+                                chunk = data.get("chunk")
+                                if chunk and not self._audio_only_stop_requested.is_set():
+                                    audio_queue.put(base64.b64decode(chunk))
+                    except Exception as exc:
+                        if not self._stream_cancel_requested.is_set():
+                            self.errorOccurred.emit(str(exc))
+                    finally:
+                        audio_queue.put(None)
+
+                receiver = threading.Thread(target=receive_stream, name="chat-stream-receiver", daemon=True)
+                receiver.start()
+
                 def stream_audio():
-                    for event_obj in self._api.send_chat_audio_stream_file(recording_path, "audio/wav"):
-                        event = event_obj.get("event")
-                        data = event_obj.get("data", {})
-                        if event == "metadata":
-                            text = data.get("transcribed_input")
-                            if text:
-                                self.transcribedTextReceived.emit(text)
-                        elif event == "chunk":
-                            text = data.get("text")
-                            if text:
-                                self.textChunkReceived.emit(text)
-                        elif event == "audio":
-                            chunk = data.get("chunk")
-                            if chunk:
-                                yield base64.b64decode(chunk)
-                
-                logger.info("GUI audio chat TTS stream started.")
-                player.play_pcm_stream(stream_audio())
+                    while (
+                        not self._stream_cancel_requested.is_set()
+                        and not self._audio_only_stop_requested.is_set()
+                    ):
+                        try:
+                            chunk = audio_queue.get(timeout=0.2)
+                        except queue.Empty:
+                            continue
+                        if chunk is None:
+                            break
+                        yield chunk
+
+                try:
+                    player.play_pcm_stream(stream_audio())
+                finally:
+                    if not self._audio_only_stop_requested.is_set():
+                        self._stream_cancel_requested.set()
+                    player.stop()
+                    # The recording file is still owned by the multipart
+                    # request until this receiver exits. Do not let this
+                    # QThread finish while it can still emit Qt signals.
+                    receiver.join()
         except Exception as exc:
             logger.error("Push-to-Talk audio processing error: %s", exc)
-            self.errorOccurred.emit(str(exc))
+            if not self._stream_cancel_requested.is_set() and not self._recording_stop_requested.is_set():
+                self.errorOccurred.emit(str(exc))
         finally:
+            with self._player_lock:
+                self._player = None
+            self._recording_active.clear()
             self.listeningChanged.emit(False)
             self.busyChanged.emit(False)
             if recording_path is not None:
-                recording_path.unlink(missing_ok=True)
+                _remove_recording_file(recording_path)
 
     def stop_recording(self) -> None:
-        self._stop_requested.set()
+        if self._recording_active.is_set():
+            self._recording_stop_requested.set()
+        else:
+            self._stream_cancel_requested.set()
+            with self._player_lock:
+                player = self._player
+            if player is not None:
+                player.stop()
+
+    def stop_audio_only(self) -> None:
+        """Stop speaker playback while allowing text/final events to finish."""
+        if self._recording_active.is_set():
+            return
+        self._audio_only_stop_requested.set()
+        with self._player_lock:
+            player = self._player
+        if player is not None:
+            player.stop()
+
+
+class _GreetingWorker(QThread):
+    errorOccurred = Signal(str)
+
+    def __init__(self, api: KioskApiClient) -> None:
+        super().__init__()
+        self._api = api
+        self._player: AudioPlayer | None = None
+
+    def run(self) -> None:
+        try:
+            payload = self._api.request_greeting_audio()
+            if self.isInterruptionRequested():
+                return
+            encoded = payload.get("audio_response")
+            if not encoded:
+                return
+            config = AudioIOConfig()
+            player = AudioPlayer(config, sample_rate=int(payload.get("sample_rate") or TTS_OUTPUT_SAMPLE_RATE))
+            self._player = player
+            if self.isInterruptionRequested():
+                player.stop()
+                return
+            player.play_pcm_stream(iter((base64.b64decode(encoded),)))
+        except Exception as exc:
+            if self.isInterruptionRequested():
+                return
+            self.errorOccurred.emit(str(exc))
+
+    def stop(self) -> None:
+        self.requestInterruption()
+        if self._player is not None:
+            self._player.stop()
 
 
 class ChatbotController(QObject):
@@ -126,11 +243,9 @@ class ChatbotController(QObject):
         self._muted = False
         self._partial_text = ""
         self._transcribed_text = ""
+        self._final_response_seen = False
         
-        self._typing_queue = ""
-        self._typing_timer = QTimer(self)
-        self._typing_timer.setInterval(40)  # 40ms per chunk (25 cps)
-        self._typing_timer.timeout.connect(self._on_typing_tick)
+        self._greeting_worker: _GreetingWorker | None = None
 
     @Slot()
     def startPushToTalk(self) -> None:
@@ -139,8 +254,7 @@ class ChatbotController(QObject):
         self._error = ""
         self._partial_text = ""
         self._transcribed_text = ""
-        self._typing_queue = ""
-        self._typing_timer.stop()
+        self._final_response_seen = False
         self.errorChanged.emit()
         self.partialTextChanged.emit()
         self.transcribedTextChanged.emit()
@@ -148,7 +262,7 @@ class ChatbotController(QObject):
         worker.listeningChanged.connect(self._set_listening)
         worker.busyChanged.connect(self._set_busy)
         worker.errorOccurred.connect(self._set_error)
-        worker.responseReceived.connect(self.responseReceived)
+        worker.responseReceived.connect(self._on_worker_response)
         worker.textChunkReceived.connect(self._on_text_chunk)
         worker.transcribedTextReceived.connect(self._on_transcribed_text)
         worker.finished.connect(lambda: self._cleanup_worker(worker))
@@ -157,25 +271,9 @@ class ChatbotController(QObject):
 
     @Slot(str)
     def _on_text_chunk(self, chunk: str) -> None:
-        self._typing_queue += chunk
-        if not self._typing_timer.isActive():
-            self._typing_timer.start()
-
-    @Slot()
-    def _on_typing_tick(self) -> None:
-        if not self._typing_queue:
-            self._typing_timer.stop()
-            if self._worker is None:
-                self._partial_text = ""
-                self._transcribed_text = ""
-                self.partialTextChanged.emit()
-                self.transcribedTextChanged.emit()
-            return
-            
-        # Type a small chunk of characters per tick to keep up with fast reading
-        chars_to_type = 1
-        self._partial_text += self._typing_queue[:chars_to_type]
-        self._typing_queue = self._typing_queue[chars_to_type:]
+        # Render complete received chunks immediately; synthesis/playback is
+        # handled independently by the worker's audio queue.
+        self._partial_text += chunk
         self.partialTextChanged.emit()
 
     @Slot(str)
@@ -183,10 +281,20 @@ class ChatbotController(QObject):
         self._transcribed_text = text
         self.transcribedTextChanged.emit()
 
+    @Slot(dict)
+    def _on_worker_response(self, payload: dict) -> None:
+        self._final_response_seen = True
+        self.responseReceived.emit(payload)
+
     @Slot()
     def stopPushToTalk(self) -> None:
-        if self._worker and self._listening:
+        if self._worker:
             self._worker.stop_recording()
+
+    @Slot()
+    def stopAudioPlayback(self) -> None:
+        if self._worker:
+            self._worker.stop_audio_only()
 
     @Slot()
     def togglePushToTalk(self) -> None:
@@ -201,30 +309,54 @@ class ChatbotController(QObject):
 
     @Slot()
     def stopVoiceLoop(self) -> None:
-        if self._worker and self._listening:
+        if self._worker:
             self.stopPushToTalk()
+        if self._greeting_worker:
+            self._greeting_worker.stop()
 
     @Slot()
     def toggleMute(self) -> None:
-        pass
+        self.setMuted(not self._muted)
 
     @Slot(bool)
     def setMuted(self, muted: bool) -> None:
-        pass
+        muted = bool(muted)
+        if muted == self._muted:
+            return
+        self._muted = muted
+        self.mutedChanged.emit()
+
+    @Slot()
+    def playGreeting(self) -> None:
+        if self._greeting_worker and self._greeting_worker.isRunning():
+            return
+        worker = _GreetingWorker(self._api)
+        worker.errorOccurred.connect(self._set_error)
+        worker.finished.connect(lambda: self._cleanup_greeting_worker(worker))
+        self._greeting_worker = worker
+        worker.start()
 
     def shutdown(self) -> None:
         if self._worker:
             self._worker.stop_recording()
             self._worker.wait(2000)
+        if self._greeting_worker:
+            self._greeting_worker.stop()
+            self._greeting_worker.wait(2000)
 
     def _cleanup_worker(self, worker: _PushToTalkWorker) -> None:
         if self._worker is worker:
             self._worker = None
-            if not self._typing_queue and not self._typing_timer.isActive():
+            if self._final_response_seen:
                 self._partial_text = ""
                 self._transcribed_text = ""
                 self.partialTextChanged.emit()
                 self.transcribedTextChanged.emit()
+        worker.deleteLater()
+
+    def _cleanup_greeting_worker(self, worker: _GreetingWorker) -> None:
+        if self._greeting_worker is worker:
+            self._greeting_worker = None
         worker.deleteLater()
 
     @Slot(bool)
@@ -270,6 +402,19 @@ class ChatbotController(QObject):
     muted = Property(bool, _get_muted, notify=mutedChanged)
     partialText = Property(str, _get_partial_text, notify=partialTextChanged)
     transcribedText = Property(str, _get_transcribed_text, notify=transcribedTextChanged)
+
+
+def _remove_recording_file(path: Path) -> None:
+    """Remove a completed recording, tolerating Windows handle release lag."""
+    for attempt in range(5):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            if attempt == 4:
+                logger.warning("Could not remove temporary recording: %s", path)
+                return
+            time.sleep(0.1 * (attempt + 1))
 
 
 def _has_voice(stats: dict[str, float]) -> bool:

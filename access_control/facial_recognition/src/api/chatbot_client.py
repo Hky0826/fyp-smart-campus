@@ -50,6 +50,7 @@ class ChatbotClient:
         self._chat_endpoint = f"{self._base_url}/api/chatbot/chat"
         self._audio_chat_endpoint = f"{self._base_url}/api/chatbot/chat/audio"
         self._audio_chat_stream_endpoint = f"{self._base_url}/api/chatbot/chat/audio/stream"
+        self._greeting_audio_endpoint = f"{self._base_url}/api/chatbot/chat/greeting/audio"
         self._health_endpoint = f"{self._base_url}/api/chatbot/health"
 
     def health_check(self) -> Dict[str, Any]:
@@ -322,3 +323,26 @@ class ChatbotClient:
                 f"Unexpected cloud error (HTTP {status_code}): {exc}",
                 status_code=status_code,
             )
+
+    def greeting_audio(self, jwt_token: Optional[str] = None) -> Dict[str, Any]:
+        """Fetch the short personalized session greeting and optional PCM speech."""
+        headers = {"Accept": "application/json"}
+        if jwt_token:
+            headers["Authorization"] = f"Bearer {jwt_token}"
+        try:
+            resp = requests.post(
+                self._greeting_audio_endpoint,
+                headers=headers,
+                timeout=(_CONNECT_TIMEOUT, _READ_TIMEOUT),
+            )
+            if resp.status_code == 401:
+                raise ChatbotClientError("Authentication failed while preparing the greeting.", status_code=401)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.Timeout as exc:
+            raise ChatbotClientError("The greeting audio request timed out.") from exc
+        except requests.ConnectionError as exc:
+            raise ChatbotClientError("Cannot reach the cloud chatbot service for the greeting.") from exc
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response else None
+            raise ChatbotClientError(f"Greeting audio request failed (HTTP {status_code}).", status_code=status_code) from exc

@@ -70,6 +70,7 @@ from RagChatbot.services.chat_service import (
     AUTH_REQUIRED_STATUS,
     PROTECTED_ACCESS_LEVELS,
     VISITOR_ACCESS_LEVELS,
+    _greeting_name,
     _verify_session,
 )
 
@@ -97,7 +98,7 @@ Rules you must follow at all times:
 5. NEVER claim to have access to information not present in the provided context.
 6. If the user asks about restricted or private information they do not have access to,
    say: "That information is not available to you based on your current access level."
-7. Keep responses short, direct, and compact (maximum 2 to 3 brief sentences).
+7. Keep responses short, direct, and compact by default. When the answer is a finite list, a comparison, or is grounded in the user's context, include EVERY matching item; never truncate a complete list to an arbitrary number. Use bullets or numbered items when that improves readability.
 8. If the user asks a broad or general question (e.g. "what programmes does QIU offer?"), ask a short clarifying question presenting 2 to 3 specific sub-topic options so the user can choose what they want. HOWEVER, if the user has ALREADY selected an option or answered a previous clarification (e.g. replying "Foundation" after being asked), DO NOT ask for further clarification — directly list all available options or details for that choice.
 9. Do NOT mention section boundaries, user roles, or context labels in your answer.
 """
@@ -116,14 +117,16 @@ def _derive_role_from_access_levels(levels: List[str]) -> str:
     return "VISITOR"
 
 
-def _tts_base64(text: str) -> Optional[str]:
+def _tts_base64(text: str, language_code: Optional[str] = None) -> Optional[str]:
     """Generate base64 PCM audio for safe response text."""
     if not rag_settings.AUDIO_TTS_ENABLED or not text.strip():
         return None
     timeout_seconds = max(0.0, float(getattr(rag_settings, "AUDIO_TTS_TIMEOUT_SECONDS", 6)))
+    use_language = bool(language_code and str(language_code).lower() not in {"en", "en-us"})
+    tts_args = (text, language_code) if use_language else (text,)
     try:
         if timeout_seconds:
-            future = _TTS_EXECUTOR.submit(generate_audio_from_text, text)
+            future = _TTS_EXECUTOR.submit(generate_audio_from_text, *tts_args)
             try:
                 audio_pcm = future.result(timeout=timeout_seconds)
             except concurrent.futures.TimeoutError:
@@ -134,7 +137,7 @@ def _tts_base64(text: str) -> Optional[str]:
                 )
                 return None
         else:
-            audio_pcm = generate_audio_from_text(text)
+            audio_pcm = generate_audio_from_text(*tts_args)
     except Exception as exc:
         logger.warning("Audio chat: TTS failed, returning text only: %s", exc)
         return None
@@ -147,6 +150,53 @@ def _tts_base64(text: str) -> Optional[str]:
         len(audio_base64),
     )
     return audio_base64
+
+
+def _tts_job(text: str, language_code: Optional[str] = None) -> tuple[Optional[bytes], float, Optional[str]]:
+    """Run one synthesis request off the response-generation path."""
+    started = time.monotonic()
+    try:
+        if language_code and str(language_code).lower() not in {"en", "en-us"}:
+            audio = generate_audio_from_text(text, language_code)
+        else:
+            audio = generate_audio_from_text(text)
+        return audio, (time.monotonic() - started) * 1000.0, None
+    except Exception as exc:  # TTS is best-effort; text must still complete.
+        return None, (time.monotonic() - started) * 1000.0, str(exc)
+
+
+def _drain_tts_queue(pending: list[tuple[str, concurrent.futures.Future]], metrics: InferenceMetrics,
+                    start_time: float, *, wait: bool = False):
+    """Yield ready audio in sentence order without blocking the LLM stream."""
+    timeout = max(0.0, float(getattr(rag_settings, "AUDIO_TTS_TIMEOUT_SECONDS", 6)))
+    while pending:
+        sentence, future = pending[0]
+        if not wait and not future.done():
+            break
+        try:
+            audio_pcm, elapsed_ms, error = future.result(timeout=timeout or None)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            audio_pcm, elapsed_ms, error = None, timeout * 1000.0, "timeout"
+        except Exception as exc:
+            audio_pcm, elapsed_ms, error = None, 0.0, str(exc)
+        pending.pop(0)
+        metrics.tts_ms += elapsed_ms
+        if audio_pcm:
+            if metrics.time_to_first_tts_ms == 0.0:
+                metrics.time_to_first_tts_ms = (time.monotonic() - start_time) * 1000.0
+            yield {
+                "event": "audio",
+                "data": {
+                    "encoding": "pcm_s16le",
+                    "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
+                    "chunk": base64.b64encode(audio_pcm).decode("ascii"),
+                    "text": sentence,
+                },
+            }
+        elif error:
+            logger.warning("Audio chat: TTS failed for sentence: %s", error)
+            yield {"event": "tts_error", "data": {"text": sentence, "message": "Speech synthesis unavailable."}}
 
 
 def _audio_response(
@@ -167,6 +217,7 @@ def _audio_response(
     metrics: Optional[InferenceMetrics] = None,
     user_id: Optional[int] = None,
     session_id: Optional[int] = None,
+    language_code: Optional[str] = None,
 ) -> AudioChatResponse:
     """Build the audio API response with consistent transcription and TTS fields."""
     if metrics is None:
@@ -175,7 +226,7 @@ def _audio_response(
     audio_data = None
     if include_audio and text_response:
         with StageTimer() as timer:
-            audio_data = _tts_base64(text_response or "")
+            audio_data = _tts_base64(text_response or "", language_code)
         metrics.tts_ms += timer.elapsed_ms
         if audio_data and metrics.time_to_first_tts_ms == 0.0:
             metrics.time_to_first_tts_ms = (time.monotonic() - start_time) * 1000.0
@@ -272,6 +323,7 @@ def process_audio_chat(
                 metrics=metrics,
                 user_id=user_id,
                 session_id=resolved_session_id,
+                language_code=detected_language,
             )
 
 # Step 2: Resolve RBAC access levels
@@ -333,6 +385,7 @@ def process_audio_chat(
         )
 
     user_query = extraction_result.user_query
+    detected_language = extraction_result.detected_language or "en"
     if not user_query:
         logger.warning("Audio chat: extracted query is empty.")
         return _audio_response(
@@ -401,7 +454,7 @@ def process_audio_chat(
         if context.session_id is not None and context.user_id is not None:
             logged_query_id = log_personal_interaction(db, session_id=context.session_id, user_id=context.user_id, intent=personal_result.intent.value, response_time_ms=response_time_ms, is_navigational=personal_result.navigation_target is not None)
             query_id = logged_query_id if logged_query_id > 0 else None
-        return _audio_response(transcribed_input=user_query, text_response=personal_result.answer, status="ok" if personal_result.access_granted else ("auth_required" if personal_result.authentication_required else "no_access"), access_granted=personal_result.access_granted, error_message=personal_result.status_message, start_time=start_time, query_id=query_id, include_audio=include_audio, response_scope=personal_result.response_scope, personal_intent=personal_result.intent.value, authentication_required=personal_result.authentication_required, navigation_target=navigation, metrics=metrics, user_id=user_id, session_id=resolved_session_id)
+        return _audio_response(transcribed_input=user_query, text_response=personal_result.answer, status="ok" if personal_result.access_granted else ("auth_required" if personal_result.authentication_required else "no_access"), access_granted=personal_result.access_granted, error_message=personal_result.status_message, start_time=start_time, query_id=query_id, include_audio=include_audio, response_scope=personal_result.response_scope, personal_intent=personal_result.intent.value, authentication_required=personal_result.authentication_required, navigation_target=navigation, metrics=metrics, user_id=user_id, session_id=resolved_session_id, language_code=detected_language)
 
     # Query routing: check if query is related to university information
     from RagChatbot.generation.query_router import classify_query, get_capabilities_summary
@@ -412,11 +465,11 @@ def process_audio_chat(
 
     if route.category != "UNIVERSITY_INFO":
         if route.category == "GREETING":
-            first_name = context.full_name.strip().split()[0] if (context.authenticated and context.full_name and context.full_name.strip()) else ""
+            first_name = _greeting_name(context) if context.authenticated else ""
             if first_name:
-                fast_answer = f"Hi {first_name}! How can I help you with Quest International University today?"
+                fast_answer = f"Hi {first_name}, how may I help you today?"
             else:
-                fast_answer = "Hi! How can I help you with Quest International University today?"
+                fast_answer = "Hi, how may I help you today?"
         elif route.category == "CAPABILITY":
             fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
         elif route.category == "NAVIGATIONAL":
@@ -439,6 +492,7 @@ def process_audio_chat(
             metrics=metrics,
             user_id=user_id,
             session_id=resolved_session_id,
+            language_code=detected_language,
         )
 
 # Step 6: Embed the extracted query
@@ -458,6 +512,7 @@ def process_audio_chat(
                 metrics=metrics,
                 user_id=user_id,
                 session_id=resolved_session_id,
+                language_code=detected_language,
             )
     metrics.embedding_return_ms += timer.elapsed_ms
 
@@ -484,6 +539,7 @@ def process_audio_chat(
                 metrics=metrics,
                 user_id=user_id,
                 session_id=resolved_session_id,
+                language_code=detected_language,
             )
         else:
             # No relevant chunks at all
@@ -501,6 +557,7 @@ def process_audio_chat(
                 metrics=metrics,
                 user_id=user_id,
                 session_id=resolved_session_id,
+                language_code=detected_language,
             )
 
 # Step 8: Build context block and separated prompt
@@ -601,6 +658,7 @@ def process_audio_chat(
         metrics=metrics,
         user_id=user_id,
         session_id=resolved_session_id,
+        language_code=detected_language,
     )
 
 
@@ -616,6 +674,31 @@ def _has_relevant_protected_chunks(
         top_k_context=1,
     )
     return bool(protected_chunks)
+
+
+def _recent_chat_history(db: Session, session_id: Optional[int]) -> list[dict]:
+    if not session_id:
+        return []
+    try:
+        from app.models.models import ChatbotQuery
+        rows = (
+            db.query(ChatbotQuery)
+            .filter(ChatbotQuery.session_id == session_id)
+            .filter(ChatbotQuery.response_text.isnot(None))
+            .order_by(ChatbotQuery.timestamp.desc())
+            .limit(3)
+            .all()
+        )
+        history: list[dict] = []
+        for row in reversed(rows):
+            if row.query_text:
+                history.append({"role": "user", "text": row.query_text})
+            if row.response_text:
+                history.append({"role": "assistant", "text": row.response_text})
+        return history
+    except Exception:
+        logger.debug("Audio chat: unable to load recent conversation history", exc_info=True)
+        return []
 
 
 def process_audio_chat_stream(
@@ -698,6 +781,7 @@ def process_audio_chat_stream(
         return
 
     user_query = extraction_result.user_query
+    detected_language = extraction_result.detected_language or "en"
     guard_result = check_query(user_query)
     if not guard_result.is_safe:
         res = _audio_response(
@@ -733,18 +817,12 @@ def process_audio_chat_stream(
             session_id=resolved_session_id,
         )
         yield {"event": "metadata", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        if personal_result.answer:
+            yield {"event": "chunk", "data": {"text": personal_result.answer}}
+        pending: list[tuple[str, concurrent.futures.Future]] = []
         if rag_settings.AUDIO_TTS_ENABLED and personal_result.answer:
-            audio_pcm = generate_audio_from_text(personal_result.answer)
-            if audio_pcm:
-                yield {
-                    "event": "audio",
-                    "data": {
-                        "encoding": "pcm_s16le",
-                        "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
-                        "chunk": base64.b64encode(audio_pcm).decode("ascii"),
-                        "text": personal_result.answer,
-                    },
-                }
+            pending.append((personal_result.answer, _TTS_EXECUTOR.submit(_tts_job, personal_result.answer, detected_language)))
+        yield from _drain_tts_queue(pending, metrics, start_time, wait=True)
         yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
         return
 
@@ -755,11 +833,11 @@ def process_audio_chat_stream(
 
     if route.category != "UNIVERSITY_INFO":
         if route.category == "GREETING":
-            first_name = context.full_name.strip().split()[0] if (context.authenticated and context.full_name and context.full_name.strip()) else ""
+            first_name = _greeting_name(context) if context.authenticated else ""
             if first_name:
-                fast_answer = f"Hi {first_name}! How can I help you with Quest International University today?"
+                fast_answer = f"Hi {first_name}, how may I help you today?"
             else:
-                fast_answer = "Hi! How can I help you with Quest International University today?"
+                fast_answer = "Hi, how may I help you today?"
         elif route.category == "CAPABILITY":
             fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
         elif route.category == "NAVIGATIONAL":
@@ -783,18 +861,12 @@ def process_audio_chat_stream(
             session_id=resolved_session_id,
         )
         yield {"event": "metadata", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        if fast_answer:
+            yield {"event": "chunk", "data": {"text": fast_answer}}
+        pending = []
         if rag_settings.AUDIO_TTS_ENABLED and fast_answer:
-            audio_pcm = generate_audio_from_text(fast_answer)
-            if audio_pcm:
-                yield {
-                    "event": "audio",
-                    "data": {
-                        "encoding": "pcm_s16le",
-                        "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
-                        "chunk": base64.b64encode(audio_pcm).decode("ascii"),
-                        "text": fast_answer,
-                    },
-                }
+            pending.append((fast_answer, _TTS_EXECUTOR.submit(_tts_job, fast_answer, detected_language)))
+        yield from _drain_tts_queue(pending, metrics, start_time, wait=True)
         yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
         return
 
@@ -833,18 +905,12 @@ def process_audio_chat_stream(
                 session_id=resolved_session_id,
             )
         yield {"event": "metadata", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        if res.text_response:
+            yield {"event": "chunk", "data": {"text": res.text_response}}
+        pending = []
         if res.text_response and rag_settings.AUDIO_TTS_ENABLED:
-            audio_pcm = generate_audio_from_text(res.text_response)
-            if audio_pcm:
-                yield {
-                    "event": "audio",
-                    "data": {
-                        "encoding": "pcm_s16le",
-                        "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
-                        "chunk": base64.b64encode(audio_pcm).decode("ascii"),
-                        "text": res.text_response,
-                    },
-                }
+            pending.append((res.text_response, _TTS_EXECUTOR.submit(_tts_job, res.text_response, detected_language)))
+        yield from _drain_tts_queue(pending, metrics, start_time, wait=True)
         yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
         return
 
@@ -877,6 +943,7 @@ def process_audio_chat_stream(
 
     splitter = StreamingSentenceSplitter()
     full_answer_parts: List[str] = []
+    pending_tts: list[tuple[str, concurrent.futures.Future]] = []
 
     llm_stream = generate_response_stream(
         system_instruction=_LIVE_SYSTEM_INSTRUCTION,
@@ -884,6 +951,7 @@ def process_audio_chat_stream(
         retrieved_context=context_block,
         user_query=sanitized_query,
         sources=ranked_chunks,
+        chat_history=_recent_chat_history(db, resolved_session_id),
     )
 
     for token in llm_stream:
@@ -894,45 +962,38 @@ def process_audio_chat_stream(
             clean_sentence = val.sanitized_text or sentence if not val.valid else sentence
             logger.info("STREAM_DEBUG [%.3f]: Yielding sentence text: %s", time.time(), clean_sentence)
             yield {"event": "sentence", "data": {"text": clean_sentence}}
-
-            audio_pcm = None
             if rag_settings.AUDIO_TTS_ENABLED:
-                with StageTimer() as tts_timer:
-                    audio_pcm = generate_audio_from_text(clean_sentence)
-                metrics.tts_ms += tts_timer.elapsed_ms
-                if audio_pcm and metrics.time_to_first_tts_ms == 0.0:
-                    metrics.time_to_first_tts_ms = (time.monotonic() - start_time) * 1000.0
-
-            if audio_pcm:
-                logger.info("STREAM_DEBUG [%.3f]: Yielding audio chunk for sentence: %s", time.time(), clean_sentence)
-                audio_data = {
-                    "encoding": "pcm_s16le",
-                    "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
-                    "chunk": base64.b64encode(audio_pcm).decode("ascii"),
-                }
-                yield {"event": "audio", "data": audio_data}
+                pending_tts.append((clean_sentence, _TTS_EXECUTOR.submit(_tts_job, clean_sentence, detected_language)))
+            yield from _drain_tts_queue(pending_tts, metrics, start_time)
 
     for sentence in splitter.flush():
         val = validate_sentence(sentence)
         clean_sentence = val.sanitized_text or sentence if not val.valid else sentence
         yield {"event": "sentence", "data": {"text": clean_sentence}}
-        audio_pcm = None
         if rag_settings.AUDIO_TTS_ENABLED:
-            with StageTimer() as tts_timer:
-                audio_pcm = generate_audio_from_text(clean_sentence)
-            metrics.tts_ms += tts_timer.elapsed_ms
-            if audio_pcm and metrics.time_to_first_tts_ms == 0.0:
-                metrics.time_to_first_tts_ms = (time.monotonic() - start_time) * 1000.0
+            pending_tts.append((clean_sentence, _TTS_EXECUTOR.submit(_tts_job, clean_sentence, detected_language)))
+        yield from _drain_tts_queue(pending_tts, metrics, start_time)
 
-        if audio_pcm:
-            audio_data = {
-                "encoding": "pcm_s16le",
-                "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
-                "chunk": base64.b64encode(audio_pcm).decode("ascii"),
-            }
-            yield {"event": "audio", "data": audio_data}
+    # Preserve all generated text and only wait for speech after the LLM has
+    # finished. Text consumers can therefore render immediately.
+    yield from _drain_tts_queue(pending_tts, metrics, start_time, wait=True)
 
     full_answer = "".join(full_answer_parts)
+    audit_query_id: Optional[int] = None
+    if resolved_session_id is not None and resolved_session_id > 0:
+        try:
+            logged_id = log_chatbot_interaction(
+                db,
+                session_id=resolved_session_id,
+                user_id=user_id,
+                query_text=sanitized_query,
+                response_text=full_answer,
+                retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
+                response_time_ms=int((time.monotonic() - start_time) * 1000),
+            )
+            audit_query_id = logged_id if logged_id > 0 else None
+        except Exception:
+            logger.warning("Audio chat stream: unable to persist conversation", exc_info=True)
     final_res = _audio_response(
         transcribed_input=user_query,
         text_response=full_answer,
@@ -941,9 +1002,9 @@ def process_audio_chat_stream(
         access_granted=True,
         start_time=start_time,
         include_audio=False,
+        query_id=audit_query_id,
         metrics=metrics,
         user_id=user_id,
         session_id=resolved_session_id,
     )
     yield {"event": "done", "data": final_res.model_dump(mode="json", exclude={"audio_response"})}
-

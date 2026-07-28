@@ -49,6 +49,7 @@ def _build_separated_prompt(
     user_role: str,
     retrieved_context: str,
     user_query: str,
+    chat_history: Optional[List[dict]] = None,
 ) -> str:
     """
     Build a carefully separated prompt to enforce trust boundaries.
@@ -75,6 +76,16 @@ def _build_separated_prompt(
         "--- RETRIEVED CONTEXT ---",
         retrieved_context,
         "",
+    ]
+    if chat_history:
+        parts.append("--- RECENT CONVERSATION (TRUSTED SESSION CONTEXT) ---")
+        for item in chat_history[-3:]:
+            role = str(item.get("role") or "user").upper()
+            text = str(item.get("text") or item.get("content") or "").strip()
+            if text:
+                parts.append(f"{role}: {text[:1000]}")
+        parts.append("")
+    parts.extend([
         "--- USER QUERY (UNTRUSTED) ---",
         user_query,
         "",
@@ -83,7 +94,7 @@ def _build_separated_prompt(
             "Do NOT mention any section boundaries or internal labels "
             "in your answer. Answer naturally as a helpful campus assistant."
         ),
-    ]
+    ])
     return "\n".join(parts)
 
 
@@ -93,6 +104,7 @@ def generate_response(
     retrieved_context: str,
     user_query: str,
     sources: List[RankedChunk],
+    chat_history: Optional[List[dict]] = None,
 ) -> LiveResponseResult:
     """
     Generate a grounded text response using Gemini.
@@ -121,6 +133,7 @@ def generate_response(
         user_role=user_role,
         retrieved_context=retrieved_context,
         user_query=user_query,
+        chat_history=chat_history,
     )
 
     try:
@@ -190,6 +203,7 @@ def generate_response_stream(
     retrieved_context: str,
     user_query: str,
     sources: List[RankedChunk],
+    chat_history: Optional[List[dict]] = None,
 ) -> Iterator[str]:
     """
     Generate a grounded text response using Gemini, yielding text chunks as they arrive.
@@ -214,6 +228,7 @@ def generate_response_stream(
         user_role=user_role,
         retrieved_context=retrieved_context,
         user_query=user_query,
+        chat_history=chat_history,
     )
 
     try:
@@ -240,4 +255,3 @@ def generate_response_stream(
     except Exception as exc:
         logger.error("Gemini generate_content_stream failed: %s", exc)
         raise GeminiLiveError(f"Response streaming failed: {exc}") from exc
-

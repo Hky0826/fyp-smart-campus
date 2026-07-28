@@ -171,7 +171,51 @@ def sanitize_text_for_speech(text: str) -> str:
     return cleaned.strip()
 
 
-def generate_audio_from_text(text: str) -> Optional[bytes]:
+_LANGUAGE_VOICE_MAP = {
+    "en": ("en-US", "en-US-Chirp3-HD-Kore"),
+    "ms": ("ms-MY", "ms-MY-Wavenet-A"),
+    "id": ("id-ID", "id-ID-Chirp3-HD-Kore"),
+    "zh": ("cmn-CN", "cmn-CN-Chirp3-HD-Kore"),
+    "cmn": ("cmn-CN", "cmn-CN-Chirp3-HD-Kore"),
+    "ta": ("ta-IN", "ta-IN-Chirp3-HD-Kore"),
+    "hi": ("hi-IN", "hi-IN-Chirp3-HD-Kore"),
+    "ar": ("ar-XA", "ar-XA-Chirp3-HD-Kore"),
+    "bn": ("bn-IN", "bn-IN-Chirp3-HD-Kore"),
+    "de": ("de-DE", "de-DE-Chirp3-HD-Kore"),
+    "es": ("es-ES", "es-ES-Chirp3-HD-Kore"),
+    "fr": ("fr-FR", "fr-FR-Chirp3-HD-Kore"),
+    "it": ("it-IT", "it-IT-Chirp3-HD-Kore"),
+    "ja": ("ja-JP", "ja-JP-Chirp3-HD-Kore"),
+    "ko": ("ko-KR", "ko-KR-Chirp3-HD-Kore"),
+    "pt": ("pt-BR", "pt-BR-Chirp3-HD-Kore"),
+    "ru": ("ru-RU", "ru-RU-Chirp3-HD-Kore"),
+    "th": ("th-TH", "th-TH-Chirp3-HD-Kore"),
+    "tr": ("tr-TR", "tr-TR-Chirp3-HD-Kore"),
+    "vi": ("vi-VN", "vi-VN-Chirp3-HD-Kore"),
+}
+
+
+def _voice_for_language(language_code: Optional[str]) -> tuple[str, str]:
+    configured_voice = getattr(rag_settings, "AUDIO_TTS_VOICE", "Kore")
+    if not language_code:
+        voice_name = configured_voice
+        if voice_name == "Kore":
+            voice_name = "en-US-Chirp3-HD-Kore"
+        language = "-".join(voice_name.split("-")[:2]) if "-" in voice_name else "en-US"
+        return language, voice_name
+
+    normalized = str(language_code).strip().lower().replace("_", "-")
+    language_key = normalized.split("-", 1)[0]
+    language, voice_name = _LANGUAGE_VOICE_MAP.get(language_key, _LANGUAGE_VOICE_MAP["en"])
+    # A fully-qualified configured voice remains an explicit override for
+    # English; non-English languages use their locale-specific native voice.
+    if language_key == "en" and configured_voice not in {"", "Kore"}:
+        voice_name = configured_voice
+        language = "-".join(voice_name.split("-")[:2]) if "-" in voice_name else "en-US"
+    return language, voice_name
+
+
+def generate_audio_from_text(text: str, language_code: Optional[str] = None) -> Optional[bytes]:
     """
     Generate audio from validated text using Google Cloud TTS.
 
@@ -213,12 +257,7 @@ def generate_audio_from_text(text: str) -> Optional[bytes]:
         logger.error("Failed to create Google Cloud TTS client: %s", exc)
         raise RuntimeError(f"TTS client initialisation failed: {exc}") from exc
 
-    voice_name = getattr(rag_settings, "AUDIO_TTS_VOICE", "en-US-Chirp3-HD-Kore")
-    if voice_name == "Kore":
-        voice_name = "en-US-Chirp3-HD-Kore"
-
-    # Extract language code from voice name (e.g. 'en-US' from 'en-US-Chirp3-HD-Kore')
-    language_code = "-".join(voice_name.split("-")[:2]) if "-" in voice_name else "en-US"
+    language_code, voice_name = _voice_for_language(language_code)
 
     voice = texttospeech.VoiceSelectionParams(
         language_code=language_code,
@@ -250,7 +289,7 @@ def generate_audio_from_text(text: str) -> Optional[bytes]:
         raise RuntimeError(f"TTS generation failed: {exc}") from exc
 
 
-def generate_audio_from_text_stream(text: str) -> Iterator[bytes]:
+def generate_audio_from_text_stream(text: str, language_code: Optional[str] = None) -> Iterator[bytes]:
     """
     Stream audio chunks from the configured TTS model.
 
@@ -261,7 +300,7 @@ def generate_audio_from_text_stream(text: str) -> Iterator[bytes]:
         return
 
     try:
-        audio_data = generate_audio_from_text(text)
+        audio_data = generate_audio_from_text(text, language_code) if language_code else generate_audio_from_text(text)
         if audio_data:
             yield audio_data
     except Exception as exc:
@@ -312,4 +351,3 @@ def stream_audio_by_sentences(sentence_stream: Iterator[str]) -> Iterator[tuple[
             audio_pcm = None
 
         yield clean_sentence, audio_pcm
-

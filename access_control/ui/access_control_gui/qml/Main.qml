@@ -40,6 +40,7 @@ ApplicationWindow {
         onPushToTalkStarted: chatbotController.startPushToTalk()
         onPushToTalkStopped: chatbotController.stopPushToTalk()
         onPushToTalkToggled: chatbotController.togglePushToTalk()
+        onStopAnsweringRequested: chatbotController.stopAudioPlayback()
     }
 
     ChatbotButton {

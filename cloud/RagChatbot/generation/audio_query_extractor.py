@@ -88,7 +88,7 @@ def transcribe_with_chirp_3(
                     "encoding": "LINEAR16",
                     "sampleRateHertz": 16000,
                     "languageCode": "en-US",
-                    "alternativeLanguageCodes": ["ms-MY", "zh-CN"],
+                    "alternativeLanguageCodes": ["ms-MY", "zh-CN", "ta-IN"],
                     "model": target_model,
                 },
                 "audio": {"content": encoded_audio},

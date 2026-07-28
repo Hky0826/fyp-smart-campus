@@ -83,6 +83,7 @@ class AccessController(QObject):
         self._offline = False
         self._chat_expanded = False
         self._chat_verification_active = False
+        self._greeting_session_id: Any = None
         self._frame_in_flight = False
         self._face_boxes: list[list[int]] = []
         self._camera_error = ""
@@ -157,6 +158,7 @@ class AccessController(QObject):
         self._chatbot.stopVoiceLoop()
         self._set_chat_expanded(False)
         self._set_chat_verification_active(False)
+        self._greeting_session_id = None
         self._run_worker("end-chat", self._api.end_chat)
         if self._state:
             self._state = {**self._state, "active_chat_session": None, "chat_recoverable": False}
@@ -257,10 +259,15 @@ class AccessController(QObject):
                 self._merge_access_attempt(payload.get("attempt"))
                 self._face_boxes = _boxes_from_attempt(payload.get("attempt"))
             elif name == "chat-verify-frame":
-                self._merge_chat_session(payload.get("session"))
+                session = payload.get("session")
+                self._merge_chat_session(session)
                 self._face_boxes = _coerce_boxes(payload.get("bboxes"))
                 self._set_chat_verification_active(False)
                 self._chat_error = ""
+                session_id = (session or {}).get("session_id")
+                if session_id is not None and session_id != self._greeting_session_id:
+                    self._greeting_session_id = session_id
+                    self._chatbot.playGreeting()
             elif name == "chat-presence-frame":
                 launched_followup_frame = self._handle_presence_payload(payload)
             elif name in {"chat-message", "chat-audio"}:

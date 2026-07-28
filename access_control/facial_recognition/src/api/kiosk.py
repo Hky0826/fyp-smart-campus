@@ -162,6 +162,14 @@ class ChatAudioResponse(BaseModel):
     navigation_target: Optional[dict[str, Any]] = None
 
 
+class ChatGreetingAudioResponse(BaseModel):
+    session: ChatSessionView
+    text: str
+    audio_response: Optional[str] = None
+    encoding: str = "pcm_s16le"
+    sample_rate: int = 24000
+
+
 @dataclass
 class _StoredChatSession:
     view: ChatSessionView
@@ -260,9 +268,12 @@ class KioskStateStore:
         self,
         token: EdgeAuthToken | None = None,
         full_name: str | None = None,
+        given_name: str | None = None,
         owner_embedding: np.ndarray | None = None,
     ) -> ChatSessionView:
         now = _utc_now()
+        full_name = full_name or (token.full_name if token else None)
+        given_name = given_name or (token.given_name if token else None)
         view = ChatSessionView(
             session_id=str(uuid.uuid4()),
             authenticated_user_id=token.user_id if token else None,
@@ -277,8 +288,13 @@ class KioskStateStore:
             expires_at=_format_datetime(token.expires_at) if token else None,
             locked=False,
         )
-        first_name = full_name.strip().split()[0] if full_name and full_name.strip() else ""
-        greeting_text = f"Hi {first_name}! How can I help you with Quest International University today?" if first_name else "Hi! How can I help you with Quest International University today?"
+        # ``given_name`` is a separate field because a valid given name can be
+        # multi-word (for example, "Nur Aisyah"). Fall back to the first token
+        # only for legacy tokens that predate the field.
+        first_name = " ".join(given_name.split()) if given_name and given_name.strip() else ""
+        if not first_name and full_name and full_name.strip():
+            first_name = full_name.strip().split()[0]
+        greeting_text = f"Hi {first_name}, how may I help you today?" if first_name else "Hi, how may I help you today?"
         history = [ChatMessage(role="assistant", content=greeting_text, created_at=now)]
         with self._lock:
             self._chat_session = _StoredChatSession(
@@ -337,6 +353,11 @@ class KioskStateStore:
             if self._chat_session.view.locked:
                 raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Chatbot session is locked.")
             return self._chat_session.token
+
+    def current_chat_session(self) -> ChatSessionView | None:
+        """Return a snapshot of the active chat session for API responses."""
+        with self._lock:
+            return self._safe_chat_view_locked()
 
     def current_chat_user_id(self) -> int | None:
         with self._lock:
@@ -499,7 +520,12 @@ def create_kiosk_router(
         owner_embedding = owner_face["embedding"]
         token = _try_issue_registered_token(pipeline, owner_embedding, runtime_config())
         return ChatVerifyResponse(
-            session=store.start_chat_session(token=token, owner_embedding=owner_embedding),
+            session=store.start_chat_session(
+                token=token,
+                full_name=token.full_name if token else None,
+                given_name=token.given_name if token else None,
+                owner_embedding=owner_embedding,
+            ),
             bboxes=_result_bboxes(result),
         )
 
@@ -566,6 +592,24 @@ def create_kiosk_router(
             response_scope=response.get("response_scope", "DOCUMENT"),
             personal_intent=response.get("personal_intent"),
             navigation_target=response.get("navigation_target"),
+        )
+
+    @router.post("/chat/greeting/audio", response_model=ChatGreetingAudioResponse)
+    def chat_greeting_audio() -> ChatGreetingAudioResponse:
+        token = store.current_token()
+        try:
+            response = chatbot_client().greeting_audio(jwt_token=token.access_token if token else None)
+        except ChatbotClientError as exc:
+            status_code = exc.status_code or status.HTTP_502_BAD_GATEWAY
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+        session = store.current_chat_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No active chatbot session.")
+        return ChatGreetingAudioResponse(
+            session=session,
+            text=str(response.get("text_response") or "Hi, how may I help you today?"),
+            audio_response=response.get("audio_response"),
+            sample_rate=int(response.get("sample_rate") or 24000),
         )
 
     @router.post("/chat/audio", response_model=ChatAudioResponse)
@@ -654,33 +698,38 @@ def create_kiosk_router(
 
         async def stream_generator():
             cloud_url = f"{runtime_config().sync_cloud_url.rstrip('/')}/api/chatbot/chat/audio/stream"
+            import httpx
+            import json
+            import time
             try:
-                import httpx
-                import json
                 async with httpx.AsyncClient() as client:
                     async with client.stream(
                         "POST", cloud_url, data=data, headers=headers, files=files, timeout=httpx.Timeout(90.0, connect=5.0)
                     ) as resp:
                         async for line in resp.aiter_lines():
                             if line:
-                                import time
                                 logger.info("STREAM_DEBUG [%.3f]: Kiosk streaming proxy received line of length %d", time.time(), len(line))
-                                yield line.encode("utf-8") + b"\n"
                                 try:
                                     obj = json.loads(line)
                                     if obj.get("event") == "done":
-                                        metadata = obj.get("data", {})
+                                        metadata = dict(obj.get("data") or {})
                                         store.append_chat_exchange(
                                             metadata.get("transcribed_input") or "[Audio input]",
                                             metadata.get("text_response") or "",
                                             metadata.get("sources") or []
                                         )
+                                        session = store.current_chat_session()
+                                        if session is not None:
+                                            metadata["session"] = session.model_dump(mode="json")
+                                            obj["data"] = metadata
                                         await events_manager.broadcast_state(store.serialize_state())
+                                        line = json.dumps(obj, separators=(",", ":"))
                                 except Exception as json_exc:
                                     logger.warning("Kiosk stream proxy json parse error: %s", json_exc)
+                                yield line.encode("utf-8") + b"\n"
             except Exception as exc:
                 logger.warning("Kiosk audio stream proxy error: %s", exc)
-                yield f'{{"event": "error", "data": {{"message": "{exc}"}}}}\n'.encode("utf-8")
+                yield json.dumps({"event": "error", "data": {"message": str(exc)}}).encode("utf-8") + b"\n"
 
         return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
 
