@@ -55,6 +55,24 @@ class KioskApiClient:
     def get_models_status(self) -> dict[str, Any]:
         return self._request_json("GET", "/models/status")
 
+    def get_setup_status(self) -> dict[str, Any]:
+        return self._request_json("GET", "/setup/status")
+
+    def complete_setup(self) -> dict[str, Any]:
+        return self._request_json("POST", "/setup/complete")
+
+    def provision_setup(self, cloud_url: str, device_id: str, device_secret: str, remote_push: bool = False) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/setup/provision",
+            json_body={
+                "cloud_url": cloud_url,
+                "device_id": device_id,
+                "device_secret": device_secret,
+                "remote_push": remote_push,
+            },
+        )
+
     def request_access(self) -> dict[str, Any]:
         return self._request_json("POST", "/kiosk/access/request")
 

@@ -42,6 +42,9 @@ def _split_into_chunks(text: str, chunk_size: int, overlap: int) -> List[str]:
 
 
 def _load_document_text(file_path: str) -> str:
+    if not os.path.isabs(file_path):
+        from app.core.private_storage import safe_existing_path
+        file_path = str(safe_existing_path("documents", file_path))
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Document file not found: {file_path}")
     ext = os.path.splitext(file_path)[1].lower()
@@ -100,6 +103,8 @@ def ingest_document(document_id: int, db: Session, force_reindex: bool = False) 
                 chunk_index=chunk_index,
                 chunk_text=chunk_text,
                 char_count=len(chunk_text),
+                # UploadedDocument.access_level is authoritative.  Chunks are
+                # refreshed in the same transaction as the document's index.
                 access_level=doc.access_level,
                 is_outdated=False,
             )

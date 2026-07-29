@@ -3,10 +3,14 @@
 import os
 import sys
 import base64
+import json
 import logging
 import datetime
+import secrets
+import time
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Set
+from urllib.parse import urlsplit
 import numpy as np
 
 # Add backend directory to sys.path to allow importing from app
@@ -22,6 +26,7 @@ import requests
 from app.core.database import get_db, Base, engine
 from app.core.security import verify_super_admin
 from app.models.models import User, Role, NodeRBAC, Device, UserRole, DeletedUser
+from app.core.device_auth import decrypt_device_secret, require_signed_device_request, bind_device_id, sign_request
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -108,15 +113,56 @@ class EdgeNotificationDispatcher:
     """
 
     @staticmethod
-    def send_deactivation_push(ip_address: str, port: int, user_id: int) -> bool:
+    def _signed_headers(device: Device, method: str, url: str, body: bytes = b"") -> Dict[str, str]:
+        if not device.device_secret_ciphertext:
+            raise ValueError("Device has no provisioned secret")
+        timestamp = str(int(time.time()))
+        nonce = secrets.token_urlsafe(24)
+        parsed = urlsplit(url)
+        signature = sign_request(
+            decrypt_device_secret(device.device_secret_ciphertext),
+            method,
+            parsed.path or "/",
+            parsed.query,
+            timestamp,
+            nonce,
+            body,
+        )
+        return {
+            "X-Device-ID": device.device_id,
+            "X-Device-Timestamp": timestamp,
+            "X-Device-Nonce": nonce,
+            "X-Device-Signature": signature,
+        }
+
+    @staticmethod
+    def _device_target(device: Device) -> tuple[str, int]:
+        if not device.ip_address:
+            raise ValueError("Device has no advertised IP address")
+        if ":" in device.ip_address:
+            ip, port_str = device.ip_address.rsplit(":", 1)
+            try:
+                return ip, int(port_str)
+            except ValueError:
+                pass
+        return device.ip_address, 8001
+
+    @staticmethod
+    def send_deactivation_push(device: Device, user_id: int) -> bool:
         """
         Dispatches an HTTP POST deactivation payload directly to the edge listener.
         """
+        try:
+            ip_address, port = EdgeNotificationDispatcher._device_target(device)
+        except ValueError as exc:
+            logger.warning("Skipping deactivation push for %s: %s", device.device_id, exc)
+            return False
         url = f"http://{ip_address}:{port}/api/edge/deactivate"
         payload = {"user_id": user_id, "is_active": 0}
+        body = json.dumps(payload, separators=(",", ":")).encode()
         try:
             logger.info(f"Dispatching instant deactivation push to {url} for user {user_id}")
-            response = requests.post(url, json=payload, timeout=3.0)
+            response = requests.post(url, data=body, headers={**EdgeNotificationDispatcher._signed_headers(device, "POST", url, body), "Content-Type": "application/json"}, timeout=3.0)
             if response.status_code == 200:
                 logger.info(f"Successfully pushed deactivation to edge device at {ip_address}")
                 return True
@@ -127,16 +173,21 @@ class EdgeNotificationDispatcher:
         return False
 
     @staticmethod
-    def send_sync_push(ip_address: str, port: int) -> bool:
+    def send_sync_push(device: Device) -> bool:
         """
         Signals an edge device to immediately pull a delta sync from the cloud.
         Called after any cloud-side user change (e.g. photo upload) so the edge
         picks up the update without waiting for the next polling cycle.
         """
+        try:
+            ip_address, port = EdgeNotificationDispatcher._device_target(device)
+        except ValueError as exc:
+            logger.warning("Skipping sync push for %s: %s", device.device_id, exc)
+            return False
         url = f"http://{ip_address}:{port}/api/edge/trigger-sync"
         try:
             logger.info(f"Dispatching trigger-sync push to edge at {ip_address}:{port}")
-            response = requests.post(url, timeout=3.0)
+            response = requests.post(url, headers=EdgeNotificationDispatcher._signed_headers(device, "POST", url), timeout=3.0)
             if response.status_code == 200:
                 logger.info(f"Edge device at {ip_address}:{port} acknowledged trigger-sync.")
                 return True
@@ -343,19 +394,8 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
         
         pushed_targets = []
         for dev in active_devices:
-            # Parse ip and port
-            if ":" in dev.ip_address:
-                ip, port_str = dev.ip_address.split(":")
-                try:
-                    port = int(port_str)
-                except ValueError:
-                    port = 8001
-            else:
-                ip = dev.ip_address
-                port = 8001
-            
             # Dispatch push alert inside background task
-            background_tasks.add_task(EdgeNotificationDispatcher.send_deactivation_push, ip, port, user_id)
+            background_tasks.add_task(EdgeNotificationDispatcher.send_deactivation_push, dev, user_id)
             pushed_targets.append(dev.device_id)
 
         return {
@@ -385,28 +425,19 @@ def push_sync_to_all_edges(db: Session) -> None:
             Device.ip_address != None
         ).all()
         for dev in active_devices:
-            if ":" in dev.ip_address:
-                ip, port_str = dev.ip_address.split(":")
-                try:
-                    port = int(port_str)
-                except ValueError:
-                    port = 8001
-            else:
-                ip = dev.ip_address
-                port = 8001
-            EdgeNotificationDispatcher.send_sync_push(ip, port)
+            EdgeNotificationDispatcher.send_sync_push(dev)
     except Exception as e:
         logger.error(f"push_sync_to_all_edges failed: {str(e)}")
 
 @router.post("/register", status_code=status.HTTP_200_OK)
-def register_edge(registration: EdgeRegistration, db: Session = Depends(get_db)):
+def register_edge(registration: EdgeRegistration, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
     """
     Enrolls an edge device's LAN metadata so the cloud publisher knows where to dispatch direct pushes.
     """
     return handler.register_edge_node(db, registration)
 
 @router.get("/delta", response_model=DeltaSyncResponse)
-def get_deltas(last_synced_at: Optional[str] = None, module: Optional[str] = None, db: Session = Depends(get_db)):
+def get_deltas(last_synced_at: Optional[str] = None, module: Optional[str] = None, device: Device = Depends(require_signed_device_request), db: Session = Depends(get_db)):
     """
     Retrieves database deltas (users, roles, permissions) modified since last_synced_at.
     Input format: ISO datetime string (e.g. 2026-06-10T00:00:00).
@@ -431,7 +462,7 @@ def administrative_deactivate(req: DeactivateRequest, background_tasks: Backgrou
     return handler.deactivate_user_and_push(db, req.user_id, background_tasks)
 
 @router.get("/user-ids", response_model=List[int])
-def get_all_user_ids(db: Session = Depends(get_db)):
+def get_all_user_ids(device: Device = Depends(require_signed_device_request), db: Session = Depends(get_db)):
     """
     Retrieves the complete set of user IDs currently existing in the cloud database.
     """

@@ -21,6 +21,8 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.models import AuthenticationLog, Device, User, SurveillanceLog
+from app.core.private_storage import private_path, ALLOWED_IMAGE_EXTENSIONS
+from app.core.device_auth import require_signed_device_request, bind_device_id
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -271,7 +273,7 @@ class SQLAlchemyUpstreamHandler(AbstractUpstreamHandler):
     @staticmethod
     def _save_surveillance_image(sync_key: str, log: EdgeSurveillanceLogPayload) -> Optional[str]:
         if not log.image_b64:
-            return log.image_path if log.image_path and log.image_path.startswith("/static/") else None
+            return None
 
         try:
             image_bytes = base64.b64decode(log.image_b64, validate=True)
@@ -286,16 +288,16 @@ class SQLAlchemyUpstreamHandler(AbstractUpstreamHandler):
         ext = os.path.splitext(log.image_filename or "")[1].lower()
         if ext not in {".jpg", ".jpeg", ".png"}:
             ext = ".jpg"
-        day = datetime.datetime.utcnow().strftime("%Y%m%d")
-        static_dir = os.path.join(backend_dir, "app", "static")
-        upload_dir = os.path.join(static_dir, "uploads", "surveillance", day)
-        os.makedirs(upload_dir, exist_ok=True)
-        safe_key = "".join(ch for ch in sync_key if ch.isalnum() or ch in {"-", "_"})[:64]
-        filename = f"{safe_key}{ext}"
-        file_path = os.path.join(upload_dir, filename)
-        with open(file_path, "wb") as out:
+        object_key = f"{datetime.datetime.utcnow():%Y%m%d}/{sync_key}{ext}"
+        file_path = private_path("surveillance", object_key)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = file_path.with_name(f".{file_path.name}.tmp")
+        with temp_path.open("xb") as out:
             out.write(image_bytes)
-        return f"/static/uploads/surveillance/{day}/{filename}"
+            out.flush()
+            os.fsync(out.fileno())
+        temp_path.replace(file_path)
+        return object_key
 
     def register_heartbeat(self, db: Session, hb: HeartbeatPayload) -> Dict[str, Any]:
         """
@@ -339,11 +341,13 @@ router = APIRouter(prefix="/sync/upstream", tags=["Database Synchronization - Up
 handler: AbstractUpstreamHandler = SQLAlchemyUpstreamHandler()
 
 @router.post("/logs")
-def ingest_logs(req: IngestionRequest, db: Session = Depends(get_db)):
+def ingest_logs(req: IngestionRequest, device: Device = Depends(require_signed_device_request), db: Session = Depends(get_db)):
     """
     Ingestion streaming endpoint for offline-buffered authentication logs.
     Includes location mutation hooks and transactional confirmation.
     """
+    for log in req.logs:
+        bind_device_id(log.device_id, device)
     success_indices = handler.ingest_authentication_logs(db, req.logs)
     
     # Return verification handshake confirmation. 
@@ -355,10 +359,12 @@ def ingest_logs(req: IngestionRequest, db: Session = Depends(get_db)):
     }
 
 @router.post("/surveillance-logs")
-def ingest_surveillance_logs(req: SurveillanceIngestionRequest, db: Session = Depends(get_db)):
+def ingest_surveillance_logs(req: SurveillanceIngestionRequest, device: Device = Depends(require_signed_device_request), db: Session = Depends(get_db)):
     """
     Ingestion endpoint for offline-buffered surveillance detections and snapshots.
     """
+    for log in req.logs:
+        bind_device_id(log.device_id, device)
     success_indices = handler.ingest_surveillance_logs(db, req.logs)
     return {
         "status": "processed",
@@ -367,8 +373,9 @@ def ingest_surveillance_logs(req: SurveillanceIngestionRequest, db: Session = De
     }
 
 @router.post("/heartbeat")
-def heartbeat(payload: HeartbeatPayload, db: Session = Depends(get_db)):
+def heartbeat(payload: HeartbeatPayload, device: Device = Depends(require_signed_device_request), db: Session = Depends(get_db)):
     """
     Periodic keep-alive API endpoint to evaluate active LAN status.
     """
+    bind_device_id(payload.device_id, device)
     return handler.register_heartbeat(db, payload)

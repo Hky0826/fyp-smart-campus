@@ -40,14 +40,17 @@ def resolve_user_session(token: str, db: Session) -> tuple[dict, int, object]:
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user identity in authentication token.") from exc
 
-    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    session = db.query(JWTSession).filter_by(token_hash=token_hash, is_revoked=False).first()
+    jti = payload.get("jti")
+    session_uuid = payload.get("session_id")
+    if not jti or not session_uuid or not payload.get("iat") or not payload.get("principal_type"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token is missing standardized session claims.")
+    session = db.query(JWTSession).filter_by(jti=jti, session_uuid=session_uuid, is_revoked=False).first()
     now_utc = dt.datetime.utcnow()
     if not session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session not found or has been revoked.")
     if session.expires_at and session.expires_at.replace(tzinfo=None) < now_utc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has expired. Please re-authenticate.")
-    if int(session.user_id) != user_id:
+    if int(session.user_id) != user_id or session.principal_type not in {"USER", "ADMIN"}:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication session does not match the token user.")
     if not db.query(User).filter_by(user_id=user_id, is_active=True).first():
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User is inactive or unavailable. Please re-authenticate.")

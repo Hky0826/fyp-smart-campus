@@ -32,7 +32,8 @@ function dashboardPath(tab, subTab) {
         function App() {
             const initialRoute = useMemo(() => readDashboardRoute(), []);
             // ── Core auth state ──────────────────────────────
-            const [token, setToken] = useState(localStorage.getItem("access_token") || "");
+            const [token, setToken] = useState("");
+            const [authChecked, setAuthChecked] = useState(false);
             const [adminType, setAdminType] = useState(localStorage.getItem("admin_type") || "");
             const [email, setEmail] = useState(localStorage.getItem("email") || "");
             const [fullName, setFullName] = useState(localStorage.getItem("full_name") || "");
@@ -72,6 +73,36 @@ function dashboardPath(tab, subTab) {
             const [loginPass, setLoginPass] = useState("");
             const [loginLoading, setLoginLoading] = useState(false);
             const [loginError, setLoginError] = useState("");
+
+            // Authentication is cookie-based. The state value is only a
+            // non-secret UI flag; the JWT stays in the HttpOnly cookie.
+            useEffect(() => {
+                let active = true;
+                fetch("/api/auth/me", { credentials: "include" })
+                    .then(async response => {
+                        if (!response.ok) throw new Error("Not authenticated");
+                        return response.json();
+                    })
+                    .then(admin => {
+                        if (!active) return;
+                        localStorage.setItem("admin_type", admin.admin_type || "");
+                        localStorage.setItem("email", admin.user?.email || admin.email || "");
+                        localStorage.setItem("full_name", admin.user?.full_name || admin.full_name || "");
+                        localStorage.setItem("admin_id", String(admin.admin_id || ""));
+                        setAdminType(admin.admin_type || "");
+                        setEmail(admin.user?.email || admin.email || "");
+                        setFullName(admin.user?.full_name || admin.full_name || "");
+                        setAdminId(admin.admin_id || "");
+                        setToken("cookie-authenticated");
+                    })
+                    .catch(() => {
+                        if (active) setToken("");
+                    })
+                    .finally(() => {
+                        if (active) setAuthChecked(true);
+                    });
+                return () => { active = false; };
+            }, []);
 
             // ── Dashboard data ────────────────────────────────
             const [dashboardStats, setDashboardStats] = useState({ users: 0, devices: 0, documents: 0, courses: 0 });
@@ -119,6 +150,7 @@ function dashboardPath(tab, subTab) {
             const [showModal, setShowModal] = useState(false);
             const [modalType, setModalType] = useState("");
             const [selectedItem, setSelectedItem] = useState(null);
+            const [provisioningDetails, setProvisioningDetails] = useState(null);
 
             // ── Sorting & Pagination ──────────────────────────
             const [sortKey, setSortKey] = useState("");
@@ -273,12 +305,11 @@ function dashboardPath(tab, subTab) {
                     });
                     const data = await response.json();
                     if (!response.ok) throw new Error(data.detail || "Authentication failed. Please check your credentials.");
-                    localStorage.setItem("access_token", data.access_token);
                     localStorage.setItem("admin_type", data.admin_type);
                     localStorage.setItem("email", data.email);
                     localStorage.setItem("full_name", data.full_name);
                     localStorage.setItem("admin_id", data.admin_id);
-                    setToken(data.access_token);
+                    setToken("cookie-authenticated");
                     setAdminType(data.admin_type);
                     setEmail(data.email);
                     setFullName(data.full_name);
@@ -562,6 +593,14 @@ function dashboardPath(tab, subTab) {
                     mergeRecordIntoList(savedRecord);
                     showSuccessToast(`Record ${modalType === 'create' ? 'created' : 'updated'} successfully!`);
                     setShowModal(false);
+                    if (currentTab === "infra" && subTab === "devices" && modalType === "create" && savedRecord?.provisioned_secret) {
+                        setProvisioningDetails({
+                            deviceId: savedRecord.device_id,
+                            deviceName: savedRecord.device_name,
+                            secret: savedRecord.provisioned_secret,
+                            ipAddress: savedRecord.ip_address || "Not configured",
+                        });
+                    }
                     refreshAfterMutation({ refreshRefs: currentTab === "academics" && ["faculties", "departments", "programmes"].includes(subTab) });
 
                     if (currentTab === "iam" && subTab === "users" && modalType === "create" && createdUser) {
@@ -595,8 +634,12 @@ function dashboardPath(tab, subTab) {
                     const response = await fetch(endpoint, { method: "DELETE", headers });
                     const data = await response.json();
                     if (!response.ok) throw new Error(data.detail || "Delete failed.");
-                    removeRecordFromList(item);
-                    showSuccessToast("Record deleted successfully.");
+                    if (data.deactivated) {
+                        showSuccessToast(data.detail || "Device deactivated; audit history was preserved.");
+                    } else {
+                        removeRecordFromList(item);
+                        showSuccessToast("Record deleted successfully.");
+                    }
                     refreshAfterMutation({ refreshRefs: currentTab === "academics" && ["faculties", "departments", "programmes"].includes(subTab) });
                 } catch (err) { showErrorToast(err.message); }
                 finally { setPendingActionKey(""); }
@@ -2365,6 +2408,40 @@ function dashboardPath(tab, subTab) {
                                             <p className="text-sm font-bold text-slate-100">Saving changes...</p>
                                         </div>
                                     )}
+                                </div>
+                            </div>
+                        )}
+
+                        {provisioningDetails && (
+                            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-in fade-in duration-200">
+                                <div className="w-full max-w-xl bg-slate-900 border border-amber-500/40 rounded-3xl p-6 md:p-8 shadow-2xl">
+                                    <div className="flex items-start gap-4 mb-6">
+                                        <div className="p-3 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20"><Icon name="key" className="w-6 h-6" /></div>
+                                        <div>
+                                            <h3 className="text-xl font-bold text-slate-100">Device provisioning secret</h3>
+                                            <p className="text-sm text-slate-400 mt-1">The access-control setup screen is waiting for these details. Enter them there and choose <span className="font-bold text-slate-200">Apply and start</span>.</p>
+                                        </div>
+                                    </div>
+                                    <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4 mb-5 text-xs text-indigo-100 leading-relaxed">
+                                        <div className="font-bold uppercase tracking-wider text-indigo-300 mb-1">What to do next</div>
+                                        <ol className="list-decimal list-inside space-y-1">
+                                            <li>Keep this dialog open.</li>
+                                            <li>On the access-control device, paste the Device ID and secret into the setup screen.</li>
+                                            <li>Confirm the cloud URL, then select <span className="font-bold">Apply and start</span>.</li>
+                                            <li>Return here after the device begins synchronization.</li>
+                                        </ol>
+                                    </div>
+                                    <div className="space-y-3 text-sm mb-5">
+                                        <div className="flex justify-between gap-4"><span className="text-slate-500">Device ID</span><span className="font-mono font-bold text-indigo-300">{provisioningDetails.deviceId}</span></div>
+                                        <div className="flex justify-between gap-4"><span className="text-slate-500">IP address</span><span className="font-mono text-slate-200">{provisioningDetails.ipAddress}</span></div>
+                                    </div>
+                                    <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 mb-6">
+                                        <div className="text-[10px] font-bold uppercase tracking-widest text-amber-300 mb-2">One-time secret</div>
+                                        <div className="font-mono text-sm md:text-base text-amber-100 break-all select-all">{provisioningDetails.secret}</div>
+                                    </div>
+                                    <div className="flex justify-end">
+                                        <button onClick={() => setProvisioningDetails(null)} className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm">Close provisioning</button>
+                                    </div>
                                 </div>
                             </div>
                         )}

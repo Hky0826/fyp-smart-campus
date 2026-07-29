@@ -24,6 +24,7 @@ from ..face.database import DeviceUserRepository
 from ..face.matching import TemplateMatcher
 from ..face.quality import FaceQualityChecker, FaceQualityConfig
 from ..face.spoofing import MotionSpoofDetector, SpoofResult
+from ..face.pad import load_pad, PADResult
 from ..face.tracking import FaceTracker, FaceTrackerConfig
 from ..face.types import AuthenticationResult, DetectedFace
 from ..utils.logging import configure_logging
@@ -117,6 +118,7 @@ class AccessControlPipeline:
         sleeper: Callable[[float], None] | None = None,
         tracker: FaceTracker | None = None,
         embedding_aggregator: TrackEmbeddingAggregator | None = None,
+        pad_detector: Any | None = None,
     ) -> None:
         self.config = config or AccessControlConfig()
         self.detector = detector
@@ -125,6 +127,7 @@ class AccessControlPipeline:
         self.aligner = aligner or FaceAligner()
         self.matcher = matcher or TemplateMatcher(self.config.recognition_threshold)
         self.spoof_detector = spoof_detector or MotionSpoofDetector()
+        self.pad_detector = pad_detector or load_pad(self.config)
         self.quality_checker = quality_checker or FaceQualityChecker(
             config=FaceQualityConfig(
                 min_face_size=self.config.min_face_size,
@@ -235,8 +238,11 @@ class AccessControlPipeline:
             if self.config.require_liveness:
                 spoof_result = self.spoof_detector.check(frame, face)
                 logger.info("Access-control spoofing result: %s score=%.4f reason=%s", spoof_result.state, spoof_result.score, spoof_result.reason)
-                if spoof_result.state != "live":
-                    is_spoof = spoof_result.state == "spoof"
+                pad_result = self.pad_detector.check(frame, face)
+                logger.info("Access-control PAD result: %s score=%.4f model=%s threshold=%.4f", pad_result.state, pad_result.score, pad_result.model_version, pad_result.threshold)
+                liveness_failed = pad_result.state != "live" if self.config.pad_required else spoof_result.state != "live"
+                if liveness_failed:
+                    is_spoof = pad_result.state == "spoof" or (not self.config.pad_required and spoof_result.state == "spoof")
                     reason = "Spoofing/liveness check failed." if is_spoof else "Liveness check inconclusive."
                     if is_spoof:
                         self._log_event(None, "SPOOFING", spoof_result.score)
@@ -246,7 +252,7 @@ class AccessControlPipeline:
                         face_count,
                         AuthenticationResult.DENY_SPOOF if is_spoof else AuthenticationResult.RETRY_UNSTABLE_TRACK,
                         spoofing_passed=False,
-                        similarity=spoof_result.score,
+                        similarity=pad_result.score if self.config.pad_required else spoof_result.score,
                         metrics=timer.metrics,
                         bbox=bbox,
                         bboxes=bboxes,
@@ -607,6 +613,12 @@ class AccessControlPipeline:
             if not cv2.imwrite(str(path), crop):
                 logger.warning("Failed to save face snapshot to %s", path)
                 return None
+            retention_days = max(1, int(getattr(self.config, "snapshot_retention_days", 7)))
+            cutoff = datetime.now(timezone.utc).timestamp() - retention_days * 86400
+            root = Path(getattr(self.config, "snapshot_dir", snapshot_dir))
+            for old_file in root.rglob("*"):
+                if old_file.is_file() and old_file.stat().st_mtime < cutoff:
+                    old_file.unlink(missing_ok=True)
         except Exception:
             logger.exception("Failed to save access face snapshot")
             return None

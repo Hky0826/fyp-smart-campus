@@ -24,7 +24,7 @@ def default_database_path() -> Path:
     configured = os.getenv("EDGE_DB_PATH") or os.getenv("ACCESS_DB_PATH")
     if configured:
         return Path(configured).expanduser()
-    return DEFAULT_DB_PATH
+    return Path.home() / ".smart-campus-edge" / "device_local.db"
 
 
 def table_columns(cursor: sqlite3.Cursor, table_name: str) -> set[str]:

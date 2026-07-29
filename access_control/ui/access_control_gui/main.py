@@ -12,6 +12,11 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
 
+try:
+    from PySide6.QtQuickControls2 import QQuickStyle
+except ImportError:  # pragma: no cover - depends on the installed Qt bundle
+    QQuickStyle = None
+
 
 def _configure_qt_runtime() -> None:
     """Choose conservative Qt settings before QApplication and cv2 import."""
@@ -45,6 +50,8 @@ def _pyside_plugin_root() -> Path:
 
 def main() -> int:
     _configure_qt_runtime()
+    if QQuickStyle is not None:
+        QQuickStyle.setStyle(os.getenv("EDGE_GUI_QT_STYLE", "Basic"))
     QCoreApplication.setApplicationName("Edge Access Control")
     QCoreApplication.setOrganizationName("EdgeMind")
 
@@ -63,6 +70,12 @@ def main() -> int:
     chatbot = ChatbotController(api)
     access = AccessController(api, camera, chatbot)
     device = DeviceController(api)
+
+    # Keep Python-owned QObject wrappers alive for the full Qt application
+    # lifetime. This is especially important for the setup controller, which
+    # is otherwise observed as null by QML on some PySide6/Qt combinations.
+    for controller in (camera, access, chatbot, device):
+        controller.setParent(app)
 
     engine.addImageProvider("camera", provider)
     context = engine.rootContext()

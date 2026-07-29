@@ -4,12 +4,15 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "build:legacy-dashboard": "node scripts/build_legacy_dashboard.mjs",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@babel/standalone": "^7.23.5",
+    "lucide": "^0.321.0",
     "lucide-react": "^0.300.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

@@ -1,12 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from datetime import datetime
 from urllib.parse import urlparse
+import os
+import secrets
 import requests
 
 from app.core.database import get_db
+from app.core.config import settings
+from app.core.device_auth import generate_device_secret, encrypt_device_secret
+from app.core.private_storage import safe_existing_path
 from app.core.security import verify_super_admin, get_current_admin
 from app.models.models import Device, NodeRBAC, EdgeRBAC, JWTSession, AuthenticationLog, SurveillanceLog, Node, Role, Edge, User, Admin, Floorplan, Course, UploadedDocument
 from app.schemas import schemas
@@ -18,13 +25,18 @@ def _device_base_url(ip_address: str) -> str:
     if not target:
         raise HTTPException(status_code=400, detail="Device has no IP address configured")
     if "://" not in target:
-        target = f"http://{target}"
+        target = f"https://{target}"
 
     parsed = urlparse(target)
     if not parsed.hostname:
         raise HTTPException(status_code=400, detail="Device IP address is invalid")
 
     host = parsed.hostname
+    if parsed.scheme != "https":
+        loopback = host in {"127.0.0.1", "localhost", "::1"}
+        allow = settings.APP_ENV != "production" and os.getenv("ALLOW_INSECURE_LOOPBACK", "false").lower() == "true"
+        if not (loopback and allow):
+            raise HTTPException(status_code=400, detail="Device control URLs must use HTTPS")
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
     port = parsed.port or 8001
@@ -64,13 +76,31 @@ def get_dashboard_stats(db: Session = Depends(get_db), current_admin=Depends(get
 # ==========================================
 # DEVICES CRUD (SYSTEM_ADMIN or SUPER_ADMIN)
 # ==========================================
+def _generate_device_id(db: Session, device_type: schemas.DeviceTypeEnum) -> str:
+    prefixes = {
+        "ENTRY_GATE": "ENTRY",
+        "KIOSK": "KIOSK",
+        "CLASSROOM": "CLASS",
+        "OFFICE": "OFFICE",
+        "OTHER": "EDGE",
+    }
+    type_name = getattr(device_type, "value", str(device_type))
+    prefix = prefixes.get(type_name, "EDGE")
+    for _ in range(20):
+        candidate = f"{prefix}-{secrets.token_hex(4).upper()}"
+        if not db.query(Device).filter_by(device_id=candidate).first():
+            return candidate
+    raise HTTPException(status_code=500, detail="Unable to allocate a unique device ID")
+
+
 @router.get("/devices", response_model=List[schemas.DeviceResponse])
 def list_devices(db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
     return db.query(Device).all()
 
 @router.post("/devices", response_model=schemas.DeviceResponse)
 def create_device(device_in: schemas.DeviceCreate, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
-    existing = db.query(Device).filter_by(device_id=device_in.device_id).first()
+    device_id = device_in.device_id or _generate_device_id(db, device_in.device_type)
+    existing = db.query(Device).filter_by(device_id=device_id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Device ID already registered")
         
@@ -78,20 +108,34 @@ def create_device(device_in: schemas.DeviceCreate, db: Session = Depends(get_db)
     node = db.query(Node).filter_by(node_id=device_in.node_id).first()
     if not node:
         raise HTTPException(status_code=400, detail="Node ID does not exist")
-        
+    provisioned_secret = generate_device_secret()
     device = Device(
-        device_id=device_in.device_id,
+        device_id=device_id,
         device_name=device_in.device_name,
         node_id=device_in.node_id,
         device_type=device_in.device_type,
         ip_address=device_in.ip_address,
         is_active=device_in.is_active,
-        installed_at=datetime.utcnow()
+        installed_at=datetime.utcnow(),
+        device_secret_ciphertext=encrypt_device_secret(provisioned_secret),
+        credential_rotated_at=datetime.utcnow(),
     )
     db.add(device)
     db.commit()
     db.refresh(device)
-    return device
+    return {**schemas.DeviceResponse.model_validate(device).model_dump(), "provisioned_secret": provisioned_secret}
+
+
+@router.post("/devices/{device_id}/rotate-credential")
+def rotate_device_credential(device_id: str, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+    device = db.query(Device).filter_by(device_id=device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    secret = generate_device_secret()
+    device.device_secret_ciphertext = encrypt_device_secret(secret)
+    device.credential_rotated_at = datetime.utcnow()
+    db.commit()
+    return {"device_id": device.device_id, "provisioned_secret": secret, "warning": "Store this secret in deployment secret storage; it will not be shown again."}
 
 @router.put("/devices/{device_id}", response_model=schemas.DeviceResponse)
 def update_device(device_id: str, device_in: schemas.DeviceUpdate, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
@@ -142,8 +186,31 @@ def delete_device(device_id: str, db: Session = Depends(get_db), current_admin=D
     device = db.query(Device).filter_by(device_id=device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    db.delete(device)
-    db.commit()
+
+    # Authentication and surveillance logs are audit records and deliberately
+    # retain their device reference. Preserve those records by deactivating a
+    # device instead of deleting it when history exists.
+    auth_log_count = db.query(AuthenticationLog).filter_by(device_id=device_id).count()
+    surveillance_log_count = db.query(SurveillanceLog).filter_by(device_id=device_id).count()
+    if auth_log_count or surveillance_log_count:
+        device.is_active = False
+        db.commit()
+        return {
+            "detail": "Device deactivated because audit logs reference it; audit history was preserved.",
+            "device_id": device_id,
+            "deleted": False,
+            "deactivated": True,
+        }
+
+    try:
+        db.delete(device)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Device cannot be deleted because another record references it. Deactivate it instead.",
+        ) from exc
     return {"detail": "Device deleted successfully"}
 
 # ==========================================
@@ -257,6 +324,15 @@ def list_surveillance_logs(
     if email is not None:
         query = query.join(User).filter(User.email == email)
     return query.order_by(SurveillanceLog.timestamp.desc()).offset(skip).limit(limit).all()
+
+
+@router.get("/surveillance-logs/{log_id}/image", include_in_schema=False)
+def download_surveillance_image(log_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+    log = db.query(SurveillanceLog).filter_by(log_id=log_id).first()
+    if not log or not log.image_path:
+        raise HTTPException(status_code=404, detail="Surveillance image not found")
+    path = safe_existing_path("surveillance", log.image_path)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store, private", "X-Content-Type-Options": "nosniff", "Content-Disposition": "inline"})
 
 @router.get("/last-known-locations", response_model=List[schemas.LastKnownLocationResponse])
 def list_last_known_locations(

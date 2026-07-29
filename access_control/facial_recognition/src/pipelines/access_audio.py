@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import sqlite3
 import threading
@@ -14,6 +15,7 @@ from typing import Any
 import requests
 
 from ..config import AccessControlConfig
+from ..device_signing import sign_assertion, signed_headers, validate_cloud_url
 
 
 logger = logging.getLogger(__name__)
@@ -62,15 +64,46 @@ class EdgeAuthToken:
 class EdgeAuthTokenClient:
     """Requests user-scoped JWTs after local face recognition succeeds."""
 
-    def __init__(self, cloud_url: str, device_id: str, timeout_seconds: float = 8.0) -> None:
+    def __init__(self, cloud_url: str, device_id: str, device_secret: str = "", timeout_seconds: float = 8.0, allow_insecure_loopback: bool = False) -> None:
         self.cloud_url = cloud_url.rstrip("/")
         self.device_id = device_id
+        self.device_secret = device_secret
         self.timeout_seconds = timeout_seconds
+        validate_cloud_url(self.cloud_url, allow_insecure_loopback=allow_insecure_loopback)
+        self.challenge_endpoint = f"{self.cloud_url}/api/edge-auth/challenge"
         self.endpoint = f"{self.cloud_url}/api/edge-auth/token"
 
-    def issue_token(self, user_id: int | str) -> EdgeAuthToken:
-        payload = {"user_id": int(user_id), "device_id": self.device_id}
-        response = requests.post(self.endpoint, json=payload, timeout=self.timeout_seconds)
+    def _post_signed(self, endpoint: str, payload: dict[str, Any]) -> requests.Response:
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        headers = {
+            **signed_headers(self.device_secret, self.device_id, "POST", endpoint, body),
+            "Content-Type": "application/json",
+        }
+        return requests.post(endpoint, data=body, headers=headers, timeout=self.timeout_seconds)
+
+    def issue_token(self, user_id: int | str, pad_score: float = 0.0, pad_model_version: str = "edge-supplemental") -> EdgeAuthToken:
+        user_id = int(user_id)
+        challenge_response = self._post_signed(self.challenge_endpoint, {"user_id": user_id})
+        if challenge_response.status_code >= 400:
+            raise RuntimeError(self._error_message(challenge_response))
+        challenge = challenge_response.json()
+        challenge_id = str(challenge["challenge_id"])
+        assertion = {
+            "challenge_id": challenge_id,
+            "user_id": user_id,
+            "match_passed": True,
+            "liveness_passed": True,
+            "pad_score": float(pad_score),
+            "pad_model_version": str(pad_model_version),
+        }
+        payload = {
+            "user_id": user_id,
+            "device_id": self.device_id,
+            "challenge_id": challenge_id,
+            "assertion": assertion,
+            "assertion_signature": sign_assertion(self.device_secret, assertion),
+        }
+        response = self._post_signed(self.endpoint, payload)
         if response.status_code >= 400:
             raise RuntimeError(self._error_message(response))
         return EdgeAuthToken.from_payload(response.json())
@@ -89,7 +122,12 @@ class AccessControlAudioCoordinator:
 
     def __init__(self, config: AccessControlConfig) -> None:
         self.config = config
-        self.token_client = EdgeAuthTokenClient(config.sync_cloud_url, config.sync_device_id)
+        self.token_client = EdgeAuthTokenClient(
+            config.sync_cloud_url,
+            config.sync_device_id,
+            config.sync_device_secret,
+            allow_insecure_loopback=config.allow_insecure_loopback,
+        )
         self._lock = threading.Lock()
         self._authenticated_token: EdgeAuthToken | None = None
         self._visitor_token: EdgeAuthToken | None = None
@@ -200,18 +238,10 @@ class AccessControlAudioCoordinator:
     def _maybe_issue_visitor_token(self) -> None:
         if not self.config.audio_auto_visitor_token:
             return
-        visitor_user_id = self.config.audio_visitor_user_id or self._find_local_visitor_user_id()
-        if visitor_user_id is None:
-            logger.info("No visitor user configured or cached; audio will request face auth for protected chat")
-            return
-        try:
-            token = self.token_client.issue_token(visitor_user_id)
-        except Exception as exc:
-            logger.warning("Could not issue visitor chatbot JWT for user_id=%s: %s", visitor_user_id, exc)
-            return
-        with self._lock:
-            self._visitor_token = token
-        logger.info("Received visitor chatbot JWT for user_id=%s session_id=%s", token.user_id, token.session_id)
+        # Visitor access must remain anonymous/PUBLIC.  Never turn a configured
+        # visitor ID into a cloud JWT because that bypasses the face-match and
+        # liveness assertion required by edge-auth.
+        logger.warning("EDGE_ACCESS_CHATBOT_AUTO_VISITOR_TOKEN is disabled: visitor IDs cannot mint edge JWTs")
 
     def _find_local_visitor_user_id(self) -> int | None:
         db_path = Path(self.config.database_path)

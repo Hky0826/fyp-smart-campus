@@ -101,12 +101,23 @@ def main() -> int:
     args = parse_args()
     configure_logging(os.getenv("EDGE_LOG_LEVEL", "INFO"))
     config = AccessControlConfig()
+    if config.setup_marker_path.is_file():
+        config.validate_security()
+    else:
+        print(
+            "First-time setup detected. The access-control service will initialize "
+            "SQLite automatically and show setup instructions on the device display."
+        )
 
     # Cloud connectivity diagnostic
     diagnose_cloud_connectivity(config.sync_cloud_url)
 
-    requested_host = args.host or os.getenv("ACCESS_API_HOST") or "0.0.0.0"
-    requested_api_port = args.port or int(os.getenv("ACCESS_API_PORT", "8080"))
+    requested_host = args.host or config.api_host
+    requested_api_port = args.port or config.api_port
+    if requested_host not in {"127.0.0.1", "localhost", "::1"} and (
+        not config.remote_api_enabled or not config.installation_credential
+    ):
+        raise ValueError("Remote edge API binding requires EDGE_REMOTE_API_ENABLED=true and an installation credential")
 
     actual_api_port = find_available_port(requested_host, requested_api_port)
     if actual_api_port != requested_api_port:

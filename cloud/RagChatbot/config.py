@@ -21,7 +21,11 @@ from dotenv import load_dotenv
 #   parents[1]  = cloud/
 # So the .env is at  cloud/dashboard/backend/.env  -> parents[1] / dashboard / backend / .env
 _DOTENV_PATH = Path(__file__).resolve().parents[1] / "dashboard" / "backend" / ".env"
-load_dotenv(dotenv_path=_DOTENV_PATH, override=True)
+# Keep deployment-provided environment variables authoritative.  The dashboard
+# backend loads the same settings with ``override=False``; overriding them here
+# can make the JWT issuer and chatbot validator use different secrets after a
+# restart, which turns every authenticated greeting into HTTP 401.
+load_dotenv(dotenv_path=_DOTENV_PATH, override=False)
 
 
 class RagSettings:
@@ -122,7 +126,7 @@ class RagSettings:
 
     # Inference Timing Logging
     RAG_INFERENCE_LOG_ENABLED: bool = os.getenv("RAG_INFERENCE_LOG_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
-    RAG_INFERENCE_LOG_FILE: str = os.getenv("RAG_INFERENCE_LOG_FILE", "logs/chatbot_inference.log").strip()
+    RAG_INFERENCE_LOG_FILE: str = os.getenv("RAG_INFERENCE_LOG_FILE", str(Path.home() / ".smart-campus-cloud" / "logs" / "chatbot_inference.log")).strip()
 
     def validate(self) -> None:
         """Raise ValueError if any required setting is missing."""

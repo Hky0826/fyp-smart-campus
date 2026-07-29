@@ -84,7 +84,7 @@ class LoginRequest(BaseModel):
     password: str
 
 class Token(BaseSchema):
-    access_token: str
+    access_token: Optional[str] = None
     token_type: str
     admin_type: str
     email: str
@@ -419,8 +419,16 @@ class DeviceBase(BaseSchema):
     ip_address: Optional[str] = None
     is_active: bool = True
 
-class DeviceCreate(DeviceBase):
-    pass
+class DeviceCreate(BaseSchema):
+    # The cloud assigns this identifier when a new device is provisioned.
+    # Keeping it optional prevents administrators from choosing colliding or
+    # misleading hardware identifiers in the dashboard.
+    device_id: Optional[str] = None
+    device_name: str
+    node_id: int
+    device_type: DeviceTypeEnum
+    ip_address: Optional[str] = None
+    is_active: bool = True
 
 class DeviceUpdate(BaseSchema):
     device_name: Optional[str] = None
@@ -432,6 +440,9 @@ class DeviceUpdate(BaseSchema):
 class DeviceResponse(DeviceBase):
     last_heartbeat: Optional[datetime.datetime] = None
     installed_at: datetime.datetime
+    # Returned only by the provisioning endpoint, never persisted in the
+    # response model for normal device reads.
+    provisioned_secret: Optional[str] = None
 
 class NodeRBACBase(BaseSchema):
     node_id: int
@@ -444,11 +455,14 @@ class EdgeRBACBase(BaseSchema):
 class JWTSessionResponse(BaseSchema):
     session_id: int
     user_id: int
-    token_hash: str
+    token_hash: Optional[str] = None
     issued_at: datetime.datetime
     expires_at: datetime.datetime
     device_id: Optional[str] = None
     is_revoked: bool
+    session_uuid: Optional[str] = None
+    jti: Optional[str] = None
+    principal_type: str = "ADMIN"
     
     # Backwards compatibility fields
     created_at: Optional[datetime.datetime] = None

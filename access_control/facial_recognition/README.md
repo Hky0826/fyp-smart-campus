@@ -37,7 +37,10 @@ access_control/facial_recognition/
 
 ### 1. Database Setup
 
-To create or refresh the local SQLite database schema:
+The normal first start initializes or migrates the local SQLite database
+automatically. The access-control display then opens a guided setup screen;
+you do not need to create or edit an edge `.env` file. For a headless or
+pre-provisioned device, the schema can still be prepared manually:
 
 ```bash
 python access_control/facial_recognition/setup_sqlite.py
@@ -70,6 +73,11 @@ Start the REST API server:
 ```bash
 uvicorn access_control.facial_recognition.src.api.main:app --host 0.0.0.0 --port 8080
 ```
+
+On a new device, the API starts without cloud credentials, creates the
+SQLite schema, and exposes setup instructions through the device UI. Cloud
+synchronization starts only after the administrator enters the dashboard URL,
+generated device ID, and one-time device secret on that screen.
 
 Key Endpoints:
 - `POST /access-control/frame`: Process single BGR image frame

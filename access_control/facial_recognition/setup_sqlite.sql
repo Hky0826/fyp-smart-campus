@@ -103,6 +103,12 @@ CREATE TABLE IF NOT EXISTS sync_metadata (
     val TEXT
 );
 
+-- Replay protection for authenticated cloud-to-edge control requests.
+CREATE TABLE IF NOT EXISTS edge_control_nonces (
+    nonce TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_device_user_face_embeddings_user_id
     ON device_user_face_embeddings(user_id);
 

@@ -48,6 +48,7 @@ class InMemoryVectorStore:
             INNER JOIN uploaded_documents ud
                 ON dc.document_id = ud.document_id
             WHERE dc.is_outdated = 0 AND ud.is_active = 1
+              AND ud.access_level = dc.access_level
         """)
         try:
             rows = db.execute(sql).fetchall()

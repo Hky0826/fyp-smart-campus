@@ -19,4 +19,4 @@ RUN chmod +x /app/access_control/facial_recognition/docker/entrypoint.sh
 
 EXPOSE 8080
 ENTRYPOINT ["/app/access_control/facial_recognition/docker/entrypoint.sh"]
-CMD ["uvicorn", "access_control.facial_recognition.src.api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "access_control.facial_recognition.src.api.main:app", "--host", "127.0.0.1", "--port", "8080"]

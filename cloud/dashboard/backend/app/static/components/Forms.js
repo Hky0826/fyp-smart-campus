@@ -168,7 +168,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
 
     useEffect(() => {
         if (!isEdit) {
-            const token = localStorage.getItem("access_token");
+            const token = "";
             fetch("/api/iam/users", { headers: { "Authorization": `Bearer ${token}` } })
                 .then(res => res.json())
                 .then(data => { if (Array.isArray(data)) setSystemUsers(data); })
@@ -1016,7 +1016,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
 
             useEffect(() => {
                 if (!isEdit) {
-                    const token = localStorage.getItem("access_token");
+                    const token = "";
                     fetch("/api/iam/users", {
                         headers: { "Authorization": `Bearer ${token}` }
                     })
@@ -1213,7 +1213,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
 
             useEffect(() => {
                 if (!isEdit) {
-                    const token = localStorage.getItem("access_token");
+                    const token = "";
                     fetch("/api/iam/users", {
                         headers: { "Authorization": `Bearer ${token}` }
                     })
@@ -1418,7 +1418,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
 
             useEffect(() => {
                 if (!isEdit) {
-                    const token = localStorage.getItem("access_token");
+                    const token = "";
                     fetch("/api/iam/users", {
                         headers: { "Authorization": `Bearer ${token}` }
                     })
@@ -1623,7 +1623,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
 
             useEffect(() => {
                 if (!isEdit) {
-                    const token = localStorage.getItem("access_token");
+                    const token = "";
                     fetch("/api/iam/users", {
                         headers: { "Authorization": `Bearer ${token}` }
                     })
@@ -1657,6 +1657,12 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
 
             return (
                 <form onSubmit={handleSubmit} className="space-y-4">
+                    {!isEdit && (
+                        <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4 text-xs text-indigo-100 leading-relaxed">
+                            <div className="font-bold uppercase tracking-wider text-indigo-300 mb-1">Guided device setup</div>
+                            Start the access-control module first. After you submit this form, the dashboard generates the device ID and one-time secret. Copy both into the setup screen shown on the access-control device, then choose <span className="font-bold">Apply and start</span>.
+                        </div>
+                    )}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Visitor Profile ID</label>
@@ -1812,7 +1818,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
 
             useEffect(() => {
                 if (!isEdit) {
-                    const token = localStorage.getItem("access_token");
+                    const token = "";
                     fetch("/api/iam/staff", {
                         headers: { "Authorization": `Bearer ${token}` }
                     })
@@ -1974,7 +1980,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
 
             const handleSubmit = (e) => {
                 onSubmit(e, {
-                    device_id: deviceId,
+                    ...(deviceId ? { device_id: deviceId } : {}),
                     device_name: deviceName,
                     node_id: parseInt(nodeId),
                     device_type: deviceType,
@@ -1989,8 +1995,14 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Device Hardware ID</label>
-                            <input type="text" required disabled={isEdit} value={deviceId} onChange={e => setDeviceId(e.target.value)} placeholder="e.g. EDGE-KIOSK-01" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" />
+                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Device ID</label>
+                            {isEdit ? (
+                                <input type="text" disabled value={deviceId} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-60 font-mono" />
+                            ) : (
+                                <div className="w-full min-h-[42px] flex items-center bg-slate-950/60 border border-dashed border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-400">
+                                    Generated automatically when you submit
+                                </div>
+                            )}
                         </div>
                         <div>
                             <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Device Label Name</label>
@@ -2017,8 +2029,9 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                         </div>
                     </div>
                     <div>
-                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Network Address</label>
-                        <input type="text" value={ipAddress} onChange={e => setIpAddress(e.target.value)} placeholder="e.g. 192.168.1.100:8001" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono" />
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Edge control address <span className="text-slate-600">(optional)</span></label>
+                        <input type="text" value={ipAddress} onChange={e => setIpAddress(e.target.value)} placeholder="e.g. https://192.168.1.100:8443" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono" />
+                        <p className="text-[11px] text-slate-500 mt-1.5">Leave blank if the device only sends signed synchronization to the cloud.</p>
                     </div>
                     <div className="flex justify-end gap-3 mt-6">
                         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
@@ -2165,7 +2178,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
             const [courseOptions, setCourseOptions] = useState(courses);
 
             useEffect(() => {
-                const token = localStorage.getItem("access_token");
+                const token = "";
                 const headers = { "Authorization": `Bearer ${token}` };
                 
                 if (!students || students.length === 0) {

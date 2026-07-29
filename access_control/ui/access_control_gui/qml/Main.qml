@@ -70,7 +70,17 @@ ApplicationWindow {
         databaseOk: deviceController.databaseOk
         modelsOk: deviceController.modelsOk
         errorText: deviceController.error
+        firstTimeSetup: deviceController.firstTimeSetup
+        setupDeviceId: deviceController.setupDeviceId
+        setupSecret: deviceController.setupSecret
+        setupLocalAddress: deviceController.setupLocalAddress
+        setupDetectedLanAddress: deviceController.setupDetectedLanAddress
+        setupCloudUrl: deviceController.setupCloudUrl
         onRefreshRequested: deviceController.refresh()
+        onSetupCompleted: deviceController.completeSetup()
+        onProvisionRequested: function(cloudUrl, deviceId, deviceSecret, remotePush) {
+            deviceController.applySetup(cloudUrl, deviceId, deviceSecret, remotePush)
+        }
     }
 
     OfflineView {

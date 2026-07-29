@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import hashlib
 import logging
 import os
 import time
@@ -109,7 +110,10 @@ def log_inference_metrics(
         "status": status,
         "user_id": user_id,
         "session_id": session_id,
-        "query_text": query_text[:100] if query_text else None,
+        "query_hash": hashlib.sha256((query_text or "").encode("utf-8", errors="ignore")).hexdigest() if query_text else None,
+        "query_length": len(query_text or ""),
+        "query_category": "personal" if (query_text or "").startswith("[PERSONAL") else "chat",
+        "query_text": "[REDACTED]" if query_text else None,
         "timings_ms": timings,
     }
 

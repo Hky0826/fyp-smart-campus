@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import hashlib
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
@@ -47,10 +48,18 @@ def log_chatbot_interaction(
     # Import here to avoid circular import at top level
     from app.models.models import ChatbotQuery
 
+    query_value = query_text or ""
+    query_hash = hashlib.sha256(query_value.encode("utf-8", errors="ignore")).hexdigest()
+    category = "personal" if query_value.startswith("[PERSONAL_INTENT]") else "chat"
     record = ChatbotQuery(
         session_id=session_id,
         user_id=user_id,
-        query_text=query_text,
+        # Keep compatibility with the legacy non-null column while ensuring
+        # raw user content is never persisted.
+        query_text="[REDACTED]",
+        query_hash=query_hash,
+        query_length=len(query_value),
+        query_category=category,
         response_text=response_text,
         retrieved_chunks=retrieved_chunk_ids,  # JSON column: list of ints
         response_time_ms=response_time_ms,

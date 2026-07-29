@@ -81,6 +81,8 @@ def retrieve_chunks(
 
     id_placeholders = ", ".join(f":id_{i}" for i in range(len(top_chunk_ids)))
     params = {f"id_{i}": cid for i, cid in enumerate(top_chunk_ids)}
+    access_placeholders = ", ".join(f":access_{i}" for i in range(len(allowed_access_levels)))
+    params.update({f"access_{i}": level for i, level in enumerate(allowed_access_levels)})
 
     sql = text(f"""
         SELECT
@@ -99,6 +101,8 @@ def retrieve_chunks(
             ON dc.document_id = ud.document_id
            AND ud.is_active = 1
         WHERE dc.chunk_id IN ({id_placeholders})
+          AND ud.access_level IN ({access_placeholders})
+          AND dc.access_level IN ({access_placeholders})
     """)
 
     try:

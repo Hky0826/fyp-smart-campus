@@ -82,7 +82,9 @@ def test_log_inference_metrics_enabled(tmp_path: Path, monkeypatch: pytest.Monke
     assert record["request_type"] == "text"
     assert record["user_id"] == 42
     assert record["session_id"] == 101
-    assert record["query_text"] == "What is the library opening hours?"
+    assert record["query_text"] == "[REDACTED]"
+    assert record["query_hash"]
+    assert record["query_length"] == len("What is the library opening hours?")
     assert record["status"] == "ok"
     assert record["timings_ms"]["prompt_injection_ms"] == 12.5
     assert record["timings_ms"]["prompt_classification_ms"] == 5.0

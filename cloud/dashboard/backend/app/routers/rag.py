@@ -1,6 +1,6 @@
 import os
-import shutil
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -8,11 +8,11 @@ from app.core.database import get_db
 from app.core.security import verify_content_admin
 from app.models.models import UploadedDocument, DocumentChunk, EmbeddingVector, ChatbotQuery
 from app.schemas import schemas
+from app.core.config import settings
+from app.core.private_storage import save_upload, safe_existing_path, ALLOWED_DOCUMENT_EXTENSIONS
 
 # Determine upload directory based on the location of this file
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads", "documents")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 router = APIRouter(prefix="/rag", tags=["RAG Knowledge Base & Documents"])
 
@@ -53,7 +53,7 @@ def list_documents(db: Session = Depends(get_db), current_admin=Depends(verify_c
     return db.query(UploadedDocument).all()
 
 @router.post("/documents", response_model=schemas.UploadedDocumentResponse)
-def create_document(
+async def create_document(
     background_tasks: BackgroundTasks,
     title: str = Form(...),
     access_level: str = Form(...),
@@ -66,16 +66,16 @@ def create_document(
     filename = ""
     file_path = ""
     if file:
-        filename = file.filename
-        file_path = os.path.join(UPLOAD_DIR, filename)
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        filename, stored_path = await save_upload(file, "documents", ALLOWED_DOCUMENT_EXTENSIONS, settings.MAX_DOCUMENT_BYTES)
+        file_path = filename
 
+    if access_level not in {"PUBLIC", "STUDENT", "LECTURER", "ADMIN"}:
+        raise HTTPException(status_code=400, detail="Invalid document access level")
     doc = UploadedDocument(
         title=title,
         filename=filename,
         file_path=file_path,
-        uploaded_by=uploaded_by,
+        uploaded_by=current_admin.user_id,
         access_level=access_level,
         is_active=is_active
     )
@@ -90,7 +90,7 @@ def create_document(
     return doc
 
 @router.put("/documents/{document_id}", response_model=schemas.UploadedDocumentResponse)
-def update_document(
+async def update_document(
     document_id: int, 
     background_tasks: BackgroundTasks,
     title: str = Form(None),
@@ -106,15 +106,19 @@ def update_document(
         raise HTTPException(status_code=404, detail="Document not found")
         
     if title is not None: doc.title = title
-    if access_level is not None: doc.access_level = access_level
-    if uploaded_by is not None: doc.uploaded_by = uploaded_by
+    old_access_level = doc.access_level
+    if access_level is not None:
+        if access_level not in {"PUBLIC", "STUDENT", "LECTURER", "ADMIN"}:
+            raise HTTPException(status_code=400, detail="Invalid document access level")
+        doc.access_level = access_level
+        for chunk in doc.chunks:
+            chunk.access_level = access_level
+    doc.uploaded_by = current_admin.user_id
     if is_active is not None: doc.is_active = is_active
     
     if file:
-        filename = file.filename
-        file_path = os.path.join(UPLOAD_DIR, filename)
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        filename, stored_path = await save_upload(file, "documents", ALLOWED_DOCUMENT_EXTENSIONS, settings.MAX_DOCUMENT_BYTES)
+        file_path = filename
         doc.filename = filename
         doc.file_path = file_path
         
@@ -124,8 +128,21 @@ def update_document(
     if file:
         # Trigger re-ingestion in background if a new file is uploaded
         background_tasks.add_task(background_ingest, doc.document_id, True)
+    elif access_level is not None and access_level != old_access_level:
+        from RagChatbot.retrieval.vector_store import vector_store
+        if vector_store.is_loaded:
+            vector_store.load_from_db(db)
         
     return doc
+
+
+@router.get("/documents/{document_id}/download", include_in_schema=False)
+def download_document(document_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_content_admin)):
+    doc = db.query(UploadedDocument).filter_by(document_id=document_id, is_active=True).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    path = safe_existing_path("documents", doc.file_path)
+    return FileResponse(path, media_type="application/octet-stream", filename="document", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @router.post("/documents/{document_id}/toggle-active")

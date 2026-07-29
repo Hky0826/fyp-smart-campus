@@ -17,13 +17,16 @@ if cloud_root not in sys.path:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse, PlainTextResponse
 
 from app.routers import auth, iam, rag, infrastructure, academics, references, embeddings
 from app.routers.edge_auth import router as edge_auth_router
 from sync.cloud_to_edge import cloud_sync_service as downstream_sync
 from sync.edge_to_cloud import cloud_sync_service as upstream_sync
 from app.core.database import Base, engine, SessionLocal
+from app.core.config import settings
+from app.core.csrf import CSRFMiddleware
+from app.core.security_headers import SecurityHeadersMiddleware
 from RagChatbot.router import router as chatbot_router
 
 # Create the FastAPI app instance
@@ -32,9 +35,19 @@ app = FastAPI(
     description="Enterprise-grade administrative API and database manager.",
     version="1.0.0"
 )
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(CSRFMiddleware)
+
+
+@app.middleware("http")
+async def block_legacy_private_paths(request, call_next):
+    if request.url.path.startswith(("/static/uploads", "/dashboard/uploads")):
+        return PlainTextResponse("Not found", status_code=404)
+    return await call_next(request)
 
 @app.on_event("startup")
 def load_vector_store():
+    settings.validate_security()
     from RagChatbot.retrieval.vector_store import vector_store
     with SessionLocal() as db:
         vector_store.load_from_db(db)
@@ -43,10 +56,10 @@ def load_vector_store():
 # Allows React frontend (e.g. running on Vite dev server port 5173) to consume APIs
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, restrict to trusted domains
+    allow_origins=list(settings.DASHBOARD_ORIGINS),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-CSRF-Token", "X-Device-ID", "X-Device-Timestamp", "X-Device-Nonce", "X-Device-Signature"],
 )
 
 # Register API routers with '/api' prefix
@@ -72,7 +85,7 @@ app.include_router(chatbot_router, prefix="/api")
 def redirect_to_dashboard():
     return RedirectResponse(url="/dashboard/")
 
-# Mount the static files directory to serve the CDN-based React SPA
+# Mount the static files directory to serve the locally built dashboard SPA
 static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 if not os.path.exists(static_dir):
     os.makedirs(static_dir)
@@ -81,8 +94,8 @@ if not os.path.exists(static_dir):
 def dashboard_spa_fallback(full_path: str):
     return FileResponse(os.path.join(static_dir, "index.html"))
 
-# Mount the folder under '/dashboard' path. 
-# Anything in the 'static' folder (like index.html) will be served.
+# Only the built dashboard assets are served here. Private uploads are stored
+# under settings.PRIVATE_STORAGE_ROOT and have authenticated download routes.
 app.mount("/static", StaticFiles(directory=static_dir), name="static-assets")
 app.mount("/dashboard", StaticFiles(directory=static_dir, html=True), name="static")
 

@@ -21,12 +21,14 @@ from __future__ import annotations
 import base64
 import datetime
 import json
+import os
 import logging
+import hashlib
 from collections import OrderedDict
 from collections.abc import Iterator
-from threading import Lock
+from threading import Lock, BoundedSemaphore
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status, Request
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.concurrency import iterate_in_threadpool
@@ -52,6 +54,7 @@ from RagChatbot.services.greeting_audio_service import generate_greeting_audio
 from RagChatbot.services.chat_service import process_chat, process_public_smoke_chat
 from RagChatbot.services.ingestion_service import ingest_document
 from RagChatbot.security.auth_context import resolve_auth_context
+from app.core.rate_limit import client_ip, enforce_limit
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,14 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 _GREETING_AUDIO_CACHE: OrderedDict[str, str] = OrderedDict()
 _GREETING_AUDIO_CACHE_LOCK = Lock()
 _GREETING_AUDIO_CACHE_SIZE = 128
+_AI_JOB_LIMIT = BoundedSemaphore(max(1, int(os.getenv("MAX_AI_CONCURRENCY", "8"))))
+
+
+def _enforce_ai_quota(request: Request, token: str | None, device_id: str | None, *, audio: bool = False) -> None:
+    identity = f"device:{device_id}" if device_id else (f"auth:{hashlib.sha256(token.encode()).hexdigest()[:16]}" if token else f"anon:{client_ip(request)}")
+    enforce_limit(identity, 60 if token or device_id else 8, 60, "AI request quota exceeded")
+    if audio:
+        enforce_limit(f"audio:{identity}", 20 if token or device_id else 3, 60, "Audio request quota exceeded")
 
 
 def _greeting_text(full_name: str | None, given_name: str | None = None) -> str:
@@ -256,6 +267,7 @@ def chatbot_health():
 )
 def public_smoke_chat(
     body: ChatRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -265,7 +277,13 @@ def public_smoke_chat(
     backend. When enabled, retrieval is limited to PUBLIC documents only.
     """
     _require_public_smoke_test_enabled()
-    return process_public_smoke_chat(request=body, db=db)
+    _enforce_ai_quota(request, None, body.device_id)
+    if not _AI_JOB_LIMIT.acquire(blocking=False):
+        raise HTTPException(status_code=503, detail="AI service is busy; retry later")
+    try:
+        return process_public_smoke_chat(request=body, db=db)
+    finally:
+        _AI_JOB_LIMIT.release()
 
 
 @router.post(
@@ -274,6 +292,7 @@ def public_smoke_chat(
 )
 def public_smoke_chat_stream(
     body: ChatRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -283,7 +302,13 @@ def public_smoke_chat_stream(
     backend. When enabled, retrieval is limited to PUBLIC documents only.
     """
     _require_public_smoke_test_enabled()
-    response = process_public_smoke_chat(request=body, db=db)
+    _enforce_ai_quota(request, None, body.device_id)
+    if not _AI_JOB_LIMIT.acquire(blocking=False):
+        raise HTTPException(status_code=503, detail="AI service is busy; retry later")
+    try:
+        response = process_public_smoke_chat(request=body, db=db)
+    finally:
+        _AI_JOB_LIMIT.release()
     return StreamingResponse(
         _chat_response_events(response),
         media_type="text/event-stream",
@@ -303,6 +328,7 @@ def public_smoke_chat_stream(
 )
 def chat(
     body: ChatRequest,
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
     db: Session = Depends(get_db),
 ):
@@ -322,7 +348,13 @@ def chat(
     requests to this endpoint.
     """
     bearer_token = credentials.credentials if credentials else None
-    return process_chat(request=body, bearer_token=bearer_token, db=db)
+    _enforce_ai_quota(request, bearer_token, body.device_id)
+    if not _AI_JOB_LIMIT.acquire(blocking=False):
+        raise HTTPException(status_code=503, detail="AI service is busy; retry later")
+    try:
+        return process_chat(request=body, bearer_token=bearer_token, db=db)
+    finally:
+        _AI_JOB_LIMIT.release()
 
 
 @router.post(
@@ -356,6 +388,7 @@ def chat_greeting_audio(
 )
 def chat_stream(
     body: ChatRequest,
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
     db: Session = Depends(get_db),
 ):
@@ -369,7 +402,13 @@ def chat_stream(
     sentence-sized chunks.
     """
     bearer_token = credentials.credentials if credentials else None
-    response = process_chat(request=body, bearer_token=bearer_token, db=db)
+    _enforce_ai_quota(request, bearer_token, body.device_id)
+    if not _AI_JOB_LIMIT.acquire(blocking=False):
+        raise HTTPException(status_code=503, detail="AI service is busy; retry later")
+    try:
+        response = process_chat(request=body, bearer_token=bearer_token, db=db)
+    finally:
+        _AI_JOB_LIMIT.release()
     return StreamingResponse(
         _chat_response_events(response),
         media_type="text/event-stream",
@@ -388,6 +427,7 @@ def chat_stream(
     summary="Submit audio query from edge device to the RAG chatbot",
 )
 async def chat_audio(
+    request: Request,
     audio: UploadFile = File(...),
     device_id: str | None = Form(None),
     session_id: int | None = Form(None),
@@ -429,6 +469,7 @@ async def chat_audio(
 
     # ── Determine MIME type ───────────────────────────────────────────
     mime_type = audio.content_type or "audio/wav"
+    _enforce_ai_quota(request, credentials.credentials if credentials else None, device_id, audio=True)
 
     # ── Extract bearer token ──────────────────────────────────────────
     bearer_token = credentials.credentials if credentials else None
@@ -470,6 +511,7 @@ async def chat_audio(
     summary="Submit audio query and stream TTS audio chunks to the edge device",
 )
 async def chat_audio_stream(
+    request: Request,
     audio: UploadFile = File(...),
     device_id: str | None = Form(None),
     session_id: int | None = Form(None),
@@ -487,6 +529,7 @@ async def chat_audio_stream(
     """
     audio_bytes, mime_type = await _read_valid_audio_upload(audio)
     bearer_token = credentials.credentials if credentials else None
+    _enforce_ai_quota(request, bearer_token, device_id, audio=True)
     return StreamingResponse(
         _audio_chat_stream_events(
             audio_bytes=audio_bytes,

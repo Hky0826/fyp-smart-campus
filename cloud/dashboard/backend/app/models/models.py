@@ -179,6 +179,7 @@ class UserImage(Base):
     image_id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     template_name = Column(Enum("front", "left_30", "right_30", "left_60", "right_60", "slightly_up", "slightly_down", "low_light"), nullable=False)
+    # Opaque server-side object key; never a client filename or public URL.
     image_path = Column(String(500), nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
@@ -424,6 +425,9 @@ class ChatbotQuery(Base):
     session_id = Column(Integer, ForeignKey("jwt_sessions.session_id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
     query_text = Column(Text, nullable=False)
+    query_hash = Column(String(64), nullable=True)
+    query_length = Column(Integer, nullable=True)
+    query_category = Column(String(32), nullable=True)
     response_text = Column(Text, nullable=True)
     retrieved_chunks = Column(JSON, nullable=True) # JSON array of chunk IDs
     response_time_ms = Column(Integer, nullable=True)
@@ -448,6 +452,8 @@ class Device(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     last_heartbeat = Column(DateTime, nullable=True)
     installed_at = Column(DateTime, default=datetime.datetime.utcnow)
+    device_secret_ciphertext = Column(Text, nullable=True)
+    credential_rotated_at = Column(DateTime, nullable=True)
     
     node = relationship("Node")
 
@@ -479,6 +485,9 @@ class JWTSession(Base):
     expires_at = Column(DateTime, nullable=False)
     device_id = Column(String(100), ForeignKey("devices.device_id", ondelete="SET NULL"), nullable=True)
     is_revoked = Column(Boolean, default=False, nullable=False)
+    session_uuid = Column(String(64), unique=True, nullable=True)
+    jti = Column(String(64), unique=True, nullable=True)
+    principal_type = Column(String(32), nullable=False, default="ADMIN")
     
     user = relationship("User")
     device = relationship("Device")
@@ -493,6 +502,28 @@ class JWTSession(Base):
         if self.user and self.user.admin:
             return self.user.admin.admin_id
         return ""
+
+
+class DeviceRequestNonce(Base):
+    __tablename__ = "device_request_nonces"
+
+    device_id = Column(String(100), ForeignKey("devices.device_id", ondelete="CASCADE"), primary_key=True)
+    nonce = Column(String(128), primary_key=True)
+    expires_at = Column(DateTime, nullable=False)
+
+
+class FaceAuthChallenge(Base):
+    __tablename__ = "face_auth_challenges"
+
+    challenge_id = Column(String(64), primary_key=True)
+    device_id = Column(String(100), ForeignKey("devices.device_id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    match_passed = Column(Boolean, default=False, nullable=False)
+    liveness_passed = Column(Boolean, default=False, nullable=False)
+    pad_model_version = Column(String(100), nullable=True)
+    pad_score = Column(Float, nullable=True)
 
 class AuthenticationLog(Base):
     __tablename__ = "authentication_logs"

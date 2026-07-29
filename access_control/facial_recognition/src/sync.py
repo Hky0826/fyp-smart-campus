@@ -3,22 +3,29 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
+import os
 import datetime
 import json
 import logging
 import sqlite3
 import threading
+import time
 from array import array
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
-from ..setup_sqlite import backfill_missing_sync_keys, initialize_sqlite_database, table_columns
+from ..setup_sqlite import backfill_missing_sync_keys, initialize_sqlite_database, migrate_legacy_schema, table_columns
 from .utils.sync_key import generate_sync_key
+from .device_signing import signed_headers, validate_cloud_url
 
 
 logger = logging.getLogger(__name__)
@@ -28,14 +35,24 @@ DEFAULT_EMBEDDING_MODEL = "openvc_sface"
 class SQLiteEdgeDB:
     """SQLite storage used by downstream and upstream synchronization."""
 
-    def __init__(self, db_path: str | Path = "device_local.db") -> None:
+    def __init__(self, db_path: str | Path = "device_local.db", encryption_key: str = "") -> None:
         self.db_path = Path(db_path)
+        self.encryption_key = encryption_key or os.getenv("EDGE_DB_ENCRYPTION_KEY", "")
         self.lock = threading.Lock()
         self.initialize_schema()
 
     def _get_connection(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(self.db_path))
+        if self.encryption_key:
+            try:
+                from pysqlcipher3 import dbapi2 as encrypted_sqlite
+            except ImportError as exc:
+                raise RuntimeError("pysqlcipher3 is required when EDGE_DB_ENCRYPTION_KEY is configured") from exc
+            conn = encrypted_sqlite.connect(str(self.db_path))
+            escaped_key = self.encryption_key.replace("'", "''")
+            conn.execute(f"PRAGMA key = '{escaped_key}'")
+        else:
+            conn = sqlite3.connect(str(self.db_path))
         conn.execute("PRAGMA journal_mode = WAL;")
         conn.execute("PRAGMA foreign_keys = ON;")
         return conn
@@ -43,11 +60,46 @@ class SQLiteEdgeDB:
     def initialize_schema(self) -> None:
         with self.lock:
             try:
-                initialize_sqlite_database(self.db_path)
+                if not self.encryption_key:
+                    initialize_sqlite_database(self.db_path)
+                else:
+                    # Schema creation must use the same SQLCipher connection as
+                    # all subsequent reads/writes; opening this file with the
+                    # stdlib sqlite3 module would leave it unencrypted or fail
+                    # with "file is not a database".
+                    self.db_path.parent.mkdir(parents=True, exist_ok=True)
+                    conn = self._get_connection()
+                    try:
+                        conn.executescript((Path(__file__).resolve().parents[1] / "setup_sqlite.sql").read_text(encoding="utf-8"))
+                        migrate_legacy_schema(conn.cursor())
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+                        raise
+                    finally:
+                        conn.close()
                 logger.info("SQLite sync schema initialized at %s", self.db_path)
             except Exception:
                 logger.exception("Error initializing SQLite sync schema")
                 raise
+
+    def consume_control_nonce(self, nonce: str, expires_at: int) -> bool:
+        """Atomically accept a cloud control nonce once only."""
+        with self.lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("DELETE FROM edge_control_nonces WHERE expires_at <= ?", (int(time.time()),))
+                conn.execute(
+                    "INSERT INTO edge_control_nonces (nonce, expires_at) VALUES (?, ?)",
+                    (nonce, expires_at),
+                )
+                conn.commit()
+                return True
+            except sqlite3.IntegrityError:
+                conn.rollback()
+                return False
+            finally:
+                conn.close()
 
     @staticmethod
     def _table_columns(cursor: sqlite3.Cursor, table_name: str) -> set[str]:
@@ -671,8 +723,60 @@ class DeactivatePayload(BaseModel):
     is_active: int
 
 
-def create_edge_app(db: SQLiteEdgeDB, downstream_worker: Optional["DownstreamSyncWorker"] = None) -> FastAPI:
+def create_edge_app(
+    db: SQLiteEdgeDB,
+    downstream_worker: Optional["DownstreamSyncWorker"] = None,
+    installation_credential: str | None = None,
+    device_id: str = "",
+    device_secret: str = "",
+) -> FastAPI:
     app = FastAPI(title="Edge Device Receiver Daemon")
+
+    if installation_credential or device_secret:
+        class _InstallationMiddleware(BaseHTTPMiddleware):
+            async def dispatch(self, request: Request, call_next):
+                if request.url.path == "/health":
+                    return await call_next(request)
+
+                if device_secret:
+                    supplied_device_id = request.headers.get("X-Device-ID", "")
+                    timestamp = request.headers.get("X-Device-Timestamp", "")
+                    nonce = request.headers.get("X-Device-Nonce", "")
+                    signature = request.headers.get("X-Device-Signature", "")
+                    try:
+                        timestamp_value = int(timestamp)
+                    except (TypeError, ValueError):
+                        return JSONResponse({"detail": "Invalid device timestamp"}, status_code=401)
+                    if (
+                        supplied_device_id != device_id
+                        or not nonce
+                        or len(nonce) < 16
+                        or len(nonce) > 128
+                        or abs(time.time() - timestamp_value) > 300
+                    ):
+                        return JSONResponse({"detail": "Invalid signed edge request"}, status_code=401)
+                    body = await request.body()
+                    canonical = "\n".join(
+                        (
+                            request.method.upper(),
+                            request.url.path,
+                            request.url.query,
+                            timestamp,
+                            nonce,
+                            hashlib.sha256(body).hexdigest(),
+                        )
+                    ).encode()
+                    expected = base64.urlsafe_b64encode(
+                        hmac.new(device_secret.encode(), canonical, hashlib.sha256).digest()
+                    ).decode().rstrip("=")
+                    if not signature or not hmac.compare_digest(expected, signature):
+                        return JSONResponse({"detail": "Invalid device signature"}, status_code=401)
+                    if not db.consume_control_nonce(nonce, timestamp_value + 300):
+                        return JSONResponse({"detail": "Replayed device request"}, status_code=401)
+                elif request.headers.get("X-Installation-Credential") != installation_credential:
+                    return JSONResponse({"detail": "Installation authentication required"}, status_code=401)
+                return await call_next(request)
+        app.add_middleware(_InstallationMiddleware)
 
     @app.post("/api/edge/deactivate")
     def handle_deactivation(payload: DeactivatePayload) -> Dict[str, str]:
@@ -700,9 +804,12 @@ def create_edge_app(db: SQLiteEdgeDB, downstream_worker: Optional["DownstreamSyn
 class DownstreamSyncWorker:
     """Polls cloud database deltas into the local SQLite cache."""
 
-    def __init__(self, db: SQLiteEdgeDB, cloud_url: str, poll_interval_sec: int = 60) -> None:
+    def __init__(self, db: SQLiteEdgeDB, cloud_url: str, poll_interval_sec: int = 60, device_id: str = "", device_secret: str = "", allow_insecure_loopback: bool = False) -> None:
         self.db = db
         self.cloud_url = cloud_url.rstrip("/")
+        validate_cloud_url(cloud_url, allow_insecure_loopback)
+        self.device_secret = device_secret or os.getenv("EDGE_SYNC_DEVICE_SECRET", "")
+        self.device_id = device_id or os.getenv("EDGE_SYNC_DEVICE_ID", "")
         self.poll_interval = poll_interval_sec
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -736,7 +843,7 @@ class DownstreamSyncWorker:
         url = f"{self.cloud_url}/api/sync/downstream/user-ids"
         try:
             logger.info("Syncing cloud database baseline for deleted users at startup")
-            response = requests.get(url, timeout=10.0)
+            response = requests.get(url, headers=signed_headers(self.device_secret, self.device_id, "GET", url), timeout=10.0)
             if response.status_code != 200:
                 logger.warning("Startup cleanup skipped, cloud returned HTTP %s", response.status_code)
                 return
@@ -761,7 +868,7 @@ class DownstreamSyncWorker:
 
         url = f"{self.cloud_url}/api/sync/downstream/delta"
         try:
-            response = requests.get(url, params=params, timeout=10.0)
+            response = requests.get(url, params=params, headers=signed_headers(self.device_secret, self.device_id, "GET", url, params=params), timeout=10.0)
             if response.status_code != 200:
                 logger.error("Cloud returned downstream sync HTTP %s", response.status_code)
                 return
@@ -799,10 +906,14 @@ class UpstreamSyncClient:
         local_ip: str,
         local_port: int = 8000,
         log_push_interval_sec: int = 60,
+        device_secret: str = "",
+        allow_insecure_loopback: bool = False,
     ) -> None:
         self.db = db
         self.cloud_url = cloud_url.rstrip("/")
+        validate_cloud_url(cloud_url, allow_insecure_loopback)
         self.device_id = device_id
+        self.device_secret = device_secret or os.getenv("EDGE_SYNC_DEVICE_SECRET", "")
         self.device_name = device_name
         self.local_ip = local_ip
         self.local_port = local_port
@@ -841,7 +952,9 @@ class UpstreamSyncClient:
             "ip_address": f"{self.local_ip}:{self.local_port}",
         }
         try:
-            response = requests.post(url, json=payload, timeout=5.0)
+            import json
+            body = json.dumps(payload, separators=(",", ":")).encode()
+            response = requests.post(url, data=body, headers={**signed_headers(self.device_secret, self.device_id, "POST", url, body), "Content-Type": "application/json"}, timeout=5.0)
             online = response.status_code == 200
             if online and not self.is_online:
                 logger.info("Cloud link restored; sync status ONLINE")
@@ -893,7 +1006,9 @@ class UpstreamSyncClient:
 
         url = f"{self.cloud_url}/api/sync/upstream/logs"
         try:
-            response = requests.post(url, json={"logs": payload_logs}, timeout=15.0)
+            import json
+            body = json.dumps({"logs": payload_logs}, separators=(",", ":")).encode()
+            response = requests.post(url, data=body, headers={**signed_headers(self.device_secret, self.device_id, "POST", url, body), "Content-Type": "application/json"}, timeout=15.0)
             if response.status_code != 200:
                 logger.error("Cloud returned upstream sync HTTP %s", response.status_code)
                 return
@@ -936,7 +1051,9 @@ class UpstreamSyncClient:
 
         url = f"{self.cloud_url}/api/sync/upstream/surveillance-logs"
         try:
-            response = requests.post(url, json={"logs": payload_logs}, timeout=30.0)
+            import json
+            body = json.dumps({"logs": payload_logs}, separators=(",", ":")).encode()
+            response = requests.post(url, data=body, headers={**signed_headers(self.device_secret, self.device_id, "POST", url, body), "Content-Type": "application/json"}, timeout=30.0)
             if response.status_code != 200:
                 logger.error("Cloud returned surveillance upstream sync HTTP %s", response.status_code)
                 return
@@ -994,6 +1111,11 @@ class SyncEngine:
         downstream_poll_interval_sec: int,
         log_push_interval_sec: int,
         enabled: bool = True,
+        device_secret: str = "",
+        allow_insecure_loopback: bool = False,
+        remote_api_enabled: bool = False,
+        installation_credential: str = "",
+        database_encryption_key: str = "",
     ) -> None:
         self.db_path = Path(db_path)
         self.cloud_url = cloud_url
@@ -1004,6 +1126,11 @@ class SyncEngine:
         self.downstream_poll_interval_sec = downstream_poll_interval_sec
         self.log_push_interval_sec = log_push_interval_sec
         self.enabled = enabled
+        self.device_secret = device_secret
+        self.allow_insecure_loopback = allow_insecure_loopback
+        self.remote_api_enabled = remote_api_enabled
+        self.installation_credential = installation_credential
+        self.database_encryption_key = database_encryption_key
         self.db: Optional[SQLiteEdgeDB] = None
         self.downstream: Optional[DownstreamSyncWorker] = None
         self.upstream: Optional[UpstreamSyncClient] = None
@@ -1025,6 +1152,11 @@ class SyncEngine:
             downstream_poll_interval_sec=config.sync_downstream_poll_seconds,
             log_push_interval_sec=config.sync_log_push_interval_seconds,
             enabled=config.sync_enabled,
+            device_secret=config.sync_device_secret,
+            allow_insecure_loopback=config.allow_insecure_loopback,
+            remote_api_enabled=config.remote_api_enabled,
+            installation_credential=config.installation_credential,
+            database_encryption_key=config.database_encryption_key,
         )
 
     def start(self) -> None:
@@ -1034,15 +1166,20 @@ class SyncEngine:
         if self._running:
             return
 
-        self.db = SQLiteEdgeDB(self.db_path)
+        self.db = SQLiteEdgeDB(self.db_path, encryption_key=self.database_encryption_key)
         self.downstream = DownstreamSyncWorker(
             self.db,
             cloud_url=self.cloud_url,
             poll_interval_sec=self.downstream_poll_interval_sec,
+            device_id=self.device_id,
+            device_secret=self.device_secret,
+            allow_insecure_loopback=self.allow_insecure_loopback,
         )
         # Reserve/select the listener before constructing the client so the
         # heartbeat advertises the port that the receiver actually binds.
-        actual_sync_port = _find_available_sync_port("0.0.0.0", self.configured_local_port)
+        if self.local_ip not in {"127.0.0.1", "localhost", "::1"} and not getattr(self, "remote_api_enabled", False):
+            raise ValueError("Edge sync receiver is loopback-only unless remote mode is explicitly enabled")
+        actual_sync_port = _find_available_sync_port(self.local_ip, self.configured_local_port)
         self.actual_sync_port = actual_sync_port
         if actual_sync_port != self.configured_local_port:
             logger.info("Sync receiver port %s in use; using free port %s", self.configured_local_port, actual_sync_port)
@@ -1055,10 +1192,18 @@ class SyncEngine:
             local_ip=self.local_ip,
             local_port=actual_sync_port,
             log_push_interval_sec=self.log_push_interval_sec,
+            device_secret=self.device_secret,
+            allow_insecure_loopback=self.allow_insecure_loopback,
         )
 
-        app = create_edge_app(self.db, downstream_worker=self.downstream)
-        uvicorn_config = uvicorn.Config(app, host="0.0.0.0", port=actual_sync_port, log_level="warning")
+        app = create_edge_app(
+            self.db,
+            downstream_worker=self.downstream,
+            installation_credential=self.installation_credential if self.remote_api_enabled else None,
+            device_id=self.device_id,
+            device_secret=self.device_secret,
+        )
+        uvicorn_config = uvicorn.Config(app, host=self.local_ip, port=actual_sync_port, log_level="warning")
         self._server = uvicorn.Server(uvicorn_config)
 
         self.upstream.start()

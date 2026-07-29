@@ -847,7 +847,6 @@ def _first_face_with_embedding(result: dict[str, Any]) -> dict[str, Any] | None:
 def _try_issue_registered_token(pipeline: Any, owner_embedding: np.ndarray, config: RuntimeConfig) -> EdgeAuthToken | None:
     try:
         templates = pipeline.repository.load_templates()
-        templates = [t for t in templates if t.template_name in (None, "front", "low_light")]
         match = pipeline.matcher.match(
             owner_embedding,
             templates,
@@ -870,7 +869,12 @@ def _try_issue_registered_token(pipeline: Any, owner_embedding: np.ndarray, conf
     if not match.matched or not match.is_active or match.user_id is None:
         return None
 
-    token_client = EdgeAuthTokenClient(config.sync_cloud_url, config.sync_device_id)
+    token_client = EdgeAuthTokenClient(
+        config.sync_cloud_url,
+        config.sync_device_id,
+        config.sync_device_secret,
+        allow_insecure_loopback=config.allow_insecure_loopback,
+    )
     try:
         token = token_client.issue_token(match.user_id)
         logger.info("Chatbot JWT issued for user_id=%s with recognition_score=%.4f", match.user_id, match.similarity)

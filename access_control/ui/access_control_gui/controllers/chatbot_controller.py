@@ -86,6 +86,9 @@ class _PushToTalkWorker(QThread):
             if recording_path and recording_path.exists() and recording_path.stat().st_size >= 512:
                 voice_stats = _wav_voice_stats(recording_path)
                 logger.info("Push-to-Talk recorded stats: %s", voice_stats)
+                if not _has_voice(voice_stats):
+                    self.errorOccurred.emit("No speech detected. Please try speaking again.")
+                    return
                 self.busyChanged.emit(True)
                 audio_queue: queue.Queue[bytes | None] = queue.Queue()
 

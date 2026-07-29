@@ -93,6 +93,9 @@ class MultiModelEmbeddingService:
 
     @staticmethod
     def _file_path(web_path: str) -> Path:
+        from app.core.private_storage import private_path
+        if web_path and not web_path.startswith("/") and not web_path.startswith("static/"):
+            return private_path("faces", web_path)
         static = Path(__file__).resolve().parents[1] / "static"
         value = web_path.lstrip("/").removeprefix("static/")
         return static / value

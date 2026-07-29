@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
 import bcrypt
@@ -6,11 +7,14 @@ import os
 import datetime
 import json
 import re
+import secrets
 import cv2
 import numpy as np
 
 from app.core.database import get_db
 from app.core.security import verify_system_admin, verify_super_admin, get_password_hash
+from app.core.config import settings
+from app.core.private_storage import private_path, safe_existing_path
 from app.facial_recognition.alignment import extract_aligned_face
 from app.models.models import Role, User, Student, Lecturer, Staff, Visitor, Admin, Node, Department, Faculty, Programme
 from app.schemas import schemas
@@ -241,10 +245,10 @@ def _replace_user_enrollment(
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Enrollment failed: {exc}") from exc
 
-    static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
-    user_upload_dir = os.path.join(static_dir, "uploads", "faces", str(user.user_id))
-    os.makedirs(user_upload_dir, exist_ok=True)
-    paths = {pose: os.path.join(user_upload_dir, f"{pose}.jpg") for pose in enrollment_crops}
+    user_upload_dir = private_path("faces", str(user.user_id))
+    user_upload_dir.mkdir(parents=True, exist_ok=True)
+    object_keys = {pose: f"{user.user_id}/{pose}-{secrets.token_hex(12)}.jpg" for pose in enrollment_crops}
+    paths = {pose: str(private_path("faces", object_key)) for pose, object_key in object_keys.items()}
     backups = {}
     for path in paths.values():
         if os.path.isfile(path):
@@ -253,15 +257,17 @@ def _replace_user_enrollment(
 
     try:
         for pose, crop in enrollment_crops.items():
-            if not cv2.imwrite(paths[pose], crop):
+            temp_path = f"{paths[pose]}.tmp"
+            if not cv2.imwrite(temp_path, crop):
                 raise HTTPException(status_code=400, detail=f"Enrollment failed: {pose}: could not save image")
+            os.replace(temp_path, paths[pose])
         db.query(UserImage).filter_by(user_id=user.user_id).delete()
         db.query(UserFaceEmbedding).filter_by(user_id=user.user_id).delete()
         for pose in enrollment_crops:
             db.add(UserImage(
                 user_id=user.user_id,
                 template_name=pose,
-                image_path=f"/static/uploads/faces/{user.user_id}/{pose}.jpg",
+                image_path=object_keys[pose],
             ))
         for (pose, model_name), embedding in staged.items():
             db.add(UserFaceEmbedding(
@@ -1082,6 +1088,21 @@ def upload_user_face_photo(
         "face_vector": user.face_vector,
         "imagepath": user.imagepath
     }
+
+
+@router.get("/users/{user_id}/images/{pose}", include_in_schema=False)
+def download_user_face_image(
+    user_id: int,
+    pose: str,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_super_admin),
+):
+    from app.models.models import UserImage
+    image = db.query(UserImage).filter_by(user_id=user_id, template_name=pose).first()
+    if not image:
+        raise HTTPException(status_code=404, detail="Biometric image not found")
+    path = safe_existing_path("faces", image.image_path)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store, private", "X-Content-Type-Options": "nosniff", "Content-Disposition": "inline"})
 
 
 @router.post("/users/{user_id}/enroll-live/start")

@@ -54,15 +54,24 @@ class AccessAudioIntegrationTests(unittest.TestCase):
         }
         with patch(
             "access_control.facial_recognition.src.pipelines.access_audio.requests.post",
-            return_value=FakeResponse(payload=payload),
+            side_effect=[
+                FakeResponse(payload={"challenge_id": "challenge-1"}),
+                FakeResponse(payload=payload),
+            ],
         ) as post:
-            token = EdgeAuthTokenClient("http://cloud.example:8000", "entry-gate-01").issue_token(7)
+            token = EdgeAuthTokenClient(
+                "https://cloud.example:8000",
+                "entry-gate-01",
+                "device-secret-for-tests",
+            ).issue_token(7)
 
-        post.assert_called_once_with(
-            "http://cloud.example:8000/api/edge-auth/token",
-            json={"user_id": 7, "device_id": "entry-gate-01"},
-            timeout=8.0,
-        )
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(post.call_args_list[0].args[0], "https://cloud.example:8000/api/edge-auth/challenge")
+        self.assertEqual(post.call_args_list[1].args[0], "https://cloud.example:8000/api/edge-auth/token")
+        for call in post.call_args_list:
+            self.assertIn("X-Device-Signature", call.kwargs["headers"])
+            self.assertEqual(call.kwargs["headers"]["Content-Type"], "application/json")
+            self.assertIsInstance(call.kwargs["data"], bytes)
         self.assertEqual(token.access_token, "jwt-value")
         self.assertEqual(token.session_id, 99)
         self.assertEqual(token.roles, ("STUDENT",))
@@ -87,7 +96,7 @@ class AccessAudioIntegrationTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            config = AccessControlConfig(database_path=db_path)
+            config = AccessControlConfig(database_path=db_path, allow_insecure_loopback=True)
             coordinator = AccessControlAudioCoordinator(config)
 
             self.assertEqual(coordinator._find_local_visitor_user_id(), 5)
@@ -110,7 +119,7 @@ class AccessAudioIntegrationTests(unittest.TestCase):
 
     def test_coordinator_throttles_repeated_token_attempts(self):
         coordinator = AccessControlAudioCoordinator(
-            AccessControlConfig(audio_token_retry_seconds=30)
+            AccessControlConfig(audio_token_retry_seconds=30, allow_insecure_loopback=True)
         )
 
         self.assertTrue(coordinator._should_attempt_authenticated_token(7))
