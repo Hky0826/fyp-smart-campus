@@ -1,9 +1,13 @@
 # Facial-Recognition-Access-LLM-Navigation-for-Smart-Universities
 
-```bash
-export QT_QPA_PLATFORM=xcb
-source .venv/bin/activate
+Cloud startup on Windows is handled by one command from the repository root:
+
+```powershell
+.\start_cloud.ps1
 ```
+
+Use `.\start_cloud.ps1 -Reload` when developing. See [setup.md](setup.md) for
+the first-run prerequisites and access-control device setup.
 
 ---
 
@@ -12,7 +16,7 @@ source .venv/bin/activate
 * **cloud/**: Central server components (Dashboard API backend, RAG Chatbot, and Database Synchronization Routers).
 * **edge/**: Local edge device components.
 * **edge/facial_recognition/**: Hailo face-recognition, access-control, surveillance, SQLite sync, Docker, and local facial API code.
-* **edge/audio_io/**: Wake word detection, speech recording, whisper.cpp STT, FastAPI RAG streaming client, Piper TTS, and local playback.
+* **edge/audio_io/**: Audio activation, speech recording, cloud Gemini transcription/RAG/TTS client, and local playback.
 
 ---
 
