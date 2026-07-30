@@ -214,6 +214,11 @@ def _audio_response(
     personal_intent: Optional[str] = None,
     authentication_required: bool = False,
     navigation_target: Optional[dict] = None,
+    navigation: Optional[dict] = None,
+    route_summary: Optional[dict] = None,
+    instructions: Optional[list[dict]] = None,
+    visualisation: Optional[dict] = None,
+    intent: Optional[str] = None,
     metrics: Optional[InferenceMetrics] = None,
     user_id: Optional[int] = None,
     session_id: Optional[int] = None,
@@ -255,6 +260,11 @@ def _audio_response(
         personal_intent=personal_intent,
         authentication_required=authentication_required,
         navigation_target=navigation_target,
+        intent=intent,
+        navigation=navigation,
+        route_summary=route_summary,
+        instructions=instructions or [],
+        visualisation=visualisation,
     )
 
 
@@ -460,7 +470,7 @@ def process_audio_chat(
     from RagChatbot.generation.query_router import classify_query, get_capabilities_summary
 
     with StageTimer() as timer:
-        route = classify_query(sanitized_query)
+        route = classify_query(sanitized_query, db=db)
     metrics.prompt_classification_ms += timer.elapsed_ms
 
     if route.category != "UNIVERSITY_INFO":
@@ -473,7 +483,9 @@ def process_audio_chat(
         elif route.category == "CAPABILITY":
             fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
         elif route.category == "NAVIGATIONAL":
-            fast_answer = "Navigational request detected. Routing to map module..."
+            from RagChatbot.services.map_service import calculate_navigation
+            navigation_data = calculate_navigation(sanitized_query, db=db, context=context)
+            fast_answer = (navigation_data or {}).get("answer") or "Please tell me the unique destination you want to reach."
         elif route.category == "OUT_OF_SCOPE":
             fast_answer = "I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics."
         elif route.category == "UNCLEAR":
@@ -493,6 +505,18 @@ def process_audio_chat(
             user_id=user_id,
             session_id=resolved_session_id,
             language_code=detected_language,
+            intent=(
+                "NAVIGATION_CONFIRMATION"
+                if (navigation_data or {}).get("confirmation_required")
+                else "NAVIGATIONAL"
+                if route.category == "NAVIGATIONAL"
+                else None
+            ),
+            navigation_target=(navigation_data or {}).get("navigation_target") if route.category == "NAVIGATIONAL" else None,
+            navigation=(navigation_data or {}).get("navigation") if route.category == "NAVIGATIONAL" else None,
+            route_summary=(navigation_data or {}).get("route_summary") if route.category == "NAVIGATIONAL" else None,
+            instructions=(navigation_data or {}).get("instructions", []) if route.category == "NAVIGATIONAL" else [],
+            visualisation=(navigation_data or {}).get("visualisation") if route.category == "NAVIGATIONAL" else None,
         )
 
 # Step 6: Embed the extracted query
@@ -850,7 +874,7 @@ def process_audio_chat_stream(
 
     # Query routing: check if query is related to university information
     with StageTimer() as timer:
-        route = classify_query(sanitized_query)
+        route = classify_query(sanitized_query, db=db)
     metrics.prompt_classification_ms += timer.elapsed_ms
 
     if route.category != "UNIVERSITY_INFO":
@@ -863,7 +887,9 @@ def process_audio_chat_stream(
         elif route.category == "CAPABILITY":
             fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
         elif route.category == "NAVIGATIONAL":
-            fast_answer = "Navigational request detected. Routing to map module..."
+            from RagChatbot.services.map_service import calculate_navigation
+            navigation_data = calculate_navigation(sanitized_query, db=db, context=context)
+            fast_answer = (navigation_data or {}).get("answer") or "Please tell me the unique destination you want to reach."
         elif route.category == "OUT_OF_SCOPE":
             fast_answer = "I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics."
         elif route.category == "UNCLEAR":
@@ -881,6 +907,18 @@ def process_audio_chat_stream(
             metrics=metrics,
             user_id=user_id,
             session_id=resolved_session_id,
+            intent=(
+                "NAVIGATION_CONFIRMATION"
+                if (navigation_data or {}).get("confirmation_required")
+                else "NAVIGATIONAL"
+                if route.category == "NAVIGATIONAL"
+                else None
+            ),
+            navigation_target=(navigation_data or {}).get("navigation_target") if route.category == "NAVIGATIONAL" else None,
+            navigation=(navigation_data or {}).get("navigation") if route.category == "NAVIGATIONAL" else None,
+            route_summary=(navigation_data or {}).get("route_summary") if route.category == "NAVIGATIONAL" else None,
+            instructions=(navigation_data or {}).get("instructions", []) if route.category == "NAVIGATIONAL" else [],
+            visualisation=(navigation_data or {}).get("visualisation") if route.category == "NAVIGATIONAL" else None,
         )
         yield {"event": "metadata", "data": res.model_dump(mode="json", exclude={"audio_response"})}
         if fast_answer:

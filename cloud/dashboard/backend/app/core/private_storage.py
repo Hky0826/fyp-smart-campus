@@ -14,10 +14,11 @@ ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
 
 def private_path(category: str, object_key: str) -> Path:
-    if not object_key or Path(object_key).is_absolute() or ".." in Path(object_key).parts:
+    clean_key = (object_key or "").lstrip("/").removeprefix("uploads/").lstrip("/")
+    if not clean_key or ".." in Path(clean_key).parts:
         raise HTTPException(status_code=404, detail="Private object not found")
     root = (settings.PRIVATE_STORAGE_ROOT / category).resolve()
-    path = (root / object_key).resolve()
+    path = (root / clean_key).resolve()
     if root not in path.parents:
         raise HTTPException(status_code=404, detail="Private object not found")
     return path

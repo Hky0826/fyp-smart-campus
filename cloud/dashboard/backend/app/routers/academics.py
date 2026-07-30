@@ -6,6 +6,8 @@ from datetime import datetime, time
 from app.core.database import get_db
 from app.core.security import verify_system_admin
 from app.models.models import Course, CourseEnrollment, Timetable, Appointment, Notification, User, Student, Lecturer, Staff, Node, Role
+from cloud.mapping_and_notification.notifications.builder import build_notification
+from cloud.mapping_and_notification.notifications.broker import Broker
 from app.schemas import schemas
 from app.routers.iam import resolve_faculty, resolve_programme
 
@@ -346,16 +348,26 @@ def create_appointment(appt_in: schemas.AppointmentCreate, db: Session = Depends
         host_email=appt_in.host_email or host.email
     )
     db.add(appt)
+    db.flush()
+    # Appointment and separate host/guest audit rows share one transaction.
+    # Broker publication happens only after these rows are durable; a broker
+    # outage leaves explicit RETRYING records rather than a false QUEUED state.
+    body = f"You have a new appointment scheduled at {appt.scheduled_at} regarding: {appt.purpose or 'General Inquiry'}."
+    payloads = [
+        build_notification(recipient_user_id=guest.user_id, title="New Appointment Scheduled", body=body, appointment_id=appt.appointment_id),
+        build_notification(recipient_user_id=host.user_id, title="New Appointment Scheduled", body=body, appointment_id=appt.appointment_id),
+    ]
+    rows = [Notification(recipient_user_id=p.recipient_user_id, event_type=p.event_type, title=p.title, body=p.body, appointment_id=p.appointment_id, message_id=p.message_id, status="PENDING", attempt_count=0) for p in payloads]
+    db.add_all(rows)
     db.commit()
-    db.refresh(appt)
-    
-    # 4. Auto-generate notification for the appointment host/guest
-    notif = Notification(
-        title="New Appointment Scheduled",
-        body=f"You have a new appointment scheduled at {appt.scheduled_at} regarding: {appt.purpose or 'General Inquiry'}.",
-        appointment_id=appt.appointment_id
-    )
-    db.add(notif)
+    broker = Broker()
+    for payload, row in zip(payloads, rows):
+        if broker.publish(payload.as_dict()):
+            row.status = "QUEUED"
+        else:
+            row.status = "RETRYING"
+            row.delivery_error = "Broker unavailable"
+            row.attempt_count = 1
     db.commit()
     
     return appt

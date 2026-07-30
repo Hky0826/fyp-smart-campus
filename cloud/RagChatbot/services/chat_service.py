@@ -65,6 +65,23 @@ def _greeting_name(context) -> str:
     return full_name.split()[0] if full_name else ""
 
 
+def _navigation_for_query(query: str, db: Session, context):
+    from RagChatbot.services.map_service import calculate_navigation
+    try:
+        return calculate_navigation(query, db=db, context=context)
+    except Exception as exc:
+        logger.info("Navigation adapter could not calculate a route: %s", type(exc).__name__)
+        return None
+
+
+def _navigation_intent(navigation_data: dict | None) -> str | None:
+    if not navigation_data:
+        return None
+    if navigation_data.get("confirmation_required"):
+        return "NAVIGATION_CONFIRMATION"
+    return "NAVIGATIONAL"
+
+
 # JWT helpers
 
 def _decode_jwt(token: str) -> dict:
@@ -223,10 +240,11 @@ def process_chat(
     from RagChatbot.generation.query_router import classify_query, get_capabilities_summary
     
     with StageTimer() as timer:
-        route = classify_query(sanitized_query)
+        route = classify_query(sanitized_query, db=db)
     metrics.prompt_classification_ms += timer.elapsed_ms
 
     fast_answer = None
+    navigation_data = None
 
     if route.category == "GREETING":
         first_name = _greeting_name(context) if context.authenticated else ""
@@ -237,7 +255,8 @@ def process_chat(
     elif route.category == "CAPABILITY":
         fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
     elif route.category == "NAVIGATIONAL":
-        fast_answer = "Navigational request detected. Routing to map module..."
+        navigation_data = _navigation_for_query(sanitized_query, db, context)
+        fast_answer = (navigation_data or {}).get("answer") or "Please tell me the unique destination you want to reach."
     elif route.category == "OUT_OF_SCOPE":
         fast_answer = "I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics."
     elif route.category == "UNCLEAR":
@@ -276,6 +295,12 @@ def process_chat(
             status_message=None,
             response_time_ms=response_time_ms,
             query_id=query_id,
+            intent=_navigation_intent(navigation_data),
+            navigation_target=(navigation_data or {}).get("navigation_target"),
+            navigation=(navigation_data or {}).get("navigation"),
+            route_summary=(navigation_data or {}).get("route_summary"),
+            instructions=(navigation_data or {}).get("instructions", []),
+            visualisation=(navigation_data or {}).get("visualisation"),
         )
 
 # Step 3: RBAC access levels
@@ -452,17 +477,19 @@ def process_public_smoke_chat(
     from RagChatbot.generation.query_router import classify_query, get_capabilities_summary
     
     with StageTimer() as timer:
-        route = classify_query(sanitized_query)
+        route = classify_query(sanitized_query, db=db)
     metrics.prompt_classification_ms += timer.elapsed_ms
 
     fast_answer = None
+    navigation_data = None
 
     if route.category == "GREETING":
         fast_answer = "Hi! How can I help you with Quest International University today?"
     elif route.category == "CAPABILITY":
         fast_answer = get_capabilities_summary()
     elif route.category == "NAVIGATIONAL":
-        fast_answer = "Navigational request detected. Routing to map module..."
+        navigation_data = _navigation_for_query(sanitized_query, db, None)
+        fast_answer = (navigation_data or {}).get("answer") or "Please tell me the unique destination you want to reach."
     elif route.category == "OUT_OF_SCOPE":
         fast_answer = "I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics."
     elif route.category == "UNCLEAR":
@@ -485,6 +512,12 @@ def process_public_smoke_chat(
             status_message=None,
             response_time_ms=int((time.monotonic() - start_time) * 1000),
             query_id=None,
+            intent=_navigation_intent(navigation_data),
+            navigation_target=(navigation_data or {}).get("navigation_target"),
+            navigation=(navigation_data or {}).get("navigation"),
+            route_summary=(navigation_data or {}).get("route_summary"),
+            instructions=(navigation_data or {}).get("instructions", []),
+            visualisation=(navigation_data or {}).get("visualisation"),
         )
 
     with StageTimer() as timer:

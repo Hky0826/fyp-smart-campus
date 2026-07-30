@@ -212,6 +212,19 @@ def seed_data():
         db.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
         print("Data seeding completed successfully!")
         
+        try:
+            import shutil
+            from pathlib import Path
+            from app.core.config import settings
+            target_dir = settings.PRIVATE_STORAGE_ROOT / "floorplans"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            source_dir = Path(__file__).resolve().parents[3] / "floorplan"
+            if source_dir.exists():
+                for img in source_dir.glob("*.jpeg"):
+                    shutil.copy2(img, target_dir / img.name)
+                print("Seeded floorplan images to private storage successfully.")
+        except Exception as img_err:
+            print(f"Note: Floorplan image copy skipped ({img_err})")
     except Exception as e:
         print(f"Error seeding relational database entries: {e}")
         db.rollback()

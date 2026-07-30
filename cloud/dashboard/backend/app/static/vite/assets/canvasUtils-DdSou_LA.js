@@ -1,0 +1,1 @@
+function g(e,f,l,n){if(!e)return null;const o=document.createElement("canvas");o.width=f,o.height=l;const a=o.getContext("2d");a.clearRect(0,0,f,l),a.fillStyle="rgba(239, 68, 68, 0.4)";for(let t=0;t<e.length;t++)for(let c=0;c<e[t].length;c++)e[t][c]===1&&a.fillRect(c*n,t*n,n,n);const r=new window.Image;return r.src=o.toDataURL("image/png"),r}export{g as generateWallOverlay};

@@ -26,6 +26,18 @@ function dashboardPath(tab, subTab) {
     return subTab ? `/dashboard/${tab}/${subTab}` : `/dashboard/${tab}`;
 }
 
+function CampusMapTab() {
+    return (
+        <div className="w-full h-[calc(100vh-6rem)] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl">
+            <iframe
+                src="/static/vite/index.html"
+                className="w-full h-full border-none"
+                title="Campus Map Editor"
+            />
+        </div>
+    );
+}
+
 // ============================================================
 // MAIN APP COMPONENT
 // ============================================================
@@ -2362,25 +2374,7 @@ function dashboardPath(tab, subTab) {
 
                         {/* ══ CAMPUS MAP ════════════════════════════════════ */}
                         {currentTab === "mapping" && (
-                            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out space-y-7">
-                                <div>
-                                    <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight">Campus Map</h1>
-                                    <p className="text-slate-400 text-sm mt-1">Interactive campus layout with access zones and live navigation paths.</p>
-                                </div>
-                                <div className="flex flex-col items-center justify-center bg-slate-900/50 border-2 border-dashed border-slate-800 rounded-3xl py-32 text-center px-8 shadow-inner">
-                                    <div className="p-6 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-3xl mb-6 shadow-lg shadow-indigo-500/5">
-                                        <Icon name="map" className="w-12 h-12" />
-                                    </div>
-                                    <h3 className="text-xl font-bold text-slate-200">Interactive Map — Coming Soon</h3>
-                                    <p className="text-slate-500 text-sm max-w-md mt-3 leading-relaxed">
-                                        The campus map module is under development. It will display building floorplans, IoT device locations, room access zones, and real-time navigation.
-                                    </p>
-                                    <div className="mt-8 inline-flex items-center gap-2.5 text-xs bg-slate-900/80 border border-slate-700 text-indigo-400 font-mono px-5 py-2.5 rounded-full shadow-sm">
-                                        <span className="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-ping"></span>
-                                        <span className="font-semibold tracking-wide">Integration in progress...</span>
-                                    </div>
-                                </div>
-                            </div>
+                            <CampusMapTab setToast={setToast} />
                         )}
 
                         {/* ══ MODAL: CREATE / EDIT ══════════════════════════ */}

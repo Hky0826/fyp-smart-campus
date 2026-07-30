@@ -31,6 +31,7 @@ from app.core.config import settings
 from app.core.csrf import CSRFMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
 from RagChatbot.router import router as chatbot_router
+from cloud.mapping_and_notification.api.router import router as mapping_notification_router
 
 # Create the FastAPI app instance
 app = FastAPI(
@@ -97,6 +98,7 @@ app.include_router(edge_auth_router, prefix="/api")
 
 # RAG Chatbot endpoints – available to edge devices and admin UI
 app.include_router(chatbot_router, prefix="/api")
+app.include_router(mapping_notification_router, prefix="/api/mapping-notification")
 
 
 # Redirect root to /dashboard/

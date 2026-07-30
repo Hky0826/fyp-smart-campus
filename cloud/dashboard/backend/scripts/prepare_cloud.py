@@ -71,7 +71,9 @@ def index_exists(connection, table: str, index_name: str) -> bool:
     if not table_exists(connection, table):
         return False
     inspector = inspect(connection)
-    return any(item.get("name") == index_name for item in inspector.get_indexes(table))
+    indexes = inspector.get_indexes(table)
+    unique_constraints = inspector.get_unique_constraints(table)
+    return any(item.get("name") == index_name for item in [*indexes, *unique_constraints])
 
 
 def add_column_if_missing(connection, table: str, column: str, definition: str) -> None:
@@ -112,6 +114,19 @@ def create_security_tables(connection) -> None:
                     CONSTRAINT fk_face_challenge_user
                         FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
                 ) ENGINE=InnoDB"""
+            )
+        )
+
+
+def create_index_if_missing(connection, table: str, index_name: str, columns: str, unique: bool = False) -> None:
+    """Create a named index only when the existing schema does not have it."""
+
+    if table_exists(connection, table) and not index_exists(connection, table, index_name):
+        unique_sql = "UNIQUE " if unique else ""
+        connection.execute(
+            text(
+                f"CREATE {unique_sql}INDEX {_identifier(index_name)} "
+                f"ON {_identifier(table)} ({columns})"
             )
         )
 
@@ -162,6 +177,42 @@ def run_one_migration(connection, migration_name: str) -> None:
         add_column_if_missing(connection, "chatbot_queries", "query_length", "INT NULL")
         add_column_if_missing(connection, "chatbot_queries", "query_category", "VARCHAR(32) NULL")
 
+    elif migration_name == "20260730_mapping_notification_hardening.sql":
+        # Base.metadata.create_all() does not alter existing tables. Keep this
+        # handler idempotent so the normal cloud launcher can bring an older
+        # shared database up to the ORM schema without dropping data.
+        add_column_if_missing(connection, "floorplans", "graph_version", "INT NOT NULL DEFAULT 1")
+        add_column_if_missing(connection, "notifications", "attempt_count", "INT NOT NULL DEFAULT 0")
+        add_column_if_missing(connection, "notifications", "max_attempts", "INT NOT NULL DEFAULT 3")
+        add_column_if_missing(connection, "notifications", "next_attempt_at", "DATETIME NULL")
+        add_column_if_missing(connection, "notifications", "correlation_id", "VARCHAR(64) NULL")
+
+        if table_exists(connection, "notifications"):
+            connection.execute(
+                text(
+                    "ALTER TABLE notifications MODIFY COLUMN status "
+                    "ENUM('PENDING','QUEUED','RETRYING','SENT','FAILED','SKIPPED') "
+                    "NOT NULL DEFAULT 'PENDING'"
+                )
+            )
+
+        create_index_if_missing(
+            connection,
+            "notifications",
+            "uq_notifications_message_id",
+            "message_id",
+            unique=True,
+        )
+        create_index_if_missing(connection, "nodes", "ix_nodes_floorplan_label", "floorplan_id, room_label")
+        create_index_if_missing(connection, "edges", "ix_edges_endpoints", "source_node_id, destination_node_id")
+        create_index_if_missing(
+            connection,
+            "notifications",
+            "ix_notifications_status_created",
+            "status, created_at",
+        )
+        create_index_if_missing(connection, "users", "ix_users_location_seen", "last_known_location, last_seen")
+
     else:
         raise RuntimeError(f"No safe handler exists for migration {migration_name}")
 
@@ -173,6 +224,7 @@ def run_migrations() -> None:
         "20260728_security_hardening.sql",
         "20260728_face_auth_challenges.sql",
         "20260728_private_data.sql",
+        "20260730_mapping_notification_hardening.sql",
     ]
 
     with engine.begin() as connection:

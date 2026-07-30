@@ -9,6 +9,8 @@ import json
 import logging
 import re
 from pydantic import BaseModel, Field
+from google import genai
+from google.genai import types
 
 from RagChatbot.config import rag_settings
 
@@ -39,9 +41,26 @@ _CAPABILITY_PATTERN = re.compile(
 )
 
 _NAVIGATIONAL_PATTERN = re.compile(
-    r"\b(where\s+is|how\s+to\s+get\s+to|directions?\s+to|map\s+of|location\s+of|find\s+the\s+building|way\s+to)\b",
+    r"\b(where\s+(?:is|are)|how\s+(?:do\s+i|can\s+i)\s+get\s+to|directions?\s+to|map\s+of|location\s+of|find\s+the\s+building|way\s+to|take\s+me\s+to|navigate\s+to|go\s+to|show\s+me\s+where|point\s+me\s+to)\b",
     re.IGNORECASE,
 )
+
+# Only send queries that contain a plausible movement/location hint to the LLM.
+# This preserves the cheap local path for ordinary document questions.
+_NAVIGATION_HINT_PATTERN = re.compile(
+    r"\b(where|go|going|take|navigate|destination|directions?|route|reach|arrive|head|walk|guide|point|locate|nearby|nearest|located|cashier|toilet|washroom|restroom|bathroom|library|cafeteria|cafe|reception|office|classroom|elevator|stairwell|entrance|pharmacy)\b",
+    re.IGNORECASE,
+)
+
+_ROUTE_CATEGORIES = {"GREETING", "CAPABILITY", "NAVIGATIONAL", "OUT_OF_SCOPE", "UNCLEAR", "UNIVERSITY_INFO"}
+_ROUTER_SYSTEM_PROMPT = """Classify the user's request into exactly one category.
+
+Use NAVIGATIONAL when the user wants to find, reach, visit, or get directions to a
+physical campus destination such as a cashier, toilet, room, office, library, cafe,
+entrance, elevator, or washroom. Use UNIVERSITY_INFO for questions asking about
+documents, policies, programmes, fees, people, or other campus information without
+asking to go to a physical place. Return only the requested JSON object.
+"""
 
 _UNCLEAR_WORDS = {"fees", "help", "science", "info", "test", "school"}
 
@@ -54,11 +73,91 @@ class RouteClassification(BaseModel):
     )
 
 
-def classify_query(query: str) -> RouteClassification:
+def _load_destination_catalog(db) -> list[tuple[str, str]]:
+    """Load navigable labels from nodes without exposing corridor waypoints."""
+    if db is None:
+        return []
+    try:
+        from cloud.mapping_and_notification.mapping.repository import MapRepository
+
+        return [
+            (str(label), str(node_type).upper())
+            for label, node_type in MapRepository(db).destination_catalog()
+            if label and str(node_type).upper() != "CORRIDOR"
+        ]
+    except Exception as exc:
+        logger.warning("Could not load navigation destination catalog: %s", type(exc).__name__)
+        return []
+
+
+def _query_mentions_destination(query: str, destinations: list[tuple[str, str]]) -> bool:
+    normalized_query = re.sub(r"[^\w]+", " ", query.casefold()).strip()
+    for label, _ in destinations:
+        normalized_label = re.sub(r"[^\w]+", " ", label.casefold()).strip()
+        if normalized_label and re.search(rf"(?<!\w){re.escape(normalized_label)}(?!\w)", normalized_query):
+            return True
+    return False
+
+
+def _llm_navigation_fallback(query: str, destinations: list[tuple[str, str]]) -> RouteClassification | None:
+    """Use a structured LLM classification when local patterns are insufficient."""
+    mentions_destination = _query_mentions_destination(query, destinations)
+    if not rag_settings.GOOGLE_API_KEY or not (_NAVIGATION_HINT_PATTERN.search(query) or mentions_destination):
+        return None
+
+    try:
+        client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
+        destination_context = "\n".join(
+            f"- {label} ({node_type})" for label, node_type in destinations
+        ) or "- No destination catalog is available"
+        response = client.models.generate_content(
+            model=rag_settings.LLM_MODEL,
+            contents=(
+                f"Known navigable destinations from the nodes table:\n{destination_context}\n\n"
+                f"User request: {query}"
+            ),
+            config=types.GenerateContentConfig(
+                system_instruction=_ROUTER_SYSTEM_PROMPT,
+                max_output_tokens=64,
+                temperature=0.0,
+                response_mime_type="application/json",
+                response_schema={
+                    "type": "OBJECT",
+                    "properties": {
+                        "category": {
+                            "type": "STRING",
+                            "enum": sorted(_ROUTE_CATEGORIES),
+                        },
+                        "clarification_question": {
+                            "type": "STRING",
+                            "nullable": True,
+                        },
+                    },
+                    "required": ["category"],
+                },
+            ),
+        )
+        payload = json.loads((response.text or "").strip())
+        category = str(payload.get("category", "")).upper()
+        if category not in _ROUTE_CATEGORIES:
+            return None
+        result = RouteClassification(
+            category=category,
+            clarification_question=payload.get("clarification_question"),
+        )
+        logger.info("LLM query router classified request as %s", result.category)
+        return result
+    except Exception as exc:
+        # Intent classification must never prevent normal RAG handling.
+        logger.warning("LLM query router fallback failed: %s", type(exc).__name__)
+        return None
+
+
+def classify_query(query: str, db=None) -> RouteClassification:
     """
     Local Regex Guard & Intent Router (~2ms — 0 LLM calls).
     
-    Classifies queries locally using pattern matching without invoking any LLM API.
+    Classifies queries locally first, with a targeted LLM fallback for navigation hints.
     """
     clean_query = query.strip()
     if not clean_query:
@@ -91,9 +190,24 @@ def classify_query(query: str) -> RouteClassification:
             clarification_question=f"Could you please specify what information about {query_words[0]} you are looking for?",
         )
 
-    # 5. Default: Substantive RAG Query (UNIVERSITY_INFO)
-    logger.info("Local Regex Router classified '%s' as UNIVERSITY_INFO (0 LLM calls)", query)
+    # 5. LLM fallback for natural navigation phrases not covered by regex.
+    destinations = _load_destination_catalog(db)
+    if _query_mentions_destination(clean_query, destinations) and _normalise_query(clean_query) in {
+        _normalise_query(label) for label, _ in destinations
+    }:
+        return RouteClassification(category="NAVIGATIONAL")
+
+    llm_route = _llm_navigation_fallback(clean_query, destinations)
+    if llm_route is not None:
+        return llm_route
+
+    # 6. Default: Substantive RAG Query (UNIVERSITY_INFO)
+    logger.info("Query router classified '%s' as UNIVERSITY_INFO", query)
     return RouteClassification(category="UNIVERSITY_INFO")
+
+
+def _normalise_query(value: str) -> str:
+    return re.sub(r"[^\w]+", " ", value.casefold()).strip()
 
 
 def get_capabilities_summary(*, authenticated: bool = False, personalisation_enabled: bool = False) -> str:

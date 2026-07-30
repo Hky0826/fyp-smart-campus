@@ -75,6 +75,12 @@ class ChatResponse(BaseModel):
     query_id: Optional[int] = Field(
         None, description="Audit log ID stored in chatbot_queries."
     )
+    intent: Optional[str] = None
+    navigation_target: Optional[dict[str, Any]] = None
+    navigation: Optional[dict[str, Any]] = None
+    route_summary: Optional[dict[str, Any]] = None
+    instructions: List[dict[str, Any]] = Field(default_factory=list)
+    visualisation: Optional[dict[str, Any]] = None
 
 
 class IngestionRequest(BaseModel):
@@ -139,6 +145,12 @@ class AudioChatResponse(BaseModel):
     query_id: Optional[int] = Field(
         None, description="Audit log ID stored in chatbot_queries."
     )
+    intent: Optional[str] = None
+    navigation_target: Optional[dict[str, Any]] = None
+    navigation: Optional[dict[str, Any]] = None
+    route_summary: Optional[dict[str, Any]] = None
+    instructions: List[dict[str, Any]] = Field(default_factory=list)
+    visualisation: Optional[dict[str, Any]] = None
 
 
 class ExtractedQuery(BaseModel):

@@ -1,7 +1,7 @@
 import datetime
 import json
 from typing import Optional, List
-from sqlalchemy import Column, Integer, String, Text, DateTime, Date, Time, ForeignKey, Enum, Boolean, JSON, Float, UniqueConstraint, LargeBinary
+from sqlalchemy import Column, Integer, String, Text, DateTime, Date, Time, ForeignKey, Enum, Boolean, JSON, Float, UniqueConstraint, LargeBinary, Index
 from sqlalchemy.types import UserDefinedType
 from sqlalchemy.orm import relationship, synonym
 from app.core.database import Base
@@ -59,6 +59,8 @@ class Floorplan(Base):
     floor_level = Column(Integer, nullable=False)
     image_path = Column(String(500), nullable=False)
     scale_ratio = Column(Float, nullable=True)
+    # Incremented on every complete graph save to reject stale dashboard edits.
+    graph_version = Column(Integer, nullable=False, default=1, server_default="1")
     
     building = relationship("Building", back_populates="floorplans")
     nodes = relationship("Node", back_populates="floorplan", cascade="all, delete-orphan")
@@ -720,15 +722,24 @@ class Notification(Base):
     event_type = Column(String(100), nullable=True)
     title = Column(String(255), nullable=False)
     body = Column(Text, nullable=False)
-    status = Column(Enum("PENDING", "SENT", "FAILED"), default="PENDING", nullable=True)
+    status = Column(Enum("PENDING", "QUEUED", "RETRYING", "SENT", "FAILED", "SKIPPED"), default="PENDING", nullable=False)
     message_id = Column(String(255), nullable=True)
     delivery_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=True)
     appointment_id = Column(Integer, ForeignKey("appointments.appointment_id"), nullable=True)
-    sent_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
+    max_attempts = Column(Integer, nullable=False, default=3, server_default="3")
+    next_attempt_at = Column(DateTime, nullable=True)
+    correlation_id = Column(String(64), nullable=True)
     expires_at = Column(DateTime, nullable=True)
     
     appointment = relationship("Appointment", back_populates="notifications")
+
+    __table_args__ = (
+        UniqueConstraint("message_id", name="uq_notifications_message_id"),
+        Index("ix_notifications_status_created", "status", "created_at"),
+    )
 
 
 class DeletedUser(Base):

@@ -92,6 +92,10 @@ Start the Uvicorn local development server:
 .venv\Scripts\python.exe -m uvicorn cloud.dashboard.backend.app.main:app --reload
 ```
 
+From the repository root, add `-StartNotificationWorker` to
+`.\start_cloud.ps1` to launch the separate RabbitMQ notification worker. The
+worker uses the durable `campus.notifications.queue` topology.
+
 ---
 
 ## Accessing the Frontends
@@ -101,6 +105,11 @@ You can access the fully interactive **React + Tailwind** administrative portal 
 👉 **[http://127.0.0.1:8000/dashboard/](http://127.0.0.1:8000/dashboard/)**
 
 This view runs entirely off the static FastAPI mount and does not require Node.js, compiling, or package managers.
+
+The integrated Mapping & Notifications feature is available at
+`/dashboard/mapping-notification`. It includes floorplan selection/upload, node
+and edge editing, wall overlays, route preview, notification testing, and audit
+refresh through relative `/api/mapping-notification` calls.
 
 ### Option B: Vite + React Development Skeleton
 If you install Node.js/npm and wish to run the project in development mode:
