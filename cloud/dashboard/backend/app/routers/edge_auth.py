@@ -32,6 +32,7 @@ import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import update
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -156,11 +157,27 @@ def issue_edge_token(
         raise HTTPException(status_code=401, detail="Successful face match and liveness are required")
     if not verify_assertion_signature(decrypt_device_secret(device.device_secret_ciphertext), assertion, body.assertion_signature):
         raise HTTPException(status_code=401, detail="Invalid face-auth assertion")
-    challenge.match_passed = True
-    challenge.liveness_passed = True
-    challenge.pad_model_version = str(assertion.get("pad_model_version", "unknown"))
-    challenge.pad_score = float(assertion.get("pad_score", 0.0))
-    challenge.used_at = datetime.utcnow()
+    consumed_at = datetime.utcnow()
+    consumed = db.execute(
+        update(FaceAuthChallenge)
+        .where(
+            FaceAuthChallenge.challenge_id == body.challenge_id,
+            FaceAuthChallenge.device_id == device.device_id,
+            FaceAuthChallenge.user_id == user.user_id,
+            FaceAuthChallenge.used_at.is_(None),
+            FaceAuthChallenge.expires_at > consumed_at,
+        )
+        .values(
+            match_passed=True,
+            liveness_passed=True,
+            pad_model_version=str(assertion.get("pad_model_version", "unknown")),
+            pad_score=float(assertion.get("pad_score", 0.0)),
+            used_at=consumed_at,
+        )
+    )
+    if consumed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=401, detail="Face-auth challenge is invalid, expired, or already used")
 
     # ── Create JWT ────────────────────────────────────────────────────────────
     expire = datetime.utcnow() + timedelta(minutes=_TOKEN_EXPIRE_MINUTES)

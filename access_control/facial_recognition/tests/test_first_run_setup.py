@@ -50,7 +50,7 @@ def test_development_defaults_allow_local_first_run_without_env(monkeypatch):
 
     config = AccessControlConfig()
 
-    assert default_cloud_url() == "http://127.0.0.1:8000"
+    assert default_cloud_url() == "https://127.0.0.1:8000"
     assert AccessControlConfig.__dataclass_fields__["allow_insecure_loopback"].default is True
 
 

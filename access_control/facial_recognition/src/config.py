@@ -16,10 +16,8 @@ DEFAULT_CAMERA = "0"
 
 
 def default_cloud_url() -> str:
-    """Use local HTTP for development; production defaults to HTTPS."""
-    if os.getenv("APP_ENV", "development").lower() == "production":
-        return "https://127.0.0.1:8000"
-    return "http://127.0.0.1:8000"
+    """Use a TLS loopback endpoint until deployment provisions the cloud URL."""
+    return "https://127.0.0.1:8000"
 
 
 def detect_local_ip(target_url: str = "") -> str:
@@ -228,6 +226,8 @@ def _resolve_model_path(path_str: str, default_path: Path) -> Path:
 
 @dataclass(frozen=True)
 class AccessControlConfig(RuntimeConfig):
+    node_id: int | None = _optional_int_env("EDGE_ACCESS_NODE_ID", "ACCESS_NODE_ID")
+    policy_max_age_seconds: int = _int_env("EDGE_ACCESS_POLICY_MAX_AGE_SECONDS", 300)
     detector_model_path: Path = _resolve_model_path(
         _env_str("EDGE_ACCESS_DETECTOR_MODEL_PATH", "ACCESS_YUNET_MODEL", str(MODEL_ROOT / "access_control" / "face_detection_yunet_2023mar_int8bq.onnx")),
         MODEL_ROOT / "access_control" / "face_detection_yunet_2023mar_int8bq.onnx"

@@ -167,6 +167,11 @@ class SQLiteEdgeDB:
                                     record["embedding"],
                                 ),
                             )
+                    if "visitor_start" in user_columns and "visitor_expiry" in user_columns:
+                        cursor.execute(
+                            "UPDATE device_users SET visitor_start = ?, visitor_expiry = ? WHERE user_id = ?",
+                            (user.get("visitor_start"), user.get("visitor_expiry"), user_id),
+                        )
                 conn.commit()
                 logger.info("Processed delta update for %s users", len(users))
             except Exception:
@@ -378,8 +383,6 @@ class SQLiteEdgeDB:
                 conn.close()
 
     def save_rbac_delta(self, rbac: List[Dict[str, Any]]) -> None:
-        if not rbac:
-            return
         with self.lock:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -399,6 +402,20 @@ class SQLiteEdgeDB:
                 conn.rollback()
                 logger.exception("Failed to commit RBAC delta")
                 raise
+            finally:
+                conn.close()
+
+    def save_policy_metadata(self, *, node_id: int | None, policy_version: str | None, synced_at: str | None) -> None:
+        with self.lock:
+            conn = self._get_connection()
+            try:
+                values = {"cloud_node_id": node_id, "policy_version": policy_version, "policy_synced_at": synced_at}
+                if any(value is None for value in values.values()):
+                    conn.execute("DELETE FROM sync_metadata WHERE key IN ('cloud_node_id', 'policy_version', 'policy_synced_at')")
+                else:
+                    for key, value in values.items():
+                        conn.execute("INSERT INTO sync_metadata (key, val) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET val=excluded.val", (key, str(value)))
+                conn.commit()
             finally:
                 conn.close()
 
@@ -532,7 +549,11 @@ class SQLiteEdgeDB:
                         spoofing_checked,
                         spoofing_passed,
                         timestamp,
-                        image_path
+                        image_path,
+                        node_id,
+                        policy_version,
+                        decision_reason,
+                        correlation_id
                     FROM device_auth_logs
                     WHERE sync_status = 0
                     ORDER BY timestamp ASC
@@ -551,6 +572,10 @@ class SQLiteEdgeDB:
                         "spoofing_passed": row[8],
                         "timestamp": row[9],
                         "image_path": row[10],
+                        "node_id": row[11],
+                        "policy_version": row[12],
+                        "decision_reason": row[13],
+                        "correlation_id": row[14],
                     }
                     for row in cursor.fetchall()
                 ]
@@ -880,6 +905,7 @@ class DownstreamSyncWorker:
                 data.get("user_roles", data.get("device_user_roles", [])),
             )
             self.db.save_rbac_delta(data.get("node_rbac", []))
+            self.db.save_policy_metadata(node_id=data.get("node_id"), policy_version=data.get("policy_version"), synced_at=data.get("policy_synced_at") or data.get("timestamp"))
 
             deleted_ids = data.get("deleted_user_ids", [])
             if deleted_ids:
@@ -1000,6 +1026,10 @@ class UpstreamSyncClient:
                     "spoofing_passed": log["spoofing_passed"],
                     "timestamp": log["timestamp"],
                     "image_path": log["image_path"],
+                    "node_id": log.get("node_id"),
+                    "policy_version": log.get("policy_version"),
+                    "decision_reason": log.get("decision_reason"),
+                    "correlation_id": log.get("correlation_id"),
                 }
             )
             log_id_mapping[index] = log["log_id"]

@@ -90,6 +90,7 @@ class Token(BaseSchema):
     email: str
     full_name: str
     admin_id: str
+    must_change_password: bool = False
 
 # ==========================================
 # Structural Reference Schemas
@@ -225,6 +226,7 @@ class VisitorBase(BaseSchema):
     organization: Optional[str] = None
     visit_purpose: Optional[str] = None
     access_expiry: datetime.datetime
+    access_start: Optional[datetime.datetime] = None
     registered_by: int
 
 class AdminBase(BaseSchema):
@@ -242,7 +244,7 @@ class UserResponse(UserBase):
     last_seen: Optional[datetime.datetime] = None
     roles: List[RoleResponse] = []
     imagepath: Optional[str] = None
-    face_vector: Optional[str] = None
+    face_enrolled: bool = False
     
     student: Optional[StudentBase] = None
     lecturer: Optional[LecturerBase] = None
@@ -260,7 +262,7 @@ class UserResponse(UserBase):
     last_seen: Optional[datetime.datetime] = None
     roles: List[RoleResponse] = []
     imagepath: Optional[str] = None
-    face_vector: Optional[str] = None
+    face_enrolled: bool = False
     
     student: Optional[StudentBase] = None
     lecturer: Optional[LecturerBase] = None
@@ -333,6 +335,7 @@ class VisitorUpdate(BaseSchema):
     organization: Optional[str] = None
     visit_purpose: Optional[str] = None
     access_expiry: Optional[datetime.datetime] = None
+    access_start: Optional[datetime.datetime] = None
     user: Optional[UserUpdate] = None
 
 class VisitorResponse(VisitorBase):
@@ -342,13 +345,23 @@ class VisitorResponse(VisitorBase):
 class AdminCreate(AdminBase):
     user: Optional[UserCreate] = None
     user_id: Optional[int] = None
-    password: Optional[str] = None
+    password: str
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    password: str
 
 class AdminUpdate(BaseSchema):
     admin_id: Optional[str] = None
     admin_type: Optional[AdminTypeEnum] = None
     department: Optional[str] = None
     department_id: Optional[str] = None
+    office_node_id: Optional[int] = None
+    password: Optional[str] = None
+    user: Optional[UserUpdate] = None
 
 class AdminResponse(AdminBase):
     user_id: int
@@ -481,6 +494,10 @@ class AuthenticationLogResponse(BaseSchema):
     spoofing_passed: Optional[bool] = None
     timestamp: datetime.datetime
     image_path: Optional[str] = None
+    node_id: Optional[int] = None
+    policy_version: Optional[str] = None
+    decision_reason: Optional[str] = None
+    correlation_id: Optional[str] = None
     
     # Backwards compatibility fields
     email: Optional[str] = None
@@ -498,6 +515,10 @@ class AuthenticationLogCreate(BaseSchema):
     spoofing_checked: bool = True
     spoofing_passed: Optional[bool] = None
     image_path: Optional[str] = None
+    node_id: Optional[int] = None
+    policy_version: Optional[str] = None
+    decision_reason: Optional[str] = None
+    correlation_id: Optional[str] = None
     
     # Backwards compatibility fields
     email: Optional[str] = None

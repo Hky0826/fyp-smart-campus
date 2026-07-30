@@ -5,12 +5,12 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import mysql.connector
-import bcrypt
 from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
 from app.models.models import Role, User, Admin, Building, Floorplan, Node, Edge, Department, Faculty, Programme, Staff, UserRole
+from app.core.security import get_password_hash, validate_strong_password
 
 def create_database():
     print(f"Connecting to MySQL server at {settings.DB_HOST}:{settings.DB_PORT}...")
@@ -161,12 +161,15 @@ def seed_data():
         # STAGE 4: SEED SECURE IDENTITY ROOT (User -> Staff -> Admin Linkage)
         # =========================================================================
         admin_role = roles_map["ADMIN"]
-        existing_admin = db.query(User).filter_by(email="admin").first()
+        existing_admin = db.query(User).filter_by(email="super.administrator@qiu.edu.my").first()
         
         if not existing_admin:
-            password_plain = "admin123"
-            salt = bcrypt.gensalt(rounds=12)
-            password_hash = bcrypt.hashpw(password_plain.encode('utf-8'), salt).decode('utf-8')
+            password_plain = os.getenv("INITIAL_ADMIN_PASSWORD", "")
+            try:
+                password_plain = validate_strong_password(password_plain, name_parts=("super", "administrator", "qiu"))
+            except ValueError as exc:
+                raise RuntimeError("INITIAL_ADMIN_PASSWORD must be provided and meet the strong password policy") from exc
+            password_hash = get_password_hash(password_plain)
             
             user = User(
                 given_name="Super",
@@ -199,12 +202,11 @@ def seed_data():
                 user_id=user.user_id,
                 staff_id="STF-00001",
                 admin_type="SUPER_ADMIN",
-                password_hash=password_hash
+                password_hash=password_hash,
+                must_change_password=True
             )
             db.add(admin)
-            print("Seeded default SUPER_ADMIN profile credentials:")
-            print(" -> email: 'admin'")
-            print(" -> Password: 'admin123'")
+            print("Seeded SUPER_ADMIN profile; require the provisioned password to be changed at first login.")
             
         db.commit()
         db.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))

@@ -65,7 +65,7 @@ A configuration `.env` file is generated at `dashboard/backend/.env`. Edit this 
 ```ini
 DB_HOST=localhost
 DB_PORT=3306
-DB_USER=root
+DB_USER=smart_campus_app
 DB_PASSWORD=your_mysql_password
 DB_NAME=biometric_rag_db
 ```
@@ -84,7 +84,7 @@ Run the initialization script to configure the database, run table structures, a
 
 *Seeded credentials for test login:*
 * **Username**: `admin`
-* **Password**: `admin123`
+* **Password**: the strong password provisioned during initialization; no default exists.
 
 ### 5. Launch the FastAPI Server
 Start the Uvicorn local development server:

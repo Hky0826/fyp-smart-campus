@@ -23,6 +23,7 @@ from app.core.database import get_db
 from app.models.models import AuthenticationLog, Device, User, SurveillanceLog
 from app.core.private_storage import private_path, ALLOWED_IMAGE_EXTENSIONS
 from app.core.device_auth import require_signed_device_request, bind_device_id
+from sync.callback_security import validate_callback_host
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -44,6 +45,10 @@ class EdgeLogPayload(BaseModel):
     spoofing_passed: Optional[bool] = None
     timestamp: str = Field(..., description="Timestamp of authentication attempt in ISO 8601 format")
     image_path: Optional[str] = None
+    node_id: Optional[int] = None
+    policy_version: Optional[str] = None
+    decision_reason: Optional[str] = None
+    correlation_id: Optional[str] = None
 
 class IngestionRequest(BaseModel):
     logs: List[EdgeLogPayload]
@@ -123,16 +128,16 @@ class SQLAlchemyUpstreamHandler(AbstractUpstreamHandler):
             logger.warning("Location Mutation Failed: User %s not found in database", user_id)
             return
 
-        if user_record.last_seen is not None and event_time < user_record.last_seen:
-            logger.info(
-                "Location Mutation Skipped: %s event for user %s is older than current last_seen",
-                source,
-                user_id,
-            )
+        from sqlalchemy import update
+        result = db.execute(
+            update(User)
+            .where(User.user_id == user_id)
+            .where((User.last_seen.is_(None)) | (User.last_seen <= event_time))
+            .values(last_known_location=device_record.node_id, last_seen=event_time)
+        )
+        if result.rowcount != 1:
+            logger.info("Location Mutation Skipped: %s event for user %s was older than current last_seen", source, user_id)
             return
-
-        user_record.last_known_location = device_record.node_id
-        user_record.last_seen = event_time
         logger.info(
             "Location Mutation: User %s last_known_location updated to Node %s from %s",
             user_id,
@@ -174,6 +179,10 @@ class SQLAlchemyUpstreamHandler(AbstractUpstreamHandler):
                     spoofing_passed=log.spoofing_passed,
                     timestamp=parsed_time,
                     image_path=log.image_path,
+                    node_id=log.node_id,
+                    policy_version=log.policy_version,
+                    decision_reason=log.decision_reason,
+                    correlation_id=log.correlation_id,
                 )
                 db.add(db_log)
                 db.flush() # Flushes so we trigger constraints and auto-increment
@@ -305,20 +314,14 @@ class SQLAlchemyUpstreamHandler(AbstractUpstreamHandler):
         """
         device = db.query(Device).filter(Device.device_id == hb.device_id).first()
         if not device:
-            # Create a fallback Device record
-            device = Device(
-                device_id=hb.device_id,
-                device_name=hb.device_name,
-                node_id=1,  # Default fallback node
-                device_type="KIOSK",
-                ip_address=hb.ip_address,
-                is_active=True,
-                last_heartbeat=datetime.datetime.utcnow()
-            )
-            db.add(device)
-            logger.info(f"Heartbeat created new device: {hb.device_id}")
+            raise HTTPException(status_code=403, detail="Device is not administratively provisioned")
         else:
-            device.ip_address = hb.ip_address
+            # Heartbeats prove liveness only; they cannot select a callback.
+            if not device.callback_url and device.ip_address:
+                try:
+                    device.callback_url = validate_callback_host(device.ip_address)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail="Device callback is not securely provisioned") from exc
             device.last_heartbeat = datetime.datetime.utcnow()
             device.is_active = True
             logger.debug(f"Heartbeat received from device: {hb.device_id}")
@@ -346,8 +349,15 @@ def ingest_logs(req: IngestionRequest, device: Device = Depends(require_signed_d
     Ingestion streaming endpoint for offline-buffered authentication logs.
     Includes location mutation hooks and transactional confirmation.
     """
+    if len(req.logs) > 500:
+        raise HTTPException(status_code=413, detail="Too many log records")
     for log in req.logs:
         bind_device_id(log.device_id, device)
+        log.device_id = device.device_id
+        if log.auth_status.upper() not in {"SUCCESS", "FAILED", "SPOOFING"} or log.face_count < 0 or log.face_count > 10:
+            raise HTTPException(status_code=422, detail="Invalid authentication log")
+        if log.user_id is not None and not db.query(User.user_id).filter(User.user_id == log.user_id).first():
+            raise HTTPException(status_code=422, detail="Invalid authentication log")
     success_indices = handler.ingest_authentication_logs(db, req.logs)
     
     # Return verification handshake confirmation. 
@@ -363,8 +373,11 @@ def ingest_surveillance_logs(req: SurveillanceIngestionRequest, device: Device =
     """
     Ingestion endpoint for offline-buffered surveillance detections and snapshots.
     """
+    if len(req.logs) > 500:
+        raise HTTPException(status_code=413, detail="Too many log records")
     for log in req.logs:
         bind_device_id(log.device_id, device)
+        log.device_id = device.device_id
     success_indices = handler.ingest_surveillance_logs(db, req.logs)
     return {
         "status": "processed",

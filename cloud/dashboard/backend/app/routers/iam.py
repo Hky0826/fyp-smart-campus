@@ -12,9 +12,10 @@ import cv2
 import numpy as np
 
 from app.core.database import get_db
-from app.core.security import verify_system_admin, verify_super_admin, get_password_hash
+from app.core.security import verify_system_admin, verify_super_admin, get_password_hash, validate_strong_password
 from app.core.config import settings
 from app.core.private_storage import private_path, safe_existing_path
+from app.core.audit import record_audit
 from app.facial_recognition.alignment import extract_aligned_face
 from app.models.models import Role, User, Student, Lecturer, Staff, Visitor, Admin, Node, Department, Faculty, Programme
 from app.schemas import schemas
@@ -203,6 +204,22 @@ except Exception as _e:
 enrollment_sessions = {}
 enrollment_progress = {}
 scrfd_detector_instance = None
+
+
+def _read_bounded(stream, limit: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while total <= limit:
+        chunk = stream.read(min(1024 * 1024, limit - total + 1))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail="Uploaded file exceeds the allowed size")
+    if not chunks:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    return b"".join(chunks)
 
 def get_scrfd_detector():
     global scrfd_detector_instance
@@ -857,6 +874,7 @@ def create_visitor(visitor_in: schemas.VisitorCreate, db: Session = Depends(get_
         id_number=visitor_in.id_number,
         organization=visitor_in.organization,
         visit_purpose=visitor_in.visit_purpose,
+        access_start=visitor_in.access_start or user.enrolled_at or datetime.datetime.utcnow(),
         access_expiry=visitor_in.access_expiry,
         registered_by=visitor_in.registered_by if visitor_in.registered_by else current_admin.user_id
     )
@@ -905,6 +923,11 @@ def list_admins(db: Session = Depends(get_db), current_admin=Depends(verify_supe
 
 @router.post("/admins", response_model=schemas.AdminResponse)
 def create_admin(admin_in: schemas.AdminCreate, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+    user_input = admin_in.user
+    try:
+        password = validate_strong_password(admin_in.password, name_parts=tuple(filter(None, (user_input.given_name if user_input else "", user_input.family_name if user_input else "", user_input.email if user_input else ""))))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Password does not meet security requirements") from exc
     # 1. Determine admin_id
     admin_id = admin_in.admin_id
     if not admin_id:
@@ -953,16 +976,18 @@ def create_admin(admin_in: schemas.AdminCreate, db: Session = Depends(get_db), c
         db.add(staff)
         db.flush()
         
-    password_hash = get_password_hash(admin_in.password or "admin123")
+    password_hash = get_password_hash(password)
     
     admin = Admin(
         admin_id=admin_id,
         user_id=user.user_id,
         staff_id=staff.staff_id,
         admin_type=admin_in.admin_type,
-        password_hash=password_hash
+        password_hash=password_hash,
+        must_change_password=True,
     )
     db.add(admin)
+    record_audit(db, actor_user_id=current_admin.user_id, action="admin_created", target_type="admin", target_id=admin_id, result="success")
     db.commit()
     db.refresh(admin)
     return admin
@@ -984,7 +1009,14 @@ def update_admin(admin_id: str, admin_in: schemas.AdminUpdate, db: Session = Dep
         setattr(admin, field, val)
         
     if password:
+        try:
+            password = validate_strong_password(password, name_parts=(admin.user.given_name, admin.user.family_name, admin.user.email))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Password does not meet security requirements") from exc
         admin.password_hash = get_password_hash(password)
+        admin.must_change_password = False
+        for session in admin.user.sessions:
+            session.is_revoked = True
         
     if department_id is not None or department is not None:
         dept = resolve_department(db, department_id, department)
@@ -997,6 +1029,8 @@ def update_admin(admin_id: str, admin_in: schemas.AdminUpdate, db: Session = Dep
             
     if user_data:
         apply_user_update(db, admin.user, user_data)
+
+    record_audit(db, actor_user_id=current_admin.user_id, action="admin_updated", target_type="admin", target_id=admin_id, result="success", details={"privilege": admin.admin_type})
             
     db.commit()
     db.refresh(admin)
@@ -1035,13 +1069,15 @@ def upload_user_face_photo(
 
     # Read uploaded file
     try:
-        file_bytes = file.file.read()
+        file_bytes = _read_bounded(file.file, settings.MAX_BIOMETRIC_BYTES)
         nparr = np.frombuffer(file_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
             raise HTTPException(status_code=400, detail="Invalid image file format")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read/decode uploaded photo: {e}")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid image upload")
 
     # Detect and align first; all model work is staged before old templates are touched.
     crop = None
@@ -1069,7 +1105,7 @@ def upload_user_face_photo(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Enrollment failed: {pose}: {exc}") from exc
+        raise HTTPException(status_code=400, detail="Enrollment failed; image could not be processed") from exc
 
     if crop is None or crop.size == 0:
         raise HTTPException(status_code=400, detail=f"Enrollment failed: {pose}: could not extract a usable face")
@@ -1085,7 +1121,7 @@ def upload_user_face_photo(
 
     return {
         "detail": f"Face photo for {pose} uploaded and Face ID templates updated successfully",
-        "face_vector": user.face_vector,
+        "face_enrolled": user.face_enrolled,
         "imagepath": user.imagepath
     }
 
@@ -1137,19 +1173,21 @@ async def enroll_live_frame(
             raise HTTPException(status_code=404, detail="User not found")
 
         try:
-            file_bytes = await file.read()
+            file_bytes = _read_bounded(file.file, settings.MAX_BIOMETRIC_BYTES)
             nparr = np.frombuffer(file_bytes, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             if img is None:
                 raise HTTPException(status_code=400, detail="Invalid image frame")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to read/decode frame: {e}")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid image upload")
 
         detector = get_scrfd_detector()
         try:
             faces = detector.detect(img)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Detector inference failed: {e}")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Image processing failed")
 
         if not faces:
             return {
@@ -1365,7 +1403,7 @@ def enroll_live_complete(
 
         return {
             "detail": "Live multi-pose face enrollment completed successfully.",
-            "face_vector": user.face_vector,
+            "face_enrolled": user.face_enrolled,
             "imagepath": user.imagepath
         }
     finally:
@@ -1387,10 +1425,22 @@ async def enroll_user_video(
     import tempfile
     temp_video = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
     try:
-        temp_video.write(await file.read())
+        temp_video.write(_read_bounded(file.file, settings.MAX_SURVEILLANCE_BYTES * 10))
         temp_video.close()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to write uploaded video: {e}")
+    except HTTPException:
+        try:
+            temp_video.close()
+            os.unlink(temp_video.name)
+        except OSError:
+            pass
+        raise
+    except Exception:
+        try:
+            temp_video.close()
+            os.unlink(temp_video.name)
+        except OSError:
+            pass
+        raise HTTPException(status_code=400, detail="Invalid video upload")
 
     cap = cv2.VideoCapture(temp_video.name)
     if not cap.isOpened():
@@ -1515,7 +1565,7 @@ async def enroll_user_video(
 
     return {
         "detail": "Video face enrollment completed successfully.",
-        "face_vector": user.face_vector,
+        "face_enrolled": user.face_enrolled,
         "imagepath": user.imagepath
     }
 

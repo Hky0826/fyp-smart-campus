@@ -1,5 +1,3 @@
-import React from 'react'
-
 function App() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 px-4 relative overflow-hidden text-slate-100">
@@ -28,7 +26,7 @@ function App() {
             For an out-of-the-box working portal, run the FastAPI server and navigate to:
           </p>
           <p className="text-sm font-bold text-emerald-400 mt-2 font-mono">
-            http://127.0.0.1:8000/dashboard
+            https://127.0.0.1:8000/dashboard
           </p>
         </div>
       </div>

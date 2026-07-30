@@ -67,7 +67,7 @@ def _cloud_audio_url() -> str:
     configured = _optional_str_env("EDGE_AUDIO_CLOUD_API_URL")
     if configured:
         return configured
-    cloud_base_url = os.getenv("EDGE_SYNC_CLOUD_URL", "http://10.178.101.3:8000").rstrip("/")
+    cloud_base_url = os.getenv("EDGE_SYNC_CLOUD_URL", "https://127.0.0.1:8000").rstrip("/")
     return f"{cloud_base_url}/api/chatbot/chat/audio"
 
 

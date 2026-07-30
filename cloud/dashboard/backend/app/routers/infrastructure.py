@@ -12,7 +12,7 @@ import requests
 
 from app.core.database import get_db
 from app.core.config import settings
-from app.core.device_auth import generate_device_secret, encrypt_device_secret
+from app.core.device_auth import generate_device_secret, encrypt_device_secret, require_signed_device_request, bind_device_id
 from app.core.private_storage import safe_existing_path
 from app.core.security import verify_super_admin, get_current_admin
 from app.models.models import Device, NodeRBAC, EdgeRBAC, JWTSession, AuthenticationLog, SurveillanceLog, Node, Role, Edge, User, Admin, Floorplan, Course, UploadedDocument
@@ -370,8 +370,15 @@ def list_last_known_locations(
 @router.post("/auth-logs", response_model=schemas.AuthenticationLogResponse)
 def create_auth_log(
     log_in: schemas.AuthenticationLogCreate, 
+    device: Device = Depends(require_signed_device_request),
     db: Session = Depends(get_db)
 ):
+    """Compatibility shim; signed device identity is authoritative."""
+    bind_device_id(log_in.device_id, device)
+    if log_in.auth_status not in {"SUCCESS", "FAILED", "SPOOFING"}:
+        raise HTTPException(status_code=422, detail="Invalid authentication status")
+    if log_in.user_id is not None and not db.query(User).filter_by(user_id=log_in.user_id).first():
+        raise HTTPException(status_code=422, detail="Unknown user")
     existing = db.query(AuthenticationLog).filter_by(sync_key=log_in.sync_key).first()
     if existing:
         return existing
@@ -389,14 +396,18 @@ def create_auth_log(
     log = AuthenticationLog(
         sync_key=log_in.sync_key,
         user_id=user_id,
-        device_id=log_in.device_id,
-        auth_status=auth_status or "SUCCESS",
+        device_id=device.device_id,
+        auth_status=auth_status or "FAILED",
         confidence_score=log_in.confidence_score,
         face_count=log_in.face_count,
         reason=log_in.reason,
         spoofing_checked=log_in.spoofing_checked,
         spoofing_passed=log_in.spoofing_passed,
         image_path=log_in.image_path,
+        node_id=device.node_id,
+        policy_version=log_in.policy_version,
+        decision_reason=log_in.decision_reason,
+        correlation_id=log_in.correlation_id,
         timestamp=datetime.utcnow()
     )
     db.add(log)

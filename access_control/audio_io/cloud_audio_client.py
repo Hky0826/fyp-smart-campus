@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import requests
+from urllib.parse import urlsplit
 
 try:
     from .config import AudioIOConfig
@@ -71,6 +73,11 @@ class CloudAudioClient:
         credential_provider: Callable[[], CloudChatCredentials | Mapping[str, Any] | str | None] | None = None,
     ) -> None:
         self.config = config or AudioIOConfig()
+        for endpoint in (self.config.cloud_api_url, self.config.cloud_stream_api_url):
+            parsed = urlsplit(endpoint)
+            allow_loopback = os.getenv("EDGE_ALLOW_INSECURE_LOOPBACK", "false").lower() in {"1", "true", "yes", "on"}
+            if parsed.scheme != "https" and not (allow_loopback and parsed.hostname in {"127.0.0.1", "localhost", "::1"}):
+                raise ValueError("Cloud audio endpoints must use HTTPS")
         self.credential_provider = credential_provider
 
     def send_audio(self, audio_path: str | Path) -> AudioResponseData:

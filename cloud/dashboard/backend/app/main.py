@@ -1,5 +1,7 @@
 import os
 import sys
+import uuid
+import logging
 
 # Add the parent directory of 'app' to sys.path so Python can find the 'app' module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,10 +16,11 @@ cloud_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",
 if cloud_root not in sys.path:
     sys.path.insert(0, cloud_root)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, FileResponse, PlainTextResponse
+from fastapi.responses import RedirectResponse, FileResponse, PlainTextResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
 
 from app.routers import auth, iam, rag, infrastructure, academics, references, embeddings
 from app.routers.edge_auth import router as edge_auth_router
@@ -35,6 +38,22 @@ app = FastAPI(
     description="Enterprise-grade administrative API and database manager.",
     version="1.0.0"
 )
+logger = logging.getLogger("smart-campus.api")
+
+
+@app.middleware("http")
+async def correlation_context(request: Request, call_next):
+    correlation_id = request.headers.get("X-Correlation-ID")
+    if not correlation_id or len(correlation_id) > 64 or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for ch in correlation_id):
+        correlation_id = uuid.uuid4().hex
+    request.state.correlation_id = correlation_id
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception("Unhandled request failure correlation_id=%s method=%s path=%s", correlation_id, request.method, request.url.path)
+        response = JSONResponse(status_code=500, content={"detail": "Request could not be completed", "correlation_id": correlation_id})
+    response.headers["X-Correlation-ID"] = correlation_id
+    return response
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(CSRFMiddleware)
 

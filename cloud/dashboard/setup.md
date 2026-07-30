@@ -16,7 +16,7 @@ Since MySQL is not yet configured or running on your machine, you can choose **e
    - **MySQL Workbench** (Optional: GUI manager)
 4. During configuration:
    - Keep default Port `3306`.
-   - Set a password for the `root` account (remember this for your `.env` file).
+   - Create a least-privilege `smart_campus_app` account with a unique password.
    - Configure it as a Windows Service named `MySQL97` (or similar).
 5. Finish installation.
 
@@ -28,7 +28,7 @@ If you already have Docker installed and prefer not to install MySQL directly on
    docker-compose up -d
    docker run --name smart-campus-mysql -e MYSQL_ROOT_PASSWORD=3996 -p 3306:3306 -d mysql:9.0
    ```
-3. Set `DB_PASSWORD=your_root_password_here` in your `.env` file. The FastAPI backend will connect to it exactly the same way.
+3. Set `DB_USER=smart_campus_app` and its unique `DB_PASSWORD` in your `.env` file.
 
 ---
 
@@ -95,8 +95,8 @@ This will fetch and configure:
    ```ini
    DB_HOST=localhost
    DB_PORT=3306
-   DB_USER=root
-   DB_PASSWORD=your_root_password_here   <-- Insert the password you set during installation
+   DB_USER=smart_campus_app
+   DB_PASSWORD=your_database_password_here
    DB_NAME=biometric_rag_db
    ```
 3. Save the file.
@@ -120,7 +120,7 @@ python dashboard/backend/app/db_init.py
 5. Seeds a default campus structure (e.g. `FCI Building`, Room nodes, and path edges).
 6. Creates a default **SUPER_ADMIN** profile:
    - **Username**: `admin`
-   - **Password**: `admin123`
+   - **Password**: provision a strong password; no default password exists.
 
 ---
 
@@ -137,7 +137,7 @@ You should see output similar to:
 INFO:     Started server process [12820]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Uvicorn running on https://127.0.0.1:8000 (Press CTRL+C to quit)
 ```
 
 ---
@@ -145,10 +145,10 @@ INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 ## Step 6: Log In and Test the Dashboard
 
 1. Open your browser and navigate to:
-   **[http://127.0.0.1:8000/dashboard/](http://127.0.0.1:8000/dashboard/)**
+   **[https://127.0.0.1:8000/dashboard/](https://127.0.0.1:8000/dashboard/)**
 2. Use the seeded credentials to log in:
    - **Username**: `admin`
-   - **Password**: `admin123`
+   - **Password**: the strong password provisioned during initialization.
 3. Once logged in, you will access the admin overview console. You can:
    - Browse and CRUD user profiles (under *Identity Profiles*).
    - Track and add hardware items (under *Infrastructure*).

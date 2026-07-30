@@ -15,31 +15,31 @@ def check_staff_exists(db: Session, staff_id: str):
         raise HTTPException(status_code=400, detail=f"Staff ID {staff_id} does not exist")
 
 @router.get("/buildings", response_model=List[schemas.BuildingResponse])
-def get_buildings(db: Session = Depends(get_db)):
+def get_buildings(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     return db.query(Building).all()
 
 @router.get("/floorplans", response_model=List[schemas.FloorplanResponse])
-def get_floorplans(db: Session = Depends(get_db)):
+def get_floorplans(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     return db.query(Floorplan).all()
 
 @router.get("/nodes", response_model=List[schemas.NodeResponse])
-def get_nodes(db: Session = Depends(get_db)):
+def get_nodes(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     return db.query(Node).all()
 
 @router.get("/edges", response_model=List[schemas.EdgeResponse])
-def get_edges(db: Session = Depends(get_db)):
+def get_edges(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     return db.query(Edge).all()
 
 @router.get("/faculties", response_model=List[schemas.FacultyResponse])
-def get_faculties(db: Session = Depends(get_db)):
+def get_faculties(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     return db.query(Faculty).all()
 
 @router.get("/programmes", response_model=List[schemas.ProgrammeResponse])
-def get_programmes(db: Session = Depends(get_db)):
+def get_programmes(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     return db.query(Programme).all()
 
 @router.get("/departments", response_model=List[schemas.DepartmentResponse])
-def get_departments(db: Session = Depends(get_db)):
+def get_departments(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     return db.query(Department).all()
 
 

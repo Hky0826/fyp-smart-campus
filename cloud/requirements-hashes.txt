@@ -1,0 +1,5 @@
+# CI contract: production installation must use a generated hash-locked file.
+# Generate/verify with:
+#   python -m pip install pip-tools
+#   pip-compile --allow-unsafe --generate-hashes --output-file cloud/requirements-prod.lock cloud/requirements-prod.txt
+#   python -m pip install --require-hashes -r cloud/requirements-prod.lock

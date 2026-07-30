@@ -1,0 +1,22 @@
+# Reviewed exact production pins. Regenerate with pip-compile --generate-hashes
+# in the release pipeline and commit the resulting hash-locked artifact.
+fastapi==0.139.0
+uvicorn[standard]==0.50.0
+python-multipart==0.0.32
+python-dotenv==1.2.2
+pydantic[email]==2.13.4
+PyJWT==2.13.0
+bcrypt==5.0.0
+cryptography==49.0.0
+SQLAlchemy==2.0.51
+mysql-connector-python==9.7.0
+requests==2.34.2
+redis==8.0.1
+google-generativeai==0.8.5
+google-genai==1.67.0
+google-cloud-texttospeech==2.33.0
+numpy==2.5.1
+opencv-python==4.11.0.86
+onnxruntime==1.27.0
+torch==2.12.1
+timm==1.0.24

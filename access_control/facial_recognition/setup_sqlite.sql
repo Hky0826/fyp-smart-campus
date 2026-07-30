@@ -11,6 +11,8 @@ PRAGMA journal_mode = WAL;
 CREATE TABLE IF NOT EXISTS device_users (
     user_id INTEGER PRIMARY KEY NOT NULL,
     is_active INTEGER DEFAULT 1 NOT NULL CHECK (is_active IN (0, 1)),
+    visitor_start DATETIME NULL,
+    visitor_expiry DATETIME NULL,
     last_synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -56,6 +58,10 @@ CREATE TABLE IF NOT EXISTS device_auth_logs (
     spoofing_passed INTEGER NULL CHECK (spoofing_passed IS NULL OR spoofing_passed IN (0, 1)),
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     image_path TEXT NULL,
+    node_id INTEGER NULL,
+    policy_version TEXT NULL,
+    decision_reason TEXT NULL,
+    correlation_id TEXT NULL,
     sync_status INTEGER DEFAULT 0 NOT NULL CHECK (sync_status IN (0, 1)),
     synced_at DATETIME NULL,
     FOREIGN KEY (user_id) REFERENCES device_users(user_id) ON DELETE SET NULL ON UPDATE CASCADE
@@ -85,7 +91,8 @@ CREATE TABLE IF NOT EXISTS device_info (
     device_name TEXT NOT NULL,
     node_id INTEGER NOT NULL,
     location_name TEXT NOT NULL,
-    last_cloud_sync DATETIME NULL
+    last_cloud_sync DATETIME NULL,
+    policy_version TEXT NULL
 );
 
 -- Table 3.47: device_node_rbac

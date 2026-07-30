@@ -3,6 +3,8 @@ import uuid
 from datetime import datetime, timedelta
 import jwt
 import bcrypt
+import re
+import secrets
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -22,6 +24,29 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
     except Exception:
         return False
+
+
+COMMON_PASSWORDS = {"password", "password123", "admin", "admin123", "qwerty", "welcome", "letmein", "changeme"}
+
+
+def validate_strong_password(password: str, *, name_parts: tuple[str, ...] = ()) -> str:
+    value = (password or "").strip()
+    lowered = value.casefold()
+    if len(value) < 14 or len(value) > 256:
+        raise ValueError("Password must be between 14 and 256 characters")
+    if lowered in COMMON_PASSWORDS or any(part and part.casefold() in lowered for part in name_parts if len(part) >= 3):
+        raise ValueError("Password is too common or contains account-identifying text")
+    if not re.search(r"[A-Za-z]", value) or not re.search(r"\d", value):
+        raise ValueError("Password must contain letters and numbers")
+    return value
+
+
+def issue_password_reset_token(admin, db, ttl_minutes: int = 15) -> str:
+    raw = secrets.token_urlsafe(32)
+    admin.reset_token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    admin.reset_token_expires_at = datetime.utcnow() + timedelta(minutes=ttl_minutes)
+    db.flush()
+    return raw
 
 def create_access_token(data: dict, expires_delta: timedelta = None, *, session_uuid: str | None = None, jti: str | None = None) -> str:
     to_encode = data.copy()

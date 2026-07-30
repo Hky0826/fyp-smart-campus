@@ -27,6 +27,7 @@ from app.core.database import get_db, Base, engine
 from app.core.security import verify_super_admin
 from app.models.models import User, Role, NodeRBAC, Device, UserRole, DeletedUser
 from app.core.device_auth import decrypt_device_secret, require_signed_device_request, bind_device_id, sign_request
+from sync.callback_security import validate_callback_url
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -57,6 +58,8 @@ class UserSyncResponse(BaseModel):
     is_active: int
     last_synced_at: str
     embeddings: Optional[List[Dict[str, Any]]] = None
+    visitor_start: Optional[str] = None
+    visitor_expiry: Optional[str] = None
 
 class RoleSyncResponse(BaseModel):
     role_id: int
@@ -80,6 +83,9 @@ class DeltaSyncResponse(BaseModel):
     node_rbac: List[NodeRbacSyncResponse]
     deleted_user_ids: List[int] = Field(default_factory=list)
     timestamp: str
+    node_id: Optional[int] = None
+    policy_version: Optional[str] = None
+    policy_synced_at: Optional[str] = None
 
 class DeactivateRequest(BaseModel):
     user_id: int
@@ -137,15 +143,10 @@ class EdgeNotificationDispatcher:
 
     @staticmethod
     def _device_target(device: Device) -> tuple[str, int]:
-        if not device.ip_address:
-            raise ValueError("Device has no advertised IP address")
-        if ":" in device.ip_address:
-            ip, port_str = device.ip_address.rsplit(":", 1)
-            try:
-                return ip, int(port_str)
-            except ValueError:
-                pass
-        return device.ip_address, 8001
+        if not device.callback_url:
+            raise ValueError("Device has no administratively provisioned callback URL")
+        parsed = urlsplit(validate_callback_url(device.callback_url))
+        return parsed.hostname or "", parsed.port or 443
 
     @staticmethod
     def send_deactivation_push(device: Device, user_id: int) -> bool:
@@ -157,12 +158,12 @@ class EdgeNotificationDispatcher:
         except ValueError as exc:
             logger.warning("Skipping deactivation push for %s: %s", device.device_id, exc)
             return False
-        url = f"http://{ip_address}:{port}/api/edge/deactivate"
+        url = f"https://{ip_address}:{port}/api/edge/deactivate"
         payload = {"user_id": user_id, "is_active": 0}
         body = json.dumps(payload, separators=(",", ":")).encode()
         try:
             logger.info(f"Dispatching instant deactivation push to {url} for user {user_id}")
-            response = requests.post(url, data=body, headers={**EdgeNotificationDispatcher._signed_headers(device, "POST", url, body), "Content-Type": "application/json"}, timeout=3.0)
+            response = requests.post(url, data=body, headers={**EdgeNotificationDispatcher._signed_headers(device, "POST", url, body), "Content-Type": "application/json"}, timeout=3.0, allow_redirects=False)
             if response.status_code == 200:
                 logger.info(f"Successfully pushed deactivation to edge device at {ip_address}")
                 return True
@@ -184,10 +185,10 @@ class EdgeNotificationDispatcher:
         except ValueError as exc:
             logger.warning("Skipping sync push for %s: %s", device.device_id, exc)
             return False
-        url = f"http://{ip_address}:{port}/api/edge/trigger-sync"
+        url = f"https://{ip_address}:{port}/api/edge/trigger-sync"
         try:
             logger.info(f"Dispatching trigger-sync push to edge at {ip_address}:{port}")
-            response = requests.post(url, headers=EdgeNotificationDispatcher._signed_headers(device, "POST", url), timeout=3.0)
+            response = requests.post(url, headers=EdgeNotificationDispatcher._signed_headers(device, "POST", url), timeout=3.0, allow_redirects=False)
             if response.status_code == 200:
                 logger.info(f"Edge device at {ip_address}:{port} acknowledged trigger-sync.")
                 return True
@@ -209,6 +210,10 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
     """
 
     def register_edge_node(self, db: Session, reg: EdgeRegistration) -> Dict[str, Any]:
+        try:
+            callback_url = validate_callback_url(f"https://{reg.ip_address}:{reg.port}")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Edge callback must be an approved HTTPS destination") from exc
         # Query device by device_id
         device = db.query(Device).filter(Device.device_id == reg.device_id).first()
         if not device:
@@ -219,6 +224,7 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
                 node_id=reg.node_id,
                 device_type="KIOSK",
                 ip_address=f"{reg.ip_address}:{reg.port}",
+                callback_url=callback_url,
                 is_active=True,
                 last_heartbeat=datetime.datetime.utcnow()
             )
@@ -227,6 +233,7 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
         else:
             # Update IP address and attributes
             device.ip_address = f"{reg.ip_address}:{reg.port}"
+            device.callback_url = callback_url
             device.device_name = reg.device_name
             device.node_id = reg.node_id
             device.last_heartbeat = datetime.datetime.utcnow()
@@ -294,6 +301,8 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
             )
         
         users_list = user_query.all()
+        policy_synced_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        policy_version = policy_synced_at
         sync_users = []
         for u in users_list:
             embeddings_payload = []
@@ -318,6 +327,8 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
                 is_active=1 if u.is_active else 0,
                 last_synced_at=u.enrolled_at.isoformat() if u.enrolled_at else datetime.datetime.utcnow().isoformat(),
                 embeddings=embeddings_payload
+                ,visitor_start=(u.visitor.access_start.isoformat() if u.visitor and u.visitor.access_start else (u.enrolled_at.isoformat() if u.visitor and u.enrolled_at else None))
+                ,visitor_expiry=u.visitor.access_expiry.isoformat() if u.visitor else None
             ))
 
         # Roles and assignments are deliberately returned as complete snapshots.
@@ -367,7 +378,10 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
             "user_roles": sync_user_roles,
             "node_rbac": sync_rbac,
             "deleted_user_ids": deleted_user_ids,
-            "timestamp": datetime.datetime.utcnow().isoformat()
+            "timestamp": policy_synced_at,
+            "node_id": None,
+            "policy_version": policy_version,
+            "policy_synced_at": policy_synced_at,
         }
 
     def deactivate_user_and_push(self, db: Session, user_id: int, background_tasks: BackgroundTasks) -> Dict[str, Any]:
@@ -452,7 +466,9 @@ def get_deltas(last_synced_at: Optional[str] = None, module: Optional[str] = Non
     model_by_module = {"access_control": {"openvc_sface"}, "surveillance": {"auraface"}, "edge": {"arcface_r50"}}
     if module is not None and module not in model_by_module:
         raise HTTPException(status_code=400, detail="module must be access_control, surveillance, or edge")
-    return handler.get_delta_updates(db, parsed_time, model_by_module.get(module))
+    payload = handler.get_delta_updates(db, parsed_time, model_by_module.get(module))
+    payload["node_id"] = device.node_id
+    return payload
 
 @router.post("/deactivate")
 def administrative_deactivate(req: DeactivateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):

@@ -3,7 +3,7 @@ import json
 from typing import Optional, List
 from sqlalchemy import Column, Integer, String, Text, DateTime, Date, Time, ForeignKey, Enum, Boolean, JSON, Float, UniqueConstraint, LargeBinary
 from sqlalchemy.types import UserDefinedType
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, synonym
 from app.core.database import Base
 
 class VECTOR(UserDefinedType):
@@ -70,6 +70,9 @@ class Node(Base):
     floorplan_id = Column(Integer, ForeignKey("floorplans.floorplan_id"), nullable=False)
     coord_x = Column(Float, nullable=False)
     coord_y = Column(Float, nullable=False)
+    # Compatibility aliases used by older sync fixtures and clients.
+    cord_x = synonym("coord_x")
+    cord_y = synonym("coord_y")
     room_label = Column(String(100), nullable=False)
     is_accessible = Column(Enum("ALLOW", "DENY"), default="ALLOW", nullable=False)
     node_type = Column(Enum('CLASSROOM','CORRIDOR','ENTRANCE','STAIRWELL','ELEVATOR','FOOD','OFFICE','FACILITIES','HALL','WASHROOM','OUTDOOR','SOCIAL SPACES','OTHER','ROOM','CAFETERIA','LABORATORY','LECTURE_HALL','RESTROOM'), nullable=False)
@@ -153,6 +156,10 @@ class User(Base):
                 except Exception:
                     pass
         return None
+
+    @property
+    def face_enrolled(self) -> bool:
+        return bool(self.embeddings)
     
     # Sub-profiles
     student = relationship("Student", back_populates="user", uselist=False, cascade="all, delete-orphan")
@@ -327,6 +334,7 @@ class Visitor(Base):
     id_number = Column(String(50), nullable=False)
     organization = Column(String(150), nullable=True)
     visit_purpose = Column(Text, nullable=True)
+    access_start = Column(DateTime, nullable=True)
     access_expiry = Column(DateTime, nullable=False)
     registered_by = Column(Integer, ForeignKey("users.user_id", ondelete="RESTRICT"), nullable=False)
     
@@ -341,6 +349,9 @@ class Admin(Base):
     staff_id = Column(String(50), ForeignKey("staff.staff_id", ondelete="RESTRICT"), nullable=False)
     admin_type = Column(Enum("SUPER_ADMIN", "SYSTEM_ADMIN", "CONTENT_ADMIN"), nullable=False)
     password_hash = Column(String(255), nullable=False)
+    must_change_password = Column(Boolean, default=True, nullable=False)
+    reset_token_hash = Column(String(128), nullable=True)
+    reset_token_expires_at = Column(DateTime, nullable=True)
     
     user = relationship("User", back_populates="admin")
     staff = relationship("Staff")
@@ -449,6 +460,7 @@ class Device(Base):
     node_id = Column(Integer, ForeignKey("nodes.node_id"), nullable=False)
     device_type = Column(Enum("KIOSK", "ENTRY_GATE", "CLASSROOM", "OFFICE", "OTHER"), nullable=False)
     ip_address = Column(String(45), nullable=True)
+    callback_url = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     last_heartbeat = Column(DateTime, nullable=True)
     installed_at = Column(DateTime, default=datetime.datetime.utcnow)
@@ -540,9 +552,14 @@ class AuthenticationLog(Base):
     spoofing_passed = Column(Boolean, nullable=True)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     image_path = Column(String(500), nullable=True)
+    node_id = Column(Integer, ForeignKey("nodes.node_id", ondelete="SET NULL"), nullable=True)
+    policy_version = Column(String(128), nullable=True)
+    decision_reason = Column(String(100), nullable=True)
+    correlation_id = Column(String(64), nullable=True)
     
     user = relationship("User")
     device = relationship("Device")
+    node = relationship("Node", foreign_keys=[node_id])
     
     @property
     def email(self):
@@ -552,6 +569,23 @@ class AuthenticationLog(Base):
     def status(self):
         # Backwards compatibility with AuthStatusEnum in older API
         return self.auth_status
+
+
+class AdministratorAuditEvent(Base):
+    """Append-only security audit event; payloads are metadata, never secrets."""
+
+    __tablename__ = "administrator_audit_events"
+
+    event_id = Column(Integer, primary_key=True, autoincrement=True)
+    actor_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    action = Column(String(100), nullable=False)
+    target_type = Column(String(50), nullable=False)
+    target_id = Column(String(100), nullable=True)
+    result = Column(String(32), nullable=False)
+    correlation_id = Column(String(64), nullable=True)
+    source_ip = Column(String(45), nullable=True)
+    details = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
         
     @property
     def attempted_at(self):

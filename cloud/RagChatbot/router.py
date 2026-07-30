@@ -71,10 +71,14 @@ _AI_JOB_LIMIT = BoundedSemaphore(max(1, int(os.getenv("MAX_AI_CONCURRENCY", "8")
 
 
 def _enforce_ai_quota(request: Request, token: str | None, device_id: str | None, *, audio: bool = False) -> None:
-    identity = f"device:{device_id}" if device_id else (f"auth:{hashlib.sha256(token.encode()).hexdigest()[:16]}" if token else f"anon:{client_ip(request)}")
-    enforce_limit(identity, 60 if token or device_id else 8, 60, "AI request quota exceeded")
+    # Request-body device_id is informational.  It must never select a higher
+    # quota; only a verified credential (or the caller IP) is a quota key.
+    ip = client_ip(request)
+    enforce_limit(f"ai-ip:{ip}", 120, 60, "AI request quota exceeded")
+    identity = f"auth:{hashlib.sha256(token.encode()).hexdigest()[:16]}" if token else f"anon:{ip}"
+    enforce_limit(identity, 60 if token else 8, 60, "AI request quota exceeded")
     if audio:
-        enforce_limit(f"audio:{identity}", 20 if token or device_id else 3, 60, "Audio request quota exceeded")
+        enforce_limit(f"audio:{identity}", 20 if token else 3, 60, "Audio request quota exceeded")
 
 
 def _greeting_text(full_name: str | None, given_name: str | None = None) -> str:
@@ -166,7 +170,18 @@ async def _read_valid_audio_upload(audio: UploadFile) -> tuple[bytes, str]:
             detail=f"Expected an audio file, got {audio.content_type}.",
         )
 
-    audio_bytes = await audio.read()
+    chunks = []
+    total = 0
+    limit = rag_settings.AUDIO_MAX_UPLOAD_BYTES
+    while total <= limit:
+        chunk = await audio.read(min(1024 * 1024, limit - total + 1))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > limit:
+            break
+    audio_bytes = b"".join(chunks) if total <= limit else b""
 
     if not audio_bytes:
         raise HTTPException(
@@ -447,7 +462,7 @@ async def chat_audio(
     if audio.content_type and not audio.content_type.startswith("audio/"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Expected an audio file, got {audio.content_type}.",
+            detail="Invalid audio upload.",
         )
 
     audio_bytes = await audio.read()
@@ -455,15 +470,14 @@ async def chat_audio(
     if not audio_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded audio file is empty.",
+            detail="Invalid audio upload.",
         )
 
     if len(audio_bytes) > rag_settings.AUDIO_MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Audio file exceeds the maximum allowed size of "
-                f"{rag_settings.AUDIO_MAX_UPLOAD_BYTES} bytes."
+                "Invalid audio upload."
             ),
         )
 

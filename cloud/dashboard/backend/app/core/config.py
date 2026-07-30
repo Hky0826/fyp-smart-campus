@@ -17,7 +17,7 @@ load_dotenv(dotenv_path=dotenv_path, override=False)
 class Settings:
     DB_HOST: str = os.getenv("DB_HOST", "localhost")
     DB_PORT: str = os.getenv("DB_PORT", "3306")
-    DB_USER: str = os.getenv("DB_USER", "root")
+    DB_USER: str = os.getenv("DB_USER", "smart_campus_app")
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
     DB_NAME: str = os.getenv("DB_NAME", "biometric_rag_db")
     
@@ -56,7 +56,7 @@ class Settings:
     MAX_AI_CONCURRENCY: int = int(os.getenv("MAX_AI_CONCURRENCY", "8"))
     CSRF_COOKIE_NAME: str = "csrf_token"
     ACCESS_COOKIE_NAME: str = "access_token"
-    COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "false").lower() in {"1", "true", "yes", "on"}
+    COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "true").lower() in {"1", "true", "yes", "on"}
 
     def validate_security(self) -> None:
         secret = self.JWT_SECRET.strip()
@@ -69,6 +69,10 @@ class Settings:
             raise RuntimeError("DEVICE_CREDENTIAL_KEY must be provided by production secret storage")
         if self.APP_ENV == "production" and not self.RATE_LIMIT_REDIS_URL:
             raise RuntimeError("RATE_LIMIT_REDIS_URL must be provided in production")
+        if self.APP_ENV == "production" and (self.DB_USER.strip().lower() == "root" or not self.DB_PASSWORD.strip()):
+            raise RuntimeError("Production requires a least-privilege database account with a password")
+        if self.APP_ENV == "production" and not self.COOKIE_SECURE:
+            raise RuntimeError("COOKIE_SECURE must be enabled in production")
         self.PRIVATE_STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
 
 settings = Settings()

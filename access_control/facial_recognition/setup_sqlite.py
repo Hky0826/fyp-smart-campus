@@ -55,6 +55,8 @@ def add_column_if_missing(cursor: sqlite3.Cursor, table_name: str, column_name: 
 def migrate_legacy_schema(cursor: sqlite3.Cursor) -> None:
     add_column_if_missing(cursor, "device_users", "is_active", "INTEGER DEFAULT 1 NOT NULL")
     add_column_if_missing(cursor, "device_users", "last_synced_at", "DATETIME DEFAULT CURRENT_TIMESTAMP")
+    add_column_if_missing(cursor, "device_users", "visitor_start", "DATETIME")
+    add_column_if_missing(cursor, "device_users", "visitor_expiry", "DATETIME")
 
     auth_migrations = {
         "sync_key": "TEXT",
@@ -64,6 +66,10 @@ def migrate_legacy_schema(cursor: sqlite3.Cursor) -> None:
         "spoofing_passed": "INTEGER",
         "image_path": "TEXT",
         "synced_at": "DATETIME",
+        "node_id": "INTEGER",
+        "policy_version": "TEXT",
+        "decision_reason": "TEXT",
+        "correlation_id": "TEXT",
     }
     for column_name, definition in auth_migrations.items():
         add_column_if_missing(cursor, "device_auth_logs", column_name, definition)

@@ -407,6 +407,16 @@ class AccessControlPipeline:
                     bboxes=bboxes,
                 ))
 
+            policy_check = getattr(self.repository, "evaluate_access", None)
+            if callable(policy_check):
+                decision = policy_check(match.user_id, getattr(self.config, "node_id", None))
+                if not decision.allowed:
+                    self._log_event(match.user_id, "FAILED", match.similarity, node_id=decision.node_id, policy_version=decision.policy_version, decision_reason=decision.reason)
+                    timer.total()
+                    denied = self._deny("Access policy denied", face_count, AuthenticationResult.DENY_NO_MATCH, identity=match.identity, similarity=match.similarity, matched_template=match.matched_template, metrics=timer.metrics, bbox=bbox, bboxes=bboxes)
+                    denied.update({"node_id": decision.node_id, "policy_version": decision.policy_version, "decision_reason": decision.reason})
+                    return cache_and_return(denied)
+
             logger.info(
                 "ACCESS GRANTED: user_id=%s identity=%s recognition_score=%.4f threshold=%.3f",
                 match.user_id,
@@ -416,7 +426,8 @@ class AccessControlPipeline:
             )
 
             image_path = self._save_face_snapshot(frame, face)
-            self._log_event(match.user_id, "SUCCESS", match.similarity, image_path=image_path)
+            decision = policy_check(match.user_id, getattr(self.config, "node_id", None)) if callable(policy_check) else None
+            self._log_event(match.user_id, "SUCCESS", match.similarity, image_path=image_path, node_id=getattr(decision, "node_id", getattr(self.config, "node_id", None)), policy_version=getattr(decision, "policy_version", None), decision_reason=getattr(decision, "reason", "explicit_node_permission"))
             timer.total()
             return cache_and_return({
                 "success": True,
@@ -434,6 +445,9 @@ class AccessControlPipeline:
                 "metrics": timer.metrics,
                 "track_id": track.track_id,
                 "sample_count": self.embedding_aggregator.sample_count,
+                "node_id": getattr(decision, "node_id", getattr(self.config, "node_id", None)),
+                "policy_version": getattr(decision, "policy_version", None),
+                "decision_reason": getattr(decision, "reason", "explicit_node_permission"),
             })
         except Exception:
             logger.exception("Access-control frame processing failed")
@@ -624,11 +638,11 @@ class AccessControlPipeline:
             return None
         return str(path)
 
-    def _log_event(self, user_id: Optional[str], status: str, confidence: Optional[float], image_path: Optional[str] = None) -> None:
+    def _log_event(self, user_id: Optional[str], status: str, confidence: Optional[float], image_path: Optional[str] = None, **audit_fields: Any) -> None:
         log_method = getattr(self.repository, "log_auth_event", None)
         if callable(log_method):
             try:
-                log_method(user_id, status, confidence, image_path=image_path)
+                log_method(user_id, status, confidence, image_path=image_path, **audit_fields)
             except TypeError:
                 try:
                     log_method(user_id, status, confidence)

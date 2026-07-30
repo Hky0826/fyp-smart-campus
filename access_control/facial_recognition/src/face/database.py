@@ -13,6 +13,7 @@ import numpy as np
 
 from .matching import FaceTemplate, count_templates_by_user
 from ..utils.sync_key import generate_sync_key
+from ..access_policy import AccessDecision, evaluate_access
 
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,48 @@ class DeviceUserRepository:
             logger.info("Loaded %s templates for user %s", count, user_id)
         return templates
 
-    def log_auth_event(self, user_id: Optional[str], auth_status: str, confidence_score: Optional[float], image_path: Optional[str] = None) -> None:
+    def evaluate_access(self, user_id: int | str, node_id: int | None, now=None) -> AccessDecision:
+        """Evaluate the complete, locally cached authorization snapshot."""
+        try:
+            conn = self._connect()
+            row = conn.execute(
+                "SELECT is_active, visitor_start, visitor_expiry FROM device_users WHERE user_id = ?",
+                (int(user_id),),
+            ).fetchone()
+            if row is None:
+                return AccessDecision(False, "unknown_user", node_id, None)
+            user_roles = [r[0] for r in conn.execute(
+                "SELECT role_id FROM device_user_roles WHERE user_id = ?", (int(user_id),)
+            ).fetchall()]
+            meta = {r[0]: r[1] for r in conn.execute("SELECT key, val FROM sync_metadata").fetchall()}
+            configured_node = meta.get("cloud_node_id")
+            effective_node = int(configured_node) if configured_node is not None else node_id
+            allowed_roles = [r[0] for r in conn.execute(
+                "SELECT role_id FROM device_node_rbac WHERE node_id = ?", (effective_node,)
+            ).fetchall()]
+            policy_version = meta.get("policy_version")
+            synced_at = meta.get("policy_synced_at")
+            def parse(value):
+                if not value:
+                    return None
+                from datetime import datetime
+                return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return evaluate_access(
+                user_id=user_id, is_active=bool(row[0]), user_role_ids=user_roles,
+                allowed_role_ids=allowed_roles, node_id=effective_node,
+                policy_version=policy_version, policy_synced_at=parse(synced_at),
+                now=now, visitor_start=parse(row[1]), visitor_expiry=parse(row[2]),
+            )
+        except (OSError, ValueError, TypeError, sqlite3.Error) as exc:
+            logger.warning("Local authorization snapshot unavailable: %s", type(exc).__name__)
+            return AccessDecision(False, "malformed_policy", node_id, None)
+        finally:
+            try:
+                conn.close()
+            except UnboundLocalError:
+                pass
+
+    def log_auth_event(self, user_id: Optional[str], auth_status: str, confidence_score: Optional[float], image_path: Optional[str] = None, *, node_id: int | None = None, policy_version: str | None = None, decision_reason: str | None = None, correlation_id: str | None = None) -> None:
         try:
             conn = self._connect()
         except FileNotFoundError:
@@ -136,6 +178,10 @@ class DeviceUserRepository:
                 normalized_user_id = None
             fields = ["user_id", "auth_status", "confidence_score", "image_path", "sync_status"]
             values: List[Any] = [normalized_user_id, auth_status.upper(), confidence_score, image_path, 0]
+            for name, value in (("node_id", node_id), ("policy_version", policy_version), ("decision_reason", decision_reason), ("correlation_id", correlation_id)):
+                if name in columns:
+                    fields.insert(-1, name)
+                    values.insert(-1, value)
             if "sync_key" in columns:
                 fields.insert(0, "sync_key")
                 values.insert(0, generate_sync_key())
