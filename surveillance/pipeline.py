@@ -165,9 +165,12 @@ class SurveillancePipeline:
                 else:
                     person_crop = frame
 
-                # Run Face Detection (YuNet) on crop/frame
+                # Run Face Detection (YuNet) on crop, fallback to full frame if no face in crop
                 try:
-                    faces = self.face_detector.detect(person_crop if person_crop.size > 0 else frame)
+                    faces = self.face_detector.detect(person_crop) if person_crop.size > 0 else []
+                    if not faces:
+                        faces = self.face_detector.detect(frame)
+                        x1, y1 = 0, 0 # Full frame coordinates
                 except Exception:
                     logger.exception("Face detection (YuNet) failed for track %s", track_id)
                     faces = []

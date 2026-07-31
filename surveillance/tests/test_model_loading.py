@@ -25,7 +25,7 @@ class TestModelLoading(unittest.TestCase):
         config = SurveillanceConfig()
         self.assertTrue(config.person_detector_model_path.name.endswith("yolox_m_hailo8.hef"))
         self.assertTrue(config.face_detector_model_path.name.endswith("yunet_hailo8.hef"))
-        self.assertTrue("auraface" in config.face_embedder_model_path.name and config.face_embedder_model_path.name.endswith(".hef"))
+        self.assertTrue(("auraface" in config.face_embedder_model_path.name or "glintr100" in config.face_embedder_model_path.name) and config.face_embedder_model_path.name.endswith(".hef"))
 
     def test_mock_hailo_runner_fallback_when_path_missing(self):
         runner = HailoModelRunner("non_existent_model.hef", allow_mock=True)

@@ -50,7 +50,7 @@ def _default_face_embedder_path() -> Path:
     configured = os.getenv("SURVEILLANCE_FACE_EMBEDDER_MODEL_PATH")
     if configured:
         return Path(configured).expanduser()
-    for candidate_name in ("auraface_l2_hailo8.hef", "auraface_l2_hailo.hef", "auraface_hailo8.hef"):
+    for candidate_name in ("glintr100_hailo8.hef", "auraface_l2_hailo8.hef", "auraface_l2_hailo.hef", "auraface_hailo8.hef"):
         candidate = MODEL_ROOT / candidate_name
         if candidate.exists():
             return candidate
@@ -72,8 +72,8 @@ class SurveillanceConfig:
 
     # Detection & Recognition thresholds
     person_detection_threshold: float = float(os.getenv("SURVEILLANCE_PERSON_DETECTION_THRESHOLD", "0.50"))
-    face_detection_threshold: float = float(os.getenv("SURVEILLANCE_FACE_DETECTION_THRESHOLD", "0.85"))
-    recognition_threshold: float = float(os.getenv("SURVEILLANCE_RECOGNITION_THRESHOLD", "0.65"))
+    face_detection_threshold: float = float(os.getenv("SURVEILLANCE_FACE_DETECTION_THRESHOLD", "0.60"))
+    recognition_threshold: float = float(os.getenv("SURVEILLANCE_RECOGNITION_THRESHOLD", "0.40"))
 
     # ByteTrack configuration
     track_high_thresh: float = float(os.getenv("SURVEILLANCE_TRACK_HIGH_THRESH", "0.50"))
