@@ -50,9 +50,10 @@ def _default_face_embedder_path() -> Path:
     configured = os.getenv("SURVEILLANCE_FACE_EMBEDDER_MODEL_PATH")
     if configured:
         return Path(configured).expanduser()
-    hailo8_path = MODEL_ROOT / "auraface_hailo8.hef"
-    if hailo8_path.exists():
-        return hailo8_path
+    for candidate_name in ("auraface_l2_hailo8.hef", "auraface_l2_hailo.hef", "auraface_hailo8.hef"):
+        candidate = MODEL_ROOT / candidate_name
+        if candidate.exists():
+            return candidate
     return MODEL_ROOT / "auraface.hef"
 
 
