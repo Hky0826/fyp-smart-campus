@@ -13,6 +13,7 @@ import { KonvaCanvas } from './components/KonvaCanvas';
 
 export default function MappingNotificationPage() {
     const [currentImageObj, setCurrentImageObj] = useState(null);
+    const [activeDrawerTab, setActiveDrawerTab] = useState('none'); // 'none', 'route', 'notif'
 
     const floorplanData = useFloorplanData({
         onFloorplanLoaded: ({ img, nodes, edges }) => {
@@ -67,10 +68,38 @@ export default function MappingNotificationPage() {
     const currentFloorLevel = currentFp ? currentFp.floor_level : '';
 
     return (
-        <div className="bg-slate-950 text-slate-100 p-2.5 font-sans">
-            <div className="grid grid-cols-1 xl:grid-cols-4 gap-2.5">
-                {/* Column 1: Floorplan Management */}
-                <div className="xl:col-span-1 flex flex-col gap-2.5">
+        <div className="bg-[#0B0F19] min-h-screen text-slate-100 p-2.5 font-sans flex flex-col gap-2 relative">
+            {/* Inline Top Header Bar */}
+            <div className="flex flex-row justify-between items-center gap-2 pb-1.5 border-b border-slate-800/60">
+                <div className="flex items-center gap-2">
+                    <h1 className="text-sm font-extrabold text-white tracking-tight">
+                        Campus Map & Notifications
+                    </h1>
+                    <span className="hidden sm:inline-block text-[9px] text-slate-400 border-l border-slate-800 pl-2">
+                        Interactive floorplan editor, wall detection & route testing
+                    </span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-slate-900/80 border border-slate-800 px-2 py-0.5 rounded-lg">
+                    <span className="text-[8.5px] font-bold text-slate-400 tracking-wider">FLOORPLAN:</span>
+                    <select 
+                        onChange={floorplanData.loadFloorplanData} 
+                        className="bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[9.5px] text-white focus:outline-none focus:border-teal-500 cursor-pointer h-5.5 font-medium" 
+                        value={floorplanData.currentFloorplanId || ""}
+                    >
+                        <option value="" disabled>-- Select Floorplan --</option>
+                        {(floorplanData.floorplansList || []).map(fp => ( 
+                            <option key={fp.floorplan_id} value={fp.floorplan_id}>
+                                {fp.building_name || 'Building'} - Floor {fp.floor_level}
+                            </option> 
+                        ))}
+                    </select>
+                </div>
+            </div>
+
+            {/* Side-by-Side Flex Layout (Works at ANY iframe width, including expanded sidebar) */}
+            <div className="flex flex-row gap-2.5 items-start min-w-0 w-full relative">
+                {/* Left Controls Sidebar (240px width) */}
+                <div className="w-[240px] shrink-0 flex flex-col gap-2">
                     <MapManagerCard
                         buildingsList={floorplanData.buildingsList}
                         selectedBuildingId={floorplanData.selectedBuildingId}
@@ -102,28 +131,46 @@ export default function MappingNotificationPage() {
                         setShowWallOverlay={floorplanData.setShowWallOverlay}
                         fetchWallMask={floorplanData.fetchWallMask}
                         isFetchingWallMask={floorplanData.isFetchingWallMask}
-                        nodes={mapEditor.nodes}
-                        setNodes={mapEditor.setNodes}
-                    />
-                </div>
-
-                {/* Column 2 & 3: Toolbar + Konva Canvas */}
-                <div className="xl:col-span-2 flex flex-col gap-2 min-h-[420px]">
-                    <Toolbar
                         mode={mapEditor.mode}
                         selectTool={mapEditor.selectTool}
-                        currentFloorplanId={floorplanData.currentFloorplanId}
-                        handleResetView={mapEditor.handleResetView}
-                        navPanelOpen={navigation.navPanelOpen}
-                        setNavPanelOpen={navigation.setNavPanelOpen}
-                        notifPanelOpen={notificationHub.notifPanelOpen}
-                        setNotifPanelOpen={notificationHub.setNotifPanelOpen}
                         handleSaveMapData={floorplanData.handleSaveMapData}
                         nodes={mapEditor.nodes}
                         edges={mapEditor.edges}
                     />
 
-                    <div className="w-full h-[440px] min-h-[440px]" ref={mapEditor.containerRef}>
+                    {/* Quick Action Drawers */}
+                    <div className="bg-[#111827] border border-slate-800/80 rounded-xl p-2 shadow-xl flex flex-col gap-1.5">
+                        <span className="text-[8.5px] font-bold text-slate-400 uppercase tracking-wider">TOOLS & TESTING</span>
+                        <div className="flex gap-1">
+                            <button
+                                type="button"
+                                onClick={() => setActiveDrawerTab(activeDrawerTab === 'route' ? 'none' : 'route')}
+                                className={`flex-1 py-1 rounded-md text-[9px] font-bold transition-all cursor-pointer border flex items-center justify-center gap-1 ${
+                                    activeDrawerTab === 'route'
+                                        ? 'bg-teal-600 border-teal-500 text-white shadow-md'
+                                        : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white'
+                                }`}
+                            >
+                                🧭 Route
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveDrawerTab(activeDrawerTab === 'notif' ? 'none' : 'notif')}
+                                className={`flex-1 py-1 rounded-md text-[9px] font-bold transition-all cursor-pointer border flex items-center justify-center gap-1 ${
+                                    activeDrawerTab === 'notif'
+                                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-md'
+                                        : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white'
+                                }`}
+                            >
+                                🔔 Notif
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Right Main Column (flex-1) */}
+                <div className="flex-1 min-w-0 flex flex-col gap-1">
+                    <div className="w-full h-[480px] min-h-[480px] bg-[#0A0D14] border border-slate-800/80 rounded-xl overflow-hidden shadow-2xl relative" ref={mapEditor.containerRef}>
                         <KonvaCanvas
                             imageObj={currentImageObj}
                             wallOverlayImage={floorplanData.wallOverlayImage}
@@ -155,108 +202,129 @@ export default function MappingNotificationPage() {
                             handleNodeDragEnd={mapEditor.handleNodeDragEnd}
                             navHighlight={navigation.navHighlight}
                         />
+
+                        {/* Floating Properties Overlay Panel (Appears when Node/Edge is clicked) */}
+                        {mapEditor.activeObj && (
+                            <div className="absolute top-3 right-3 w-[280px] z-30 shadow-2xl">
+                                <PropertiesPanel
+                                    mode={mapEditor.mode}
+                                    selectedElement={mapEditor.selectedElement}
+                                    setSelectedElement={mapEditor.setSelectedElement}
+                                    activeObj={mapEditor.activeObj}
+                                    isTransitionNode={mapEditor.isTransitionNode}
+                                    activeNodeTab={mapEditor.activeNodeTab}
+                                    setActiveNodeTab={mapEditor.setActiveNodeTab}
+                                    updateProperty={mapEditor.updateProperty}
+                                    handleRoleToggle={mapEditor.handleRoleToggle}
+                                    rolesList={floorplanData.rolesList}
+                                    edges={mapEditor.edges}
+                                    nodes={mapEditor.nodes}
+                                    globalNodes={floorplanData.globalNodes}
+                                    currentFloorplanId={floorplanData.currentFloorplanId}
+                                    transitionTargetId={mapEditor.transitionTargetId}
+                                    setTransitionTargetId={mapEditor.setTransitionTargetId}
+                                    transitionWeight={mapEditor.transitionWeight}
+                                    setTransitionWeight={mapEditor.setTransitionWeight}
+                                    transitionIsAccessible={mapEditor.transitionIsAccessible}
+                                    setTransitionIsAccessible={mapEditor.setTransitionIsAccessible}
+                                    transitionIsBidirectional={mapEditor.transitionIsBidirectional}
+                                    setTransitionIsBidirectional={mapEditor.setTransitionIsBidirectional}
+                                    currentBuildingName={currentBuildingName}
+                                    currentFloorLevel={currentFloorLevel}
+                                    handleUpdateTransition={mapEditor.handleUpdateTransition}
+                                    handleDeleteTransition={mapEditor.handleDeleteTransition}
+                                    handleCreateTransition={mapEditor.handleCreateTransition}
+                                    triggerSelectedEdgeAStar={mapEditor.triggerSelectedEdgeAStar}
+                                    resetSelectedEdgeToStraight={mapEditor.resetSelectedEdgeToStraight}
+                                    handleDeleteSelectedElement={mapEditor.handleDeleteSelectedElement}
+                                />
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="text-center">
+                        <span className="text-[9.5px] text-slate-400 font-medium bg-slate-900/60 px-2.5 py-0.5 rounded-full border border-slate-800/60 inline-block">
+                            ✨ Click elements on canvas to edit properties, or drag nodes to move them.
+                        </span>
                     </div>
                 </div>
+            </div>
 
-                {/* Column 4: Side Panels */}
-                <div className="xl:col-span-1 flex flex-col gap-3">
-                    <PropertiesPanel
-                        mode={mapEditor.mode}
-                        selectedElement={mapEditor.selectedElement}
-                        setSelectedElement={mapEditor.setSelectedElement}
-                        activeObj={mapEditor.activeObj}
-                        isTransitionNode={mapEditor.isTransitionNode}
-                        activeNodeTab={mapEditor.activeNodeTab}
-                        setActiveNodeTab={mapEditor.setActiveNodeTab}
-                        updateProperty={mapEditor.updateProperty}
-                        handleRoleToggle={mapEditor.handleRoleToggle}
-                        rolesList={floorplanData.rolesList}
-                        edges={mapEditor.edges}
-                        nodes={mapEditor.nodes}
-                        globalNodes={floorplanData.globalNodes}
-                        currentFloorplanId={floorplanData.currentFloorplanId}
-                        transitionTargetId={mapEditor.transitionTargetId}
-                        setTransitionTargetId={mapEditor.setTransitionTargetId}
-                        transitionWeight={mapEditor.transitionWeight}
-                        setTransitionWeight={mapEditor.setTransitionWeight}
-                        transitionIsAccessible={mapEditor.transitionIsAccessible}
-                        setTransitionIsAccessible={mapEditor.setTransitionIsAccessible}
-                        transitionIsBidirectional={mapEditor.transitionIsBidirectional}
-                        setTransitionIsBidirectional={mapEditor.setTransitionIsBidirectional}
-                        currentBuildingName={currentBuildingName}
-                        currentFloorLevel={currentFloorLevel}
-                        handleUpdateTransition={mapEditor.handleUpdateTransition}
-                        handleDeleteTransition={mapEditor.handleDeleteTransition}
-                        handleCreateTransition={mapEditor.handleCreateTransition}
-                        triggerSelectedEdgeAStar={mapEditor.triggerSelectedEdgeAStar}
-                        resetSelectedEdgeToStraight={mapEditor.resetSelectedEdgeToStraight}
-                    />
+            {/* Collapsible Drawer for Route Preview / Notifications */}
+            {activeDrawerTab !== 'none' && (
+                <div className="fixed inset-y-0 right-0 w-[340px] bg-[#111827] border-l border-slate-800 shadow-2xl p-4 z-40 overflow-y-auto flex flex-col gap-3">
+                    <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                        <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                            {activeDrawerTab === 'route' ? '🧭 Admin Route Preview' : '🔔 Notification Hub & Audit Log'}
+                        </h3>
+                        <button
+                            type="button"
+                            onClick={() => setActiveDrawerTab('none')}
+                            className="text-[10px] text-slate-400 hover:text-white font-bold bg-slate-900 px-2 py-0.5 rounded border border-slate-700 cursor-pointer"
+                        >
+                            Close ✖
+                        </button>
+                    </div>
 
-                    <NavigationPanel
-                        navPanelOpen={navigation.navPanelOpen}
-                        navResult={navigation.navResult}
-                        setNavResult={navigation.setNavResult}
-                        setNavHighlight={navigation.setNavHighlight}
-                        navError={navigation.navError}
-                        setNavError={navigation.setNavError}
-                        navStartId={navigation.navStartId}
-                        setNavStartId={navigation.setNavStartId}
-                        navEndId={navigation.navEndId}
-                        setNavEndId={navigation.setNavEndId}
-                        navRoleId={navigation.navRoleId}
-                        setNavRoleId={navigation.setNavRoleId}
-                        globalNodes={floorplanData.globalNodes}
-                        rolesList={floorplanData.rolesList}
-                        handleRunNavigation={navigation.handleRunNavigation}
-                        navLoading={navigation.navLoading}
-                        setNotifVisitorId={notificationHub.setNotifVisitorId}
-                        setNotifVisitorEmail={notificationHub.setNotifVisitorEmail}
-                        setNotifMessage={notificationHub.setNotifMessage}
-                        setIsAutoMessage={notificationHub.setIsAutoMessage}
-                    />
+                    {activeDrawerTab === 'route' && (
+                        <NavigationPanel
+                            navPanelOpen={true}
+                            navResult={navigation.navResult}
+                            setNavResult={navigation.setNavResult}
+                            setNavHighlight={navigation.setNavHighlight}
+                            navError={navigation.navError}
+                            setNavError={navigation.setNavError}
+                            navStartId={navigation.navStartId}
+                            setNavStartId={navigation.setNavStartId}
+                            navEndId={navigation.navEndId}
+                            setNavEndId={navigation.setNavEndId}
+                            navRoleId={navigation.navRoleId}
+                            setNavRoleId={navigation.setNavRoleId}
+                            globalNodes={floorplanData.globalNodes}
+                            rolesList={floorplanData.rolesList}
+                            handleRunNavigation={navigation.handleRunNavigation}
+                            navLoading={navigation.navLoading}
+                            setNotifVisitorId={notificationHub.setNotifVisitorId}
+                            setNotifVisitorEmail={notificationHub.setNotifVisitorEmail}
+                            setNotifMessage={notificationHub.setNotifMessage}
+                            setIsAutoMessage={notificationHub.setIsAutoMessage}
+                        />
+                    )}
 
-                    <NotificationPanel
-                        notifPanelOpen={notificationHub.notifPanelOpen}
-                        navStartId={navigation.navStartId}
-                        setNavStartId={navigation.setNavStartId}
-                        navEndId={navigation.navEndId}
-                        setNavEndId={navigation.setNavEndId}
-                        navRoleId={navigation.navRoleId}
-                        setNavRoleId={navigation.setNavRoleId}
-                        globalNodes={floorplanData.globalNodes}
-                        rolesList={floorplanData.rolesList}
-                        notifUsers={notificationHub.notifUsers}
-                        notifTargetHostId={notificationHub.notifTargetHostId}
-                        setNotifTargetHostId={notificationHub.setNotifTargetHostId}
-                        notifVisitorId={notificationHub.notifVisitorId}
-                        setNotifVisitorId={notificationHub.setNotifVisitorId}
-                        notifEventType={notificationHub.notifEventType}
-                        setNotifEventType={notificationHub.setNotifEventType}
-                        notifMessage={notificationHub.notifMessage}
-                        setNotifMessage={notificationHub.setNotifMessage}
-                        setIsAutoMessage={notificationHub.setIsAutoMessage}
-                        emailDeliveryMode={notificationHub.emailDeliveryMode}
-                        setEmailDeliveryMode={notificationHub.setEmailDeliveryMode}
-                        handleGenerateRouteAndNotify={notificationHub.handleGenerateRouteAndNotify}
-                        notifTestLoading={notificationHub.notifTestLoading}
-                        notifTestError={notificationHub.notifTestError}
-                        notifTestResult={notificationHub.notifTestResult}
-                        fetchNotifData={notificationHub.fetchNotifData}
-                        notifLogLoading={notificationHub.notifLogLoading}
-                        notifLog={notificationHub.notifLog}
-                    />
-
-                    {!mapEditor.activeObj && !navigation.navPanelOpen && !notificationHub.notifPanelOpen && (
-                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-xl flex flex-col items-center justify-center text-center text-slate-500 py-8">
-                            <span className="text-2xl mb-1">💡</span>
-                            <p className="text-xs font-semibold text-slate-400 mb-0.5">Properties & Tools Panel</p>
-                            <p className="text-[10px] text-slate-500 max-w-xs leading-normal">
-                                Click <strong className="text-slate-300">Edit Properties</strong> in the toolbar and select a node or path to edit its attributes, or open <strong className="text-slate-300">Navigate</strong> / <strong className="text-slate-300">Notification Hub</strong>.
-                            </p>
-                        </div>
+                    {activeDrawerTab === 'notif' && (
+                        <NotificationPanel
+                            notifPanelOpen={true}
+                            navStartId={navigation.navStartId}
+                            setNavStartId={navigation.setNavStartId}
+                            navEndId={navigation.navEndId}
+                            setNavEndId={navigation.setNavEndId}
+                            navRoleId={navigation.navRoleId}
+                            setNavRoleId={navigation.setNavRoleId}
+                            globalNodes={floorplanData.globalNodes}
+                            rolesList={floorplanData.rolesList}
+                            notifUsers={notificationHub.notifUsers}
+                            notifTargetHostId={notificationHub.notifTargetHostId}
+                            setNotifTargetHostId={notificationHub.setNotifTargetHostId}
+                            notifVisitorId={notificationHub.notifVisitorId}
+                            setNotifVisitorId={notificationHub.setNotifVisitorId}
+                            notifEventType={notificationHub.notifEventType}
+                            setNotifEventType={notificationHub.setNotifEventType}
+                            notifMessage={notificationHub.notifMessage}
+                            setNotifMessage={notificationHub.setNotifMessage}
+                            setIsAutoMessage={notificationHub.setIsAutoMessage}
+                            emailDeliveryMode={notificationHub.emailDeliveryMode}
+                            setEmailDeliveryMode={notificationHub.setEmailDeliveryMode}
+                            handleGenerateRouteAndNotify={notificationHub.handleGenerateRouteAndNotify}
+                            notifTestLoading={notificationHub.notifTestLoading}
+                            notifTestError={notificationHub.notifTestError}
+                            notifTestResult={notificationHub.notifTestResult}
+                            fetchNotifData={notificationHub.fetchNotifData}
+                            notifLogLoading={notificationHub.notifLogLoading}
+                            notifLog={notificationHub.notifLog}
+                        />
                     )}
                 </div>
-            </div>
+            )}
         </div>
     );
 }

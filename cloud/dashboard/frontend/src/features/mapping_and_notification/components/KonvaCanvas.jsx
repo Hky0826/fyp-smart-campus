@@ -203,7 +203,7 @@ export function KonvaCanvas({
                                     fill={fillColor}
                                     stroke={isTransition ? '#ffffff' : '#020617'}
                                     strokeWidth={isTransition ? 2.5 : 2}
-                                    draggable={mode === 'add_nodes'}
+                                    draggable={mode === 'edit_props' || mode === 'add_nodes' || mode === 'draw_paths'}
                                     dragBoundFunc={getClampedDragBounds}
                                     onClick={e => handleNodeClick(idx, e)}
                                     onDragMove={e => handleNodeDragMove(idx, e)}

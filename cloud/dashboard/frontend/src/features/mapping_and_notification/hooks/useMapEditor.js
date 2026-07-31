@@ -571,10 +571,36 @@ export function useMapEditor({ rolesList, globalNodes, getWallGrid, editScaleRat
         setSelectedElement({ type: null, index: null });
     };
 
+    const handleDeleteSelectedElement = () => {
+        if (!selectedElement.type || selectedElement.index === null) return;
+        if (selectedElement.type === 'node') {
+            const index = selectedElement.index;
+            const nodeObj = nodes[index];
+            if (!window.confirm(`Delete node "${nodeObj?.room_label || 'Node ' + (index + 1)}"?`)) return;
+            setNodes(nodes.filter((_, i) => i !== index));
+            setEdges(edges
+                .filter(edge => edge.start !== index && edge.end !== index)
+                .map(edge => ({
+                    ...edge,
+                    start: edge.start > index ? edge.start - 1 : edge.start,
+                    end:   edge.end   > index ? edge.end   - 1 : edge.end
+                }))
+            );
+            setSelectedElement({ type: null, index: null });
+            setHoveredNodeIndex(null);
+        } else if (selectedElement.type === 'edge') {
+            const index = selectedElement.index;
+            if (!window.confirm('Delete this path?')) return;
+            setEdges(edges.filter((_, i) => i !== index));
+            setSelectedElement({ type: null, index: null });
+            setHoveredEdgeIndex(null);
+        }
+    };
+
     return {
+        mode, setMode,
         nodes, setNodes,
         edges, setEdges,
-        mode, setMode,
         selectedElement, setSelectedElement,
         hoveredNodeIndex, setHoveredNodeIndex,
         hoveredEdgeIndex, setHoveredEdgeIndex,
@@ -611,6 +637,7 @@ export function useMapEditor({ rolesList, globalNodes, getWallGrid, editScaleRat
         handleCreateTransition,
         handleUpdateTransition,
         handleDeleteTransition,
+        handleDeleteSelectedElement,
         triggerSelectedEdgeAStar,
         resetSelectedEdgeToStraight,
         selectTool

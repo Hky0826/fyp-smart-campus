@@ -16,13 +16,11 @@ export function NavigationPanel({
 }) {
     const [directionsOpen, setDirectionsOpen] = React.useState(true);
 
-    if (!navPanelOpen) return null;
-
     return (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-xl flex flex-col gap-2.5 max-h-[85vh] overflow-y-auto">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-2">
-                <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span>🧭</span> Navigation Tester
+        <div className="bg-[#111827] border border-slate-800/80 rounded-xl p-3 shadow-xl flex flex-col gap-2.5">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-1.5">
+                <h3 className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">
+                    ADMIN ROUTE PREVIEW
                 </h3>
                 {navResult && (
                     <button
@@ -38,36 +36,36 @@ export function NavigationPanel({
                             if (setNotifMessage) setNotifMessage('');
                             if (setIsAutoMessage) setIsAutoMessage(true);
                         }}
-                        className="text-[10px] text-teal-400 hover:text-teal-300 font-bold bg-teal-950 px-2 py-0.5 rounded border border-teal-800 cursor-pointer"
+                        className="text-[9px] text-teal-400 hover:text-teal-300 font-bold bg-teal-950 px-1.5 py-0.5 rounded border border-teal-800 cursor-pointer"
                     >
-                        Clear Route
+                        Clear
                     </button>
                 )}
             </div>
 
             <div className="flex flex-col gap-2">
                 <div className="flex flex-col gap-1">
-                    <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">🟢 Start Node</label>
+                    <label className="text-[9px] text-slate-400 font-semibold">Start Node ID</label>
                     <NodeSelector
                         id="nav-start-select"
                         nodes={globalNodes.filter(n => !isCorridorNode(n))}
                         value={navStartId}
                         onChange={setNavStartId}
-                        placeholder="Search start node..."
+                        placeholder="Start Node ID..."
                     />
                 </div>
 
                 <div className="flex flex-col gap-1">
                     <div className="flex justify-between items-center">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">🔴 Destination Node</label>
+                        <label className="text-[9px] text-slate-400 font-semibold">Destination Node ID</label>
                         <button
                             id="nav-swap-btn"
                             type="button"
                             onClick={() => { const tmp = navStartId; setNavStartId(navEndId); setNavEndId(tmp); }}
-                            className="text-[9px] text-teal-400 hover:underline bg-transparent border-0 cursor-pointer"
+                            className="text-[9px] text-teal-400 hover:underline bg-transparent border-0 cursor-pointer font-semibold"
                             title="Swap Start and Destination"
                         >
-                            ⇅ Swap Start/Dest
+                            Swap ⇅
                         </button>
                     </div>
                     <NodeSelector
@@ -75,19 +73,19 @@ export function NavigationPanel({
                         nodes={globalNodes.filter(n => !isCorridorNode(n))}
                         value={navEndId}
                         onChange={setNavEndId}
-                        placeholder="Search destination node..."
+                        placeholder="Destination Node ID..."
                     />
                 </div>
 
                 <div className="flex flex-col gap-1">
-                    <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">🎭 User Role</label>
+                    <label className="text-[9px] text-slate-400 font-semibold">Role</label>
                     <select
                         id="nav-role-select"
                         value={navRoleId}
                         onChange={e => setNavRoleId(e.target.value)}
-                        className="bg-slate-950 border border-slate-800 rounded-md p-1.5 text-[11px] text-slate-200 focus:outline-none focus:border-teal-500 w-full cursor-pointer"
+                        className="bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[10px] text-slate-200 focus:outline-none focus:border-teal-500 w-full cursor-pointer h-7"
                     >
-                        <option value="">-- Select role --</option>
+                        <option value="">-- Select Role --</option>
                         {rolesList.map(r => (
                             <option key={r.role_id || r.id} value={r.role_id || r.id}>{r.role_name || r.name}</option>
                         ))}
@@ -99,9 +97,9 @@ export function NavigationPanel({
                 id="nav-find-route-btn"
                 onClick={handleRunNavigation}
                 disabled={navLoading || !navStartId || !navEndId}
-                className="w-full py-1.5 bg-teal-600 hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-md text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition-all duration-200 border-0"
+                className="w-full py-1.5 bg-teal-600 hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-md text-[10px] flex items-center justify-center gap-1.5 cursor-pointer transition-all duration-200 border-0 shadow-md shadow-teal-600/10 mt-0.5"
             >
-                {navLoading ? '⏳ Calculating...' : '🧭 Find Route'}
+                {navLoading ? 'Calculating...' : 'Calculate Route'}
             </button>
 
             {navError && (

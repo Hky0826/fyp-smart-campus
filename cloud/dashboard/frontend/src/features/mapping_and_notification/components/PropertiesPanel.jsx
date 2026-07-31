@@ -21,7 +21,8 @@ export function PropertiesPanel({
     handleDeleteTransition,
     handleCreateTransition,
     triggerSelectedEdgeAStar,
-    resetSelectedEdgeToStraight
+    resetSelectedEdgeToStraight,
+    handleDeleteSelectedElement
 }) {
     const [rolesOpen, setRolesOpen] = React.useState(false);
     const currentActiveObj = activeObj;
@@ -316,6 +317,19 @@ export function PropertiesPanel({
                             })}
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* Red Delete Button for selected Node or Edge */}
+            {handleDeleteSelectedElement && (
+                <div className="border-t border-slate-800 pt-2 mt-1">
+                    <button
+                        type="button"
+                        onClick={handleDeleteSelectedElement}
+                        className="w-full py-1.5 bg-rose-950/90 hover:bg-rose-900 border border-rose-800 text-rose-300 font-bold rounded-md text-[10px] flex items-center justify-center gap-1.5 cursor-pointer transition-all duration-200"
+                    >
+                        🗑️ Delete {selectedElement.type === 'node' ? 'Node' : 'Path'}
+                    </button>
                 </div>
             )}
         </div>
