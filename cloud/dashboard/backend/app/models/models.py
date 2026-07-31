@@ -149,7 +149,7 @@ class User(Base):
     @property
     def face_vector(self) -> Optional[str]:
         for emb in self.embeddings:
-            if emb.template_name == "front" and emb.model_name == "openvc_sface":
+            if emb.template_name == "front" and emb.model_name in ("openvc_sface", "opencv_sface"):
                 try:
                     import json
                     import numpy as np
@@ -157,6 +157,14 @@ class User(Base):
                     return json.dumps([round(float(v), 6) for v in arr.tolist()])
                 except Exception:
                     pass
+        for emb in self.embeddings:
+            try:
+                import json
+                import numpy as np
+                arr = np.frombuffer(emb.embedding, dtype=np.float32)
+                return json.dumps([round(float(v), 6) for v in arr.tolist()])
+            except Exception:
+                pass
         return None
 
     @property

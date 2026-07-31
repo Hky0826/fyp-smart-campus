@@ -759,16 +759,32 @@ function CampusMapTab() {
 
             const startCamera = async () => {
                 try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        throw new Error("Camera access is restricted by your browser. Ensure you are accessing via HTTPS or http://localhost, and browser permissions are granted.");
+                    }
+                    let stream;
+                    try {
+                        stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } } });
+                    } catch (e1) {
+                        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    }
                     setCameraStream(stream);
                     setRecordingPhase('idle');
                     setGuidePoseIndex(0);
                     setEnrollFeedback('');
                     setRecordingProgress(0);
                     setEmbeddingProgress(0);
-                    if (videoRef.current) videoRef.current.srcObject = stream;
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = stream;
+                        videoRef.current.play().catch(e => console.warn("Video play exception:", e));
+                    }
                 } catch (err) {
-                    setEnrollFeedback('Could not access camera: ' + err.message);
+                    setRecordingPhase('failed');
+                    let hint = "";
+                    if (err.name === "NotAllowedError" || (err.message && err.message.toLowerCase().includes("permission"))) {
+                        hint = " Recommended Checks:\n1. Windows Settings -> Privacy & security -> Camera -> Enable 'Allow desktop apps to access your camera'.\n2. Ensure no other application (Zoom, Teams, Python script, OpenCV, OBS) is currently using your webcam.";
+                    }
+                    setEnrollFeedback(`Could not access camera (${err.name || 'Error'}): ${err.message || 'Permission denied'}.${hint}`);
                 }
             };
 
@@ -1053,7 +1069,12 @@ function CampusMapTab() {
                 return () => { active = false; if (timerId) clearTimeout(timerId); };
             }, [enrollMethod, liveScanActive, cameraStream, activeCameraPoseIndex, selectedItem]);
 
-            useEffect(() => { if (cameraStream && videoRef.current) videoRef.current.srcObject = cameraStream; }, [cameraStream]);
+            useEffect(() => {
+                if (cameraStream && videoRef.current) {
+                    videoRef.current.srcObject = cameraStream;
+                    videoRef.current.play().catch(e => console.warn("Video play exception:", e));
+                }
+            }, [cameraStream]);
 
             // ── Render modal form ─────────────────────────────
             const renderModalForm = () => {
@@ -2644,7 +2665,13 @@ function CampusMapTab() {
 
                                                     {/* Camera feed */}
                                                     {cameraStream
-                                                        ? <video ref={videoRef} autoPlay playsInline muted className='absolute inset-0 w-full h-full object-cover -scale-x-100'/>
+                                                        ? <video ref={(el) => {
+                                                            videoRef.current = el;
+                                                            if (el && cameraStream && el.srcObject !== cameraStream) {
+                                                                el.srcObject = cameraStream;
+                                                                el.play().catch(() => {});
+                                                            }
+                                                          }} autoPlay playsInline muted className='absolute inset-0 w-full h-full object-cover -scale-x-100'/>
                                                         : <div className='absolute inset-0 flex flex-col items-center justify-center text-slate-700 gap-2'>
                                                             <Icon name='camera' className='w-14 h-14 opacity-50'/>
                                                             <p className='text-xs font-semibold'>Camera preview</p>

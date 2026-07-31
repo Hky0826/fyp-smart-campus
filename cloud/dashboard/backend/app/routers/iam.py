@@ -203,7 +203,7 @@ except Exception as _e:
 # Temporary in-memory session store for live enrollment
 enrollment_sessions = {}
 enrollment_progress = {}
-scrfd_detector_instance = None
+yunet_detector_instance = None
 
 
 def _read_bounded(stream, limit: int) -> bytes:
@@ -221,15 +221,19 @@ def _read_bounded(stream, limit: int) -> bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
     return b"".join(chunks)
 
-def get_scrfd_detector():
-    global scrfd_detector_instance
-    if scrfd_detector_instance is None:
+def get_yunet_detector():
+    global yunet_detector_instance
+    if yunet_detector_instance is None:
         router_dir = os.path.dirname(os.path.abspath(__file__))
         app_dir = os.path.dirname(router_dir)
-        model_path = os.path.join(app_dir, "facial_recognition", "models", "scrfd_2.5g_bnkps.onnx")
-        from app.facial_recognition.scrfd_detector import SCRFDDetector
-        scrfd_detector_instance = SCRFDDetector(model_path)
-    return scrfd_detector_instance
+        model_path = os.path.join(app_dir, "facial_recognition", "models", "face_detection_yunet_2023mar_int8bq.onnx")
+        from app.facial_recognition.detector import YuNetDetector
+        yunet_detector_instance = YuNetDetector(model_path)
+    return yunet_detector_instance
+
+def get_scrfd_detector():
+    """Backwards-compatible alias for face detector."""
+    return get_yunet_detector()
 
 def _replace_user_enrollment(
     db: Session,
@@ -1082,7 +1086,7 @@ def upload_user_face_photo(
     # Detect and align first; all model work is staged before old templates are touched.
     crop = None
     try:
-        detector = get_scrfd_detector()
+        detector = get_yunet_detector()
         faces = detector.detect(img)
 
         if faces and len(faces) > 0:
@@ -1183,7 +1187,7 @@ async def enroll_live_frame(
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid image upload")
 
-        detector = get_scrfd_detector()
+        detector = get_yunet_detector()
         try:
             faces = detector.detect(img)
         except Exception:
@@ -1451,7 +1455,7 @@ async def enroll_user_video(
     harvested_crops = {}
     harvested_blurs = {}
 
-    detector = get_scrfd_detector()
+    detector = get_yunet_detector()
     frame_idx = 0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     # Sample no more than roughly 60 frames; detector inference dominates runtime.

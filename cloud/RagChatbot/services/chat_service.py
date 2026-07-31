@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 from typing import List, Optional
 
@@ -80,6 +81,36 @@ def _navigation_intent(navigation_data: dict | None) -> str | None:
     if navigation_data.get("confirmation_required"):
         return "NAVIGATION_CONFIRMATION"
     return "NAVIGATIONAL"
+
+
+def _confirmed_navigation_label(query: str, db: Session, session_id: int | None) -> str | None:
+    """Resolve an affirmative reply against the latest fuzzy navigation prompt."""
+    if not session_id or not re.fullmatch(
+        r"\s*(?:yes|yeah|yep|correct|right|that(?:'s| is) it|yes please|go ahead|proceed)\s*[.!]?\s*",
+        query,
+        flags=re.IGNORECASE,
+    ):
+        return None
+
+    try:
+        from app.models.models import ChatbotQuery
+
+        latest = (
+            db.query(ChatbotQuery)
+            .filter(ChatbotQuery.session_id == session_id)
+            .order_by(ChatbotQuery.timestamp.desc(), ChatbotQuery.query_id.desc())
+            .first()
+        )
+        response_text = str(getattr(latest, "response_text", "") or "")
+        match = re.match(
+            r"\s*Did you mean (?P<label>[^?]+)\? Is that the place you want to go\?\s*$",
+            response_text,
+            flags=re.IGNORECASE,
+        )
+        return match.group("label").strip() if match else None
+    except Exception as exc:
+        logger.info("Could not resolve navigation confirmation: %s", type(exc).__name__)
+        return None
 
 
 # JWT helpers
@@ -245,8 +276,12 @@ def process_chat(
 
     fast_answer = None
     navigation_data = None
+    confirmed_label = _confirmed_navigation_label(sanitized_query, db, session_id)
 
-    if route.category == "GREETING":
+    if confirmed_label:
+        navigation_data = _navigation_for_query(f"where is {confirmed_label}", db, context)
+        fast_answer = (navigation_data or {}).get("answer") or "I could not confirm that destination."
+    elif route.category == "GREETING":
         first_name = _greeting_name(context) if context.authenticated else ""
         if first_name:
             fast_answer = f"Hi {first_name}, how may I help you today?"
@@ -275,6 +310,7 @@ def process_chat(
                 response_text=fast_answer,
                 retrieved_chunk_ids=[],
                 response_time_ms=response_time_ms,
+                is_navigational=bool(navigation_data),
             )
             query_id = logged_query_id if logged_query_id > 0 else None
 

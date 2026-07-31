@@ -11,6 +11,10 @@ os.makedirs(TARGET_DIR, exist_ok=True)
 # URLs for models. ArcFace R50 must match the Hailo Model Zoo source used to
 # compile edge/facial_recognition/models/surveillance/arcface_r50.hef.
 MODELS = {
+    "face_detection_yunet_2023mar_int8bq.onnx": {
+        "url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar_int8bq.onnx",
+        "min_size": 100_000,
+    },
     "scrfd_2.5g_bnkps.onnx": {
         "url": "https://huggingface.co/hsuyabc/scrfd_2.5g_bnkps.onnx/resolve/main/scrfd_2.5g_bnkps.onnx",
         "sha256": "bc24bb349491481c3ca793cf89306723162c280cb284c5a5e49df3760bf5c2ce",
@@ -36,7 +40,7 @@ def file_sha256(path):
     return digest.hexdigest()
 
 def is_valid_model(path, spec):
-    if not os.path.exists(path) or os.path.getsize(path) <= spec.get("min_size", 1_000_000):
+    if not os.path.exists(path) or os.path.getsize(path) <= spec.get("min_size", 100_000):
         return False
     expected_sha256 = spec.get("sha256")
     return expected_sha256 is None or file_sha256(path) == expected_sha256

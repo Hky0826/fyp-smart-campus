@@ -70,7 +70,9 @@ from RagChatbot.services.chat_service import (
     AUTH_REQUIRED_STATUS,
     PROTECTED_ACCESS_LEVELS,
     VISITOR_ACCESS_LEVELS,
+    _confirmed_navigation_label,
     _greeting_name,
+    _navigation_intent,
     _verify_session,
 )
 
@@ -473,7 +475,13 @@ def process_audio_chat(
         route = classify_query(sanitized_query, db=db)
     metrics.prompt_classification_ms += timer.elapsed_ms
 
-    if route.category != "UNIVERSITY_INFO":
+    navigation_data = None
+    confirmed_label = _confirmed_navigation_label(sanitized_query, db, resolved_session_id)
+    if confirmed_label:
+        from RagChatbot.services.map_service import calculate_navigation
+        navigation_data = calculate_navigation(f"where is {confirmed_label}", db=db, context=context)
+        fast_answer = (navigation_data or {}).get("answer") or "I could not confirm that destination."
+    elif route.category != "UNIVERSITY_INFO":
         if route.category == "GREETING":
             first_name = _greeting_name(context) if context.authenticated else ""
             if first_name:
@@ -493,6 +501,18 @@ def process_audio_chat(
         else:
             fast_answer = "I'm sorry, I could not process your query."
 
+        if resolved_session_id is not None and navigation_data:
+            log_chatbot_interaction(
+                db,
+                session_id=resolved_session_id,
+                user_id=user_id,
+                query_text=sanitized_query,
+                response_text=fast_answer,
+                retrieved_chunk_ids=[],
+                response_time_ms=int((time.monotonic() - start_time) * 1000),
+                is_navigational=True,
+            )
+
         # Bypass embedding and retrieval completely
         return _audio_response(
             transcribed_input=user_query,
@@ -508,15 +528,13 @@ def process_audio_chat(
             intent=(
                 "NAVIGATION_CONFIRMATION"
                 if (navigation_data or {}).get("confirmation_required")
-                else "NAVIGATIONAL"
-                if route.category == "NAVIGATIONAL"
-                else None
+                else _navigation_intent(navigation_data)
             ),
-            navigation_target=(navigation_data or {}).get("navigation_target") if route.category == "NAVIGATIONAL" else None,
-            navigation=(navigation_data or {}).get("navigation") if route.category == "NAVIGATIONAL" else None,
-            route_summary=(navigation_data or {}).get("route_summary") if route.category == "NAVIGATIONAL" else None,
-            instructions=(navigation_data or {}).get("instructions", []) if route.category == "NAVIGATIONAL" else [],
-            visualisation=(navigation_data or {}).get("visualisation") if route.category == "NAVIGATIONAL" else None,
+            navigation_target=(navigation_data or {}).get("navigation_target") if navigation_data else None,
+            navigation=(navigation_data or {}).get("navigation") if navigation_data else None,
+            route_summary=(navigation_data or {}).get("route_summary") if navigation_data else None,
+            instructions=(navigation_data or {}).get("instructions", []) if navigation_data else [],
+            visualisation=(navigation_data or {}).get("visualisation") if navigation_data else None,
         )
 
 # Step 6: Embed the extracted query
@@ -877,7 +895,13 @@ def process_audio_chat_stream(
         route = classify_query(sanitized_query, db=db)
     metrics.prompt_classification_ms += timer.elapsed_ms
 
-    if route.category != "UNIVERSITY_INFO":
+    navigation_data = None
+    confirmed_label = _confirmed_navigation_label(sanitized_query, db, resolved_session_id)
+    if confirmed_label:
+        from RagChatbot.services.map_service import calculate_navigation
+        navigation_data = calculate_navigation(f"where is {confirmed_label}", db=db, context=context)
+        fast_answer = (navigation_data or {}).get("answer") or "I could not confirm that destination."
+    elif route.category != "UNIVERSITY_INFO":
         if route.category == "GREETING":
             first_name = _greeting_name(context) if context.authenticated else ""
             if first_name:
@@ -910,15 +934,13 @@ def process_audio_chat_stream(
             intent=(
                 "NAVIGATION_CONFIRMATION"
                 if (navigation_data or {}).get("confirmation_required")
-                else "NAVIGATIONAL"
-                if route.category == "NAVIGATIONAL"
-                else None
+                else _navigation_intent(navigation_data)
             ),
-            navigation_target=(navigation_data or {}).get("navigation_target") if route.category == "NAVIGATIONAL" else None,
-            navigation=(navigation_data or {}).get("navigation") if route.category == "NAVIGATIONAL" else None,
-            route_summary=(navigation_data or {}).get("route_summary") if route.category == "NAVIGATIONAL" else None,
-            instructions=(navigation_data or {}).get("instructions", []) if route.category == "NAVIGATIONAL" else [],
-            visualisation=(navigation_data or {}).get("visualisation") if route.category == "NAVIGATIONAL" else None,
+            navigation_target=(navigation_data or {}).get("navigation_target") if navigation_data else None,
+            navigation=(navigation_data or {}).get("navigation") if navigation_data else None,
+            route_summary=(navigation_data or {}).get("route_summary") if navigation_data else None,
+            instructions=(navigation_data or {}).get("instructions", []) if navigation_data else [],
+            visualisation=(navigation_data or {}).get("visualisation") if navigation_data else None,
         )
         yield {"event": "metadata", "data": res.model_dump(mode="json", exclude={"audio_response"})}
         if fast_answer:
@@ -929,7 +951,7 @@ def process_audio_chat_stream(
         yield from _drain_tts_queue(pending, metrics, start_time, wait=True)
         if resolved_session_id is not None and resolved_session_id > 0:
             tts_time = int(metrics.time_to_first_tts_ms) if metrics.time_to_first_tts_ms > 0 else int((time.monotonic() - start_time) * 1000)
-            log_chatbot_interaction(db, session_id=resolved_session_id, user_id=user_id, query_text=sanitized_query, response_text=fast_answer, retrieved_chunk_ids=[], response_time_ms=tts_time)
+            log_chatbot_interaction(db, session_id=resolved_session_id, user_id=user_id, query_text=sanitized_query, response_text=fast_answer, retrieved_chunk_ids=[], response_time_ms=tts_time, is_navigational=bool(navigation_data))
         yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
         return
 

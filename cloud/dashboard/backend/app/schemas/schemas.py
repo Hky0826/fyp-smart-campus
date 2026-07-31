@@ -245,6 +245,7 @@ class UserResponse(UserBase):
     roles: List[RoleResponse] = []
     imagepath: Optional[str] = None
     face_enrolled: bool = False
+    face_vector: Optional[str] = None
     
     student: Optional[StudentBase] = None
     lecturer: Optional[LecturerBase] = None
@@ -254,21 +255,6 @@ class UserResponse(UserBase):
 
     office_node_id: Optional[int] = None
     staff_id: Optional[str] = None
-
-class UserResponse(UserBase):
-    user_id: int
-    full_name: str
-    enrolled_at: datetime.datetime
-    last_seen: Optional[datetime.datetime] = None
-    roles: List[RoleResponse] = []
-    imagepath: Optional[str] = None
-    face_enrolled: bool = False
-    
-    student: Optional[StudentBase] = None
-    lecturer: Optional[LecturerBase] = None
-    staff: Optional[StaffBase] = None
-    visitor: Optional[VisitorBase] = None
-    admin: Optional[AdminBase] = None
 
 class StudentCreate(StudentBase):
     user: Optional[UserCreate] = None
