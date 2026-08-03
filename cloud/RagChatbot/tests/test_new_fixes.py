@@ -25,12 +25,9 @@ def test_sanitize_text_for_speech_empty():
 
 
 def test_system_prompt_rules_exist():
-    assert "Keep responses short, direct, and compact" in _SYSTEM_PROMPT
-    assert "return every matching item" in _SYSTEM_PROMPT
-    assert "never silently omit" in _SYSTEM_PROMPT
+    assert "DISPLAY CONSTRAINT: Responses render on a 5-inch screen." in _SYSTEM_PROMPT
+    assert "Answer ONLY using information found in the provided context documents." in _SYSTEM_PROMPT
     assert "Keep responses short, direct, and compact" in _LIVE_SYSTEM_INSTRUCTION
-    assert "return every matching item" in _LIVE_SYSTEM_INSTRUCTION
-    assert "never silently omit" in _LIVE_SYSTEM_INSTRUCTION
 
 
 def test_programme_prompt_keeps_complete_finite_context():

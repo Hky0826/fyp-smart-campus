@@ -19,6 +19,13 @@ Item {
     signal pushToTalkToggled()
     signal stopAnsweringRequested()
 
+    onVisibleChanged: {
+        if (visible) {
+            history.userScrolledUp = false
+            history.scrollToBottom()
+        }
+    }
+
     Rectangle {
         anchors.fill: parent
         color: "#f8fafc"
@@ -94,16 +101,51 @@ Item {
                 boundsBehavior: Flickable.StopAtBounds
                 spacing: 8
                 model: root.messages || []
-                onCountChanged: Qt.callLater(function() {
-                    if (history.contentHeight <= history.height || history.atYEnd || history.contentY >= history.contentHeight - history.height - 24)
+
+                property bool userScrolledUp: false
+
+                function scrollToBottom() {
+                    Qt.callLater(function() {
                         history.positionViewAtEnd()
-                })
-                onContentHeightChanged: Qt.callLater(function() {
-                    // Keep the viewport stable while a response grows. Only
-                    // follow the stream when the user was already at the end.
-                    if (history.contentHeight <= history.height || history.atYEnd || history.contentY >= history.contentHeight - history.height - 24)
-                        history.positionViewAtEnd()
-                })
+                    })
+                }
+
+                onMovementEnded: {
+                    if (history.atYEnd || history.contentY >= history.contentHeight - history.height - 30) {
+                        userScrolledUp = false
+                    } else {
+                        userScrolledUp = true
+                    }
+                }
+
+                onFlickEnded: {
+                    if (history.atYEnd || history.contentY >= history.contentHeight - history.height - 30) {
+                        userScrolledUp = false
+                    } else {
+                        userScrolledUp = true
+                    }
+                }
+
+                onCountChanged: {
+                    userScrolledUp = false
+                    scrollToBottom()
+                }
+
+                onModelChanged: {
+                    if (!userScrolledUp) {
+                        scrollToBottom()
+                    }
+                }
+
+                onContentHeightChanged: {
+                    if (!userScrolledUp || history.contentHeight <= history.height) {
+                        scrollToBottom()
+                    }
+                }
+
+                Component.onCompleted: {
+                    scrollToBottom()
+                }
 
                 delegate: Item {
                     width: history.width
