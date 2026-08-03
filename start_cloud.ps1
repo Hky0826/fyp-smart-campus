@@ -1,9 +1,9 @@
 [CmdletBinding()]
 param(
     [switch]$Reload,
-    [switch]$StartNotificationWorker,
+    [switch]$SkipNotificationWorker,
     [int]$Port = 8000,
-    [string]$BindAddress = "127.0.0.1"
+    [string]$BindAddress = "0.0.0.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -97,8 +97,8 @@ $uvicornArgs = @(
     "--port", $Port.ToString()
 )
 $env:PYTHONPATH = "$repoRoot\cloud\dashboard\backend;$repoRoot\cloud"
-if ($StartNotificationWorker) {
-    Write-Host "Starting the separate notification worker..." -ForegroundColor Cyan
+if (-not $SkipNotificationWorker) {
+    Write-Host "Starting the background notification worker..." -ForegroundColor Cyan
     Start-Process -WindowStyle Hidden -FilePath $python -ArgumentList @(
         "-m", "cloud.mapping_and_notification.workers.notification_worker"
     ) -WorkingDirectory $repoRoot | Out-Null

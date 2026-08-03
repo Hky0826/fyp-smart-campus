@@ -6,17 +6,31 @@ Cloud startup on Windows is handled by one command from the repository root:
 .\start_cloud.ps1
 ```
 
-Use `.\start_cloud.ps1 -Reload` when developing. See [setup.md](setup.md) for
-the first-run prerequisites and access-control device setup.
+`start_cloud.ps1` runs the cloud backend in development mode on loopback
+(`127.0.0.1`). Use `-Reload` for auto-reload and
+`-StartNotificationWorker` to launch the notification worker.
+
+See [setup.md](setup.md) for the first-run prerequisites and access-control
+device setup.
+
+The integrated Mapping & Notifications feature is served by the cloud Vite
+dashboard at `/dashboard/mapping-notification`. It uses the dashboard cookie
+session and CSRF token; it does not run the legacy port-5000 login/API.
+
+Before retiring the legacy runtime, run the read-only cutover check:
+
+```powershell
+.\scripts\mapping_cutover_check.ps1
+```
 
 ---
 
 ## Workspace Directory Structure
 
 * **cloud/**: Central server components (Dashboard API backend, RAG Chatbot, and Database Synchronization Routers).
-* **edge/**: Local edge device components.
-* **edge/facial_recognition/**: Hailo face-recognition, access-control, surveillance, SQLite sync, Docker, and local facial API code.
-* **edge/audio_io/**: Audio activation, speech recording, cloud Gemini transcription/RAG/TTS client, and local playback.
+* **access_control/**: Local access-control device components.
+* **access_control/facial_recognition/**: Hailo face-recognition, access-control, surveillance, SQLite sync, Docker, and local facial API code.
+* **access_control/audio_io/**: Audio activation, speech recording, cloud Gemini Live/RAG client, and local playback.
 
 ---
 
