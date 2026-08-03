@@ -97,10 +97,8 @@ def resolve_allowed_access_levels(roles: List[str]) -> List[str]:
         A deduplicated, sorted list of allowed access_level strings.
     """
     allowed: Set[str] = set()
-    if roles:
-        highest_role = get_highest_role(roles)
-        levels = _ROLE_ACCESS_MAP.get(highest_role, [])
-        allowed.update(levels)
+    for role in roles or []:
+        allowed.update(_ROLE_ACCESS_MAP.get(str(role).upper(), []))
 
     if not allowed:
         # Fall back to public-only access for unknown roles

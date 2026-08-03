@@ -41,14 +41,14 @@ _CAPABILITY_PATTERN = re.compile(
 )
 
 _NAVIGATIONAL_PATTERN = re.compile(
-    r"\b(where\s+(?:is|are)|how\s+(?:do\s+i|can\s+i)\s+get\s+to|directions?\s+to|map\s+of|location\s+of|find\s+the\s+building|way\s+to|take\s+me\s+to|navigate\s+to|go\s+to|show\s+me\s+where|point\s+me\s+to)\b",
+    r"\b(where\s+(?:is|are|can\s+i\s+(?:find|get))|can\s+you\s+tell\s+me\s+where|how\s+(?:do\s+i|can\s+i)\s+get\s+to|directions?\s+to|map\s+of|location\s+of|find\s+the\s+building|way\s+to|take\s+me\s+to|navigate\s+to|go\s+to|show\s+me\s+where|point\s+me\s+to)\b",
     re.IGNORECASE,
 )
 
 # Only send queries that contain a plausible movement/location hint to the LLM.
 # This preserves the cheap local path for ordinary document questions.
 _NAVIGATION_HINT_PATTERN = re.compile(
-    r"\b(where|go|going|take|navigate|destination|directions?|route|reach|arrive|head|walk|guide|point|locate|nearby|nearest|located|cashier|toilet|washroom|restroom|bathroom|library|cafeteria|cafe|reception|office|classroom|elevator|stairwell|entrance|pharmacy)\b",
+    r"\b(where|go|going|take|navigate|destination|directions?|route|reach|arrive|head|walk|guide|point|locate|nearby|nearest|located|food|eat|canteen|cashier|toilet|washroom|restroom|bathroom|library|cafeteria|cafe|reception|office|classroom|elevator|stairwell|entrance|pharmacy)\b",
     re.IGNORECASE,
 )
 
@@ -177,7 +177,8 @@ def classify_query(query: str, db=None) -> RouteClassification:
         return RouteClassification(category="CAPABILITY")
 
     # 3. NAVIGATIONAL Fast-Path
-    if _NAVIGATIONAL_PATTERN.search(clean_query):
+    from RagChatbot.services.map_service import is_navigation_query
+    if _NAVIGATIONAL_PATTERN.search(clean_query) or is_navigation_query(clean_query, db=db):
         logger.info("Local Regex Router classified '%s' as NAVIGATIONAL (0 LLM calls)", query)
         return RouteClassification(category="NAVIGATIONAL")
 

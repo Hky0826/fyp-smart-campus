@@ -101,7 +101,7 @@ Rules you must follow at all times:
 6. If the user asks about restricted or private information they do not have access to,
    say: "That information is not available to you based on your current access level."
 7. Keep responses short, direct, and compact by default. When the answer is a finite list, a comparison, or is grounded in the user's context, include EVERY matching item; never truncate a complete list to an arbitrary number. Use bullets or numbered items when that improves readability.
-8. If the user asks a broad or general question (e.g. "what programmes does QIU offer?"), ask a short clarifying question presenting 2 to 3 specific sub-topic options so the user can choose what they want. HOWEVER, if the user has ALREADY selected an option or answered a previous clarification (e.g. replying "Foundation" after being asked), DO NOT ask for further clarification — directly list all available options or details for that choice.
+8. For broad finite-list questions (including "what programmes does QIU offer?"), return every matching item from the retrieved context. Group complete lists by faculty or level when useful. Ask a clarification only when the user explicitly asks for a category or the complete result is too large to present safely; never silently omit matching items.
 9. Do NOT mention section boundaries, user roles, or context labels in your answer.
 """
 
@@ -316,11 +316,19 @@ def process_audio_chat(
 # Step 1: Verify JWT
     user_id: Optional[int] = None
     resolved_session_id: Optional[int] = None
+    context = None
 
     if bearer_token:
         try:
-            user_id, resolved_session_id = _verify_session(bearer_token, db)
-        except HTTPException:
+            context = resolve_auth_context(
+                bearer_token,
+                db,
+                requested_device_id=device_id,
+            )
+            user_id, resolved_session_id = context.user_id, context.session_id
+        except HTTPException as exc:
+            if exc.status_code == 403:
+                raise
 # Token invalid or expired; return auth_required
             # so the edge device can prompt the user to re-authenticate.
             logger.warning("Audio chat: invalid/expired JWT, returning auth_required.")
@@ -452,7 +460,11 @@ def process_audio_chat(
     sanitized_query = guard_result.sanitized_query or user_query
 
     with StageTimer() as timer:
-        context = resolve_auth_context(bearer_token, db)
+        context = context or resolve_auth_context(
+            bearer_token,
+            db,
+            requested_device_id=device_id,
+        )
         personal_route = parse_personal_intent(sanitized_query)
         personal_result = handle_personal_request(personal_route, context, db)
     metrics.prompt_classification_ms += timer.elapsed_ms
@@ -764,11 +776,19 @@ def process_audio_chat_stream(
 
     user_id: Optional[int] = None
     resolved_session_id: Optional[int] = None
+    context = None
 
     if bearer_token:
         try:
-            user_id, resolved_session_id = _verify_session(bearer_token, db)
-        except HTTPException:
+            context = resolve_auth_context(
+                bearer_token,
+                db,
+                requested_device_id=device_id,
+            )
+            user_id, resolved_session_id = context.user_id, context.session_id
+        except HTTPException as exc:
+            if exc.status_code == 403:
+                raise
             logger.warning("Audio chat stream: invalid/expired JWT.")
             res = _audio_response(
                 transcribed_input=None,
@@ -842,7 +862,11 @@ def process_audio_chat_stream(
         return
 
     sanitized_query = guard_result.sanitized_query or user_query
-    context = resolve_auth_context(bearer_token, db)
+    context = context or resolve_auth_context(
+        bearer_token,
+        db,
+        requested_device_id=device_id,
+    )
     personal_route = parse_personal_intent(sanitized_query)
     personal_result = handle_personal_request(personal_route, context, db)
 

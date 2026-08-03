@@ -93,16 +93,20 @@ def handle_personal_request(route: PersonalRoute, context: AuthenticatedChatCont
     roles = {role.upper() for role in context.roles}
     if route.intent == PersonalIntent.PROFILE:
         try:
-            profile = repository.profile(context)
+            profiles = repository.profiles(context) if hasattr(repository, "profiles") else [repository.profile(context)]
         except Exception:
             return _result(route, TEMPORARY_ERROR_ANSWER, False, "Personal data service temporarily unavailable.")
-        if not profile:
+        profiles = [profile for profile in profiles if profile]
+        if not profiles:
             return _result(route, NO_RECORDS_ANSWER, False, "No active personal profile is available.")
-        fields = [f"You are {profile.name} ({profile.role.lower()})"]
-        for label, value in (("programme", profile.programme), ("faculty", profile.faculty), ("department", profile.department), ("position", profile.position), ("office", profile.office)):
-            if value:
-                fields.append(f"{label.title()}: {value}")
-        return _result(route, ". ".join(fields) + ".", True)
+        sections = []
+        for profile in profiles:
+            fields = [f"{profile.name} ({profile.role.lower()})"]
+            for label, value in (("programme", profile.programme), ("faculty", profile.faculty), ("department", profile.department), ("position", profile.position), ("office", profile.office)):
+                if value:
+                    fields.append(f"{label.title()}: {value}")
+            sections.append(", ".join(fields))
+        return _result(route, "Your personal records are: " + "; ".join(sections) + ".", True)
 
     if route.intent in {PersonalIntent.COURSES, PersonalIntent.TIMETABLE, PersonalIntent.NEXT_CLASS, PersonalIntent.LOCATION}:
         if route.intent == PersonalIntent.COURSES and "STUDENT" not in roles:
@@ -117,7 +121,11 @@ def handle_personal_request(route: PersonalRoute, context: AuthenticatedChatCont
                 courses = repository.courses(context, term)
                 answer = NO_RECORDS_ANSWER if not courses else "Your current courses are:\n" + "\n".join(f"{c.code} - {c.name}" for c in courses)
                 return _result(route, answer, bool(courses), None if courses else "No active enrolments were found.")
-            entries = repository.student_timetable(context, term) if "STUDENT" in roles else repository.lecturer_timetable(context, term)
+            entries = []
+            if "STUDENT" in roles:
+                entries.extend(repository.student_timetable(context, term))
+            if "LECTURER" in roles:
+                entries.extend(repository.lecturer_timetable(context, term))
             selected = _selected_entries(entries, route, local_now)
             next_only = route.intent in {PersonalIntent.NEXT_CLASS, PersonalIntent.LOCATION}
             target = NavigationTarget(label=selected[0].course.code, location=selected[0].location) if next_only and selected and selected[0].location.display else None

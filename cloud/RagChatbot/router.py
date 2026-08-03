@@ -470,14 +470,14 @@ async def chat_audio(
     if not audio_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid audio upload.",
+            detail="Uploaded audio file is empty.",
         )
 
     if len(audio_bytes) > rag_settings.AUDIO_MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "Invalid audio upload."
+                f"Audio file exceeds the maximum allowed size of {rag_settings.AUDIO_MAX_UPLOAD_BYTES} bytes."
             ),
         )
 

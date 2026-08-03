@@ -48,10 +48,23 @@ class AuthenticatedChatContext:
     staff_id: Optional[str] = None
     visitor_id: Optional[str] = None
     admin_id: Optional[str] = None
+    # Trusted only: resolved from JWTSession.device_id and Device.node_id.
+    # These fields are never populated from a chatbot request body.
+    device_id: Optional[str] = None
+    device_node_id: Optional[int] = None
+    device_label: Optional[str] = None
     given_name: Optional[str] = None
     full_name: Optional[str] = None
     authenticated: bool = False
     reason: Optional[str] = None
+
+    @property
+    def trusted_device_id(self) -> Optional[str]:
+        return self.device_id
+
+    @property
+    def trusted_device_node_id(self) -> Optional[int]:
+        return self.device_node_id
 
 
 @dataclass(frozen=True)

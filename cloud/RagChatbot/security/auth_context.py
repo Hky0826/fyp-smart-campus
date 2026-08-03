@@ -57,23 +57,40 @@ def resolve_user_session(token: str, db: Session) -> tuple[dict, int, object]:
     return payload, user_id, session
 
 
-def resolve_auth_context(token: Optional[str], db: Session) -> AuthenticatedChatContext:
+def resolve_auth_context(
+    token: Optional[str],
+    db: Session,
+    *,
+    requested_device_id: Optional[str] = None,
+) -> AuthenticatedChatContext:
     """Resolve identity from verified token and active DB session only."""
     if not token:
         return AuthenticatedChatContext(user_id=None, session_id=None, authenticated=False, reason="anonymous")
-    from app.models.models import User
+    from app.models.models import Device, User
     payload, user_id, session = resolve_user_session(token, db)
+    trusted_device = None
+    if session.device_id:
+        trusted_device = (
+            db.query(Device)
+            .filter(Device.device_id == session.device_id, Device.is_active.is_(True))
+            .first()
+        )
+    if requested_device_id is not None and requested_device_id != session.device_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Request device_id does not match the authenticated session device.",
+        )
     user = db.query(User).filter_by(user_id=user_id, is_active=True).first()
     roles = tuple(sorted({str(role.role_name).upper() for role in (user.roles or [])}))
-    from RagChatbot.security.rbac import get_highest_role
-    highest_role = get_highest_role(roles) if roles else "VISITOR"
-    roles = (highest_role,)
 
-    student_id = getattr(getattr(user, "student", None), "student_id", None) if highest_role == "STUDENT" else None
-    lecturer_id = getattr(getattr(user, "lecturer", None), "lecturer_id", None) if highest_role == "LECTURER" else None
-    staff_id = getattr(getattr(user, "staff", None), "staff_id", None) if highest_role in {"STAFF", "LECTURER", "ADMIN", "SUPER_ADMIN", "SYSTEM_ADMIN", "CONTENT_ADMIN"} else None
-    visitor_id = getattr(getattr(user, "visitor", None), "visitor_id", None) if highest_role == "VISITOR" else None
-    admin_id = getattr(getattr(user, "admin", None), "admin_id", None) if highest_role in {"ADMIN", "SUPER_ADMIN", "SYSTEM_ADMIN", "CONTENT_ADMIN"} else None
+    # Identity records are independent of role ordering. A person can hold
+    # more than one role and each applicable record remains available to the
+    # personalisation layer.
+    student_id = getattr(getattr(user, "student", None), "student_id", None)
+    lecturer_id = getattr(getattr(user, "lecturer", None), "lecturer_id", None)
+    staff_id = getattr(getattr(user, "staff", None), "staff_id", None)
+    visitor_id = getattr(getattr(user, "visitor", None), "visitor_id", None)
+    admin_id = getattr(getattr(user, "admin", None), "admin_id", None)
     full_name = getattr(user, "full_name", None) or getattr(user, "name", None)
     given_name = getattr(user, "given_name", None)
 
@@ -84,6 +101,9 @@ def resolve_auth_context(token: Optional[str], db: Session) -> AuthenticatedChat
         staff_id=staff_id,
         visitor_id=visitor_id,
         admin_id=admin_id,
+        device_id=getattr(session, "device_id", None),
+        device_node_id=getattr(trusted_device, "node_id", None),
+        device_label=getattr(getattr(trusted_device, "node", None), "room_label", None),
         given_name=given_name,
         full_name=full_name,
         authenticated=True,

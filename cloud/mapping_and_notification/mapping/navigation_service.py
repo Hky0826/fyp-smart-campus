@@ -53,14 +53,19 @@ class NavigationService:
             node = self.db.query(Node).filter(Node.node_id == start_node_id).first()
             if node:
                 return node
+        # A JWT-bound device is the most authoritative origin for chatbot
+        # navigation. User location is only a fallback when that binding is
+        # unavailable or its node has been removed.
+        if device is not None and getattr(device, "node_id", None):
+            node = self.db.query(Node).filter(Node.node_id == device.node_id).first()
+            if node:
+                return node
         if user is not None and getattr(user, "last_known_location", None):
             last_seen = getattr(user, "last_seen", None)
             if last_seen and datetime.utcnow() - last_seen <= timedelta(minutes=settings.stale_location_minutes):
                 node = self.db.query(Node).filter(Node.node_id == user.last_known_location).first()
                 if node:
                     return node
-        if device is not None and getattr(device, "node_id", None):
-            return self.db.query(Node).filter(Node.node_id == device.node_id).first()
         raise StartLocationRequired("A fresh starting location is required")
 
     def calculate(self, *, destination_node_id: int | None = None, destination_label: str | None = None, start_node_id: int | None = None, user=None, device=None, roles=(), walking_speed: float = settings.default_walking_speed, allow_explicit_start: bool = False):

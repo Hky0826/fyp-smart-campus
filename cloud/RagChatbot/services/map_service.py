@@ -1,138 +1,308 @@
-"""In-process adapter from RAG navigation intents to the cloud map service."""
+"""Shared, catalog-driven navigation resolution for every chatbot entrypoint."""
 
 from __future__ import annotations
 
 import re
 from difflib import SequenceMatcher
+from types import SimpleNamespace
 
-from cloud.mapping_and_notification.mapping.navigation_service import DestinationAmbiguous, NavigationService, NoRouteError, StartLocationRequired
+from cloud.mapping_and_notification.mapping.navigation_service import (
+    NavigationService,
+    NoRouteError,
+    StartLocationRequired,
+)
 from cloud.mapping_and_notification.mapping.repository import MapRepository
 
 
-_NAVIGATION_PREFIX = re.compile(
-    r"^(?:how do i get to|how can i get to|where is|take me to|navigate to|directions to)\s+",
+_CONVERSATIONAL_PREFIX = re.compile(
+    r"^(?:please\s+)?(?:can\s+you\s+(?:tell\s+me\s+)?|could\s+you\s+(?:tell\s+me\s+)?|would\s+you\s+(?:tell\s+me\s+)?|show\s+me\s+)?"
+    r"(?:where(?:\s+is|\s+are|\s+can\s+i\s+(?:find|get))?|take\s+me\s+to|navigate\s+to|directions?\s+to|how\s+(?:do\s+i|can\s+i)\s+get\s+to)\s*",
     re.IGNORECASE,
 )
-_LEADING_ARTICLE = re.compile(r"^(?:the|a|an)\s+", re.IGNORECASE)
+_LEADING_FILLERS = re.compile(r"^(?:is|are|located|at|the|a|an|please)\s+", re.IGNORECASE)
+_TRAILING_FILLERS = re.compile(r"\s+(?:please|for\s+me)$", re.IGNORECASE)
 _WASHROOM_WORDS = {"bathroom", "restroom", "toilet", "washroom", "washrooms"}
 _WASHROOM_TYPES = {"WASHROOM", "RESTROOM"}
-
-
-def _destination_text(query: str) -> str:
-    value = re.sub(r"\s+", " ", query.strip())
-    value = _NAVIGATION_PREFIX.sub("", value)
-    value = _LEADING_ARTICLE.sub("", value)
-    return value.rstrip("?.!").strip()
+_FOOD_WORDS = {"food", "eat", "eating", "meal", "meals", "canteen", "cafeteria", "cafe", "coffee"}
+_FOOD_TYPES = {"FOOD", "CAFETERIA"}
+_LIFT_WORDS = {"lift", "lifts", "elevator", "elevators"}
+_LIFT_TYPES = {"ELEVATOR"}
+_STAIR_WORDS = {"stair", "stairs", "stairwell", "stairwells"}
+_STAIR_TYPES = {"STAIRWELL"}
+_GENDER_WORDS = {"men", "mens", "male", "women", "womens", "female", "unisex", "accessible", "s"}
+_COMPOUND_ALIASES = {
+    "board room": "boardroom",
+    "board rooms": "boardrooms",
+    "class room": "classroom",
+    "class rooms": "classrooms",
+    "wash room": "washroom",
+    "wash rooms": "washrooms",
+    "caffeteria": "cafeteria",
+    "cafateria": "cafeteria",
+    "cafiteria": "cafeteria",
+}
 
 
 def _normalise_label(value: str) -> str:
-    """Normalise labels enough to match natural-language destination names."""
-    return re.sub(r"[^\w]+", " ", value.casefold(), flags=re.UNICODE).strip()
+    value = re.sub(r"[^\w]+", " ", str(value or "").casefold(), flags=re.UNICODE)
+    value = re.sub(r"\s+", " ", value).strip()
+    for source, target in _COMPOUND_ALIASES.items():
+        value = value.replace(source, target)
+    # Singular/plural differences are not meaningful for a destination label.
+    words = [word[:-1] if len(word) > 3 and word.endswith("s") else word for word in value.split()]
+    return " ".join(words)
 
 
-def _destination_matches(nodes, label: str):
-    """Find exact labels first, then common facility aliases."""
-    nodes = [node for node in nodes if str(node.node_type).strip().upper() != "CORRIDOR"]
-    target = _normalise_label(label)
-    exact = [node for node in nodes if _normalise_label(node.label) == target]
+def _compact(value: str) -> str:
+    return _normalise_label(value).replace(" ", "")
+
+
+def _destination_text(query: str) -> str:
+    value = re.sub(r"\s+", " ", str(query or "").strip())
+    value = value.rstrip("?.!,;:").strip()
+    # Apply repeatedly because STT often produces “can you tell me where is …”.
+    previous = None
+    while value and value != previous:
+        previous = value
+        value = _CONVERSATIONAL_PREFIX.sub("", value, count=1).strip()
+        value = _LEADING_FILLERS.sub("", value, count=1).strip()
+    value = _TRAILING_FILLERS.sub("", value).strip()
+    return value.rstrip("?.!,;:").strip()
+
+
+def _node_type(node) -> str:
+    return str(getattr(node, "node_type", "") or "").strip().upper()
+
+
+def _node_allowed(node, roles) -> bool:
+    if str(getattr(node, "accessible", True)).upper() in {"DENY", "FALSE", "0"}:
+        return False
+    allowed_roles = {str(role).upper() for role in (getattr(node, "allowed_roles", ()) or ())}
+    role_set = {str(role).upper() for role in (roles or ())}
+    return not allowed_roles or bool(allowed_roles & role_set) or "SUPER_ADMIN" in role_set
+
+
+def _candidate_nodes(nodes, roles):
+    return [
+        node for node in nodes
+        if _node_type(node) != "CORRIDOR" and _node_allowed(node, roles)
+    ]
+
+
+def _gender_from_washroom_query(value: str) -> str | None:
+    text = str(value or "").casefold()
+    compact = _compact(value)
+    if re.search(r"\b(?:men'?s?|mens?|male)\b", text) or compact.startswith(("menwashroom", "menswashroom")):
+        return "men"
+    if re.search(r"\b(?:women'?s?|womens?|female)\b", text) or compact.startswith(("womenwashroom", "womenswashroom")):
+        return "women"
+    if re.search(r"\b(?:unisex|accessible)\b", text) or compact.startswith("unisex"):
+        return "unisex"
+    return None
+
+
+def _category_matches(nodes, query: str, query_words: set[str]):
+    """Resolve typed facility categories without including entrances."""
+    if query_words & _WASHROOM_WORDS:
+        washrooms = [node for node in nodes if _node_type(node) in _WASHROOM_TYPES]
+        gender = _gender_from_washroom_query(query)
+        if gender:
+            washrooms = [node for node in washrooms if _gender_from_washroom_query(getattr(node, "label", "")) == gender]
+        return sorted(washrooms, key=lambda node: (str(getattr(node, "label", "")).casefold(), getattr(node, "node_id", 0)))
+    if query_words & _FOOD_WORDS:
+        return sorted([node for node in nodes if _node_type(node) in _FOOD_TYPES], key=lambda node: (str(getattr(node, "label", "")).casefold(), getattr(node, "node_id", 0)))
+    if query_words & _LIFT_WORDS:
+        return sorted([node for node in nodes if _node_type(node) in _LIFT_TYPES], key=lambda node: (str(getattr(node, "label", "")).casefold(), getattr(node, "node_id", 0)))
+    if query_words & _STAIR_WORDS:
+        return sorted([node for node in nodes if _node_type(node) in _STAIR_TYPES], key=lambda node: (str(getattr(node, "label", "")).casefold(), getattr(node, "node_id", 0)))
+    return None
+
+
+def _is_category_only_query(query_words: set[str]) -> bool:
+    category_words = _WASHROOM_WORDS | _FOOD_WORDS | _LIFT_WORDS | _STAIR_WORDS
+    return bool(query_words & category_words) and query_words <= (category_words | _GENDER_WORDS | {"nearby", "nearest", "closest"})
+
+
+def _score_destination(query: str, label: str) -> float:
+    query_normalised = _normalise_label(query)
+    label_normalised = _normalise_label(label)
+    if not query_normalised or not label_normalised:
+        return 0.0
+    if query_normalised == label_normalised or _compact(query) == _compact(label):
+        return 1.0
+    query_words = set(query_normalised.split())
+    label_words = set(label_normalised.split())
+    if query_words and query_words <= label_words:
+        return 0.94
+    left, right = _compact(query), _compact(label)
+    if left in right or right in left:
+        # Prefer the catalog label that explains the most of the query.  A
+        # short query such as ``laplace`` should match ``La Place Cafe``
+        # better than its longer entrance labels, without needing a
+        # place-specific alias.
+        extra_characters = max(0, len(right) - len(left)) if left in right else max(0, len(left) - len(right))
+        return max(0.80, 0.94 - min(extra_characters, 14) * 0.01)
+    return SequenceMatcher(None, left, right).ratio()
+
+
+def _destination_matches(nodes, label: str, roles=()):
+    """Resolve natural language against the current accessible destination catalog."""
+    candidates = _candidate_nodes(nodes, roles)
+    query = _normalise_label(label)
+    query_words = set(query.split())
+
+    # Broad requests such as “food”, “toilet”, or “nearest lift” must use the
+    # typed category and return all accessible catalog matches. A specific
+    # label such as “Food Court” or “La Place Cafe” continues through the
+    # scored label path below.
+    if _is_category_only_query(query_words):
+        category_matches = _category_matches(candidates, label, query_words)
+        if category_matches is not None:
+            return category_matches
+
+    scored = [(node, _score_destination(label, getattr(node, "label", ""))) for node in candidates]
+    exact = [node for node, score in scored if score >= 0.999]
     if exact:
         return exact
+    strong = [(node, score) for node, score in scored if score >= 0.80]
+    if strong:
+        # Entrances are routing graph details, not user-facing destinations.
+        # When the catalog contains both a destination and its entrances,
+        # prefer the destination dynamically; this also applies to any new
+        # destination added later.
+        non_entrances = [item for item in strong if _node_type(item[0]) != "ENTRANCE"]
+        if non_entrances:
+            strong = non_entrances
+        best = max(score for _, score in strong)
+        # Keep all near-ties so the caller can ask a concise clarification.
+        return [node for node, score in strong if score >= max(0.80, best - 0.08)]
 
-    target_words = set(target.split())
-    if target_words & _WASHROOM_WORDS:
-        return [
-            node
-            for node in nodes
-            if str(node.node_type).upper() in _WASHROOM_TYPES
-            or bool(set(_normalise_label(node.label).split()) & _WASHROOM_WORDS)
-        ]
-
-    # Support labels such as "Cashier Counter" when the user says "cashier".
-    return [
-        node
-        for node in nodes
-        if target and target in _normalise_label(node.label).split()
-    ]
-
-
-def _destination_similarity(left: str, right: str) -> float:
-    left_normalised = _normalise_label(left)
-    right_normalised = _normalise_label(right)
-    left_compact = left_normalised.replace(" ", "")
-    right_compact = right_normalised.replace(" ", "")
-    if not left_compact or not right_compact:
-        return 0.0
-    if left_compact in right_compact or right_compact in left_compact:
-        return 0.9
-    return SequenceMatcher(None, left_compact, right_compact).ratio()
+    category_matches = _category_matches(candidates, label, query_words)
+    if category_matches is not None:
+        return category_matches
+    return []
 
 
-def _similar_destination_matches(nodes, label: str):
-    """Return close non-corridor labels that need user confirmation."""
+def _similar_destination_matches(nodes, label: str, roles=()):
     candidates = [
-        (node, _destination_similarity(label, node.label))
-        for node in nodes
-        if str(node.node_type).strip().upper() != "CORRIDOR"
+        (node, _score_destination(label, getattr(node, "label", "")))
+        for node in _candidate_nodes(nodes, roles)
     ]
-    candidates = [(node, score) for node, score in candidates if score >= 0.72]
-    if not candidates:
+    # Fuzzy suggestions must be genuinely plausible; otherwise an unrelated
+    # label such as Student Life can be offered for a misspelled destination.
+    strong = [(node, score) for node, score in candidates if score >= 0.78]
+    if not strong:
         return []
-    best_score = max(score for _, score in candidates)
-    return [node for node, score in candidates if score >= max(0.72, best_score - 0.08)]
+    best = max(score for _, score in strong)
+    return [node for node, score in strong if score >= max(0.72, best - 0.08)]
+
+
+def is_navigation_query(query: str, *, db=None) -> bool:
+    """Cheap deterministic route gate shared by text, audio, and Live."""
+    text = " ".join(str(query or "").split())
+    if re.search(r"\b(?:where\s+(?:is|are|can\s+i\s+(?:find|get))|can\s+you\s+tell\s+me\s+where|take\s+me\s+to|navigate\s+to|directions?\s+to|how\s+(?:do\s+i|can\s+i)\s+get\s+to|location\s+of|find\s+the)\b", text, re.IGNORECASE):
+        return True
+    if db is None:
+        return False
+    try:
+        snapshot = MapRepository(db).snapshot()
+        return bool(_destination_matches(snapshot.nodes, _destination_text(text)))
+    except Exception:
+        return False
+
+
+def _is_nearest_query(value: str) -> bool:
+    return bool(re.search(r"\b(?:nearest|closest|nearby)\b", value, re.IGNORECASE))
+
+
+def _candidate_data(node) -> dict:
+    return {
+        "node_id": node.node_id,
+        "label": node.label,
+        "floorplan_id": node.floorplan_id,
+        "node_type": node.node_type,
+    }
 
 
 def calculate_navigation(query: str, *, db, context):
-    """Resolve a canonical label and calculate a route without an HTTP hop.
-
-    The trusted context supplies the user; query text can only select a unique
-    destination label and can never select a role or arbitrary start node.
-    """
+    """Resolve and calculate one trusted, RBAC-filtered campus route."""
     label = _destination_text(query)
     snapshot = MapRepository(db).snapshot()
-    matches = _destination_matches(snapshot.nodes, label)
-    if len(matches) != 1:
-        if not matches:
-            suggestions = _similar_destination_matches(snapshot.nodes, label)
-            if suggestions:
-                suggestion_data = [
-                    {
-                        "node_id": node.node_id,
-                        "label": node.label,
-                        "floorplan_id": node.floorplan_id,
-                        "node_type": node.node_type,
-                    }
-                    for node in suggestions
-                ]
-                if len(suggestion_data) == 1:
-                    answer = f"Did you mean {suggestion_data[0]['label']}? Is that the place you want to go?"
-                else:
-                    labels = ", ".join(item["label"] for item in suggestion_data)
-                    answer = f"Did you mean one of these places: {labels}?"
-                return {
-                    "intent": "NAVIGATIONAL",
-                    "confirmation_required": True,
-                    "navigation_target": {
-                        "confirmation_required": True,
-                        "candidates": suggestion_data,
-                    },
-                    "answer": answer,
-                }
-        if len(matches) > 1:
-            is_washroom_query = bool(set(_normalise_label(label).split()) & _WASHROOM_WORDS)
-            answer = (
-                "I found several washrooms. Please specify men's, women's, or unisex washroom."
-                if is_washroom_query
-                else "Please specify which floor or building you mean."
-            )
-            return {"intent": "NAVIGATIONAL", "navigation_target": {"candidates": [{"node_id": n.node_id, "label": n.label, "floorplan_id": n.floorplan_id} for n in matches]}, "answer": answer}
-        return None
+    roles = getattr(context, "roles", ())
+    matches = _destination_matches(snapshot.nodes, label, roles)
     user = None
     user_id = getattr(context, "user_id", None)
     if user_id is not None:
         from app.models.models import User
         user = db.query(User).filter(User.user_id == user_id, User.is_active.is_(True)).first()
+    device = None
+    if getattr(context, "device_node_id", None) is not None:
+        device = SimpleNamespace(device_id=getattr(context, "device_id", None), node_id=context.device_node_id)
+
+    route = None
+    # “Nearest lift/stairs” means compare accessible routes from the trusted
+    # origin instead of asking the user to choose a floor manually.
+    if len(matches) > 1 and _is_nearest_query(label):
+        route_candidates = []
+        start_required = False
+        for node in matches:
+            try:
+                candidate_route = NavigationService(db).calculate(destination_node_id=node.node_id, user=user, device=device, roles=roles)
+                route_candidates.append((candidate_route, node))
+            except StartLocationRequired:
+                start_required = True
+            except NoRouteError:
+                continue
+        if route_candidates:
+            route, selected = min(route_candidates, key=lambda item: item[0].get("route_summary", {}).get("total_distance_m", float("inf")))
+            matches = [selected]
+        elif start_required:
+            category_words = set(_normalise_label(label).split())
+            category = "lift" if category_words & _LIFT_WORDS else "stairwell" if category_words & _STAIR_WORDS else "facility"
+            return {
+                "intent": "NAVIGATIONAL",
+                "navigation_target": {"candidates": [_candidate_data(node) for node in matches]},
+                "answer": f"I found several {category} locations, but I need your current campus location to determine which is nearest.",
+            }
+    if len(matches) != 1:
+        if not matches:
+            suggestions = _similar_destination_matches(snapshot.nodes, label, roles)
+            if suggestions:
+                suggestion_data = [_candidate_data(node) for node in suggestions]
+                if len(suggestion_data) == 1:
+                    answer = f"Did you mean {suggestion_data[0]['label']}? Is that the place you want to go?"
+                else:
+                    labels = ", ".join(item["label"] for item in suggestion_data)
+                    answer = f"Which place did you mean: {labels}?"
+                return {
+                    "intent": "NAVIGATIONAL",
+                    "confirmation_required": True,
+                    "navigation_target": {"confirmation_required": True, "candidates": suggestion_data},
+                    "answer": answer,
+                }
+        if len(matches) > 1:
+            query_words = set(_normalise_label(label).split())
+            labels = ", ".join(node.label for node in matches)
+            answer = (
+                f"I found these food destinations: {labels}. Which one do you mean?"
+                if query_words & _FOOD_WORDS
+                else f"I found these washrooms: {labels}. Which one do you mean?"
+                if query_words & _WASHROOM_WORDS
+                else f"I found these destinations: {labels}. Which one do you mean?"
+            )
+            return {
+                "intent": "NAVIGATIONAL",
+                "navigation_target": {"candidates": [_candidate_data(node) for node in matches]},
+                "answer": answer,
+            }
+        return {
+            "intent": "NAVIGATIONAL",
+            "navigation_target": {"candidates": []},
+            "answer": f"I couldn't find a mapped campus destination matching '{label}'. Please check the name or ask for a nearby facility such as a lift, stairwell, washroom, or cafeteria.",
+        }
     try:
-        route = NavigationService(db).calculate(destination_node_id=matches[0].node_id, user=user, roles=getattr(context, "roles", ()))
+        if route is None:
+            route = NavigationService(db).calculate(destination_node_id=matches[0].node_id, user=user, device=device, roles=roles)
     except StartLocationRequired:
         return {"intent": "NAVIGATIONAL", "navigation_target": {"node_id": matches[0].node_id, "label": matches[0].label}, "answer": "I found the destination, but I need your current campus location to give directions."}
     except NoRouteError:

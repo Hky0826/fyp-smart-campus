@@ -93,6 +93,16 @@ class RagSettings:
     )
     # Maximum allowed audio upload size in bytes (default 10 MB).
     AUDIO_MAX_UPLOAD_BYTES: int = int(os.getenv("RAG_AUDIO_MAX_UPLOAD_BYTES", "10485760"))
+    LIVE_ROUTING_MODEL: str = os.getenv(
+        "RAG_LIVE_ROUTING_MODEL", "gemini-3.1-flash-lite"
+    )
+    LIVE_MODEL: str = os.getenv("RAG_LIVE_MODEL", "gemini-3.1-flash-lite")
+    LIVE_MANUAL_ACTIVITY: bool = os.getenv("RAG_LIVE_MANUAL_ACTIVITY", "true").strip().lower() in {"1", "true", "yes", "on"}
+    LIVE_THINKING_LEVEL: str = os.getenv("RAG_LIVE_THINKING_LEVEL", "low")
+    LIVE_CONNECT_TIMEOUT_SECONDS: float = float(os.getenv("RAG_LIVE_CONNECT_TIMEOUT_SECONDS", "10"))
+    LIVE_IO_TIMEOUT_SECONDS: float = float(os.getenv("RAG_LIVE_IO_TIMEOUT_SECONDS", "30"))
+    LIVE_TURN_TIMEOUT_SECONDS: float = float(os.getenv("RAG_LIVE_TURN_TIMEOUT_SECONDS", "30"))
+    LIVE_BACKEND_TIMEOUT_SECONDS: float = float(os.getenv("RAG_LIVE_BACKEND_TIMEOUT_SECONDS", "30"))
 
     # Retrieval 
     # Maximum number of chunks returned from vector search before re-ranking

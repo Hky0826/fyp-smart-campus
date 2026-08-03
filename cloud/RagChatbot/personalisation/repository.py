@@ -25,27 +25,36 @@ class PersonalDataRepository:
         building = getattr(floorplan, "building", None)
         return SafeLocation(room=getattr(node, "room_label", None), building=getattr(building, "building_name", None), floor=getattr(floorplan, "floor_level", None))
 
-    def profile(self, context: AuthenticatedChatContext) -> Optional[SafeProfile]:
+    def profiles(self, context: AuthenticatedChatContext) -> list[SafeProfile]:
         from app.models.models import User
         user = self.db.query(User).filter_by(user_id=context.user_id, is_active=True).first()
         if not user:
-            return None
+            return []
         name = getattr(user, "full_name", "").strip()
+        profiles: list[SafeProfile] = []
         if context.student_id and getattr(user, "student", None):
             student = user.student
-            return SafeProfile(name=name, role="STUDENT", programme=getattr(student, "program", None), faculty=getattr(student, "faculty", None))
+            profiles.append(SafeProfile(name=name, role="STUDENT", programme=getattr(student, "program", None), faculty=getattr(student, "faculty", None)))
         if context.lecturer_id and getattr(user, "lecturer", None):
             lecturer = user.lecturer
-            return SafeProfile(name=name, role="LECTURER", faculty=getattr(lecturer, "faculty", None), department=getattr(lecturer, "department", None), position=getattr(lecturer, "position", None), office=self._location(getattr(lecturer, "office", None)).display or None)
+            profiles.append(SafeProfile(name=name, role="LECTURER", faculty=getattr(lecturer, "faculty", None), department=getattr(lecturer, "department", None), position=getattr(lecturer, "position", None), office=self._location(getattr(lecturer, "office", None)).display or None))
         staff = getattr(user, "staff", None)
-        if staff and (context.staff_id or context.admin_id):
-            return SafeProfile(name=name, role="ADMINISTRATOR" if context.admin_id else "STAFF", department=getattr(staff, "department", None), position=getattr(staff, "position", None), office=self._location(getattr(staff, "office", None)).display or None)
+        if staff and context.staff_id:
+            profiles.append(SafeProfile(name=name, role="STAFF", department=getattr(staff, "department", None), position=getattr(staff, "position", None), office=self._location(getattr(staff, "office", None)).display or None))
         if context.visitor_id and getattr(user, "visitor", None):
             visitor = user.visitor
-            if self._visitor_expired(getattr(visitor, "access_expiry", None)):
-                return None
-            return SafeProfile(name=name, role="VISITOR")
-        return SafeProfile(name=name, role=(context.roles[0] if context.roles else "USER"))
+            if not self._visitor_expired(getattr(visitor, "access_expiry", None)):
+                profiles.append(SafeProfile(name=name, role="VISITOR"))
+        if context.admin_id:
+            profiles.append(SafeProfile(name=name, role="ADMINISTRATOR"))
+        if not profiles:
+            profiles.append(SafeProfile(name=name, role=(context.roles[0] if context.roles else "USER")))
+        return profiles
+
+    def profile(self, context: AuthenticatedChatContext) -> Optional[SafeProfile]:
+        """Backward-compatible primary profile accessor."""
+        profiles = self.profiles(context)
+        return profiles[0] if profiles else None
 
     def courses(self, context: AuthenticatedChatContext, term: Optional[tuple[int, str]] = None) -> list[SafeCourse]:
         from app.models.models import Course, CourseEnrollment, Student

@@ -84,12 +84,8 @@ def _navigation_intent(navigation_data: dict | None) -> str | None:
 
 
 def _confirmed_navigation_label(query: str, db: Session, session_id: int | None) -> str | None:
-    """Resolve an affirmative reply against the latest fuzzy navigation prompt."""
-    if not session_id or not re.fullmatch(
-        r"\s*(?:yes|yeah|yep|correct|right|that(?:'s| is) it|yes please|go ahead|proceed)\s*[.!]?\s*",
-        query,
-        flags=re.IGNORECASE,
-    ):
+    """Resolve confirmations and short category choices from the latest prompt."""
+    if not session_id:
         return None
 
     try:
@@ -102,12 +98,60 @@ def _confirmed_navigation_label(query: str, db: Session, session_id: int | None)
             .first()
         )
         response_text = str(getattr(latest, "response_text", "") or "")
-        match = re.match(
-            r"\s*Did you mean (?P<label>[^?]+)\? Is that the place you want to go\?\s*$",
-            response_text,
+        affirmative = re.fullmatch(
+            r"\s*(?:yes|yeah|yep|correct|right|that(?:'s| is) it|yes please|go ahead|proceed)\s*[.!]?\s*",
+            query,
             flags=re.IGNORECASE,
         )
-        return match.group("label").strip() if match else None
+        if affirmative:
+            match = re.match(
+                r"\s*Did you mean (?P<label>[^?]+)\? Is that the place you want to go\?\s*$",
+                response_text,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                return match.group("label").strip()
+
+        # A user commonly answers a category clarification with a short
+        # choice such as “men”, “women”, or “unisex”. Resolve that choice
+        # against the current catalog rather than manufacturing a fixed
+        # destination label. This keeps the continuation working if labels
+        # or facilities change.
+        if (
+            re.fullmatch(r"\s*(?:men|mens|male|women|womens|female|unisex|accessible)\s*[.!]?\s*", query, re.IGNORECASE)
+            and "washroom" in response_text.casefold()
+        ):
+            from RagChatbot.services.map_service import _destination_matches, _normalise_label
+
+            # Prefer the candidate labels already shown to the user. This
+            # preserves the conversational contract and does not assume any
+            # particular washroom naming convention.
+            labels_match = re.search(r":\s*(?P<labels>[^.]+)\.\s*Which one", response_text, flags=re.IGNORECASE)
+            if labels_match:
+                requested = _normalise_label(query)
+                for candidate_label in labels_match.group("labels").split(","):
+                    candidate_label = candidate_label.strip()
+                    candidate_words = set(_normalise_label(candidate_label).split())
+                    if requested in candidate_words or requested == _normalise_label(candidate_label):
+                        return candidate_label or None
+
+            from cloud.mapping_and_notification.mapping.repository import MapRepository
+
+            snapshot = MapRepository(db).snapshot()
+            matches = _destination_matches(snapshot.nodes, f"{query} washroom")
+            if len(matches) == 1:
+                return str(getattr(matches[0], "label", "")).strip() or None
+
+        # For a catalog response, accept a short label choice verbatim. The
+        # navigation resolver still performs the final RBAC/catalog check.
+        if len(str(query).split()) <= 5 and "which one" in response_text.casefold():
+            labels_match = re.search(r":\s*(?P<labels>[^.]+)\.\s*Which one", response_text, flags=re.IGNORECASE)
+            if labels_match:
+                requested = " ".join(str(query).casefold().split())
+                for label in labels_match.group("labels").split(","):
+                    if requested == " ".join(label.casefold().split()) or requested in " ".join(label.casefold().split()).split():
+                        return label.strip()
+        return None
     except Exception as exc:
         logger.info("Could not resolve navigation confirmation: %s", type(exc).__name__)
         return None
@@ -231,7 +275,11 @@ def process_chat(
     sanitized_query = guard_result.sanitized_query or request.query
 
 # Step 2: JWT verification and user/session resolution
-    context = resolve_auth_context(bearer_token, db)
+    context = resolve_auth_context(
+        bearer_token,
+        db,
+        requested_device_id=request.device_id,
+    )
     user_id, session_id = context.user_id, context.session_id
     if context.authenticated and user_id is not None:
         allowed_levels = get_allowed_access_levels_for_user(user_id, db)

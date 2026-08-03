@@ -1,6 +1,11 @@
 import pytest
+from types import SimpleNamespace
+from unittest.mock import patch
+from fastapi import HTTPException
 from RagChatbot.generation.response_validator import sanitize_text_for_speech
 from RagChatbot.generation.prompt_builder import _SYSTEM_PROMPT
+from RagChatbot.generation.prompt_builder import build_prompt
+from RagChatbot.retrieval.ranking import RankedChunk
 from RagChatbot.services.audio_chat_service import _LIVE_SYSTEM_INSTRUCTION
 from RagChatbot.personalisation.schemas import AuthenticatedChatContext
 
@@ -21,11 +26,21 @@ def test_sanitize_text_for_speech_empty():
 
 def test_system_prompt_rules_exist():
     assert "Keep responses short, direct, and compact" in _SYSTEM_PROMPT
-    assert "ask a short clarifying question presenting 2 to 3 specific sub-topic options" in _SYSTEM_PROMPT
-    assert "HOWEVER, if the user has ALREADY selected an option or answered a previous clarification" in _SYSTEM_PROMPT
+    assert "return every matching item" in _SYSTEM_PROMPT
+    assert "never silently omit" in _SYSTEM_PROMPT
     assert "Keep responses short, direct, and compact" in _LIVE_SYSTEM_INSTRUCTION
-    assert "ask a short clarifying question presenting 2 to 3 specific sub-topic options" in _LIVE_SYSTEM_INSTRUCTION
-    assert "HOWEVER, if the user has ALREADY selected an option or answered a previous clarification" in _LIVE_SYSTEM_INSTRUCTION
+    assert "return every matching item" in _LIVE_SYSTEM_INSTRUCTION
+    assert "never silently omit" in _LIVE_SYSTEM_INSTRUCTION
+
+
+def test_programme_prompt_keeps_complete_finite_context():
+    chunks = [
+        RankedChunk(1, 10, "Programmes", 0, "Faculty A: Bachelor of Science", "PUBLIC", 0.9),
+        RankedChunk(2, 10, "Programmes", 1, "Faculty B: Bachelor of Arts", "PUBLIC", 0.8),
+        RankedChunk(3, 10, "Programmes", 2, "Faculty C: Diploma in Computing", "PUBLIC", 0.7),
+    ]
+    _, user_message = build_prompt("What programmes does QIU offer?", chunks)
+    assert all(item in user_message for item in ("Bachelor of Science", "Bachelor of Arts", "Diploma in Computing"))
 
 
 def test_authenticated_chat_context_full_name():
@@ -39,3 +54,73 @@ def test_authenticated_chat_context_full_name():
     assert ctx.authenticated is True
     first_name = ctx.full_name.strip().split()[0]
     assert first_name == "John"
+
+
+def test_authenticated_context_preserves_roles_identities_and_device_origin():
+    from RagChatbot.security import auth_context
+
+    session = SimpleNamespace(session_id=100, device_id="registered-kiosk")
+    user = SimpleNamespace(
+        roles=[SimpleNamespace(role_name="STUDENT"), SimpleNamespace(role_name="LECTURER")],
+        student=SimpleNamespace(student_id="S1"),
+        lecturer=SimpleNamespace(lecturer_id="L1"),
+        staff=SimpleNamespace(staff_id="ST1"),
+        visitor=SimpleNamespace(visitor_id="V1"),
+        admin=SimpleNamespace(admin_id="A1"),
+        full_name="Multi Role User",
+        given_name="Multi",
+    )
+    device = SimpleNamespace(device_id="registered-kiosk", node_id=77, node=SimpleNamespace(room_label="Main entrance"))
+
+    class Query:
+        def __init__(self, result):
+            self.result = result
+
+        def filter(self, *args, **kwargs):
+            return self
+
+        def filter_by(self, *args, **kwargs):
+            return self
+
+        def first(self):
+            return self.result
+
+    class Db:
+        def query(self, model):
+            return Query(device if model.__name__ == "Device" else user)
+
+    with patch.object(auth_context, "resolve_user_session", return_value=({}, 1, session)):
+        context = auth_context.resolve_auth_context("jwt", Db(), requested_device_id="registered-kiosk")
+
+    assert context.roles == ("LECTURER", "STUDENT")
+    assert (context.student_id, context.lecturer_id, context.staff_id, context.visitor_id, context.admin_id) == ("S1", "L1", "ST1", "V1", "A1")
+    assert context.device_id == "registered-kiosk"
+    assert context.device_node_id == 77
+    assert context.device_label == "Main entrance"
+
+
+def test_authenticated_device_mismatch_is_rejected():
+    from RagChatbot.security import auth_context
+
+    session = SimpleNamespace(session_id=100, device_id="registered-kiosk")
+    user = SimpleNamespace(roles=[], full_name="User", given_name=None, student=None, lecturer=None, staff=None, visitor=None, admin=None)
+
+    class Query:
+        def filter(self, *args, **kwargs):
+            return self
+
+        def filter_by(self, *args, **kwargs):
+            return self
+
+        def first(self):
+            return user
+
+    class Db:
+        def query(self, model):
+            return Query()
+
+    with patch.object(auth_context, "resolve_user_session", return_value=({}, 1, session)):
+        with pytest.raises(HTTPException) as exc_info:
+            auth_context.resolve_auth_context("jwt", Db(), requested_device_id="spoofed-kiosk")
+
+    assert exc_info.value.status_code == 403

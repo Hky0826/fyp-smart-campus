@@ -43,3 +43,13 @@ def test_non_confirmation_reply_does_not_trigger_navigation():
     )
 
     assert _confirmed_navigation_label("what is the fee?", db, 42) is None
+
+
+def test_washroom_category_reply_resolves_to_gendered_destination():
+    db = _FakeDb(
+        SimpleNamespace(
+            response_text="I found these washrooms: Men's Washroom, Women's Washroom. Which one do you mean?"
+        )
+    )
+
+    assert _confirmed_navigation_label("men", db, 42) == "Men's Washroom"
