@@ -62,6 +62,7 @@ from RagChatbot.security.audit_logger import log_access_denied, log_chatbot_inte
 from RagChatbot.security.prompt_guard import check_query
 from RagChatbot.security.rbac import get_allowed_access_levels_for_user
 from RagChatbot.security.auth_context import resolve_auth_context
+from RagChatbot.generation import llm_planner
 from RagChatbot.personalisation.intents import parse_personal_intent
 from RagChatbot.personalisation.service import handle_personal_request
 from RagChatbot.logging.inference_logger import InferenceMetrics, StageTimer, log_inference_metrics
@@ -459,94 +460,67 @@ def process_audio_chat(
 
     sanitized_query = guard_result.sanitized_query or user_query
 
+    # Text, uploaded audio, and streamed audio all use the same structured
+    # planner.  Keep the original recognized transcript for the response while
+    # passing only the guarded text to the planner.
     with StageTimer() as timer:
-        context = context or resolve_auth_context(
-            bearer_token,
-            db,
-            requested_device_id=device_id,
+        planned = llm_planner.execute_planned_turn(
+            sanitized_query,
+            context=context or resolve_auth_context(bearer_token, db, requested_device_id=device_id),
+            db=db,
+            confirmation_context=_confirmed_navigation_label(sanitized_query, db, resolved_session_id),
         )
-        personal_route = parse_personal_intent(sanitized_query)
-        personal_result = handle_personal_request(personal_route, context, db)
     metrics.prompt_classification_ms += timer.elapsed_ms
 
-    if personal_result is not None:
-        response_time_ms = int((time.monotonic() - start_time) * 1000)
+    if planned.kind != "rag":
+        context = context or resolve_auth_context(bearer_token, db, requested_device_id=device_id)
         query_id = None
-        navigation = None
-        if personal_result.navigation_target:
-            navigation = {"label": personal_result.navigation_target.label, "location": personal_result.navigation_target.location.display}
-        if context.session_id is not None and context.user_id is not None:
-            logged_query_id = log_personal_interaction(db, session_id=context.session_id, user_id=context.user_id, intent=personal_result.intent.value, response_time_ms=response_time_ms, is_navigational=personal_result.navigation_target is not None)
-            query_id = logged_query_id if logged_query_id > 0 else None
-        return _audio_response(transcribed_input=user_query, text_response=personal_result.answer, status="ok" if personal_result.access_granted else ("auth_required" if personal_result.authentication_required else "no_access"), access_granted=personal_result.access_granted, error_message=personal_result.status_message, start_time=start_time, query_id=query_id, include_audio=include_audio, response_scope=personal_result.response_scope, personal_intent=personal_result.intent.value, authentication_required=personal_result.authentication_required, navigation_target=navigation, metrics=metrics, user_id=user_id, session_id=resolved_session_id, language_code=detected_language)
-
-    # Query routing: check if query is related to university information
-    from RagChatbot.generation.query_router import classify_query, get_capabilities_summary
-
-    with StageTimer() as timer:
-        route = classify_query(sanitized_query, db=db)
-    metrics.prompt_classification_ms += timer.elapsed_ms
-
-    navigation_data = None
-    confirmed_label = _confirmed_navigation_label(sanitized_query, db, resolved_session_id)
-    if confirmed_label:
-        from RagChatbot.services.map_service import calculate_navigation
-        navigation_data = calculate_navigation(f"where is {confirmed_label}", db=db, context=context)
-        fast_answer = (navigation_data or {}).get("answer") or "I could not confirm that destination."
-    elif route.category != "UNIVERSITY_INFO":
-        if route.category == "GREETING":
-            first_name = _greeting_name(context) if context.authenticated else ""
-            if first_name:
-                fast_answer = f"Hi {first_name}, how may I help you today?"
+        response_time_ms = int((time.monotonic() - start_time) * 1000)
+        if resolved_session_id is not None and user_id is not None:
+            if planned.kind == "personal":
+                logged_query_id = log_personal_interaction(
+                    db,
+                    session_id=resolved_session_id,
+                    user_id=user_id,
+                    intent=planned.intent or "UNKNOWN",
+                    response_time_ms=response_time_ms,
+                    is_navigational=bool(planned.navigation),
+                )
             else:
-                fast_answer = "Hi, how may I help you today?"
-        elif route.category == "CAPABILITY":
-            fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
-        elif route.category == "NAVIGATIONAL":
-            from RagChatbot.services.map_service import calculate_navigation
-            navigation_data = calculate_navigation(sanitized_query, db=db, context=context)
-            fast_answer = (navigation_data or {}).get("answer") or "Please tell me the unique destination you want to reach."
-        elif route.category == "OUT_OF_SCOPE":
-            fast_answer = "I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics."
-        elif route.category == "UNCLEAR":
-            fast_answer = route.clarification_question or "Could you please clarify what university information you are looking for?"
-        else:
-            fast_answer = "I'm sorry, I could not process your query."
-
-        if resolved_session_id is not None and navigation_data:
-            log_chatbot_interaction(
-                db,
-                session_id=resolved_session_id,
-                user_id=user_id,
-                query_text=sanitized_query,
-                response_text=fast_answer,
-                retrieved_chunk_ids=[],
-                response_time_ms=int((time.monotonic() - start_time) * 1000),
-                is_navigational=True,
-            )
-
-        # Bypass embedding and retrieval completely
+                logged_query_id = log_chatbot_interaction(
+                    db,
+                    session_id=resolved_session_id,
+                    user_id=user_id,
+                    query_text=sanitized_query,
+                    response_text=planned.answer or "",
+                    retrieved_chunk_ids=[],
+                    response_time_ms=response_time_ms,
+                    is_navigational=planned.kind == "navigation",
+                )
+            query_id = logged_query_id if logged_query_id > 0 else None
+        navigation_data = planned.navigation
         return _audio_response(
             transcribed_input=user_query,
-            text_response=fast_answer,
-            status="ok",
-            access_granted=True,
+            text_response=planned.answer or "",
+            status=planned.status,
+            access_granted=planned.access_granted,
+            error_message=planned.status_message,
             start_time=start_time,
+            query_id=query_id,
             include_audio=include_audio,
+            response_scope=planned.response_scope,
+            personal_intent=planned.intent if planned.kind == "personal" else None,
+            authentication_required=planned.authentication_required,
             metrics=metrics,
             user_id=user_id,
             session_id=resolved_session_id,
             language_code=detected_language,
-            intent=(
-                "NAVIGATION_CONFIRMATION"
-                if (navigation_data or {}).get("confirmation_required")
-                else _navigation_intent(navigation_data)
-            ),
-            navigation_target=(navigation_data or {}).get("navigation_target") if navigation_data else None,
-            navigation=(navigation_data or {}).get("navigation") if navigation_data else None,
-            route_summary=(navigation_data or {}).get("route_summary") if navigation_data else None,
-            instructions=(navigation_data or {}).get("instructions", []) if navigation_data else [],
-            visualisation=(navigation_data or {}).get("visualisation") if navigation_data else None,
+            intent=planned.intent,
+            navigation_target=(navigation_data or {}).get("navigation_target"),
+            navigation=(navigation_data or {}).get("navigation"),
+            route_summary=(navigation_data or {}).get("route_summary"),
+            instructions=(navigation_data or {}).get("instructions", []),
+            visualisation=(navigation_data or {}).get("visualisation"),
         )
 
 # Step 6: Embed the extracted query
@@ -867,8 +841,72 @@ def process_audio_chat_stream(
         db,
         requested_device_id=device_id,
     )
-    personal_route = parse_personal_intent(sanitized_query)
-    personal_result = handle_personal_request(personal_route, context, db)
+    with StageTimer() as timer:
+        planned = llm_planner.execute_planned_turn(
+            sanitized_query,
+            context=context,
+            db=db,
+            confirmation_context=_confirmed_navigation_label(sanitized_query, db, resolved_session_id),
+        )
+    metrics.prompt_classification_ms += timer.elapsed_ms
+
+    if planned.kind != "rag":
+        # Preserve the deterministic handler seam for legacy callers that
+        # provide an authenticated test/context without role records.  Normal
+        # authenticated sessions always carry their full role set and use the
+        # registry handler above.
+        if planned.kind == "personal" and context.authenticated and not context.roles:
+            legacy_route = parse_personal_intent(sanitized_query)
+            legacy_result = handle_personal_request(legacy_route, context, db)
+            if legacy_result is not None:
+                planned = llm_planner.PlannedOperation(
+                    kind="personal",
+                    answer=legacy_result.answer,
+                    personal_result=legacy_result,
+                    intent=legacy_result.intent.value,
+                    status="ok" if legacy_result.access_granted else ("auth_required" if legacy_result.authentication_required else "no_access"),
+                    access_granted=legacy_result.access_granted,
+                    status_message=legacy_result.status_message,
+                    authentication_required=legacy_result.authentication_required,
+                    response_scope=legacy_result.response_scope,
+                )
+        navigation_data = planned.navigation
+        res = _audio_response(
+            transcribed_input=user_query,
+            text_response=planned.answer or "",
+            status=planned.status,
+            access_granted=planned.access_granted,
+            error_message=planned.status_message,
+            start_time=start_time,
+            include_audio=False,
+            response_scope=planned.response_scope,
+            personal_intent=planned.intent if planned.kind == "personal" else None,
+            authentication_required=planned.authentication_required,
+            intent=planned.intent,
+            navigation_target=(navigation_data or {}).get("navigation_target"),
+            navigation=(navigation_data or {}).get("navigation"),
+            route_summary=(navigation_data or {}).get("route_summary"),
+            instructions=(navigation_data or {}).get("instructions", []),
+            visualisation=(navigation_data or {}).get("visualisation"),
+            metrics=metrics,
+            user_id=user_id,
+            session_id=resolved_session_id,
+        )
+        yield {"event": "metadata", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        if planned.answer:
+            yield {"event": "chunk", "data": {"text": planned.answer}}
+        pending: list[tuple[str, concurrent.futures.Future]] = []
+        if rag_settings.AUDIO_TTS_ENABLED and planned.answer:
+            pending.append((planned.answer, _TTS_EXECUTOR.submit(_tts_job, planned.answer, detected_language)))
+        yield from _drain_tts_queue(pending, metrics, start_time, wait=True)
+        yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
+        return
+
+    # The shared planner already handled every non-RAG operation.  Keep this
+    # legacy branch unreachable for planner-produced RAG turns so it cannot
+    # perform a second personal or route classification.
+    personal_route = None
+    personal_result = None
 
     if personal_result is not None:
         navigation = None
@@ -916,11 +954,13 @@ def process_audio_chat_stream(
 
     # Query routing: check if query is related to university information
     with StageTimer() as timer:
-        route = classify_query(sanitized_query, db=db)
+        route = type("Route", (), {"category": "UNIVERSITY_INFO"})()
     metrics.prompt_classification_ms += timer.elapsed_ms
 
     navigation_data = None
-    confirmed_label = _confirmed_navigation_label(sanitized_query, db, resolved_session_id)
+    # Confirmation context is supplied to the shared planner.  Do not run the
+    # retired regex confirmation branch for planner-produced RAG turns.
+    confirmed_label = None
     if confirmed_label:
         from RagChatbot.services.map_service import calculate_navigation
         navigation_data = calculate_navigation(f"where is {confirmed_label}", db=db, context=context)

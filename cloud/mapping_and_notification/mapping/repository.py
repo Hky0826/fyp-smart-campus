@@ -46,6 +46,8 @@ class MapRepository:
             allowed_roles=frozenset(node_roles.get(n.node_id, set())),
             allowed_role_ids=frozenset(node_role_ids.get(n.node_id, set())),
             scale_ratio=float(getattr(n.floorplan, "scale_ratio", None) or 1.0),
+            building=getattr(getattr(n.floorplan, "building", None), "building_name", None),
+            floor=getattr(n.floorplan, "floor_level", None),
         ) for n in db_nodes)
         edge_query = self.db.query(Edge).options(joinedload(Edge.source_node), joinedload(Edge.destination_node))
         edge_query = edge_query.filter(Edge.source_node_id.in_(ids), Edge.destination_node_id.in_(ids))

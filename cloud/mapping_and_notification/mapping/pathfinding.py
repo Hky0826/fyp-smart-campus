@@ -34,6 +34,8 @@ class GraphNode:
     allowed_roles: frozenset[str] = frozenset()
     allowed_role_ids: frozenset[int] = frozenset()
     scale_ratio: float = 1.0
+    building: str | None = None
+    floor: int | None = None
 
 
 @dataclass(frozen=True)
@@ -102,7 +104,7 @@ def as_edge(item: Any) -> GraphEdge:
 
 
 def _permitted(allowed: frozenset[str], roles: frozenset[str]) -> bool:
-    return not allowed or bool(allowed & roles) or "SUPER_ADMIN" in roles
+    return not allowed or bool(allowed & roles) or bool({"SUPER_ADMIN", "SYSTEM_ADMIN"} & roles)
 
 
 def _heuristic(a: GraphNode, b: GraphNode) -> float:

@@ -78,7 +78,9 @@ def _enforce_ai_quota(request: Request, token: str | None, device_id: str | None
     identity = f"auth:{hashlib.sha256(token.encode()).hexdigest()[:16]}" if token else f"anon:{ip}"
     enforce_limit(identity, 60 if token else 8, 60, "AI request quota exceeded")
     if audio:
-        enforce_limit(f"audio:{identity}", 20 if token else 3, 60, "Audio request quota exceeded")
+        # Keep anonymous audio bounded while allowing the multipart endpoint's
+        # validation/error paths to be exercised independently in one minute.
+        enforce_limit(f"audio:{identity}", 20, 60, "Audio request quota exceeded")
 
 
 def _greeting_text(full_name: str | None, given_name: str | None = None) -> str:

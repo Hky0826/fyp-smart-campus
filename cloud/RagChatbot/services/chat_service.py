@@ -45,6 +45,7 @@ from RagChatbot.security.auth_context import resolve_auth_context, resolve_user_
 from RagChatbot.personalisation.intents import parse_personal_intent
 from RagChatbot.personalisation.service import handle_personal_request
 from RagChatbot.logging.inference_logger import InferenceMetrics, StageTimer, log_inference_metrics
+from RagChatbot.generation import llm_planner
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +59,11 @@ AUTH_REQUIRED_STATUS = "Authentication required: please scan your face to check 
 
 
 def _greeting_name(context) -> str:
-    """Prefer the stored given name, which may contain multiple words."""
-    given_name = " ".join(str(getattr(context, "given_name", "") or "").split())
-    if given_name:
-        return given_name
-    full_name = str(getattr(context, "full_name", "") or "").strip()
-    return full_name.split()[0] if full_name else ""
+    """Return the user's complete display name without duplicated whitespace."""
+    full_name = " ".join(str(getattr(context, "full_name", "") or "").split())
+    if full_name:
+        return full_name
+    return " ".join(str(getattr(context, "given_name", "") or "").split())
 
 
 def _navigation_for_query(query: str, db: Session, context):
@@ -288,77 +288,44 @@ def process_chat(
         allowed_levels = VISITOR_ACCESS_LEVELS
         logger.info("Chat: anonymous visitor allowed_levels=%s", allowed_levels)
 
+    # One shared structured planner owns active intent selection.  It returns
+    # only fixed backend operations; university information is the sole result
+    # that continues into the existing RBAC-filtered RAG path below.  The
+    # planner module contains the deterministic, bounded fallback used when
+    # the provider is unavailable.
     with StageTimer() as timer:
-        personal_route = parse_personal_intent(sanitized_query)
-        personal_result = handle_personal_request(personal_route, context, db)
-    metrics.prompt_classification_ms += timer.elapsed_ms
-
-    if personal_result is not None:
-        response_time_ms = int((time.monotonic() - start_time) * 1000)
-        query_id = None
-        if session_id is not None and user_id is not None:
-            logged_query_id = log_personal_interaction(db, session_id=session_id, user_id=user_id, intent=personal_result.intent.value, response_time_ms=response_time_ms, is_navigational=personal_result.navigation_target is not None)
-            query_id = logged_query_id if logged_query_id > 0 else None
-        navigation = None
-        if personal_result.navigation_target:
-            navigation = {"label": personal_result.navigation_target.label, "location": personal_result.navigation_target.location.display}
-
-        metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
-        log_inference_metrics(
-            request_type="text",
-            user_id=user_id,
-            session_id=session_id,
-            query_text=sanitized_query,
-            metrics=metrics,
-            status="ok" if personal_result.access_granted else "no_access",
+        planned = llm_planner.execute_planned_turn(
+            sanitized_query,
+            context=context,
+            db=db,
+            confirmation_context=_confirmed_navigation_label(sanitized_query, db, session_id),
         )
-
-        return ChatResponse(answer=personal_result.answer, citations=[], access_granted=personal_result.access_granted, status_message=personal_result.status_message, response_time_ms=response_time_ms, query_id=query_id, response_scope=personal_result.response_scope, personal_intent=personal_result.intent.value, authentication_required=personal_result.authentication_required, navigation_target=navigation)
-
-# Step 2.5: Query routing
-    from RagChatbot.generation.query_router import classify_query, get_capabilities_summary
-    
-    with StageTimer() as timer:
-        route = classify_query(sanitized_query, db=db)
     metrics.prompt_classification_ms += timer.elapsed_ms
 
-    fast_answer = None
-    navigation_data = None
-    confirmed_label = _confirmed_navigation_label(sanitized_query, db, session_id)
-
-    if confirmed_label:
-        navigation_data = _navigation_for_query(f"where is {confirmed_label}", db, context)
-        fast_answer = (navigation_data or {}).get("answer") or "I could not confirm that destination."
-    elif route.category == "GREETING":
-        first_name = _greeting_name(context) if context.authenticated else ""
-        if first_name:
-            fast_answer = f"Hi {first_name}, how may I help you today?"
-        else:
-            fast_answer = "Hi, how may I help you today?"
-    elif route.category == "CAPABILITY":
-        fast_answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
-    elif route.category == "NAVIGATIONAL":
-        navigation_data = _navigation_for_query(sanitized_query, db, context)
-        fast_answer = (navigation_data or {}).get("answer") or "Please tell me the unique destination you want to reach."
-    elif route.category == "OUT_OF_SCOPE":
-        fast_answer = "I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics."
-    elif route.category == "UNCLEAR":
-        fast_answer = route.clarification_question or "Could you please clarify what university information you are looking for?"
-
-    if fast_answer:
-        # Bypass RAG completely and return the fast answer.
+    if planned.kind != "rag":
         response_time_ms = int((time.monotonic() - start_time) * 1000)
         query_id = None
-        if session_id is not None:
+        if planned.kind == "personal" and planned.personal_result is not None:
+            if session_id is not None and user_id is not None:
+                logged_query_id = log_personal_interaction(
+                    db,
+                    session_id=session_id,
+                    user_id=user_id,
+                    intent=planned.intent or "UNKNOWN",
+                    response_time_ms=response_time_ms,
+                    is_navigational=bool(planned.navigation),
+                )
+                query_id = logged_query_id if logged_query_id > 0 else None
+        elif session_id is not None:
             logged_query_id = log_chatbot_interaction(
                 db,
                 session_id=session_id,
                 user_id=user_id,
                 query_text=sanitized_query,
-                response_text=fast_answer,
+                response_text=planned.answer or "",
                 retrieved_chunk_ids=[],
                 response_time_ms=response_time_ms,
-                is_navigational=bool(navigation_data),
+                is_navigational=planned.kind == "navigation",
             )
             query_id = logged_query_id if logged_query_id > 0 else None
 
@@ -369,22 +336,25 @@ def process_chat(
             session_id=session_id,
             query_text=sanitized_query,
             metrics=metrics,
-            status="ok",
+            status=planned.status,
         )
-
+        navigation_data = planned.navigation
         return ChatResponse(
-            answer=fast_answer,
+            answer=planned.answer or "",
             citations=[],
-            access_granted=True,
-            status_message=None,
+            access_granted=planned.access_granted,
+            status_message=planned.status_message,
             response_time_ms=response_time_ms,
             query_id=query_id,
-            intent=_navigation_intent(navigation_data),
+            intent=planned.intent,
             navigation_target=(navigation_data or {}).get("navigation_target"),
             navigation=(navigation_data or {}).get("navigation"),
             route_summary=(navigation_data or {}).get("route_summary"),
             instructions=(navigation_data or {}).get("instructions", []),
             visualisation=(navigation_data or {}).get("visualisation"),
+            response_scope=planned.response_scope,
+            personal_intent=planned.intent if planned.kind == "personal" else None,
+            authentication_required=planned.authentication_required,
         )
 
 # Step 3: RBAC access levels

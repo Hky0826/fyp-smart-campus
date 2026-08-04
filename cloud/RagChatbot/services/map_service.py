@@ -85,7 +85,9 @@ def _node_allowed(node, roles) -> bool:
 def _candidate_nodes(nodes, roles):
     return [
         node for node in nodes
-        if _node_type(node) != "CORRIDOR" and _node_allowed(node, roles)
+        # Corridors and graph-only entrances are routing details, not
+        # user-facing destinations or planner candidates.
+        if _node_type(node) not in {"CORRIDOR", "ENTRANCE"} and _node_allowed(node, roles)
     ]
 
 

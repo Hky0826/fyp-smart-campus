@@ -49,8 +49,23 @@ def test_authenticated_chat_context_full_name():
     )
     assert ctx.full_name == "John Doe"
     assert ctx.authenticated is True
-    first_name = ctx.full_name.strip().split()[0]
-    assert first_name == "John"
+
+
+def test_greeting_uses_complete_name():
+    from RagChatbot.generation.llm_planner import PlannerResult, _fixed_operation
+    from RagChatbot.services.chat_service import _greeting_name
+
+    ctx = AuthenticatedChatContext(
+        user_id=1,
+        session_id=100,
+        given_name="John",
+        full_name="  John   Doe  ",
+        authenticated=True,
+    )
+
+    assert _greeting_name(ctx) == "John Doe"
+    result = _fixed_operation(PlannerResult(route="GREETING"), context=ctx)
+    assert result.answer == "Hi John Doe, how may I help you today?"
 
 
 def test_authenticated_context_preserves_roles_identities_and_device_origin():

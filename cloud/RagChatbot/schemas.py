@@ -76,6 +76,9 @@ class ChatResponse(BaseModel):
         None, description="Audit log ID stored in chatbot_queries."
     )
     intent: Optional[str] = None
+    response_scope: str = Field(default="DOCUMENT", description="DOCUMENT or PERSONAL.")
+    personal_intent: Optional[str] = None
+    authentication_required: bool = False
     navigation_target: Optional[dict[str, Any]] = None
     navigation: Optional[dict[str, Any]] = None
     route_summary: Optional[dict[str, Any]] = None

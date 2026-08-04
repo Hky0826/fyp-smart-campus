@@ -38,7 +38,7 @@ def parse_personal_intent(query: str, *, now=None) -> PersonalRoute:
         return PersonalRoute(intent=PersonalIntent.PRIVACY_DENIED, requires_authentication=True)
     has_self_pronoun = bool(re.search(r"\b(my|me|i|mine)\b", text))
     has_implicit_personal_query = bool(re.search(
-        r"\b(have\s+any\s+class(?:es)?|any\s+class(?:es)?|got\s+class(?:es)?|next\s+class|upcoming\s+class|today'?s\s+class(?:es)?|today'?s\s+schedule|classes\s+today|schedule\s+today|enrolled\s+in)\b",
+        r"\b(have\s+any\s+class(?:es)?|any\s+class(?:es)?|got\s+class(?:es)?|next\s+class|upcoming\s+class|today'?s\s+class(?:es)?|today'?s\s+schedule|classes\s+today|schedule\s+today|enrolled\s+in|when\s+am\s+i\s+teaching|when\s+do\s+i\s+teach)\b",
         text,
     ))
     if not (has_self_pronoun or has_implicit_personal_query):
@@ -55,7 +55,7 @@ def parse_personal_intent(query: str, *, now=None) -> PersonalRoute:
     elif re.search(r"\b(next\s+class|next\s+lecture|upcoming\s+class|upcoming\s+lecture)\b", text):
         intent = PersonalIntent.LOCATION if location else PersonalIntent.NEXT_CLASS
         scope = DateScope.NEXT
-    elif re.search(r"\b(timetable|schedule|class(?:es)?|lecture(?:s)?)\b", text):
+    elif re.search(r"\b(timetable|schedule|class(?:es)?|lecture(?:s)?|teach(?:ing)?)\b", text):
         intent = PersonalIntent.LOCATION if location and scope == DateScope.NEXT else PersonalIntent.TIMETABLE
     else:
         return PersonalRoute()

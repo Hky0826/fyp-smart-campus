@@ -99,14 +99,58 @@ class PersonalDataRepository:
             courses.append(SafeCourse(code=row.course.course_code, name=row.course.course_name, credits=getattr(row.course, "credit_hours", None)))
         return courses
 
-    def student_timetable(self, context: AuthenticatedChatContext, term: tuple[int, str]) -> list[SafeTimetableEntry]:
+    def student_timetable(self, context: AuthenticatedChatContext, term: Optional[tuple[int, str]] = None) -> list[SafeTimetableEntry]:
         from app.models.models import Course, CourseEnrollment, Student, Timetable, Node, Floorplan
-        rows = (self.db.query(Timetable).join(Course, Course.course_id == Timetable.course_id).join(CourseEnrollment, CourseEnrollment.course_id == Timetable.course_id).join(Student, Student.student_id == CourseEnrollment.student_id).options(joinedload(Timetable.course), joinedload(Timetable.classroom).joinedload(Node.floorplan).joinedload(Floorplan.building)).filter(Student.user_id == context.user_id, CourseEnrollment.status == "ENROLLED", CourseEnrollment.semester == term[0], CourseEnrollment.academic_year == term[1], Timetable.semester == term[0], Timetable.academic_year == term[1], Course.is_active.is_(True)).distinct().order_by(Timetable.day_of_week, Timetable.start_time).all())
+        base_query = (self.db.query(Timetable)
+            .join(Course, Course.course_id == Timetable.course_id)
+            .join(CourseEnrollment, CourseEnrollment.course_id == Timetable.course_id)
+            .join(Student, Student.student_id == CourseEnrollment.student_id)
+            .options(joinedload(Timetable.course), joinedload(Timetable.classroom).joinedload(Node.floorplan).joinedload(Floorplan.building))
+            .filter(Student.user_id == context.user_id, CourseEnrollment.status == "ENROLLED", Course.is_active.is_(True))
+            .distinct())
+        rows = []
+        if term is not None:
+            rows = base_query.filter(
+                CourseEnrollment.semester == term[0],
+                CourseEnrollment.academic_year == term[1],
+                Timetable.semester == term[0],
+                Timetable.academic_year == term[1],
+            ).order_by(Timetable.day_of_week, Timetable.start_time).all()
+        if not rows:
+            # The configured semester may use the legacy value ``1`` while
+            # timetable rows use a compound live value such as ``202607``.
+            # Resolve the latest term owned by this student instead of
+            # discarding an otherwise authorized timetable.
+            all_rows = base_query.order_by(
+                Timetable.semester.desc(), Timetable.academic_year.desc(),
+                Timetable.day_of_week, Timetable.start_time,
+            ).all()
+            if all_rows:
+                latest_term = (all_rows[0].semester, all_rows[0].academic_year)
+                rows = [row for row in all_rows if (row.semester, row.academic_year) == latest_term]
         return [self._timetable_dto(row) for row in rows]
 
-    def lecturer_timetable(self, context: AuthenticatedChatContext, term: tuple[int, str]) -> list[SafeTimetableEntry]:
+    def lecturer_timetable(self, context: AuthenticatedChatContext, term: Optional[tuple[int, str]] = None) -> list[SafeTimetableEntry]:
         from app.models.models import Course, Lecturer, Timetable, Node, Floorplan
-        rows = (self.db.query(Timetable).join(Lecturer, Lecturer.lecturer_id == Timetable.lecturer_id).join(Course, Course.course_id == Timetable.course_id).options(joinedload(Timetable.course), joinedload(Timetable.classroom).joinedload(Node.floorplan).joinedload(Floorplan.building)).filter(Lecturer.user_id == context.user_id, Timetable.semester == term[0], Timetable.academic_year == term[1], Course.is_active.is_(True)).order_by(Timetable.day_of_week, Timetable.start_time).all())
+        base_query = (self.db.query(Timetable)
+            .join(Lecturer, Lecturer.lecturer_id == Timetable.lecturer_id)
+            .join(Course, Course.course_id == Timetable.course_id)
+            .options(joinedload(Timetable.course), joinedload(Timetable.classroom).joinedload(Node.floorplan).joinedload(Floorplan.building))
+            .filter(Lecturer.user_id == context.user_id, Course.is_active.is_(True)))
+        rows = []
+        if term is not None:
+            rows = base_query.filter(
+                Timetable.semester == term[0],
+                Timetable.academic_year == term[1],
+            ).order_by(Timetable.day_of_week, Timetable.start_time).all()
+        if not rows:
+            all_rows = base_query.order_by(
+                Timetable.semester.desc(), Timetable.academic_year.desc(),
+                Timetable.day_of_week, Timetable.start_time,
+            ).all()
+            if all_rows:
+                latest_term = (all_rows[0].semester, all_rows[0].academic_year)
+                rows = [row for row in all_rows if (row.semester, row.academic_year) == latest_term]
         return [self._timetable_dto(row) for row in rows]
 
     def appointments(self, context: AuthenticatedChatContext, start: Optional[dt.datetime] = None, end: Optional[dt.datetime] = None) -> list[SafeAppointment]:

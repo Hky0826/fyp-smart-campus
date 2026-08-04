@@ -47,6 +47,13 @@ class RagSettings:
     EMBEDDING_DIM: int = int(os.getenv("RAG_EMBEDDING_DIM", "3072"))
     # Primary LLM used by both the audio path and the migrated text path.
     LLM_MODEL: str = os.getenv("RAG_LLM_MODEL", "gemini-3.1-flash-lite")
+    # Shared structured planner.  Keep the defaults on the existing lightweight
+    # model so deployments can roll this out without a new model dependency.
+    PLANNER_MODEL: str = os.getenv("RAG_PLANNER_MODEL", LLM_MODEL)
+    # Gemini rejects manually supplied deadlines below 10 seconds.  Keep a
+    # small buffer above that provider minimum by default.
+    PLANNER_TIMEOUT_SECONDS: float = float(os.getenv("RAG_PLANNER_TIMEOUT_SECONDS", "12"))
+    PLANNER_CATALOG_CANDIDATE_LIMIT: int = int(os.getenv("RAG_PLANNER_CATALOG_CANDIDATE_LIMIT", "8"))
 
     AUDIO_STT_MODEL: str = os.getenv("RAG_AUDIO_STT_MODEL", "chirp_3")
 

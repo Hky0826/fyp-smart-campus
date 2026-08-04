@@ -87,7 +87,7 @@ export function NavigationPanel({
                     >
                         <option value="">-- Select Role --</option>
                         {rolesList.map(r => (
-                            <option key={r.role_id || r.id} value={r.role_id || r.id}>{r.role_name || r.name}</option>
+                            <option key={r.role_id || r.id} value={r.role_name || r.name}>{r.role_name || r.name}</option>
                         ))}
                     </select>
                 </div>
@@ -125,7 +125,7 @@ export function NavigationPanel({
                         </div>
                         <div className="bg-slate-950/50 rounded p-1 text-center">
                             <p className="text-[8px] text-slate-500 uppercase">Est. Time</p>
-                            <p className="text-[11px] font-bold text-teal-400">{navResult.route_summary.estimated_time_label}</p>
+                            <p className="text-[11px] font-bold text-teal-400">{navResult.route_summary.estimated_time_label || (navResult.route_summary.estimated_time_seconds != null ? `${navResult.route_summary.estimated_time_seconds}s` : 'N/A')}</p>
                         </div>
                         {navResult.route_summary.floor_transitions > 0 && (
                             <div className={`bg-slate-950/50 rounded p-1 text-center ${navResult.route_summary.building_transitions > 0 ? '' : 'col-span-2'}`}>
@@ -159,14 +159,17 @@ export function NavigationPanel({
                     {directionsOpen && (
                         <div className="flex flex-col gap-1 mt-1">
                             {navResult.instructions.map((step, idx) => {
-                                const icons = { start: '🟢', walk: '⬆️', turn: step.action === 'left' ? '↰' : '↱', transition: step.action === 'elevator' ? '🛗' : step.action === 'stairwell' ? '🪜' : '🚪', arrive: '🏁' };
+                                const action = step.action || step.type || 'walk';
+                                const typeKey = (action === 'left' || action === 'right') ? 'turn' : (action === 'straight' ? 'walk' : action);
+                                const icons = { start: '🟢', walk: '⬆️', turn: action === 'left' ? '↰' : '↱', transition: action === 'elevator' ? '🛗' : action === 'stairwell' ? '🪜' : '🚪', arrive: '🏁' };
                                 const colours = { start: 'text-teal-400', walk: 'text-slate-300', turn: 'text-amber-400', transition: 'text-purple-400', arrive: 'text-yellow-400' };
+                                const text = step.instruction || step.description || '';
                                 return (
                                     <div key={idx} className="flex gap-2 items-start bg-slate-950/60 rounded-lg px-2 py-1 border border-slate-800/60">
-                                        <span className="text-xs flex-shrink-0">{icons[step.type] || '•'}</span>
+                                        <span className="text-xs flex-shrink-0">{icons[typeKey] || icons[action] || '•'}</span>
                                         <div className="flex flex-col min-w-0">
-                                            <p className={`text-[10px] font-semibold ${colours[step.type] || 'text-white'} leading-tight`}>{step.description}</p>
-                                            {step.type === 'walk' && (
+                                            <p className={`text-[10px] font-semibold ${colours[typeKey] || colours[action] || 'text-white'} leading-tight`}>{text}</p>
+                                            {step.distance_m && (
                                                 <p className="text-[9px] text-slate-600">{step.distance_m}m</p>
                                             )}
                                         </div>
