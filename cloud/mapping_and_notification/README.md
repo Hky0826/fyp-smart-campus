@@ -91,7 +91,7 @@ python -m uvicorn cloud.dashboard.backend.app.main:app --reload --port 8000
 
 ## Run the notification worker
 
-Run the worker separately from Uvicorn. It declares the durable exchange,
+The launcher starts the worker automatically alongside Uvicorn. It declares the durable exchange,
 queue, and routing key (`campus.notifications.exchange`,
 `campus.notifications.queue`, `appointment_routing`) and acknowledges messages
 only after the notification audit row is terminal:
@@ -148,7 +148,7 @@ parity testing, deployment, and migration sign-off are complete. Start the API
 and worker together for local integration testing with:
 
 ```powershell
-.\start_cloud.ps1 -StartNotificationWorker
+.\start_cloud.ps1
 ```
 
 After production sign-off, the remaining Phase 7 actions are to stop the

@@ -21,7 +21,6 @@ for path in (CLOUD_ROOT, BACKEND_ROOT):
         sys.path.insert(0, path_str)
 
 from RagChatbot.generation import response_validator
-from RagChatbot.generation.gemini_live_service import LiveResponseResult
 from RagChatbot.personalisation.schemas import AuthenticatedChatContext, PersonalIntent, PersonalResult
 from RagChatbot.retrieval.ranking import RankedChunk
 from RagChatbot.schemas import ExtractedQuery
@@ -83,8 +82,8 @@ class RagTtsModelTests(unittest.TestCase):
             patch.object(audio_chat_service, "retrieve_chunks", Mock(return_value=[chunk])),
             patch.object(
                 audio_chat_service,
-                "generate_response",
-                Mock(return_value=LiveResponseResult(text=answer, cited_chunks=[chunk])),
+                "generate_answer",
+                Mock(return_value=answer),
             ),
             patch.object(
                 audio_chat_service,

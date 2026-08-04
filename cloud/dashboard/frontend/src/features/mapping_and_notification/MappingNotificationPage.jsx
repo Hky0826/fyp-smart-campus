@@ -318,6 +318,7 @@ export default function MappingNotificationPage() {
                             notifTestLoading={notificationHub.notifTestLoading}
                             notifTestError={notificationHub.notifTestError}
                             notifTestResult={notificationHub.notifTestResult}
+                            notifDataError={notificationHub.notifDataError}
                             fetchNotifData={notificationHub.fetchNotifData}
                             notifLogLoading={notificationHub.notifLogLoading}
                             notifLog={notificationHub.notifLog}

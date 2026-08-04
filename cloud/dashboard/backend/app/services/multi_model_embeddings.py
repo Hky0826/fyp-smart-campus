@@ -12,7 +12,7 @@ from app.facial_recognition.embedder import EdgeFaceEmbedder
 from app.models.models import User, UserFaceEmbedding
 
 SFACE = "openvc_sface"
-AURAFACE = "auraface"
+ARCFACE = "arcface_r50"
 ROOT = Path(__file__).resolve().parents[5]
 
 
@@ -28,14 +28,14 @@ class MultiModelEmbeddingService:
                 ROOT / "cloud/models/sface/face_recognition_sface_2021dec.onnx",
             )
         )
-        self.auraface_path = os.getenv(
-            "AURAFACE_MODEL_PATH",
-            str(ROOT / "cloud/models/auraface/glintr100.onnx"),
+        self.arcface_path = os.getenv(
+            "ARCFACE_MODEL_PATH",
+            str(ROOT / "cloud/models/arcface/arcface_r50.onnx"),
         )
         self._sface = None
-        self._auraface = None
+        self._arcface = None
 
-    def preflight(self, models=(SFACE, AURAFACE)) -> None:
+    def preflight(self, models=(SFACE, ARCFACE)) -> None:
         """Verify model files and initialize each required backend."""
         for model_name in models:
             if model_name == SFACE:
@@ -46,14 +46,14 @@ class MultiModelEmbeddingService:
                         self._sface = cv2.FaceRecognizerSF.create(str(self.sface_path), "")
                     except Exception as exc:
                         raise EnrollmentEmbeddingError(f"{SFACE}: model initialization failed: {exc}") from exc
-            elif model_name == AURAFACE:
-                if not self.auraface_path or not Path(self.auraface_path).is_file():
-                    raise EnrollmentEmbeddingError(f"{AURAFACE}: model not found: {self.auraface_path}")
-                if self._auraface is None:
+            elif model_name == ARCFACE:
+                if not self.arcface_path or not Path(self.arcface_path).is_file():
+                    raise EnrollmentEmbeddingError(f"{ARCFACE}: model not found: {self.arcface_path}")
+                if self._arcface is None:
                     try:
-                        self._auraface = EdgeFaceEmbedder(self.auraface_path)
+                        self._arcface = EdgeFaceEmbedder(self.arcface_path)
                     except Exception as exc:
-                        raise EnrollmentEmbeddingError(f"{AURAFACE}: model initialization failed: {exc}") from exc
+                        raise EnrollmentEmbeddingError(f"{ARCFACE}: model initialization failed: {exc}") from exc
             else:
                 raise EnrollmentEmbeddingError(f"{model_name}: unsupported embedding model")
 
@@ -70,13 +70,13 @@ class MultiModelEmbeddingService:
         face = cv2.resize(image, (112, 112))
         return np.asarray(self._sface.feature(face), dtype=np.float32).reshape(-1)
 
-    def _auraface_embedding(self, image: np.ndarray) -> np.ndarray:
-        return np.asarray(self._auraface.embed(image), dtype=np.float32).reshape(-1)
+    def _arcface_embedding(self, image: np.ndarray) -> np.ndarray:
+        return np.asarray(self._arcface.embed(image), dtype=np.float32).reshape(-1)
 
-    def generate_images(self, images: dict[str, np.ndarray], models=(SFACE, AURAFACE)) -> dict[tuple[str, str], bytes]:
+    def generate_images(self, images: dict[str, np.ndarray], models=(SFACE, ARCFACE)) -> dict[tuple[str, str], bytes]:
         """Generate every pose/model result before any database mutation."""
         self.preflight(models)
-        generators = {SFACE: self._sface_embedding, AURAFACE: self._auraface_embedding}
+        generators = {SFACE: self._sface_embedding, ARCFACE: self._arcface_embedding}
         staged: dict[tuple[str, str], bytes] = {}
         for pose, image in images.items():
             if image is None or not isinstance(image, np.ndarray) or image.size == 0:
@@ -114,7 +114,7 @@ class MultiModelEmbeddingService:
             return {}, errors
         return images, errors
 
-    def reembed_all(self, db: Session, models=(SFACE, AURAFACE)):
+    def reembed_all(self, db: Session, models=(SFACE, ARCFACE)):
         """Stage all users first; preserve every old template on any failure."""
         result = {"written": 0, "skipped": 0, "errors": [], "models": list(models), "committed": False}
         try:

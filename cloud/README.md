@@ -197,8 +197,11 @@ Run the PowerShell launcher script from the project root directory (`Code_FYP`):
 # Development mode with live auto-reload
 .\start_cloud.ps1 -Reload
 
-# Start backend along with the background notification worker
-.\start_cloud.ps1 -Reload -StartNotificationWorker
+# The notification worker and local RabbitMQ broker start automatically
+.\start_cloud.ps1 -Reload
+
+# Optional: skip the worker when it is managed separately
+.\start_cloud.ps1 -Reload -SkipNotificationWorker
 ```
 
 *What `start_cloud.ps1` does automatically:*
@@ -207,7 +210,9 @@ Run the PowerShell launcher script from the project root directory (`Code_FYP`):
 3. Tests Redis responsiveness (`PONG`).
 4. Verifies connectivity to MySQL on port `3306`.
 5. Prepares database tables safely using `prepare_cloud.py`.
-6. Launches Uvicorn server on `http://127.0.0.1:8000`.
+6. Starts the local RabbitMQ broker when `RABBITMQ_URL` is not configured.
+7. Starts the notification worker.
+8. Launches Uvicorn server on `http://127.0.0.1:8000`.
 
 *Alternatively, you can double-click `start_cloud.bat` in Windows File Explorer.*
 

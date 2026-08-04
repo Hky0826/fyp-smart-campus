@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -70,9 +70,12 @@ class NotificationTestRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     body: str = Field(min_length=1, max_length=10000)
     event_type: str = "test"
+    email_delivery_mode: Literal["ethereal", "smtp"] | None = None
 
 
 class RouteAndNotifyRequest(RouteRequest):
     recipient_user_id: int
     title: str = "Campus route notification"
+    body: str | None = Field(default=None, min_length=1, max_length=10000)
     event_type: str = "appointment_routing"
+    email_delivery_mode: Literal["ethereal", "smtp"] | None = None

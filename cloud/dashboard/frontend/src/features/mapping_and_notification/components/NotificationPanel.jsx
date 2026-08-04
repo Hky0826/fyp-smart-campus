@@ -15,7 +15,7 @@ export function NotificationPanel({
     notifMessage, setNotifMessage, setIsAutoMessage,
     emailDeliveryMode, setEmailDeliveryMode,
     handleGenerateRouteAndNotify,
-    notifTestLoading, notifTestError, notifTestResult,
+    notifTestLoading, notifTestError, notifTestResult, notifDataError,
     fetchNotifData,
     notifLogLoading, notifLog
 }) {
@@ -36,8 +36,8 @@ export function NotificationPanel({
                                 const val = e.target.value;
                                 setNotifVisitorId(val);
                                 const selectedUser = (notifUsers || []).find(u => String(u.user_id) === String(val));
-                                if (selectedUser && selectedUser.role_id && setNavRoleId) {
-                                    setNavRoleId(String(selectedUser.role_id));
+                                if (selectedUser && setNavRoleId) {
+                                    setNavRoleId(selectedUser.role_name || '');
                                 }
                             }}
                             className="bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[10px] text-slate-200 focus:outline-none focus:border-indigo-500 w-full cursor-pointer h-7"
@@ -50,6 +50,12 @@ export function NotificationPanel({
                             ))}
                         </select>
                     </div>
+
+                    {notifDataError && (
+                        <div className="bg-amber-950 border border-amber-800 rounded-lg p-2 text-[9px] text-amber-300">
+                            Recipient loading failed: {notifDataError}
+                        </div>
+                    )}
 
                     <div className="flex flex-col gap-1">
                         <label className="text-[9px] text-slate-400 font-semibold">Subject / Event</label>
@@ -90,7 +96,7 @@ export function NotificationPanel({
 
                 <button
                     onClick={handleGenerateRouteAndNotify}
-                    disabled={notifTestLoading || !navStartId || !navEndId || !notifVisitorId}
+                    disabled={notifTestLoading || !navStartId || !navEndId || !notifVisitorId || !notifMessage}
                     className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-md text-[10px] flex items-center justify-center gap-1.5 cursor-pointer transition-all duration-200 border-0 shadow-lg shadow-indigo-600/10 mt-0.5"
                 >
                     {notifTestLoading ? 'Sending Notification...' : 'Send Notification'}
@@ -99,6 +105,13 @@ export function NotificationPanel({
                 {notifTestError && (
                     <div className="bg-red-950 border border-red-800 rounded-lg p-2 text-[9px] text-red-400">
                         ⚠️ {notifTestError}
+                    </div>
+                )}
+
+                {notifTestResult?.notification && (
+                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-[9px] text-slate-300">
+                        Notification status: <span className="font-bold text-teal-400">{notifTestResult.notification.status}</span>
+                        {notifTestResult.notification.status === 'RETRYING' && ' - RabbitMQ or the notification worker is unavailable.'}
                     </div>
                 )}
             </div>

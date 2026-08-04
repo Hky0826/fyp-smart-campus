@@ -22,13 +22,27 @@ router.include_router(wall_detection.router)
 @router.post("/routes-and-notify", tags=["Mapping and notification notifications"])
 def route_and_notify(payload: RouteAndNotifyRequest, db: Session = Depends(get_db), admin=Depends(verify_system_admin)):
     try:
-        route = NavigationService(db).calculate(destination_node_id=payload.canonical_destination_id(), destination_label=payload.destination_label, start_node_id=payload.canonical_start(), user=admin.user, walking_speed=payload.walking_speed, roles={str(getattr(r, "role_name", r)).upper() for r in (getattr(admin.user, "roles", None) or ())}, allow_explicit_start=True)
+        roles = {payload.rbac_role.upper()} if payload.rbac_role else {str(getattr(r, "role_name", r)).upper() for r in (getattr(admin.user, "roles", None) or ())}
+        route = NavigationService(db).calculate(destination_node_id=payload.canonical_destination_id(), destination_label=payload.destination_label, start_node_id=payload.canonical_start(), user=admin.user, walking_speed=payload.walking_speed, roles=roles, allow_explicit_start=True)
     except DestinationAmbiguous as exc:
         raise HTTPException(409, {"message": str(exc), "candidates": exc.candidates})
     except (NoRouteError, StartLocationRequired) as exc:
         raise HTTPException(422, str(exc))
     summary = route["route_summary"]
-    row = NotificationService(db).create_and_publish(build_notification(recipient_user_id=payload.recipient_user_id, title=payload.title, body=f"Route to {summary['destination_label']}", event_type=payload.event_type))
+    row = NotificationService(db).create_and_publish(build_notification(
+        recipient_user_id=payload.recipient_user_id,
+        title=payload.title,
+        body=payload.body or f"Route to {summary['destination_label']}",
+        event_type=payload.event_type,
+        email_delivery_mode=payload.email_delivery_mode,
+        route_context={
+            "route_summary": route["route_summary"],
+            "instructions": route["instructions"],
+            "path": route["path"],
+            "edges_traversed": route["edges_traversed"],
+            "visualisation": route["visualisation"],
+        },
+    ))
     route["notification"] = {"notification_id": row.notification_id, "message_id": row.message_id, "status": row.status}
     return route
 

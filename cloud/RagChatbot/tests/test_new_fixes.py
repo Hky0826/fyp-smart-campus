@@ -73,7 +73,7 @@ def test_authenticated_context_preserves_roles_identities_and_device_origin():
 
     session = SimpleNamespace(session_id=100, device_id="registered-kiosk")
     user = SimpleNamespace(
-        roles=[SimpleNamespace(role_name="STUDENT"), SimpleNamespace(role_name="LECTURER")],
+        roles=[SimpleNamespace(role_name="ADMIN")],
         student=SimpleNamespace(student_id="S1"),
         lecturer=SimpleNamespace(lecturer_id="L1"),
         staff=SimpleNamespace(staff_id="ST1"),
@@ -104,7 +104,7 @@ def test_authenticated_context_preserves_roles_identities_and_device_origin():
     with patch.object(auth_context, "resolve_user_session", return_value=({}, 1, session)):
         context = auth_context.resolve_auth_context("jwt", Db(), requested_device_id="registered-kiosk")
 
-    assert context.roles == ("LECTURER", "STUDENT")
+    assert context.roles == ("ADMIN", "LECTURER", "STAFF", "STUDENT", "VISITOR")
     assert (context.student_id, context.lecturer_id, context.staff_id, context.visitor_id, context.admin_id) == ("S1", "L1", "ST1", "V1", "A1")
     assert context.device_id == "registered-kiosk"
     assert context.device_node_id == 77

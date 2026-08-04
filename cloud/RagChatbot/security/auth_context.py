@@ -81,7 +81,24 @@ def resolve_auth_context(
             detail="Request device_id does not match the authenticated session device.",
         )
     user = db.query(User).filter_by(user_id=user_id, is_active=True).first()
-    roles = tuple(sorted({str(role.role_name).upper() for role in (user.roles or [])}))
+    role_names = {str(role.role_name).upper() for role in (user.roles or [])}
+
+    # A linked identity profile is also an authoritative indication of the
+    # user's applicable personal capability. This matters for accounts such
+    # as administrators who also have a student or lecturer profile: the
+    # personalisation layer must receive the complete role set instead of
+    # relying on a single primary role assignment.
+    if getattr(user, "student", None) is not None:
+        role_names.add("STUDENT")
+    if getattr(user, "lecturer", None) is not None:
+        role_names.add("LECTURER")
+    if getattr(user, "staff", None) is not None:
+        role_names.add("STAFF")
+    if getattr(user, "visitor", None) is not None:
+        role_names.add("VISITOR")
+    if getattr(user, "admin", None) is not None:
+        role_names.add("ADMIN")
+    roles = tuple(sorted(role_names))
 
     # Identity records are independent of role ordering. A person can hold
     # more than one role and each applicable record remains available to the

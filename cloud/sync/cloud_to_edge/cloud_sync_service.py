@@ -448,6 +448,7 @@ def register_edge(registration: EdgeRegistration, db: Session = Depends(get_db),
     """
     Enrolls an edge device's LAN metadata so the cloud publisher knows where to dispatch direct pushes.
     """
+
     return handler.register_edge_node(db, registration)
 
 @router.get("/delta", response_model=DeltaSyncResponse)
@@ -463,7 +464,7 @@ def get_deltas(last_synced_at: Optional[str] = None, module: Optional[str] = Non
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid datetime format. Please use ISO 8601 string.")
     
-    model_by_module = {"access_control": {"openvc_sface"}, "surveillance": {"auraface"}, "edge": {"arcface_r50"}}
+    model_by_module = {"access_control": {"openvc_sface"}, "surveillance": {"arcface_r50"}, "edge": {"arcface_r50"}}
     if module is not None and module not in model_by_module:
         raise HTTPException(status_code=400, detail="module must be access_control, surveillance, or edge")
     payload = handler.get_delta_updates(db, parsed_time, model_by_module.get(module))

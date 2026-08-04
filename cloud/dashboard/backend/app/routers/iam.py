@@ -243,7 +243,7 @@ def _replace_user_enrollment(
 ) -> None:
     """Stage model outputs before replacing enrollment, optionally preserving other poses."""
     from app.models.models import UserImage, UserFaceEmbedding
-    from app.services.multi_model_embeddings import MultiModelEmbeddingService, SFACE, AURAFACE, EnrollmentEmbeddingError
+    from app.services.multi_model_embeddings import MultiModelEmbeddingService, SFACE, ARCFACE, EnrollmentEmbeddingError
 
     service = MultiModelEmbeddingService()
     enrollment_crops = dict(crops)
@@ -261,7 +261,7 @@ def _replace_user_enrollment(
         enrollment_crops.update(crops)
 
     try:
-        staged = service.generate_images(enrollment_crops, (SFACE, AURAFACE))
+        staged = service.generate_images(enrollment_crops, (SFACE, ARCFACE))
     except EnrollmentEmbeddingError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Enrollment failed: {exc}") from exc

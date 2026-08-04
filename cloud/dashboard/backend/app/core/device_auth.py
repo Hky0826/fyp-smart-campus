@@ -33,7 +33,7 @@ MAX_CLOCK_SKEW_SECONDS = 300
 def _fernet() -> Fernet:
     if Fernet is None:
         raise RuntimeError("Encrypted device credential storage is not configured")
-    key = settings.DEVICE_CREDENTIAL_KEY or get_development_device_credential_key()
+    key = os.getenv("DEVICE_CREDENTIAL_KEY") or get_development_device_credential_key()
     if not key:
         raise RuntimeError("Encrypted device credential storage is not configured")
     return Fernet(key.encode())

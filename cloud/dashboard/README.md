@@ -92,9 +92,9 @@ Start the Uvicorn local development server:
 .venv\Scripts\python.exe -m uvicorn cloud.dashboard.backend.app.main:app --reload
 ```
 
-From the repository root, add `-StartNotificationWorker` to
-`.\start_cloud.ps1` to launch the separate RabbitMQ notification worker. The
-worker uses the durable `campus.notifications.queue` topology.
+`.\start_cloud.ps1` starts the separate RabbitMQ notification worker
+automatically. Use `-SkipNotificationWorker` when the worker is managed
+separately. The worker uses the durable `campus.notifications.queue` topology.
 
 ---
 

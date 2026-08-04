@@ -19,6 +19,7 @@ export const getGraph = (id) => mappingRequest(`/floorplans/${id}/graph`);
 export const getNotifications = () => mappingRequest('/notifications');
 export const getRecipients = () => mappingRequest('/notification-recipients');
 export const previewRoute = (request) => mappingRequest('/routes/admin-preview', { method: 'POST', body: JSON.stringify(request) });
+export const routeAndNotify = (request) => mappingRequest('/routes-and-notify', { method: 'POST', body: JSON.stringify(request) });
 export const calculateRoute = (request) => mappingRequest('/routes', { method: 'POST', body: JSON.stringify(request) });
 export const saveGraph = (id, graph) => mappingRequest(`/floorplans/${id}/graph`, { method: 'PUT', body: JSON.stringify(graph) });
 export const patchFloorplan = (id, data) => mappingRequest(`/floorplans/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
@@ -52,4 +53,3 @@ export async function uploadFloorplan({ buildingId, floorLevel, scaleRatio, file
   if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Floorplan upload failed');
   return data;
 }
-

@@ -22,7 +22,19 @@ def list_notifications(db: Session = Depends(get_db), _admin=Depends(verify_syst
 @router.get("/notification-recipients")
 def notification_recipients(db: Session = Depends(get_db), _admin=Depends(verify_system_admin)):
     from app.models.models import User
-    return [{"user_id": u.user_id, "name": u.full_name, "email": u.email} for u in db.query(User).filter(User.is_active.is_(True)).order_by(User.family_name, User.given_name).all()]
+    users = db.query(User).filter(User.is_active.is_(True)).order_by(User.family_name, User.given_name).all()
+    result = []
+    for u in users:
+        first_role = u.roles[0] if u.roles else None
+        result.append({
+            "user_id": u.user_id,
+            "full_name": u.full_name,
+            "name": u.full_name,
+            "email": u.email,
+            "role_name": first_role.role_name if first_role else "User",
+            "role_id": first_role.role_id if first_role else None
+        })
+    return result
 
 
 @router.post("/notifications/test")

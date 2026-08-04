@@ -33,18 +33,30 @@ def process_message(db, payload: dict, *, email_service=None):
     if not recipient_email:
         service.mark_delivery(message_id, status="SKIPPED", error="Recipient email unavailable")
         return {"status": "SKIPPED", "error": "Recipient email unavailable"}
-    ok, error = email_service.send(to=recipient_email, subject=payload.get("title", row.title), html=payload.get("html", row.body))
-    service.mark_delivery(message_id, status="SENT" if ok else "FAILED", error=error)
+    html = payload.get("html", row.body)
+    attachments = None
+    route_context = payload.get("route_context")
+    if route_context:
+        from ..notifications.route_email import render_route_email
+        html, attachments = render_route_email(
+            route_context=route_context,
+            db=db,
+            recipient_name=getattr(recipient, "full_name", None),
+            body=payload.get("body", row.body),
+        )
+    ok, error, preview_url = email_service.send(to=recipient_email, subject=payload.get("title", row.title), html=html, email_delivery_mode=payload.get("email_delivery_mode"), attachments=attachments)
+    service.mark_delivery(message_id, status="SENT" if ok else "FAILED", error=error, preview_url=preview_url)
     return {"status": "SENT" if ok else "FAILED", "error": error}
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    logging.getLogger("pika").setLevel(logging.WARNING)
     import pika
     from app.core.database import SessionLocal
     from ..notifications.broker import EXCHANGE, QUEUE, ROUTING_KEY
 
-    connection = pika.BlockingConnection(pika.URLParameters(os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")))
+    connection = pika.BlockingConnection(pika.URLParameters(os.getenv("RABBITMQ_URL", "amqp://guest:guest@127.0.0.1:5672/")))
     channel = connection.channel()
     channel.exchange_declare(exchange=EXCHANGE, exchange_type="topic", durable=True)
     channel.queue_declare(queue=QUEUE, durable=True)

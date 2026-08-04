@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getNotifications, getRecipients, previewRoute } from '../services/api';
+import { getNotifications, getRecipients, routeAndNotify } from '../services/api';
 
 export function useNotificationHub({
     navStartId,
@@ -24,28 +24,39 @@ export function useNotificationHub({
     const [notifLog, setNotifLog]                       = useState([]);
     const [notifLogLoading, setNotifLogLoading]         = useState(false);
     const [emailDeliveryMode, setEmailDeliveryMode]     = useState('ethereal');
+    const [notifDataError, setNotifDataError]           = useState('');
 
     const fetchNotifData = async () => {
         try {
             setNotifLogLoading(true);
-            const [usersRes, logRes] = await Promise.all([
-                getRecipients().catch(() => []),
-                getNotifications().catch(() => [])
+            setNotifDataError('');
+
+            const [usersResult, logResult] = await Promise.allSettled([
+                getRecipients(),
+                getNotifications()
             ]);
-            setNotifUsers(usersRes);
-            setNotifLog(logRes);
+
+            if (usersResult.status === 'fulfilled') {
+                setNotifUsers(Array.isArray(usersResult.value) ? usersResult.value : []);
+            } else {
+                setNotifUsers([]);
+                setNotifDataError(usersResult.reason?.message || 'Unable to load notification recipients.');
+            }
+
+            if (logResult.status === 'fulfilled') {
+                setNotifLog(Array.isArray(logResult.value) ? logResult.value : []);
+            }
         } catch (err) {
             console.error('Failed to load Notification Hub data:', err);
+            setNotifDataError(err.message || 'Unable to load notification data.');
         } finally {
             setNotifLogLoading(false);
         }
     };
 
     useEffect(() => {
-        if (notifPanelOpen) {
-            fetchNotifData();
-        }
-    }, [notifPanelOpen]);
+        fetchNotifData();
+    }, []);
 
     useEffect(() => {
         if (isAutoMessage) {
@@ -77,12 +88,12 @@ export function useNotificationHub({
     }, [notifVisitorId, notifUsers, notifEventType, navStartId, navEndId, globalNodes, isAutoMessage]);
 
     const handleGenerateRouteAndNotify = async () => {
-        if (!notifTargetHostId || !notifVisitorId) {
-            alert('Please select both a valid host and visitor before generating route.');
+        if (!notifVisitorId) {
+            alert('Please select a valid recipient before sending notification.');
             return;
         }
-        if (!navStartId || !navEndId || !navRoleId || !notifMessage) {
-            alert('Please fill in both navigation inputs and notification parameters.');
+        if (!navStartId || !navEndId || !notifMessage) {
+            alert('Please select start & end navigation nodes on the map and write a message.');
             return;
         }
 
@@ -96,17 +107,15 @@ export function useNotificationHub({
             const payload = {
                 start_node_id:       parseInt(navStartId, 10),
                 destination_node_id: parseInt(navEndId, 10),
-                rbac_role:           navRoleId,
-                user_id:             parseInt(notifVisitorId, 10),
+                rbac_role:           navRoleId || undefined,
+                recipient_user_id:   parseInt(notifVisitorId, 10),
+                title:               notifEventType.replaceAll('_', ' '),
+                body:                notifMessage,
                 event_type:          notifEventType,
                 email_delivery_mode: emailDeliveryMode,
-                notification_trigger: {
-                    target_host_id: Number(notifTargetHostId),
-                    alert_message:  notifMessage
-                }
             };
 
-            const res = await previewRoute(payload);
+            const res = await routeAndNotify(payload);
             setNotifTestResult(res);
             setNavResult(res);
 
@@ -142,6 +151,7 @@ export function useNotificationHub({
         notifTestResult,
         notifTestLoading,
         notifTestError,
+        notifDataError,
         notifLog,
         notifLogLoading,
         fetchNotifData,

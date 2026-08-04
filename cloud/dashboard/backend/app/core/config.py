@@ -84,8 +84,8 @@ def get_development_device_credential_key() -> str:
     Production never uses this fallback. It must receive
     DEVICE_CREDENTIAL_KEY from deployment secret storage.
     """
-    if settings.DEVICE_CREDENTIAL_KEY:
-        return settings.DEVICE_CREDENTIAL_KEY
+    if os.getenv("DEVICE_CREDENTIAL_KEY"):
+        return os.getenv("DEVICE_CREDENTIAL_KEY")
     if settings.APP_ENV != "development":
         return ""
 
