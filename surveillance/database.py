@@ -63,7 +63,7 @@ class SurveillanceUserRepository:
                     CREATE TABLE IF NOT EXISTS device_user_face_embeddings (
                         user_id INTEGER NOT NULL,
                         template_name TEXT NOT NULL DEFAULT 'front',
-                        model_name TEXT NOT NULL DEFAULT 'auraface',
+                        model_name TEXT NOT NULL DEFAULT 'arcface_r50',
                         embedding BLOB NOT NULL,
                         last_synced_at TEXT,
                         PRIMARY KEY(user_id, template_name, model_name),
@@ -343,8 +343,8 @@ class SurveillanceUserRepository:
                     if embeddings:
                         cursor.execute("DELETE FROM device_user_face_embeddings WHERE user_id = ?", (user_id,))
                         for item in embeddings:
-                            model_name = str(item.get("model_name") or "auraface")
-                            if model_name != "auraface":
+                            model_name = str(item.get("model_name") or "arcface_r50")
+                            if model_name not in {"arcface_r50", "auraface"}:
                                 continue
                             template_name = str(item.get("template_name") or item.get("template") or "front")
                             val = item.get("embedding") or item.get("embedding_b64") or item.get("face_vector_b64")
@@ -354,7 +354,7 @@ class SurveillanceUserRepository:
                                     """
                                     INSERT INTO device_user_face_embeddings (
                                         user_id, template_name, model_name, embedding, last_synced_at
-                                    ) VALUES (?, ?, 'auraface', ?, CURRENT_TIMESTAMP)
+                                    ) VALUES (?, ?, 'arcface_r50', ?, CURRENT_TIMESTAMP)
                                     """,
                                     (user_id, template_name, blob),
                                 )

@@ -43,14 +43,14 @@ class AuraFaceEmbedder:
         else:
             rgb = resized
 
-        # Standard InsightFace / AuraFace normalization: (x - 127.5) / 127.5
-        normalized = (rgb.astype(np.float32) - 127.5) / 127.5
+        # Hailo HEFs from Hailo Model Zoo include normalization (mean/std 127.5) inside net graph
+        tensor = rgb.astype(np.float32)
 
         # Check tensor format expected by runner (NCHW vs NHWC)
         if len(getattr(self.runner, "input_shape", ())) == 4 and self.runner.input_shape[1] == 3:
-            normalized = normalized.transpose(2, 0, 1)  # NHWC -> NCHW
+            tensor = tensor.transpose(2, 0, 1)  # NHWC -> NCHW
 
-        return np.expand_dims(normalized, axis=0)
+        return np.expand_dims(tensor, axis=0)
 
     def embed(self, aligned_face_bgr: np.ndarray) -> np.ndarray:
         """Runs AuraFace embedder and returns normalized 512-d float32 vector."""

@@ -362,7 +362,7 @@ def create_surveillance_app(
         return {
             "status": "ok",
             "module": "surveillance",
-            "models": ["yolox-m", "yunet", "auraface"],
+            "models": ["yolox-m", "yunet", "arcface_r50"],
             "registered_templates": repository.count(),
         }
 
