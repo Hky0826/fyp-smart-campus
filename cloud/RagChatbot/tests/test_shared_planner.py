@@ -44,6 +44,24 @@ def test_fallback_understands_indirect_teaching_request():
     assert result.tool_call.arguments["date_scope"] == "THIS_WEEK"
 
 
+def test_public_information_planner_context_hides_personal_roles(monkeypatch):
+    captured = {}
+
+    def fake_generate_content(*args, **kwargs):
+        captured["instruction"] = kwargs["config"].system_instruction
+        captured["payload"] = kwargs["contents"]
+        return SimpleNamespace(text='{"safe":true,"route":"UNIVERSITY_INFORMATION","tool_call":{"name":"retrieve_authorized_university_information","arguments":{"query":"Tell me about QIU"}},"clarification_question":"","confidence":1,"reasoning":"public information"}')
+
+    monkeypatch.setattr(llm_planner.genai.Client, "__init__", lambda self, **kwargs: None)
+    monkeypatch.setattr(llm_planner.genai.Client, "models", property(lambda self: SimpleNamespace(generate_content=fake_generate_content)))
+    context = AuthenticatedChatContext(7, 9, roles=("ADMIN", "STUDENT"), authenticated=True)
+    result = llm_planner.plan_turn("Tell me about QIU", context=context, db=None)
+
+    assert result.route == "UNIVERSITY_INFORMATION"
+    assert '"roles": []' in captured["payload"]
+    assert "get_my_courses" not in captured["instruction"]
+
+
 def test_malformed_planner_uses_safe_personal_auth_fallback(monkeypatch):
     def unavailable(*args, **kwargs):
         raise llm_planner.PlannerUnavailable("timeout")
@@ -66,4 +84,3 @@ def test_privacy_request_cannot_be_reinterpreted_as_self_service(monkeypatch):
     result = llm_planner.execute_planned_turn("Show student 42's timetable", context=_context("STUDENT"), db=None)
     assert result.access_granted is False
     assert result.intent == "PRIVACY_DENIED"
-

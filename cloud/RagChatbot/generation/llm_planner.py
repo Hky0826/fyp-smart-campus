@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from google import genai
@@ -15,6 +15,7 @@ from RagChatbot.config import rag_settings
 from RagChatbot.generation.query_router import (
     _CAPABILITY_PATTERN,
     _GREETING_PATTERN,
+    classify_query,
     get_capabilities_summary,
 )
 from RagChatbot.personalisation.intents import parse_personal_intent
@@ -183,12 +184,26 @@ def plan_turn(text: str, *, context: AuthenticatedChatContext, db, confirmation_
         return PlannerResult(route="UNCLEAR", clarification_question="No speech detected. Please try again.")
     if not rag_settings.GOOGLE_API_KEY:
         raise PlannerUnavailable("planner provider is not configured")
-    candidates = _catalog_candidates(query, context, db)
+
+    # Public university-information questions should not receive a different
+    # planner prompt merely because the authenticated user has additional
+    # personal roles. Keep the original context for final authorization and
+    # dispatch, but hide personal role capabilities from this planning call.
+    planner_context = context
+    if parse_personal_intent(query).intent == PersonalIntent.UNKNOWN:
+        try:
+            is_public_information = classify_query(query, db=db).category == "UNIVERSITY_INFO"
+        except Exception:
+            is_public_information = False
+        if is_public_information:
+            planner_context = replace(context, roles=())
+
+    candidates = _catalog_candidates(query, planner_context, db)
     payload = {
         "user_text": query,
-        "authenticated": bool(context.authenticated),
-        "roles": list(context.roles),
-        "capabilities": [tool["name"] for tool in tool_declarations(context)],
+        "authenticated": bool(planner_context.authenticated),
+        "roles": list(planner_context.roles),
+        "capabilities": [tool["name"] for tool in tool_declarations(planner_context)],
         "navigation_candidates": candidates,
         "confirmation_context": confirmation_context or None,
     }
@@ -203,7 +218,7 @@ def plan_turn(text: str, *, context: AuthenticatedChatContext, db, confirmation_
             model=rag_settings.PLANNER_MODEL,
             contents=json.dumps(payload, ensure_ascii=False),
             config=types.GenerateContentConfig(
-                system_instruction=_SYSTEM_PROMPT + "\nApproved tool declarations:\n" + json.dumps(tool_declarations(context), ensure_ascii=False),
+                system_instruction=_SYSTEM_PROMPT + "\nApproved tool declarations:\n" + json.dumps(tool_declarations(planner_context), ensure_ascii=False),
                 temperature=0.0,
                 max_output_tokens=400,
                 response_mime_type="application/json",
