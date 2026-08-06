@@ -7,8 +7,9 @@ Cloud startup on Windows is handled by one command from the repository root:
 ```
 
 `start_cloud.ps1` runs the cloud backend in development mode on loopback
-(`127.0.0.1`). Use `-Reload` for auto-reload and
-`-StartNotificationWorker` to launch the notification worker.
+(`127.0.0.1`) and starts the notification worker automatically. Use `-Reload`
+for auto-reload or `-SkipNotificationWorker` when the worker is managed
+separately.
 
 See [setup.md](setup.md) for the first-run prerequisites and access-control
 device setup.
