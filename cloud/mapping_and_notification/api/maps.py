@@ -122,7 +122,7 @@ def update_graph(floorplan_id: int, payload: GraphUpdate, db: Session = Depends(
     if payload.graph_version is not None and payload.graph_version != current_version:
         raise HTTPException(409, {"message": "Graph version is stale", "graph_version": current_version})
     existing = {n.node_id: n for n in db.query(Node).filter(Node.floorplan_id == floorplan_id).with_for_update().all()}
-    incoming_ids = {n.node_id for n in payload.nodes if n.node_id is not None}
+    incoming_ids = {n.node_id for n in payload.nodes if n.node_id is not None and n.node_id > 0}
     unknown = incoming_ids - set(existing)
     if unknown:
         raise HTTPException(409, {"message": "Graph references nodes from another floorplan", "node_ids": sorted(unknown)})
@@ -137,43 +137,57 @@ def update_graph(floorplan_id: int, payload: GraphUpdate, db: Session = Depends(
         if blockers:
             raise HTTPException(409, {"message": "Graph deletion has protected references", "references": blockers})
     all_nodes = {}
+    saved_nodes = []
+    temp_id_map = {}
     for item in payload.nodes:
-        node = existing.get(item.node_id) if item.node_id is not None else Node(floorplan_id=floorplan_id)
-        if node is None:
-            raise HTTPException(409, "Invalid node identity")
+        if item.node_id is not None and item.node_id > 0:
+            node = existing.get(item.node_id)
+            if node is None:
+                raise HTTPException(409, "Invalid node identity")
+        else:
+            node = Node(floorplan_id=floorplan_id)
         node.floorplan_id = floorplan_id
         node.coord_x, node.coord_y, node.room_label, node.node_type, node.is_accessible = item.coord_x, item.coord_y, item.room_label, item.node_type, item.is_accessible
         db.add(node); db.flush()
         all_nodes[node.node_id] = node
+        if item.node_id is not None:
+            temp_id_map[item.node_id] = node.node_id
+        saved_nodes.append((node, item))
     for edge in payload.edges:
-        if edge.source_node_id not in all_nodes or edge.destination_node_id not in all_nodes:
+        source_id = temp_id_map.get(edge.source_node_id, edge.source_node_id)
+        dest_id = temp_id_map.get(edge.destination_node_id, edge.destination_node_id)
+        if source_id not in all_nodes or dest_id not in all_nodes:
             raise HTTPException(422, "Every edge endpoint must be in the submitted graph")
     existing_edges = {e.edge_id: e for e in db.query(Edge).filter(Edge.source_node_id.in_(set(existing)), Edge.destination_node_id.in_(set(existing))).with_for_update().all()}
-    incoming_edge_ids = {e.edge_id for e in payload.edges if e.edge_id is not None}
+    incoming_edge_ids = {e.edge_id for e in payload.edges if e.edge_id is not None and e.edge_id > 0}
     if incoming_edge_ids - set(existing_edges):
         raise HTTPException(409, "Graph references an unknown edge")
     for edge in existing_edges.values():
         if edge.edge_id not in incoming_edge_ids:
             db.delete(edge)
+    saved_edges = []
     for item in payload.edges:
-        edge = existing_edges.get(item.edge_id) if item.edge_id is not None else Edge()
-        edge.source_node_id, edge.destination_node_id, edge.weight_distance, edge.is_accessible, edge.is_bidirectional = item.source_node_id, item.destination_node_id, item.weight_distance, item.is_accessible, item.is_bidirectional
+        edge = existing_edges.get(item.edge_id) if (item.edge_id is not None and item.edge_id > 0) else Edge()
+        edge.source_node_id = temp_id_map.get(item.source_node_id, item.source_node_id)
+        edge.destination_node_id = temp_id_map.get(item.destination_node_id, item.destination_node_id)
+        edge.weight_distance, edge.is_accessible, edge.is_bidirectional = item.weight_distance, item.is_accessible, item.is_bidirectional
         edge.custom_path = item.custom_path if isinstance(item.custom_path, str) else (None if item.custom_path is None else __import__("json").dumps(item.custom_path))
         db.add(edge)
+        saved_edges.append((edge, item))
+    db.flush()
     for node_id in deleted_ids:
         db.query(NodeRBAC).filter(NodeRBAC.node_id == node_id).delete(synchronize_session=False)
         db.delete(existing[node_id])
     db.flush()
     # RBAC is replaced only after the complete topology has validated.
-    for node_id, item in [(n.node_id, n) for n in payload.nodes]:
-        db.query(NodeRBAC).filter(NodeRBAC.node_id == node_id).delete(synchronize_session=False)
+    for node, item in saved_nodes:
+        db.query(NodeRBAC).filter(NodeRBAC.node_id == node.node_id).delete(synchronize_session=False)
         for role_id in item.role_ids:
-            db.add(NodeRBAC(node_id=node_id, role_id=role_id))
-    for edge in payload.edges:
-        if edge.edge_id is not None:
-            db.query(EdgeRBAC).filter(EdgeRBAC.edge_id == edge.edge_id).delete(synchronize_session=False)
-            for role_id in edge.role_ids:
-                db.add(EdgeRBAC(edge_id=edge.edge_id, role_id=role_id))
+            db.add(NodeRBAC(node_id=node.node_id, role_id=role_id))
+    for edge, item in saved_edges:
+        db.query(EdgeRBAC).filter(EdgeRBAC.edge_id == edge.edge_id).delete(synchronize_session=False)
+        for role_id in item.role_ids:
+            db.add(EdgeRBAC(edge_id=edge.edge_id, role_id=role_id))
     row.graph_version = current_version + 1
     try:
         db.commit()

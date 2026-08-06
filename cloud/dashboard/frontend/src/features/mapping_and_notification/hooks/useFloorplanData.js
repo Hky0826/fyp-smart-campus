@@ -280,19 +280,29 @@ export function useFloorplanData({ onFloorplanLoaded, onFloorplanCleared, onUplo
     const handleSaveMapData = async (nodes, edges) => {
         if (!currentFloorplanId) return alert('Please select a floorplan!');
         try {
-            const apiNodes = nodes.map(n => ({
-                node_id:       n.node_id || null,
-                coord_x:       n.x,
-                coord_y:       n.y,
-                room_label:    n.room_label || 'Node',
-                node_type:     n.node_type || 'CORRIDOR',
-                is_accessible: n.is_accessible || 'ALLOW',
-                role_ids:      n.allowed_roles || []
-            }));
+            let tempIdCounter = -1;
+            const nodeTempIdMap = new Map();
+
+            const apiNodes = nodes.map((n, idx) => {
+                let id = n.node_id;
+                if (!id) {
+                    id = tempIdCounter--;
+                }
+                nodeTempIdMap.set(idx, id);
+                return {
+                    node_id:       id,
+                    coord_x:       n.x,
+                    coord_y:       n.y,
+                    room_label:    n.room_label || 'Node',
+                    node_type:     n.node_type || 'CORRIDOR',
+                    is_accessible: n.is_accessible || 'ALLOW',
+                    role_ids:      n.allowed_roles || []
+                };
+            });
 
             const apiEdges = edges.map(e => {
-                const sourceNodeId = nodes[e.start]?.node_id;
-                const destNodeId   = e.is_cross_floor ? e.target_node_id : nodes[e.end]?.node_id;
+                const sourceNodeId = nodeTempIdMap.get(e.start);
+                const destNodeId   = e.is_cross_floor ? e.target_node_id : nodeTempIdMap.get(e.end);
 
                 let customPathStr = null;
                 if (e.isCustom && e.pathPoints && e.pathPoints.length >= 2) {
@@ -309,7 +319,7 @@ export function useFloorplanData({ onFloorplanLoaded, onFloorplanCleared, onUplo
                     custom_path:        customPathStr,
                     role_ids:           e.allowed_roles || []
                 };
-            }).filter(e => e.source_node_id && e.destination_node_id);
+            }).filter(e => e.source_node_id != null && e.destination_node_id != null);
 
             const payload = {
                 graph_version: graphVersion,
