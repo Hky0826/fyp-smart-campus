@@ -1,0 +1,45 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# AI Services — Production Dependencies
+# Python 3.11+
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── API Framework ──────────────────────────────────────────────────────────────
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# ── Request Validation ─────────────────────────────────────────────────────────
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# ── Computer Vision ────────────────────────────────────────────────────────────
+# Use headless variant — no GUI dependencies, safe for server environments
+opencv-python-headless==4.10.0.84
+numpy<2.0
+
+# ── Image I/O ──────────────────────────────────────────────────────────────────
+Pillow==11.0.0
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+python-dotenv==1.0.1
+
+# ── Logging ────────────────────────────────────────────────────────────────────
+structlog==24.4.0
+
+# ── Configuration Files ─────────────────────────────────────────────────────────
+# PyYAML is used to load src/config/semantic_rules.yaml at startup.
+PyYAML>=6.0
+
+# ── Multipart Form Parsing (required by FastAPI for file uploads) ───────────────
+python-multipart==0.0.20
+
+# ── OCR — Phase 1 Floorplan Analysis ──────────────────────────────────────────
+# PaddlePaddle CPU-only build (no CUDA required for server deployment).
+# paddleocr depends on paddlepaddle; install the CPU variant explicitly to avoid
+# pulling in the GPU build with heavy CUDA dependencies.
+paddlepaddle==2.6.2
+paddleocr==2.9.1
+
+# ── Spatial / Scientific Utilities — Phase 1 Floorplan Analysis ───────────────
+# scipy provides convex hull, distance calculations, and polygon geometry used
+# by the room detection and node positioning modules.
+scipy==1.14.1

@@ -278,6 +278,34 @@ if (-not $SkipFrontendBuild) {
     $distDir = Join-Path $frontendDir "dist"
     
     if (Get-Command npm -ErrorAction SilentlyContinue) {
+        # Mapping Microservice setup
+        $mappingBackendDir = Join-Path $repoRoot "mapping_and_notification\backend"
+        $mappingFrontendDir = Join-Path $repoRoot "mapping_and_notification\frontend"
+        if (Test-Path -LiteralPath $mappingBackendDir) {
+            Write-Info "Installing dependencies for Mapping Microservice Backend..."
+            Push-Location $mappingBackendDir
+            try {
+                npm install --quiet
+                Write-Info "Mapping Backend dependencies installed successfully."
+            } catch {
+                Write-Warn "Failed to install mapping backend dependencies."
+            } finally {
+                Pop-Location
+            }
+        }
+        if (Test-Path -LiteralPath $mappingFrontendDir) {
+            Write-Info "Installing dependencies for Mapping Microservice Frontend..."
+            Push-Location $mappingFrontendDir
+            try {
+                npm install --quiet
+                Write-Info "Mapping Frontend dependencies installed successfully."
+            } catch {
+                Write-Warn "Failed to install mapping frontend dependencies."
+            } finally {
+                Pop-Location
+            }
+        }
+
         if (-not (Test-Path -LiteralPath $distDir)) {
             Write-Info "Building dashboard frontend static assets (npm run build)..."
             Push-Location $frontendDir

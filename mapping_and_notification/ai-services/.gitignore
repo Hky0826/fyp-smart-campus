@@ -1,0 +1,33 @@
+# Virtual environment (never commit)
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# ML model weights (large files — use shared storage)
+models/*.pt
+models/*.onnx
+models/*.bin
+
+# Local environment overrides
+.env
+
+# OS
+.DS_Store
+Thumbs.db

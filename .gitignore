@@ -6,6 +6,11 @@ access_control/audio_io/**/*.wav
 access_control/ui/access_control_frontend/node_modules/
 access_control/ui/access_control_frontend/vite-dev*.log
 access_control/ui/access_control_frontend/static-server*.log
+**/node_modules/
+**/.env
+!**/.env.example
+mapping_and_notification/**/build/
+mapping_and_notification/ai-services/venv/
 __pycache__/
 *.py[cod]
 temp_babel_check
@@ -50,6 +55,5 @@ documents/
 edge/
 floorplan/
 graphify-out/
-mapping_and_notification/
 scratch/
 scripts/

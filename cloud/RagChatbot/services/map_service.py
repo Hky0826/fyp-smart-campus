@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import re
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from types import SimpleNamespace
-
-from cloud.mapping_and_notification.mapping.navigation_service import (
-    NavigationService,
-    NoRouteError,
-    StartLocationRequired,
-)
-from cloud.mapping_and_notification.mapping.repository import MapRepository
-
+from typing import Any
+import httpx
+from sqlalchemy.orm import joinedload
 
 _CONVERSATIONAL_PREFIX = re.compile(
     r"^(?:please\s+)?(?:can\s+you\s+(?:tell\s+me\s+)?|could\s+you\s+(?:tell\s+me\s+)?|would\s+you\s+(?:tell\s+me\s+)?|show\s+me\s+)?"
@@ -42,13 +39,91 @@ _COMPOUND_ALIASES = {
     "cafiteria": "cafeteria",
 }
 
+MAPPING_MICROSERVICE_URL = os.getenv("MAPPING_MICROSERVICE_URL", "http://127.0.0.1:5000")
+
+
+class NavigationError(Exception):
+    pass
+
+
+class NoRouteError(NavigationError):
+    pass
+
+
+class StartLocationRequired(NavigationError):
+    pass
+
+
+class DestinationAmbiguous(NavigationError):
+    def __init__(self, candidates):
+        self.candidates = candidates
+        super().__init__("Destination label matches more than one node")
+
+
+@dataclass(frozen=True)
+class GraphNodeSnapshot:
+    node_id: int
+    floorplan_id: int
+    x: float
+    y: float
+    label: str = ""
+    node_type: str = "OTHER"
+    accessible: bool = True
+    allowed_roles: frozenset[str] = frozenset()
+    scale_ratio: float = 1.0
+    building: str | None = None
+    floor: int | None = None
+
+
+@dataclass(frozen=True)
+class MapSnapshot:
+    nodes: tuple[GraphNodeSnapshot, ...]
+
+
+def get_map_snapshot(db) -> MapSnapshot:
+    """Load lightweight node snapshot with RBAC permissions from database."""
+    if db is None:
+        return MapSnapshot(())
+    from app.models.models import Node, NodeRBAC
+
+    db_nodes = (
+        db.query(Node)
+        .options(joinedload(Node.floorplan))
+        .order_by(Node.node_id)
+        .all()
+    )
+    if not db_nodes:
+        return MapSnapshot(())
+
+    ids = [n.node_id for n in db_nodes]
+    node_roles: dict[int, set[str]] = {}
+    for row in db.query(NodeRBAC).filter(NodeRBAC.node_id.in_(ids)).all():
+        node_roles.setdefault(row.node_id, set()).add(str(getattr(row.role, "role_name", "")).upper())
+
+    nodes = tuple(
+        GraphNodeSnapshot(
+            node_id=n.node_id,
+            floorplan_id=n.floorplan_id,
+            x=n.coord_x,
+            y=n.coord_y,
+            label=n.room_label or "",
+            node_type=str(n.node_type or "OTHER"),
+            accessible=str(n.is_accessible).upper() != "DENY",
+            allowed_roles=frozenset(node_roles.get(n.node_id, set())),
+            scale_ratio=float(getattr(n.floorplan, "scale_ratio", None) or 1.0),
+            building=getattr(getattr(n.floorplan, "building", None), "building_name", None),
+            floor=getattr(n.floorplan, "floor_level", None),
+        )
+        for n in db_nodes
+    )
+    return MapSnapshot(nodes)
+
 
 def _normalise_label(value: str) -> str:
     value = re.sub(r"[^\w]+", " ", str(value or "").casefold(), flags=re.UNICODE)
     value = re.sub(r"\s+", " ", value).strip()
     for source, target in _COMPOUND_ALIASES.items():
         value = value.replace(source, target)
-    # Singular/plural differences are not meaningful for a destination label.
     words = [word[:-1] if len(word) > 3 and word.endswith("s") else word for word in value.split()]
     return " ".join(words)
 
@@ -60,7 +135,6 @@ def _compact(value: str) -> str:
 def _destination_text(query: str) -> str:
     value = re.sub(r"\s+", " ", str(query or "").strip())
     value = value.rstrip("?.!,;:").strip()
-    # Apply repeatedly because STT often produces “can you tell me where is …”.
     previous = None
     while value and value != previous:
         previous = value
@@ -85,8 +159,6 @@ def _node_allowed(node, roles) -> bool:
 def _candidate_nodes(nodes, roles):
     return [
         node for node in nodes
-        # Corridors and graph-only entrances are routing details, not
-        # user-facing destinations or planner candidates.
         if _node_type(node) not in {"CORRIDOR", "ENTRANCE"} and _node_allowed(node, roles)
     ]
 
@@ -104,7 +176,6 @@ def _gender_from_washroom_query(value: str) -> str | None:
 
 
 def _category_matches(nodes, query: str, query_words: set[str]):
-    """Resolve typed facility categories without including entrances."""
     if query_words & _WASHROOM_WORDS:
         washrooms = [node for node in nodes if _node_type(node) in _WASHROOM_TYPES]
         gender = _gender_from_washroom_query(query)
@@ -138,25 +209,16 @@ def _score_destination(query: str, label: str) -> float:
         return 0.94
     left, right = _compact(query), _compact(label)
     if left in right or right in left:
-        # Prefer the catalog label that explains the most of the query.  A
-        # short query such as ``laplace`` should match ``La Place Cafe``
-        # better than its longer entrance labels, without needing a
-        # place-specific alias.
         extra_characters = max(0, len(right) - len(left)) if left in right else max(0, len(left) - len(right))
         return max(0.80, 0.94 - min(extra_characters, 14) * 0.01)
     return SequenceMatcher(None, left, right).ratio()
 
 
 def _destination_matches(nodes, label: str, roles=()):
-    """Resolve natural language against the current accessible destination catalog."""
     candidates = _candidate_nodes(nodes, roles)
     query = _normalise_label(label)
     query_words = set(query.split())
 
-    # Broad requests such as “food”, “toilet”, or “nearest lift” must use the
-    # typed category and return all accessible catalog matches. A specific
-    # label such as “Food Court” or “La Place Cafe” continues through the
-    # scored label path below.
     if _is_category_only_query(query_words):
         category_matches = _category_matches(candidates, label, query_words)
         if category_matches is not None:
@@ -168,15 +230,10 @@ def _destination_matches(nodes, label: str, roles=()):
         return exact
     strong = [(node, score) for node, score in scored if score >= 0.80]
     if strong:
-        # Entrances are routing graph details, not user-facing destinations.
-        # When the catalog contains both a destination and its entrances,
-        # prefer the destination dynamically; this also applies to any new
-        # destination added later.
         non_entrances = [item for item in strong if _node_type(item[0]) != "ENTRANCE"]
         if non_entrances:
             strong = non_entrances
         best = max(score for _, score in strong)
-        # Keep all near-ties so the caller can ask a concise clarification.
         return [node for node, score in strong if score >= max(0.80, best - 0.08)]
 
     category_matches = _category_matches(candidates, label, query_words)
@@ -190,8 +247,6 @@ def _similar_destination_matches(nodes, label: str, roles=()):
         (node, _score_destination(label, getattr(node, "label", "")))
         for node in _candidate_nodes(nodes, roles)
     ]
-    # Fuzzy suggestions must be genuinely plausible; otherwise an unrelated
-    # label such as Student Life can be offered for a misspelled destination.
     strong = [(node, score) for node, score in candidates if score >= 0.78]
     if not strong:
         return []
@@ -207,7 +262,7 @@ def is_navigation_query(query: str, *, db=None) -> bool:
     if db is None:
         return False
     try:
-        snapshot = MapRepository(db).snapshot()
+        snapshot = get_map_snapshot(db)
         return bool(_destination_matches(snapshot.nodes, _destination_text(text)))
     except Exception:
         return False
@@ -226,34 +281,59 @@ def _candidate_data(node) -> dict:
     }
 
 
+def _call_route_microservice(*, destination_node_id: int, start_node_id: int | None, roles: list[str]) -> dict:
+    """Call Node.js Mapping Microservice route calculation."""
+    payload = {
+        "destination_node_id": destination_node_id,
+        "start_node_id": start_node_id,
+        "roles": list(roles),
+    }
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(f"{MAPPING_MICROSERVICE_URL.rstrip('/')}/routes", json=payload)
+            if resp.status_code == 200:
+                return resp.json()
+            if resp.status_code == 422:
+                raise StartLocationRequired(resp.json().get("detail", "Start location required"))
+            if resp.status_code == 404:
+                raise NoRouteError(resp.json().get("detail", "No accessible route exists"))
+            raise NavigationError(f"Route calculation failed ({resp.status_code})")
+    except (httpx.ConnectError, httpx.TimeoutException):
+        raise NavigationError("Mapping microservice is unreachable")
+
+
 def calculate_navigation(query: str, *, db, context):
-    """Resolve and calculate one trusted, RBAC-filtered campus route."""
+    """Resolve and calculate one trusted, RBAC-filtered campus route via Mapping Microservice."""
     label = _destination_text(query)
-    snapshot = MapRepository(db).snapshot()
+    snapshot = get_map_snapshot(db)
     roles = getattr(context, "roles", ())
     matches = _destination_matches(snapshot.nodes, label, roles)
-    user = None
-    user_id = getattr(context, "user_id", None)
-    if user_id is not None:
-        from app.models.models import User
-        user = db.query(User).filter(User.user_id == user_id, User.is_active.is_(True)).first()
-    device = None
+    
+    # Resolve start node id from device or user
+    start_node_id = None
     if getattr(context, "device_node_id", None) is not None:
-        device = SimpleNamespace(device_id=getattr(context, "device_id", None), node_id=context.device_node_id)
+        start_node_id = context.device_node_id
+    elif getattr(context, "user_id", None) is not None:
+        from app.models.models import User
+        user = db.query(User).filter(User.user_id == context.user_id, User.is_active.is_(True)).first()
+        if user and getattr(user, "last_known_location", None):
+            start_node_id = user.last_known_location
 
     route = None
-    # “Nearest lift/stairs” means compare accessible routes from the trusted
-    # origin instead of asking the user to choose a floor manually.
     if len(matches) > 1 and _is_nearest_query(label):
         route_candidates = []
         start_required = False
         for node in matches:
             try:
-                candidate_route = NavigationService(db).calculate(destination_node_id=node.node_id, user=user, device=device, roles=roles)
+                candidate_route = _call_route_microservice(
+                    destination_node_id=node.node_id,
+                    start_node_id=start_node_id,
+                    roles=list(roles),
+                )
                 route_candidates.append((candidate_route, node))
             except StartLocationRequired:
                 start_required = True
-            except NoRouteError:
+            except (NoRouteError, NavigationError):
                 continue
         if route_candidates:
             route, selected = min(route_candidates, key=lambda item: item[0].get("route_summary", {}).get("total_distance_m", float("inf")))
@@ -266,6 +346,7 @@ def calculate_navigation(query: str, *, db, context):
                 "navigation_target": {"candidates": [_candidate_data(node) for node in matches]},
                 "answer": f"I found several {category} locations, but I need your current campus location to determine which is nearest.",
             }
+
     if len(matches) != 1:
         if not matches:
             suggestions = _similar_destination_matches(snapshot.nodes, label, roles)
@@ -302,13 +383,29 @@ def calculate_navigation(query: str, *, db, context):
             "navigation_target": {"candidates": []},
             "answer": f"I couldn't find a mapped campus destination matching '{label}'. Please check the name or ask for a nearby facility such as a lift, stairwell, washroom, or cafeteria.",
         }
+
     try:
         if route is None:
-            route = NavigationService(db).calculate(destination_node_id=matches[0].node_id, user=user, device=device, roles=roles)
+            route = _call_route_microservice(
+                destination_node_id=matches[0].node_id,
+                start_node_id=start_node_id,
+                roles=list(roles),
+            )
     except StartLocationRequired:
         return {"intent": "NAVIGATIONAL", "navigation_target": {"node_id": matches[0].node_id, "label": matches[0].label}, "answer": "I found the destination, but I need your current campus location to give directions."}
     except NoRouteError:
         return {"intent": "NAVIGATIONAL", "navigation_target": {"node_id": matches[0].node_id, "label": matches[0].label}, "answer": "I could not find an accessible route to that destination."}
-    summary = route["route_summary"]
-    speakable = " ".join(step["instruction"] for step in route["instructions"] if step.get("instruction"))
-    return {"intent": "NAVIGATIONAL", "navigation_target": {"node_id": matches[0].node_id, "label": matches[0].label}, "navigation": route, "route_summary": summary, "instructions": route["instructions"], "visualisation": route["visualisation"], "answer": speakable}
+    except NavigationError as exc:
+        return {"intent": "NAVIGATIONAL", "navigation_target": {"node_id": matches[0].node_id, "label": matches[0].label}, "answer": f"Navigation service error: {str(exc)}"}
+
+    summary = route.get("route_summary", {})
+    speakable = " ".join(step["instruction"] for step in route.get("instructions", []) if step.get("instruction"))
+    return {
+        "intent": "NAVIGATIONAL",
+        "navigation_target": {"node_id": matches[0].node_id, "label": matches[0].label},
+        "navigation": route,
+        "route_summary": summary,
+        "instructions": route.get("instructions", []),
+        "visualisation": route.get("visualisation", {}),
+        "answer": speakable,
+    }

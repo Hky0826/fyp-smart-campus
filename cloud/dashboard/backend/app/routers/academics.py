@@ -6,8 +6,7 @@ from datetime import datetime, time
 from app.core.database import get_db
 from app.core.security import verify_system_admin
 from app.models.models import Course, CourseEnrollment, Timetable, Appointment, Notification, User, Student, Lecturer, Staff, Node, Role
-from cloud.mapping_and_notification.notifications.builder import build_notification
-from cloud.mapping_and_notification.notifications.broker import Broker
+from app.services.notification_broker import build_notification, Broker
 from app.schemas import schemas
 from app.routers.iam import resolve_faculty, resolve_programme
 

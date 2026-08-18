@@ -154,23 +154,26 @@ if ($StartNotificationWorker -or -not $SkipNotificationWorker) {
     }
 
     try {
-        $existingWorkers = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -match 'cloud\.mapping_and_notification\.workers\.notification_worker' })
-        foreach ($existingWorker in $existingWorkers) {
-            Write-Host "Stopping existing notification worker (PID $($existingWorker.ProcessId))..." -ForegroundColor DarkCyan
-            Stop-Process -Id ([int]$existingWorker.ProcessId) -Force -ErrorAction SilentlyContinue
+        $existingNodeServices = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | Where-Object { $_.CommandLine -match 'mapping_and_notification[\\/]backend' })
+        foreach ($proc in $existingNodeServices) {
+            Write-Host "Stopping existing Mapping Microservice (PID $($proc.ProcessId))..." -ForegroundColor DarkCyan
+            Stop-Process -Id ([int]$proc.ProcessId) -Force -ErrorAction SilentlyContinue
         }
     } catch {
-        Write-Warning "Could not inspect existing notification workers; continuing with startup."
+        Write-Warning "Could not inspect existing node processes."
     }
 
-    Write-Host "Starting the background notification worker..." -ForegroundColor Cyan
-    $workerProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath $python -ArgumentList @(
-        "-m", "cloud.mapping_and_notification.workers.notification_worker"
-    ) -WorkingDirectory $repoRoot
+    Write-Host "Starting Node.js Mapping Microservice on port 5000..." -ForegroundColor Cyan
+    $mappingServiceProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath "node" -ArgumentList @(
+        "index.js"
+    ) -WorkingDirectory (Join-Path $repoRoot "mapping_and_notification\backend")
     Start-Sleep -Seconds 1
-    if ($workerProcess.HasExited) {
-        Stop-WithMessage "The notification worker exited during startup. Check RabbitMQ and the worker configuration."
-    }
+
+    Write-Host "Starting background notification worker/consumer..." -ForegroundColor Cyan
+    $workerProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath "node" -ArgumentList @(
+        "consumer.js"
+    ) -WorkingDirectory (Join-Path $repoRoot "mapping_and_notification\backend")
+    Start-Sleep -Seconds 1
 }
 if ($Reload) {
     $uvicornArgs += @("--reload", "--reload-dir", (Join-Path $repoRoot "cloud"))
