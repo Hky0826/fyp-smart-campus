@@ -73,6 +73,12 @@ if (Test-Path -LiteralPath $cloudReqs) {
     Write-Warn "cloud\requirements.txt not found! Skipping package installation."
 }
 
+$aiReqs = Join-Path $repoRoot "mapping_and_notification\ai-services\requirements.txt"
+if (Test-Path -LiteralPath $aiReqs) {
+    Write-Info "Installing AI microservice dependencies from mapping_and_notification\ai-services\requirements.txt..."
+    & $python -m pip install structlog pydantic-settings python-multipart pyyaml scipy --quiet
+}
+
 # ---------------------------------------------------------------------------
 # 2. Environment Configuration (.env) Setup
 # ---------------------------------------------------------------------------

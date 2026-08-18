@@ -174,6 +174,15 @@ if ($StartNotificationWorker -or -not $SkipNotificationWorker) {
         "consumer.js"
     ) -WorkingDirectory (Join-Path $repoRoot "mapping_and_notification\backend")
     Start-Sleep -Seconds 1
+
+    Write-Host "Starting Python AI Microservice on port 8001..." -ForegroundColor Cyan
+    $aiServiceDir = Join-Path $repoRoot "mapping_and_notification\ai-services"
+    $aiVenvPython = Join-Path $aiServiceDir "venv\Scripts\python.exe"
+    $aiPython = if (Test-Path -LiteralPath $aiVenvPython) { $aiVenvPython } else { $python }
+    $aiProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath $aiPython -ArgumentList @(
+        "-m", "uvicorn", "src.main:app", "--host", "127.0.0.1", "--port", "8001"
+    ) -WorkingDirectory $aiServiceDir
+    Start-Sleep -Seconds 1
 }
 if ($Reload) {
     $uvicornArgs += @("--reload", "--reload-dir", (Join-Path $repoRoot "cloud"))
