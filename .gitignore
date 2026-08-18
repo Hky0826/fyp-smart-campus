@@ -9,8 +9,13 @@ access_control/ui/access_control_frontend/static-server*.log
 **/node_modules/
 **/.env
 !**/.env.example
+# Mapping & Notification microservice
 mapping_and_notification/**/build/
+mapping_and_notification/**/dist/
 mapping_and_notification/ai-services/venv/
+mapping_and_notification/ai-services/.venv/
+mapping_and_notification/ai-services/debug_images/
+mapping_and_notification/backend/data/ethereal_account.json
 __pycache__/
 *.py[cod]
 temp_babel_check

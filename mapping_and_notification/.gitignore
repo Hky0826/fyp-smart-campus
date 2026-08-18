@@ -38,9 +38,9 @@ frontend/coverage/
 # ==========================================
 # 4. Backend Runtime & Generated Data
 # ==========================================
-# Ignore all uploaded files but keep the directory tracked
-backend/uploads/*
-!backend/uploads/.gitkeep
+# Keep default floorplan images tracked in git, ignore temporary generated files
+backend/uploads/tmp_*
+backend/uploads/*.tmp
 
 # Ignore generated test data
 backend/data/ethereal_account.json
