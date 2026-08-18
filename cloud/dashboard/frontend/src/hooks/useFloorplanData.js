@@ -127,7 +127,8 @@ export function useFloorplanData({ onFloorplanLoaded, onFloorplanCleared, onUplo
 
             // Load the floorplan image
             const img = new window.Image();
-            img.src = `http://localhost:5000${res.data.floorplan.image_path}`;
+            const baseUrl = authAxios.defaults.baseURL || '';
+            img.src = `${baseUrl}${res.data.floorplan.image_path}`;
 
             // Build a node index map for resolving edge start/end references
             const idToIndex = {};

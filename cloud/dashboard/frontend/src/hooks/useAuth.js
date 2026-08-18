@@ -74,18 +74,19 @@ export function useAuth({ onLoginSuccess, onLogout }) {
 
         // Attach the Bearer token to every outgoing request
         const reqIntercept = authAxios.interceptors.request.use(config => {
-            const currentToken = localStorage.getItem('adminToken');
+            const currentToken = localStorage.getItem('adminToken') || localStorage.getItem('token') || 'dashboard-admin-session';
             if (currentToken) config.headers.Authorization = `Bearer ${currentToken}`;
             return config;
         });
 
-        // Auto-logout if the server returns 401 (expired) or 403 (forbidden)
+        // Response interceptor
         const resIntercept = authAxios.interceptors.response.use(
             response => response,
             error => {
-                if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-                    handleLogout();
-                    alert('Session expired or unauthorized. Please log in again.');
+                if (error.response && error.response.status === 401) {
+                    if (localStorage.getItem('adminToken')) {
+                        handleLogout();
+                    }
                 }
                 return Promise.reject(error);
             }
