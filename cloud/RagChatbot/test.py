@@ -46,6 +46,9 @@ _SCRIPT_DIR = Path(__file__).resolve().parent          # cloud/RagChatbot/
 _CLOUD_DIR  = _SCRIPT_DIR.parent                       # cloud/
 _BACKEND_DIR = _CLOUD_DIR / "dashboard" / "backend"    # cloud/dashboard/backend/
 
+if sys.path and sys.path[0] == str(_SCRIPT_DIR):
+    sys.path.pop(0)
+
 for _p in [str(_CLOUD_DIR), str(_BACKEND_DIR)]:
     if _p not in sys.path:
         sys.path.insert(0, _p)

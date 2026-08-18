@@ -441,7 +441,7 @@ def process_user_request(
     # source, SQL, URL, file, or operation is accepted here.
     try:
         query_embedding = embed_text(sanitized)
-        ranked_chunks = retrieve_chunks(query_embedding=query_embedding, allowed_access_levels=allowed_levels, db=db)
+        ranked_chunks = retrieve_chunks(query_embedding=query_embedding, allowed_access_levels=allowed_levels, db=db, query_text=sanitized)
     except Exception as exc:
         logger.warning("Live RAG routing failed: %s", type(exc).__name__)
         return _result(status="error", route="UNIVERSITY_INFO", intent=intent, query=sanitized, response_text="The search service is temporarily unavailable. Please try again later.", exact_response=True, error_message="RAG service unavailable.")

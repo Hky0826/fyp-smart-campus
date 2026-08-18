@@ -269,7 +269,69 @@ def _verify_session(token: str, db: Session) -> tuple[int, int]:
         HTTPException 401: If the session is not found, revoked, or expired.
     """
     _, user_id, session = resolve_user_session(token, db)
-    return user_id, int(session.session_id)
+def _load_recent_chat_history(session_id: int | None, db: Session, limit: int = 3) -> list[dict[str, str]]:
+    """Load the most recent completed conversation turns for the active session."""
+    if not session_id or db is None:
+        return []
+    try:
+        from app.models.models import ChatbotQuery
+        recent = (
+            db.query(ChatbotQuery)
+            .filter(ChatbotQuery.session_id == session_id)
+            .filter(ChatbotQuery.response_text.isnot(None))
+            .order_by(ChatbotQuery.timestamp.desc(), ChatbotQuery.query_id.desc())
+            .limit(limit)
+            .all()
+        )
+        history = []
+        for q in reversed(recent):
+            history.append({
+                "user": str(getattr(q, "query_text", "") or ""),
+                "assistant": str(getattr(q, "response_text", "") or "")
+            })
+        return history
+    except Exception as exc:
+        logger.debug("Could not load recent chat history: %s", exc)
+        return []
+
+
+def _condense_query_with_history(query: str, history: list[dict[str, str]]) -> str:
+    """Condense conversational follow-up query into a standalone retrieval search string."""
+    if not history or not getattr(rag_settings, "RAG_QUERY_REWRITE_ENABLED", True):
+        return query
+
+    # Fast regex screening for pronouns / follow-up hints
+    needs_rewrite = bool(re.search(
+        r"\b(it|its|this|that|these|those|they|their|them|he|she|his|her|the course|the programme|the fee|the fees|the requirement|the requirements|cost|duration|where is it|what about|and for|how about)\b",
+        query,
+        re.IGNORECASE,
+    ))
+    if not needs_rewrite:
+        return query
+
+    try:
+        from RagChatbot.gemini_client import get_gemini_client
+        client = get_gemini_client()
+        history_lines = [f"User: {h.get('user', '')}\nAssistant: {h.get('assistant', '')}" for h in history[-2:]]
+        prompt = (
+            f"Conversation history:\n" + "\n".join(history_lines) + "\n\n"
+            f"Rewrite this follow-up into a concise standalone search query for university document retrieval. "
+            f"Do not answer it. Return ONLY the rewritten query text.\n"
+            f"Follow-up: {query}\n"
+            f"Standalone query:"
+        )
+        response = client.models.generate_content(
+            model=rag_settings.PLANNER_MODEL,
+            contents=prompt,
+            config={"temperature": 0.0, "max_output_tokens": 48},
+        )
+        rewritten = (response.text or "").strip().replace('"', '').replace("'", "")
+        if rewritten and len(rewritten) > 3:
+            logger.info("Conversational query condensed: '%s' -> '%s'", query, rewritten)
+            return rewritten
+    except Exception as exc:
+        logger.debug("Conversational query rewrite skipped (%s); using original.", exc)
+    return query
 
 
 # Main chat pipeline
@@ -581,10 +643,13 @@ def process_chat(
                 authentication_required=planned.authentication_required,
             )
 
+    chat_history = _load_recent_chat_history(session_id, db)
+    search_query = _condense_query_with_history(sanitized_query, chat_history)
+
 # Step 4: Embed the query
     with StageTimer() as timer:
         try:
-            query_embedding = embed_text(sanitized_query)
+            query_embedding = embed_text(search_query)
         except RuntimeError as exc:
             logger.error("Embedding failed for user_id=%s: %s", user_id, exc)
             raise HTTPException(
@@ -599,6 +664,7 @@ def process_chat(
             query_embedding=query_embedding,
             allowed_access_levels=allowed_levels,
             db=db,
+            query_text=search_query,
         )
     metrics.embedding_db_search_ms += timer.elapsed_ms
 
@@ -813,10 +879,13 @@ def process_chat_stream(
         yield _sse_event("done", resp.model_dump(mode="json"))
         return
 
+    chat_history = _load_recent_chat_history(session_id, db)
+    search_query = _condense_query_with_history(sanitized_query, chat_history)
+
     # Step 4: Embed query
     with StageTimer() as timer:
         try:
-            query_embedding = embed_text(sanitized_query)
+            query_embedding = embed_text(search_query)
         except RuntimeError as exc:
             logger.error("Streaming embedding failed: %s", exc)
             yield _sse_event("error", {"message": "Embedding service is temporarily unavailable."})
@@ -829,6 +898,7 @@ def process_chat_stream(
             query_embedding=query_embedding,
             allowed_access_levels=allowed_levels,
             db=db,
+            query_text=search_query,
         )
     metrics.embedding_db_search_ms += timer.elapsed_ms
 
@@ -1057,6 +1127,7 @@ def process_public_smoke_chat(
             query_embedding=query_embedding,
             allowed_access_levels=allowed_levels,
             db=db,
+            query_text=sanitized_query,
         )
     metrics.embedding_db_search_ms += timer.elapsed_ms
 

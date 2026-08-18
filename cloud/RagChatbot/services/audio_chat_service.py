@@ -553,6 +553,7 @@ def process_audio_chat(
             query_embedding=query_embedding,
             allowed_access_levels=allowed_levels,
             db=db,
+            query_text=sanitized_query,
         )
     metrics.embedding_db_search_ms += timer.elapsed_ms
 
@@ -1057,6 +1058,7 @@ def process_audio_chat_stream(
         db=db,
         top_k_retrieval=rag_settings.TOP_K_RETRIEVAL,
         top_k_context=rag_settings.TOP_K_CONTEXT,
+        query_text=sanitized_query,
     )
 
     if not ranked_chunks:

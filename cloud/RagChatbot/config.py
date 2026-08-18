@@ -116,6 +116,16 @@ class RagSettings:
     TOP_K_RETRIEVAL: int = int(os.getenv("RAG_TOP_K_RETRIEVAL", "10"))
     # Number of chunks sent to the LLM as context after re-ranking
     TOP_K_CONTEXT: int = int(os.getenv("RAG_TOP_K_CONTEXT", "5"))
+    # Minimum similarity threshold cutoff for retrieved chunks
+    RAG_SIMILARITY_THRESHOLD: float = float(os.getenv("RAG_SIMILARITY_THRESHOLD", "0.50"))
+    # Hybrid search settings (dense vector + BM25/lexical token matching)
+    RAG_HYBRID_SEARCH_ENABLED: bool = os.getenv("RAG_HYBRID_SEARCH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    RAG_HYBRID_DENSE_WEIGHT: float = float(os.getenv("RAG_HYBRID_DENSE_WEIGHT", "0.7"))
+    RAG_HYBRID_LEXICAL_WEIGHT: float = float(os.getenv("RAG_HYBRID_LEXICAL_WEIGHT", "0.3"))
+    # Structured cross-scoring reranker using lightweight Gemini Flash-Lite (disabled by default for <5ms in-memory retrieval)
+    RAG_RERANKER_ENABLED: bool = os.getenv("RAG_RERANKER_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    # Multi-turn conversational query rewrite/condensation
+    RAG_QUERY_REWRITE_ENABLED: bool = os.getenv("RAG_QUERY_REWRITE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
     # LLM generation parameters
     MAX_OUTPUT_TOKENS: int = int(os.getenv("RAG_MAX_OUTPUT_TOKENS", "384"))

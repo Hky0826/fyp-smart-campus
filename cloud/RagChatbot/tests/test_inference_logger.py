@@ -48,70 +48,75 @@ def test_stage_timer():
     assert timer.elapsed_ms >= 10.0
 
 
-def test_log_inference_metrics_enabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+import tempfile
+
+
+def test_log_inference_metrics_enabled(monkeypatch: pytest.MonkeyPatch):
     """Verify log_inference_metrics writes valid JSON line when logging is enabled."""
-    log_file = tmp_path / "test_inference.log"
-    monkeypatch.setattr(rag_settings, "RAG_INFERENCE_LOG_ENABLED", True)
-    monkeypatch.setattr(rag_settings, "RAG_INFERENCE_LOG_FILE", str(log_file))
+    with tempfile.TemporaryDirectory() as td:
+        log_file = Path(td) / "test_inference.log"
+        monkeypatch.setattr(rag_settings, "RAG_INFERENCE_LOG_ENABLED", True)
+        monkeypatch.setattr(rag_settings, "RAG_INFERENCE_LOG_FILE", str(log_file))
 
-    metrics = InferenceMetrics(
-        prompt_injection_ms=12.5,
-        prompt_classification_ms=5.0,
-        embedding_return_ms=45.2,
-        embedding_db_search_ms=18.7,
-        rag_ms=320.1,
-        tts_ms=110.0,
-        time_to_first_tts_ms=85.0,
-        total_inference_ms=511.5,
-    )
+        metrics = InferenceMetrics(
+            prompt_injection_ms=12.5,
+            prompt_classification_ms=5.0,
+            embedding_return_ms=45.2,
+            embedding_db_search_ms=18.7,
+            rag_ms=320.1,
+            tts_ms=110.0,
+            time_to_first_tts_ms=85.0,
+            total_inference_ms=511.5,
+        )
 
-    log_inference_metrics(
-        request_type="text",
-        user_id=42,
-        session_id=101,
-        query_text="What is the library opening hours?",
-        metrics=metrics,
-        status="ok",
-    )
+        log_inference_metrics(
+            request_type="text",
+            user_id=42,
+            session_id=101,
+            query_text="What is the library opening hours?",
+            metrics=metrics,
+            status="ok",
+        )
 
-    assert log_file.exists()
-    content = log_file.read_text(encoding="utf-8").strip()
-    assert content != ""
+        assert log_file.exists()
+        content = log_file.read_text(encoding="utf-8").strip()
+        assert content != ""
 
-    record = json.loads(content)
-    assert record["request_type"] == "text"
-    assert record["user_id"] == 42
-    assert record["session_id"] == 101
-    assert record["query_text"] == "[REDACTED]"
-    assert record["query_hash"]
-    assert record["query_length"] == len("What is the library opening hours?")
-    assert record["status"] == "ok"
-    assert record["timings_ms"]["prompt_injection_ms"] == 12.5
-    assert record["timings_ms"]["prompt_classification_ms"] == 5.0
-    assert record["timings_ms"]["embedding_return_ms"] == 45.2
-    assert record["timings_ms"]["embedding_db_search_ms"] == 18.7
-    assert record["timings_ms"]["rag_ms"] == 320.1
-    assert record["timings_ms"]["tts_ms"] == 110.0
-    assert record["timings_ms"]["time_to_first_tts_ms"] == 85.0
-    assert record["timings_ms"]["total_inference_ms"] == 511.5
-    assert "timestamp" in record
+        record = json.loads(content)
+        assert record["request_type"] == "text"
+        assert record["user_id"] == 42
+        assert record["session_id"] == 101
+        assert record["query_text"] == "[REDACTED]"
+        assert record["query_hash"]
+        assert record["query_length"] == len("What is the library opening hours?")
+        assert record["status"] == "ok"
+        assert record["timings_ms"]["prompt_injection_ms"] == 12.5
+        assert record["timings_ms"]["prompt_classification_ms"] == 5.0
+        assert record["timings_ms"]["embedding_return_ms"] == 45.2
+        assert record["timings_ms"]["embedding_db_search_ms"] == 18.7
+        assert record["timings_ms"]["rag_ms"] == 320.1
+        assert record["timings_ms"]["tts_ms"] == 110.0
+        assert record["timings_ms"]["time_to_first_tts_ms"] == 85.0
+        assert record["timings_ms"]["total_inference_ms"] == 511.5
+        assert "timestamp" in record
 
 
-def test_log_inference_metrics_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_log_inference_metrics_disabled(monkeypatch: pytest.MonkeyPatch):
     """Verify log_inference_metrics does not write to file when disabled."""
-    log_file = tmp_path / "test_inference_disabled.log"
-    monkeypatch.setattr(rag_settings, "RAG_INFERENCE_LOG_ENABLED", False)
-    monkeypatch.setattr(rag_settings, "RAG_INFERENCE_LOG_FILE", str(log_file))
+    with tempfile.TemporaryDirectory() as td:
+        log_file = Path(td) / "test_inference_disabled.log"
+        monkeypatch.setattr(rag_settings, "RAG_INFERENCE_LOG_ENABLED", False)
+        monkeypatch.setattr(rag_settings, "RAG_INFERENCE_LOG_FILE", str(log_file))
 
-    metrics = InferenceMetrics(total_inference_ms=100.0)
+        metrics = InferenceMetrics(total_inference_ms=100.0)
 
-    log_inference_metrics(
-        request_type="text",
-        user_id=None,
-        session_id=None,
-        query_text="hello",
-        metrics=metrics,
-        status="ok",
-    )
+        log_inference_metrics(
+            request_type="text",
+            user_id=None,
+            session_id=None,
+            query_text="hello",
+            metrics=metrics,
+            status="ok",
+        )
 
-    assert not log_file.exists()
+        assert not log_file.exists()

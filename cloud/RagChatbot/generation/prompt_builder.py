@@ -62,22 +62,32 @@ Rules:
 
 def build_context_block(chunks: List[RankedChunk]) -> str:
     """
-    Format the retrieved chunks into a readable context block for the prompt.
+    Format the retrieved chunks into a readable, deduplicated context block for the prompt.
 
     Args:
         chunks: Ranked and authorized document chunks.
 
     Returns:
-        A formatted string containing all context passages.
+        A formatted string containing all unique context passages with source tags.
     """
     if not chunks:
         return "No relevant context documents are available."
 
     parts: List[str] = []
-    for chunk in chunks:
-        parts.append(chunk.chunk_text.strip())
+    seen_texts = set()
 
-    return "\n\n---\n\n".join(parts)
+    for chunk in chunks:
+        raw_text = chunk.chunk_text.strip()
+        # Normalize for deduplication
+        norm_snippet = " ".join(raw_text.split()[:30]).lower()
+        if norm_snippet in seen_texts:
+            continue
+        seen_texts.add(norm_snippet)
+
+        title = chunk.document_title or "Campus Document"
+        parts.append(f"[Source: {title}]\n{raw_text}")
+
+    return "\n\n---\n\n".join(parts) if parts else "No relevant context documents are available."
 
 
 def build_prompt(query: str, chunks: List[RankedChunk], chat_history: Optional[List[Dict[str, Any]]] = None) -> tuple[str, str]:
