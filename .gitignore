@@ -8,13 +8,11 @@ access_control/ui/access_control_frontend/vite-dev*.log
 access_control/ui/access_control_frontend/static-server*.log
 __pycache__/
 *.py[cod]
-cloud\dashboard\backend\.env
 temp_babel_check
 .opencode
 edgeface
 .*
 cloud/dashboard/backend/app/facial_recognition/models/
-!.opencode
 !.gitignore
 cloud/dashboard/backend/app/static/uploads
 !.env.example
@@ -34,11 +32,24 @@ access_control/test/eval_framework/results
 **/data/snapshots/
 **/Dump*/
 *.sql
-!scripts/security_migration.sql
 *.sql.gz
 runtime-data/
 cloud/dashboard/backend/.env
-!.github/
-!.github/workflows/
-!.github/workflows/security.yml
-!.pre-commit-config.yaml
+
+# Documents and notes
+*.docx
+AGENTS.md
+issues*.md
+prompt.md
+
+# Config and tests
+pytest.ini
+
+# Untracked directories
+documents/
+edge/
+floorplan/
+graphify-out/
+mapping_and_notification/
+scratch/
+scripts/
