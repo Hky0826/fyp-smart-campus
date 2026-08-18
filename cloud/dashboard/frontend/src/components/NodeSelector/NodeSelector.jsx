@@ -1,14 +1,41 @@
+/**
+ * @file NodeSelector.js
+ * @description A reusable searchable autocomplete component for selecting campus nodes.
+ *
+ * Replaces native <select> dropdowns with a searchable, keyboard-navigable
+ * autocomplete selector that formats nodes as:
+ *   "{BUILDING} F{FLOOR} - {NODE NAME}"
+ *
+ * Business rules (e.g., transition node filtering) are applied by the PARENT
+ * before passing nodes to this component. NodeSelector itself is generic.
+ */
+
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 
+/**
+ * Builds a human-readable label for a node.
+ * Format: "{BUILDING} F{FLOOR} - {NODE NAME}"
+ * For transition nodes (ELEVATOR/STAIRWELL), appends "(TYPE)".
+ *
+ * @param {object} node - The node object from global nodes.
+ * @returns {string}
+ */
 function buildNodeLabel(node) {
     const name = node.room_label || `Node ${node.node_id}`;
-    const bName = node.building_name || 'Building';
-    const fLevel = node.floor_level !== undefined ? node.floor_level : '?';
-    const base = `${bName} F${fLevel} - ${name}`;
+    const base = `${node.building_name} F${node.floor_level} - ${name}`;
     const isTransition = node.node_type === 'ELEVATOR' || node.node_type === 'STAIRWELL';
     return isTransition ? `${base} (${node.node_type})` : base;
 }
 
+/**
+ * NodeSelector — Searchable node autocomplete component.
+ *
+ * @param {object[]} nodes        - Array of node objects to select from (pre-filtered by parent).
+ * @param {string|number} value   - Currently selected node_id.
+ * @param {Function} onChange     - Callback called with the selected node_id string.
+ * @param {string} [placeholder]  - Placeholder text for the search input.
+ * @param {string} [id]           - Optional id for the root element.
+ */
 export function NodeSelector({ nodes = [], value, onChange, placeholder = 'Search or select node...', id }) {
     const [isOpen, setIsOpen]               = useState(false);
     const [search, setSearch]               = useState('');
@@ -20,6 +47,7 @@ export function NodeSelector({ nodes = [], value, onChange, placeholder = 'Searc
     const inputRef      = useRef(null);
     const listRef       = useRef(null);
 
+    // ─── Derive buildings / floors from the supplied nodes ──────────────────────
     const buildings = useMemo(() => {
         const set = new Set(nodes.map(n => n.building_name).filter(Boolean));
         return Array.from(set).sort();
@@ -33,10 +61,12 @@ export function NodeSelector({ nodes = [], value, onChange, placeholder = 'Searc
         return Array.from(set).sort((a, b) => Number(a) - Number(b));
     }, [nodes, buildingFilter]);
 
+    // ─── Labelled node list ──────────────────────────────────────────────────────
     const labelledNodes = useMemo(() =>
         nodes.map(n => ({ ...n, label: buildNodeLabel(n) })),
     [nodes]);
 
+    // ─── Filtered results ────────────────────────────────────────────────────────
     const filtered = useMemo(() => {
         const q = search.toLowerCase().trim();
         return labelledNodes.filter(n => {
@@ -50,15 +80,20 @@ export function NodeSelector({ nodes = [], value, onChange, placeholder = 'Searc
         });
     }, [labelledNodes, search, buildingFilter, floorFilter]);
 
+    // ─── Resolve the display label for the currently selected value ─────────────
     const selectedLabel = useMemo(() => {
         if (!value) return '';
         const found = labelledNodes.find(n => String(n.node_id) === String(value));
         return found ? found.label : '';
     }, [value, labelledNodes]);
 
+    // ─── Reset highlighted index when results change ─────────────────────────────
     useEffect(() => { setHighlightedIdx(0); }, [filtered]);
+
+    // ─── Reset building/floor filters when building changes ──────────────────────
     useEffect(() => { setFloorFilter(''); }, [buildingFilter]);
 
+    // ─── Close on outside click ───────────────────────────────────────────────────
     useEffect(() => {
         function handleOutside(e) {
             if (containerRef.current && !containerRef.current.contains(e.target)) {
@@ -70,12 +105,14 @@ export function NodeSelector({ nodes = [], value, onChange, placeholder = 'Searc
         return () => document.removeEventListener('mousedown', handleOutside);
     }, []);
 
+    // ─── Scroll highlighted item into view ───────────────────────────────────────
     useEffect(() => {
         if (!listRef.current) return;
         const item = listRef.current.children[highlightedIdx];
         if (item) item.scrollIntoView({ block: 'nearest' });
     }, [highlightedIdx]);
 
+    // ─── Handlers ────────────────────────────────────────────────────────────────
     const openDropdown = useCallback(() => {
         setIsOpen(true);
         setSearch('');
@@ -126,6 +163,7 @@ export function NodeSelector({ nodes = [], value, onChange, placeholder = 'Searc
         }
     }, [isOpen, filtered, highlightedIdx, openDropdown, selectNode]);
 
+    // ─── Render ───────────────────────────────────────────────────────────────────
     return (
         <div
             id={id}
@@ -133,6 +171,7 @@ export function NodeSelector({ nodes = [], value, onChange, placeholder = 'Searc
             style={{ position: 'relative', width: '100%' }}
             onKeyDown={handleKeyDown}
         >
+            {/* ── Trigger Button ── */}
             <button
                 type="button"
                 onClick={isOpen ? () => { setIsOpen(false); setSearch(''); } : openDropdown}
@@ -167,6 +206,7 @@ export function NodeSelector({ nodes = [], value, onChange, placeholder = 'Searc
                 </span>
             </button>
 
+            {/* ── Dropdown ── */}
             {isOpen && (
                 <div style={{
                     position: 'absolute', zIndex: 9999, top: 'calc(100% + 4px)', left: 0, right: 0,
@@ -174,8 +214,11 @@ export function NodeSelector({ nodes = [], value, onChange, placeholder = 'Searc
                     borderRadius: '8px', boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
                     display: 'flex', flexDirection: 'column', overflow: 'hidden',
                 }}>
+                    {/* Building / Floor filters (shown when multiple buildings exist) */}
                     {buildings.length > 1 && (
-                        <div style={{ display: 'flex', gap: '4px', padding: '6px 6px 0' }}>
+                        <div style={{
+                            display: 'flex', gap: '4px', padding: '6px 6px 0',
+                        }}>
                             <select
                                 value={buildingFilter}
                                 onChange={e => setBuildingFilter(e.target.value)}
@@ -203,6 +246,7 @@ export function NodeSelector({ nodes = [], value, onChange, placeholder = 'Searc
                         </div>
                     )}
 
+                    {/* Search input */}
                     <div style={{ padding: '6px', borderBottom: '1px solid #1e293b' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px',
                                       background: '#020617', border: '1px solid #334155',
@@ -224,6 +268,7 @@ export function NodeSelector({ nodes = [], value, onChange, placeholder = 'Searc
                         </div>
                     </div>
 
+                    {/* Result list */}
                     <ul
                         ref={listRef}
                         role="listbox"
@@ -237,7 +282,9 @@ export function NodeSelector({ nodes = [], value, onChange, placeholder = 'Searc
                                 padding: '10px 12px', fontSize: '11px',
                                 color: '#475569', textAlign: 'center',
                             }}>
-                                {search ? `No nodes found matching "${search}"` : 'No nodes available'}
+                                {search
+                                    ? `No nodes found matching "${search}"`
+                                    : 'No nodes available'}
                             </li>
                         ) : (
                             filtered.map((n, idx) => (
@@ -269,6 +316,7 @@ export function NodeSelector({ nodes = [], value, onChange, placeholder = 'Searc
                         )}
                     </ul>
 
+                    {/* Result count footer */}
                     {filtered.length > 0 && (
                         <div style={{
                             padding: '4px 12px', fontSize: '9px', color: '#334155',

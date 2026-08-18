@@ -2,6 +2,14 @@
  * A* Pathfinding and Geometry Utilities for Campus Navigation System
  */
 
+/**
+ * Finds the shortest path between startPt and endPt on a 2D wall mask grid using A* search.
+ * @param {Object} startPt - Start coordinate {x, y} in pixels.
+ * @param {Object} endPt - End coordinate {x, y} in pixels.
+ * @param {Array<Array<number>>} grid - 2D grid where 1 represents a wall and 0 represents free space.
+ * @param {number} scale - Grid scale factor (e.g. 8 pixels per grid cell).
+ * @returns {Array<Object>|null} - Array of pixel points {x, y} representing the path, or null if no path found.
+ */
 export function findAStarPath(startPt, endPt, grid, scale) {
   const gridHeight = grid.length;
   if (gridHeight === 0) return null;
@@ -12,6 +20,7 @@ export function findAStarPath(startPt, endPt, grid, scale) {
   const endX = Math.max(0, Math.min(gridWidth - 1, Math.floor(endPt.x / scale)));
   const endY = Math.max(0, Math.min(gridHeight - 1, Math.floor(endPt.y / scale)));
 
+  // If start or end is a wall, try to find a nearby traversable cell
   let actualStartX = startX;
   let actualStartY = startY;
   if (grid[actualStartY][actualStartX] === 1) {
@@ -48,20 +57,23 @@ export function findAStarPath(startPt, endPt, grid, scale) {
   openSet.push(startNode);
   const getHash = (x, y) => `${x},${y}`;
 
+  // Keep a map of open set hashes for quick lookups
   const openSetMap = new Map();
   openSetMap.set(getHash(actualStartX, actualStartY), startNode);
 
   let iterations = 0;
-  const MAX_ITERATIONS = 5000;
+  const MAX_ITERATIONS = 5000; // Prevent freeze on huge searches
 
   while (openSet.length > 0 && iterations < MAX_ITERATIONS) {
     iterations++;
+    // Find node with lowest f
     openSet.sort((a, b) => a.f - b.f);
     const current = openSet.shift();
     const currentHash = getHash(current.x, current.y);
     openSetMap.delete(currentHash);
 
     if (current.x === actualEndX && current.y === actualEndY) {
+      // Reconstruct path
       const path = [];
       let temp = current;
       while (temp) {
@@ -73,15 +85,18 @@ export function findAStarPath(startPt, endPt, grid, scale) {
       }
       path.reverse();
 
+      // Ensure the exact start and end pixel coordinates are anchored
       path[0] = { x: startPt.x, y: startPt.y };
       path[path.length - 1] = { x: endPt.x, y: endPt.y };
       
+      // Perform Greedy Line-of-Sight path smoothing to minimise turning points
       const smoothed = smoothPath(path, grid, scale);
       return smoothed;
     }
 
     closedSet.add(currentHash);
 
+    // 8-way neighbors
     const directions = [
       { dx: 1, dy: 0, cost: 1 },
       { dx: -1, dy: 0, cost: 1 },
@@ -98,14 +113,15 @@ export function findAStarPath(startPt, endPt, grid, scale) {
       const ny = current.y + dir.dy;
 
       if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight) {
-        if (grid[ny][nx] === 1) continue;
+        if (grid[ny][nx] === 1) continue; // Obstacle
 
         const neighborHash = getHash(nx, ny);
         if (closedSet.has(neighborHash)) continue;
 
+        // Prevent cutting corners through walls diagonally
         if (dir.dx !== 0 && dir.dy !== 0) {
           if (grid[current.y][nx] === 1 || grid[ny][current.x] === 1) {
-            continue;
+            continue; // Block if either corner is a wall
           }
         }
 
@@ -133,9 +149,12 @@ export function findAStarPath(startPt, endPt, grid, scale) {
     }
   }
 
-  return null;
+  return null; // Pathfinding failed
 }
 
+/**
+ * Finds the nearest traversable cell starting from a wall cell.
+ */
 function findNearestTraversable(startX, startY, grid) {
   const queue = [{ x: startX, y: startY }];
   const visited = new Set([`${startX},${startY}`]);
@@ -166,6 +185,11 @@ function findNearestTraversable(startX, startY, grid) {
   return null;
 }
 
+/**
+ * Simplifies a dense path by removing collinear intermediate points.
+ * @param {Array<Object>} path - Array of points {x, y}.
+ * @returns {Array<Object>} - Simplified array of points containing only direction change corners.
+ */
 export function simplifyPath(path) {
   if (!path || path.length <= 2) return path;
 
@@ -181,6 +205,8 @@ export function simplifyPath(path) {
     const dx2 = next.x - curr.x;
     const dy2 = next.y - curr.y;
 
+    // Check for collinearity (cross product is non-zero)
+    // Using a tiny epsilon margin to account for floating point errors
     const crossProduct = dx1 * dy2 - dx2 * dy1;
     if (Math.abs(crossProduct) > 0.001) {
       simplified.push(curr);
@@ -191,6 +217,14 @@ export function simplifyPath(path) {
   return simplified;
 }
 
+/**
+ * Checks if a line segment between p1 and p2 intersects any wall cell in the grid using Bresenham's line algorithm.
+ * @param {Object} p1 - Start point {x, y} in pixels.
+ * @param {Object} p2 - End point {x, y} in pixels.
+ * @param {Array<Array<number>>} grid - 2D wall mask grid.
+ * @param {number} scale - Grid scale factor.
+ * @returns {boolean} - True if the line segment intersects a wall, false otherwise.
+ */
 export function lineIntersectsWall(p1, p2, grid, scale) {
   const gridHeight = grid.length;
   if (gridHeight === 0) return false;
@@ -213,7 +247,7 @@ export function lineIntersectsWall(p1, p2, grid, scale) {
   while (true) {
     if (cx >= 0 && cx < gridWidth && cy >= 0 && cy < gridHeight) {
       if (grid[cy][cx] === 1) {
-        return true;
+        return true; // Collided with a wall cell
       }
     }
 
@@ -232,6 +266,12 @@ export function lineIntersectsWall(p1, p2, grid, scale) {
   return false;
 }
 
+/**
+ * Calculates the total length of a multi-point path in real-world meters.
+ * @param {Array<Object>} points - Array of points {x, y}.
+ * @param {number} scaleRatio - Scale ratio (pixels to meters).
+ * @returns {string} - Total path distance as a string formatted to 2 decimal places.
+ */
 export function getPathLength(points, scaleRatio) {
   if (!points || points.length < 2) return "0.00";
   let length = 0;
@@ -243,6 +283,14 @@ export function getPathLength(points, scaleRatio) {
   return (length * scaleRatio).toFixed(2);
 }
 
+/**
+ * Smoothes a path by checking line-of-sight between points.
+ * Bypasses intermediate turning points if a straight line is clear of walls.
+ * @param {Array<Object>} path - Raw path coordinates in pixels.
+ * @param {Array<Array<number>>} grid - 2D wall mask grid.
+ * @param {number} scale - Grid scale factor.
+ * @returns {Array<Object>} - Smoothed path.
+ */
 export function smoothPath(path, grid, scale) {
   if (!path || path.length <= 2) return path;
 
@@ -251,9 +299,10 @@ export function smoothPath(path, grid, scale) {
 
   while (currentIdx < path.length - 1) {
     let nextIdx = path.length - 1;
+    // Walk backwards to find the furthest point with direct Line-of-Sight
     while (nextIdx > currentIdx + 1) {
       if (!lineIntersectsWall(path[currentIdx], path[nextIdx], grid, scale)) {
-        break;
+        break; // Direct path is clear!
       }
       nextIdx--;
     }
