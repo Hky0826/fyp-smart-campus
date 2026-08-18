@@ -130,7 +130,7 @@ class RagSettings:
         "on",
     }
 
-    # 
+    # Database settings
     DB_HOST: str = os.getenv("DB_HOST", "localhost")
     DB_PORT: str = os.getenv("DB_PORT", "3306")
     DB_USER: str = os.getenv("DB_USER", "smart_campus_app")
@@ -140,6 +140,10 @@ class RagSettings:
     # JWT settings for session authentication
     JWT_SECRET: str = os.getenv("JWT_SECRET", "")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+
+    # Mapping & Navigation Microservice settings
+    MAPPING_MICROSERVICE_URL: str = os.getenv("MAPPING_MICROSERVICE_URL", "http://127.0.0.1:5000")
+    NAVIGATION_API_KEY: str = os.getenv("NAVIGATION_API_KEY", "campus_navigation_api_key_2026")
 
     # Inference Timing Logging
     RAG_INFERENCE_LOG_ENABLED: bool = os.getenv("RAG_INFERENCE_LOG_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
@@ -158,8 +162,6 @@ class RagSettings:
             raise ValueError("JWT_SECRET is not set in .env")
         if self.RAG_PERSONALISATION_ENABLED:
             self.validate_personalisation()
-
-
 
     def validate_personalisation(self) -> None:
         """Validate settings that govern deterministic personal lookups."""

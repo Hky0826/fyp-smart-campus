@@ -31,7 +31,7 @@ from app.core.config import settings
 from app.core.csrf import CSRFMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
 from RagChatbot.router import router as chatbot_router
-from cloud.mapping_and_notification.api.router import router as mapping_notification_router
+from app.routers.mapping_proxy import router as mapping_notification_router
 
 # Create the FastAPI app instance
 app = FastAPI(

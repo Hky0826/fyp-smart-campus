@@ -90,7 +90,8 @@ class PlannedOperation:
 def _catalog_candidates(query: str, context: AuthenticatedChatContext, db) -> list[dict[str, Any]]:
     """Retrieve a small live, role-filtered catalog context for the planner."""
     try:
-        snapshot = __import__("cloud.mapping_and_notification.mapping.repository", fromlist=["MapRepository"]).MapRepository(db).snapshot()
+        from RagChatbot.services.map_service import get_map_snapshot
+        snapshot = get_map_snapshot(db)
         nodes = _candidate_nodes(snapshot.nodes, context.roles)
         if not nodes:
             return []

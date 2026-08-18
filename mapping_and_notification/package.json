@@ -1,0 +1,16 @@
+{
+  "name": "campus-navigation-system",
+  "version": "1.0.0",
+  "description": "Unified startup workflow for Campus Navigation System",
+  "scripts": {
+    "start": "concurrently -c \"cyan,magenta,yellow,blue\" -n \"backend,consumer,ai,frontend\" --kill-others-on-fail \"npm run start:backend\" \"npm run start:consumer\" \"npm run start:ai\" \"npm run start:frontend\"",
+    "start:backend": "cd backend && npm run dev",
+    "start:consumer": "cd backend && npm run consumer",
+    "start:ai": "cd ai-services && .\\venv\\Scripts\\uvicorn.exe src.main:app --reload --port 8001",
+    "start:frontend": "cd frontend && npm start",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install && cd ../ai-services && .\\venv\\Scripts\\pip.exe install -r requirements.txt"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

@@ -154,23 +154,35 @@ if ($StartNotificationWorker -or -not $SkipNotificationWorker) {
     }
 
     try {
-        $existingWorkers = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -match 'cloud\.mapping_and_notification\.workers\.notification_worker' })
-        foreach ($existingWorker in $existingWorkers) {
-            Write-Host "Stopping existing notification worker (PID $($existingWorker.ProcessId))..." -ForegroundColor DarkCyan
-            Stop-Process -Id ([int]$existingWorker.ProcessId) -Force -ErrorAction SilentlyContinue
+        $existingNodeServices = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | Where-Object { $_.CommandLine -match 'mapping_and_notification[\\/]backend' })
+        foreach ($proc in $existingNodeServices) {
+            Write-Host "Stopping existing Mapping Microservice (PID $($proc.ProcessId))..." -ForegroundColor DarkCyan
+            Stop-Process -Id ([int]$proc.ProcessId) -Force -ErrorAction SilentlyContinue
         }
     } catch {
-        Write-Warning "Could not inspect existing notification workers; continuing with startup."
+        Write-Warning "Could not inspect existing node processes."
     }
 
-    Write-Host "Starting the background notification worker..." -ForegroundColor Cyan
-    $workerProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath $python -ArgumentList @(
-        "-m", "cloud.mapping_and_notification.workers.notification_worker"
-    ) -WorkingDirectory $repoRoot
+    Write-Host "Starting Node.js Mapping Microservice on port 5000..." -ForegroundColor Cyan
+    $mappingServiceProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath "node" -ArgumentList @(
+        "index.js"
+    ) -WorkingDirectory (Join-Path $repoRoot "mapping_and_notification\backend")
     Start-Sleep -Seconds 1
-    if ($workerProcess.HasExited) {
-        Stop-WithMessage "The notification worker exited during startup. Check RabbitMQ and the worker configuration."
-    }
+
+    Write-Host "Starting background notification worker/consumer..." -ForegroundColor Cyan
+    $workerProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath "node" -ArgumentList @(
+        "consumer.js"
+    ) -WorkingDirectory (Join-Path $repoRoot "mapping_and_notification\backend")
+    Start-Sleep -Seconds 1
+
+    Write-Host "Starting Python AI Microservice on port 8001..." -ForegroundColor Cyan
+    $aiServiceDir = Join-Path $repoRoot "mapping_and_notification\ai-services"
+    $aiVenvPython = Join-Path $aiServiceDir "venv\Scripts\python.exe"
+    $aiPython = if (Test-Path -LiteralPath $aiVenvPython) { $aiVenvPython } else { $python }
+    $aiProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath $aiPython -ArgumentList @(
+        "-m", "uvicorn", "src.main:app", "--host", "127.0.0.1", "--port", "8001"
+    ) -WorkingDirectory $aiServiceDir
+    Start-Sleep -Seconds 1
 }
 if ($Reload) {
     $uvicornArgs += @("--reload", "--reload-dir", (Join-Path $repoRoot "cloud"))
@@ -179,5 +191,18 @@ if ($Reload) {
 Write-Host "Cloud development backend is starting at http://$BindAddress`:$Port" -ForegroundColor Green
 Write-Host "Dashboard: http://localhost`:$Port/dashboard/" -ForegroundColor Green
 Write-Host "Press Ctrl+C to stop the cloud backend."
-& $python @uvicornArgs
+try {
+    & $python @uvicornArgs
+} finally {
+    Write-Host "`nStopping background microservices..." -ForegroundColor DarkCyan
+    if ($mappingServiceProcess -and -not $mappingServiceProcess.HasExited) {
+        Stop-Process -Id $mappingServiceProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+    if ($workerProcess -and -not $workerProcess.HasExited) {
+        Stop-Process -Id $workerProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+    if ($aiProcess -and -not $aiProcess.HasExited) {
+        Stop-Process -Id $aiProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+}
 exit $LASTEXITCODE

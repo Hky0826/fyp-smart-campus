@@ -81,28 +81,14 @@ def test_deterministic_injection_is_rejected_before_retrieval():
 
 
 def test_live_navigation_uses_shared_deterministic_resolver(monkeypatch):
-    nodes = (SimpleNamespace(node_id=7, label="Boardroom", floorplan_id=1, node_type="HALL"),)
+    nodes = (SimpleNamespace(node_id=7, label="Boardroom", floorplan_id=1, node_type="HALL", accessible=True, allowed_roles=frozenset()),)
 
-    class FakeRepository:
-        def __init__(self, db):
-            pass
-
-        def snapshot(self):
-            return SimpleNamespace(nodes=nodes)
-
-    class FakeNavigationService:
-        def __init__(self, db):
-            pass
-
-        def calculate(self, **kwargs):
-            return {
-                "route_summary": {"start_node_id": 1, "start_label": "Kiosk"},
-                "instructions": [{"instruction": "Walk to the Boardroom."}],
-                "visualisation": {},
-            }
-
-    monkeypatch.setattr(map_service, "MapRepository", FakeRepository)
-    monkeypatch.setattr(map_service, "NavigationService", FakeNavigationService)
+    monkeypatch.setattr(map_service, "get_map_snapshot", lambda db: map_service.MapSnapshot(nodes))
+    monkeypatch.setattr(map_service, "_call_route_microservice", lambda **kwargs: {
+        "route_summary": {"start_node_id": 1, "start_label": "Kiosk"},
+        "instructions": [{"instruction": "Walk to the Boardroom."}],
+        "visualisation": {},
+    })
     with (
         patch.object(request_module, "resolve_auth_context", return_value=AuthenticatedChatContext(None, None)),
         patch.object(request_module.genai, "Client") as client,

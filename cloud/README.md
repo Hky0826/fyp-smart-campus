@@ -234,9 +234,15 @@ If running manually without the PowerShell script, execute the following steps f
    ```powershell
    python -m uvicorn cloud.dashboard.backend.app.main:app --host 0.0.0.0 --port 8000 --reload
    ```
-4. **(Optional) Start Notification Worker**:
+4. **Start Mapping & Navigation Microservice (Node.js)**:
    ```powershell
-   python -m cloud.mapping_and_notification.workers.notification_worker
+   cd cloud\mapping_microservice
+   npm start
+   ```
+5. **(Optional) Start Notification Worker (Node.js)**:
+   ```powershell
+   cd cloud\mapping_microservice
+   npm run worker
    ```
 
 ---

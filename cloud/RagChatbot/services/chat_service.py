@@ -135,9 +135,9 @@ def _confirmed_navigation_label(query: str, db: Session, session_id: int | None)
                     if requested in candidate_words or requested == _normalise_label(candidate_label):
                         return candidate_label or None
 
-            from cloud.mapping_and_notification.mapping.repository import MapRepository
+            from RagChatbot.services.map_service import get_map_snapshot
 
-            snapshot = MapRepository(db).snapshot()
+            snapshot = get_map_snapshot(db)
             matches = _destination_matches(snapshot.nodes, f"{query} washroom")
             if len(matches) == 1:
                 return str(getattr(matches[0], "label", "")).strip() or None

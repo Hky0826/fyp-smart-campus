@@ -78,11 +78,18 @@ def _load_destination_catalog(db) -> list[tuple[str, str]]:
     if db is None:
         return []
     try:
-        from cloud.mapping_and_notification.mapping.repository import MapRepository
+        from app.models.models import Node
 
+        rows = (
+            db.query(Node.room_label, Node.node_type)
+            .filter(Node.room_label.isnot(None))
+            .filter(Node.node_type != "CORRIDOR")
+            .order_by(Node.room_label, Node.node_type)
+            .all()
+        )
         return [
             (str(label), str(node_type).upper())
-            for label, node_type in MapRepository(db).destination_catalog()
+            for label, node_type in rows
             if label and str(node_type).upper() != "CORRIDOR"
         ]
     except Exception as exc:

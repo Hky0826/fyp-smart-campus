@@ -1,0 +1,196 @@
+# semantic_rules.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Semantic Node Type Classification Rules
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Each rule maps a list of case-insensitive keywords to a supported
+# navigation system node type. Rules are evaluated in ORDER — the first
+# matching rule wins.
+#
+# Supported node types (must match frontend mapConstants.js exactly):
+#   CLASSROOM, CORRIDOR, ENTRANCE, STAIRWELL, ELEVATOR, FOOD,
+#   OFFICE, FACILITIES, HALL, WASHROOM, OUTDOOR, SOCIAL SPACES, OTHER
+#
+# To add new keywords: append to any keyword list below.
+# To add a new node type: add a new entry and ensure it is supported by the frontend.
+# To change priority: reorder the rules (higher = matched first).
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+rules:
+  # ── Teaching & Learning ───────────────────────────────────────────────────
+  - node_type: "CLASSROOM"
+    keywords:
+      - "lecture"
+      - "classroom"
+      - "seminar"
+      - "tutorial"
+      - "lab"
+      - "laboratory"
+      - "computer lab"
+      - "science lab"
+      - "studio"
+      - "workshop"
+
+  # ── Offices & Administration ──────────────────────────────────────────────
+  - node_type: "OFFICE"
+    keywords:
+      - "office"
+      - "administration"
+      - "admin"
+      - "reception"
+      - "secretariat"
+      - "management"
+      - "registrar"
+      - "division"
+      - "hr "
+      - "human resource"
+      - "staff room"
+      - "faculty"
+      - "lecturer room"
+      - "instructor"
+      - "dean"
+      - "principal"
+
+  # ── Washrooms ─────────────────────────────────────────────────────────────
+  - node_type: "WASHROOM"
+    keywords:
+      - "toilet"
+      - "washroom"
+      - "restroom"
+      - "wc"
+      - "lavatory"
+      - "bathroom"
+      - "water closet"
+      - "accessible toilet"
+
+  # ── Vertical Circulation ──────────────────────────────────────────────────
+  - node_type: "ELEVATOR"
+    keywords:
+      - "lift"
+      - "elevator"
+
+  - node_type: "STAIRWELL"
+    keywords:
+      - "stair"
+      - "stairwell"
+      - "staircase"
+      - "stairway"
+
+  # ── Circulation & Entrances ───────────────────────────────────────────────
+  - node_type: "ENTRANCE"
+    keywords:
+      - "entrance"
+      - "main entrance"
+      - "entry"
+      - "exit"
+      - "lobby"
+      - "foyer"
+      - "atrium"
+      - "reception area"
+
+  - node_type: "CORRIDOR"
+    keywords:
+      - "corridor"
+      - "hallway"
+      - "passage"
+      - "concourse"
+      - "walkway"
+      - "link bridge"
+
+  # ── Food & Beverages ──────────────────────────────────────────────────────
+  - node_type: "FOOD"
+    keywords:
+      - "kitchen"
+      - "pantry"
+      - "canteen"
+      - "cafeteria"
+      - "dining"
+      - "restaurant"
+      - "food"
+      - "training kitchen"
+      - "cafe"
+      - "coffee"
+      - "kiosk"
+
+  # ── Facilities & Utilities ────────────────────────────────────────────────
+  - node_type: "FACILITIES"
+    keywords:
+      - "store"
+      - "storage"
+      - "storeroom"
+      - "stockroom"
+      - "server"
+      - "it room"
+      - "comms"
+      - "electrical"
+      - "mechanical"
+      - "plant room"
+      - "maintenance"
+      - "pump"
+      - "utility"
+      - "ahu"
+      - "fcc"
+      - "janitor"
+      - "cleaner"
+      - "equipment"
+
+  # ── Halls & Meeting Spaces ────────────────────────────────────────────────
+  - node_type: "HALL"
+    keywords:
+      - "meeting"
+      - "boardroom"
+      - "conference"
+      - "discussion"
+      - "multipurpose"
+      - "multi-purpose"
+      - "multi purpose"
+      - "function room"
+      - "auditorium"
+      - "hall"
+      - "event"
+      - "seminar room"
+
+  # ── Outdoor ───────────────────────────────────────────────────────────────
+  - node_type: "OUTDOOR"
+    keywords:
+      - "outdoor"
+      - "car park"
+      - "parking"
+      - "garden"
+      - "courtyard"
+      - "open space"
+      - "rooftop"
+
+  # ── Social Spaces ─────────────────────────────────────────────────────────
+  - node_type: "SOCIAL SPACES"
+    keywords:
+      - "library"
+      - "reading room"
+      - "resource centre"
+      - "resource center"
+      - "learning commons"
+      - "study area"
+      - "lounge"
+      - "common room"
+      - "student lounge"
+      - "breakout"
+
+  # ── Other / Default ───────────────────────────────────────────────────────
+  # Prayer rooms, medical rooms, and unclassified spaces map to OTHER.
+  - node_type: "OTHER"
+    keywords:
+      - "prayer"
+      - "surau"
+      - "mosque"
+      - "chapel"
+      - "meditation"
+      - "clinic"
+      - "medical"
+      - "health"
+      - "first aid"
+      - "nurse"
+      - "sick bay"
+
+# Fallback type when no keyword matches.
+default_node_type: "OTHER"
