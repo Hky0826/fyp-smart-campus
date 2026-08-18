@@ -8,7 +8,10 @@ never exposed to external callers.
 
 from __future__ import annotations
 
+from collections import OrderedDict
+import hashlib
 import logging
+from threading import Lock
 from typing import List
 
 import google.generativeai as genai
@@ -17,15 +20,25 @@ from RagChatbot.config import rag_settings
 
 logger = logging.getLogger(__name__)
 
+_EMBEDDING_CACHE: OrderedDict[str, List[float]] = OrderedDict()
+_EMBEDDING_CACHE_LOCK = Lock()
+
 
 def _configure_client() -> None:
     """Configure the Google AI client (idempotent)."""
     genai.configure(api_key=rag_settings.GOOGLE_API_KEY)
 
 
+def clear_embedding_cache() -> None:
+    """Clear all cached query embeddings."""
+    with _EMBEDDING_CACHE_LOCK:
+        _EMBEDDING_CACHE.clear()
+
+
 def embed_text(text: str) -> List[float]:
     """
     Generate a single embedding vector for the given text.
+    Uses an in-memory thread-safe LRU cache to avoid redundant API calls.
 
     Args:
         text: The input string to embed (query or document chunk).
@@ -39,6 +52,16 @@ def embed_text(text: str) -> List[float]:
     """
     if not text or not text.strip():
         raise ValueError("Cannot embed empty text.")
+
+    norm_text = " ".join(text.strip().lower().split())
+    cache_key = hashlib.sha256(norm_text.encode("utf-8")).hexdigest()
+
+    with _EMBEDDING_CACHE_LOCK:
+        cached = _EMBEDDING_CACHE.get(cache_key)
+        if cached is not None:
+            _EMBEDDING_CACHE.move_to_end(cache_key)
+            logger.debug("Embedding cache hit for query: %.40s", text)
+            return list(cached)
 
     _configure_client()
 
@@ -54,6 +77,14 @@ def embed_text(text: str) -> List[float]:
             len(text),
             len(embedding),
         )
+
+        with _EMBEDDING_CACHE_LOCK:
+            _EMBEDDING_CACHE[cache_key] = list(embedding)
+            _EMBEDDING_CACHE.move_to_end(cache_key)
+            max_size = getattr(rag_settings, "EMBEDDING_CACHE_SIZE", 512)
+            while len(_EMBEDDING_CACHE) > max_size:
+                _EMBEDDING_CACHE.popitem(last=False)
+
         return embedding
     except Exception as exc:
         logger.error("Google embedding API call failed: %s", exc)

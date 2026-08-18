@@ -126,6 +126,11 @@ def ingest_document(document_id: int, db: Session, force_reindex: bool = False) 
     if vector_store.is_loaded:
         vector_store.replace_document(document_id, new_vectors)
 
+    from RagChatbot.embeddings.google_embedding_service import clear_embedding_cache
+    from RagChatbot.services.chat_service import clear_rag_response_cache
+    clear_embedding_cache()
+    clear_rag_response_cache()
+
     return IngestionResult(
         document_id=document_id,
         chunks_created=len(staged),

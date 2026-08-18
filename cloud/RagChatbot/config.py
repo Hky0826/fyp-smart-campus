@@ -118,8 +118,13 @@ class RagSettings:
     TOP_K_CONTEXT: int = int(os.getenv("RAG_TOP_K_CONTEXT", "5"))
 
     # LLM generation parameters
-    MAX_OUTPUT_TOKENS: int = int(os.getenv("RAG_MAX_OUTPUT_TOKENS", "1024"))
+    MAX_OUTPUT_TOKENS: int = int(os.getenv("RAG_MAX_OUTPUT_TOKENS", "384"))
     TEMPERATURE: float = float(os.getenv("RAG_TEMPERATURE", "0.2"))
+
+    # Caching settings
+    EMBEDDING_CACHE_SIZE: int = int(os.getenv("RAG_EMBEDDING_CACHE_SIZE", "512"))
+    RESPONSE_CACHE_SIZE: int = int(os.getenv("RAG_RESPONSE_CACHE_SIZE", "256"))
+    RESPONSE_CACHE_TTL_SECONDS: float = float(os.getenv("RAG_RESPONSE_CACHE_TTL", "300.0"))
 
     # Maximum character length for a user query (guards against large injections)
     MAX_QUERY_LENGTH: int = int(os.getenv("RAG_MAX_QUERY_LENGTH", "2000"))

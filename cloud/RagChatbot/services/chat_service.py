@@ -20,9 +20,13 @@ passed RBAC filtering. The LLM never decides access permissions.
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from collections.abc import Iterator
 import hashlib
+import json
 import logging
 import re
+from threading import Lock
 import time
 from typing import List, Optional
 
@@ -34,8 +38,10 @@ from RagChatbot.config import rag_settings
 from RagChatbot.embeddings.google_embedding_service import embed_text
 from RagChatbot.generation.google_llm_service import (
     generate_answer,
+    generate_answer_stream,
     generate_no_access_response,
 )
+from RagChatbot.generation.query_router import classify_query, get_capabilities_summary
 from RagChatbot.retrieval.retriever import retrieve_chunks
 from RagChatbot.schemas import ChatRequest, ChatResponse, CitationSchema
 from RagChatbot.security.audit_logger import log_access_denied, log_chatbot_interaction, log_personal_interaction
@@ -43,6 +49,7 @@ from RagChatbot.security.prompt_guard import check_query
 from RagChatbot.security.rbac import get_allowed_access_levels_for_user
 from RagChatbot.security.auth_context import resolve_auth_context, resolve_user_session
 from RagChatbot.personalisation.intents import parse_personal_intent
+from RagChatbot.personalisation.schemas import PersonalIntent
 from RagChatbot.personalisation.service import handle_personal_request
 from RagChatbot.logging.inference_logger import InferenceMetrics, StageTimer, log_inference_metrics
 from RagChatbot.generation import llm_planner
@@ -56,6 +63,51 @@ AUTH_REQUIRED_ANSWER = (
     "Please scan your face so I can confirm whether you have permission to answer it."
 )
 AUTH_REQUIRED_STATUS = "Authentication required: please scan your face to check protected document access."
+
+_RAG_RESPONSE_CACHE: OrderedDict[str, tuple[float, ChatResponse]] = OrderedDict()
+_RAG_RESPONSE_CACHE_LOCK = Lock()
+
+
+def _rag_cache_key(query: str, allowed_access_levels: List[str]) -> str:
+    """Compute RBAC-safe deterministic cache key for a RAG query."""
+    norm = " ".join(query.strip().lower().split())
+    levels = ",".join(sorted(allowed_access_levels))
+    return hashlib.sha256(f"{norm}|{levels}".encode("utf-8")).hexdigest()
+
+
+def clear_rag_response_cache() -> None:
+    """Clear all cached RAG chatbot responses."""
+    with _RAG_RESPONSE_CACHE_LOCK:
+        _RAG_RESPONSE_CACHE.clear()
+
+
+def _split_stream_text(text: str, max_chars: int = 240) -> Iterator[str]:
+    """Split a generated answer into TTS-friendly streamed chunks."""
+    pending = " ".join(text.split())
+    while len(pending) > max_chars:
+        split_at = max(
+            pending.rfind(". ", 0, max_chars),
+            pending.rfind("? ", 0, max_chars),
+            pending.rfind("! ", 0, max_chars),
+            pending.rfind(", ", 0, max_chars),
+        )
+        if split_at < max_chars // 2:
+            split_at = pending.rfind(" ", 0, max_chars)
+        if split_at <= 0:
+            split_at = max_chars
+
+        chunk = pending[: split_at + 1].strip()
+        if chunk:
+            yield chunk
+        pending = pending[split_at + 1 :].strip()
+
+    if pending:
+        yield pending
+
+
+def _sse_event(event: str, payload: dict) -> str:
+    """Serialize one Server-Sent Event message."""
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def _greeting_name(context) -> str:
@@ -233,8 +285,6 @@ def process_chat(
     if not guard_result.is_safe:
         logger.warning("Prompt injection blocked. pattern=%s", guard_result.matched_pattern)
 
-        # We still need session_id for the audit log; attempt JWT decode without
-        # a hard failure so the log is written before the error is returned.
         user_id, session_id = None, None
         if bearer_token:
             try:
@@ -288,76 +338,228 @@ def process_chat(
         allowed_levels = VISITOR_ACCESS_LEVELS
         logger.info("Chat: anonymous visitor allowed_levels=%s", allowed_levels)
 
-    # One shared structured planner owns active intent selection.  It returns
-    # only fixed backend operations; university information is the sole result
-    # that continues into the existing RBAC-filtered RAG path below.  The
-    # planner module contains the deterministic, bounded fallback used when
-    # the provider is unavailable.
+    # Fast-path intent routing & cache check:
+    # 1. Check navigation confirmation & personal intent locally
+    # 2. Check query router locally (~2ms regex)
+    # 3. For greetings, capabilities, and out-of-scope queries: return fast response immediately
+    # 4. For direct university RAG: check response cache, then skip the slow LLM planner entirely
+    confirmation_context = _confirmed_navigation_label(sanitized_query, db, session_id)
+    personal_intent_result = parse_personal_intent(sanitized_query)
+
     with StageTimer() as timer:
-        planned = llm_planner.execute_planned_turn(
-            sanitized_query,
-            context=context,
-            db=db,
-            confirmation_context=_confirmed_navigation_label(sanitized_query, db, session_id),
-        )
+        route = classify_query(sanitized_query, db=db)
     metrics.prompt_classification_ms += timer.elapsed_ms
 
-    if planned.kind != "rag":
-        response_time_ms = int((time.monotonic() - start_time) * 1000)
-        query_id = None
-        if planned.kind == "personal" and planned.personal_result is not None:
-            if session_id is not None and user_id is not None:
-                logged_query_id = log_personal_interaction(
+    needs_planner = (
+        confirmation_context is not None
+        or personal_intent_result.intent != PersonalIntent.UNKNOWN
+        or route.category in ("NAVIGATIONAL", "UNCLEAR")
+    )
+
+    if not needs_planner:
+        if route.category == "GREETING":
+            name = _greeting_name(context) if context.authenticated else ""
+            fast_answer = f"Hi {name}, how may I help you today?" if name else "Hi, how may I help you today?"
+            response_time_ms = int((time.monotonic() - start_time) * 1000)
+            query_id = None
+            if session_id is not None:
+                logged = log_chatbot_interaction(
                     db,
                     session_id=session_id,
                     user_id=user_id,
-                    intent=planned.intent or "UNKNOWN",
+                    query_text=sanitized_query,
+                    response_text=fast_answer,
+                    retrieved_chunk_ids=[],
                     response_time_ms=response_time_ms,
-                    is_navigational=bool(planned.navigation),
+                    is_navigational=False,
+                )
+                query_id = logged if logged > 0 else None
+            metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+            log_inference_metrics(
+                request_type="text",
+                user_id=user_id,
+                session_id=session_id,
+                query_text=sanitized_query,
+                metrics=metrics,
+                status="ok",
+            )
+            return ChatResponse(
+                answer=fast_answer,
+                citations=[],
+                access_granted=True,
+                status_message=None,
+                response_time_ms=response_time_ms,
+                query_id=query_id,
+                intent="GREETING",
+            )
+
+        if route.category == "CAPABILITY":
+            fast_answer = get_capabilities_summary(
+                authenticated=context.authenticated,
+                personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED,
+            )
+            response_time_ms = int((time.monotonic() - start_time) * 1000)
+            query_id = None
+            if session_id is not None:
+                logged = log_chatbot_interaction(
+                    db,
+                    session_id=session_id,
+                    user_id=user_id,
+                    query_text=sanitized_query,
+                    response_text=fast_answer,
+                    retrieved_chunk_ids=[],
+                    response_time_ms=response_time_ms,
+                    is_navigational=False,
+                )
+                query_id = logged if logged > 0 else None
+            metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+            log_inference_metrics(
+                request_type="text",
+                user_id=user_id,
+                session_id=session_id,
+                query_text=sanitized_query,
+                metrics=metrics,
+                status="ok",
+            )
+            return ChatResponse(
+                answer=fast_answer,
+                citations=[],
+                access_granted=True,
+                status_message=None,
+                response_time_ms=response_time_ms,
+                query_id=query_id,
+                intent="CAPABILITY",
+            )
+
+        if route.category == "OUT_OF_SCOPE":
+            fast_answer = "I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics."
+            response_time_ms = int((time.monotonic() - start_time) * 1000)
+            metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+            log_inference_metrics(
+                request_type="text",
+                user_id=user_id,
+                session_id=session_id,
+                query_text=sanitized_query,
+                metrics=metrics,
+                status="blocked",
+            )
+            return ChatResponse(
+                answer=fast_answer,
+                citations=[],
+                access_granted=False,
+                status_message="Request is outside the supported university assistant scope.",
+                response_time_ms=response_time_ms,
+                query_id=None,
+                intent="OUT_OF_SCOPE",
+            )
+
+        # Check full RAG response cache for direct university questions:
+        cache_key = _rag_cache_key(sanitized_query, allowed_levels)
+        with _RAG_RESPONSE_CACHE_LOCK:
+            if cache_key in _RAG_RESPONSE_CACHE:
+                cached_time, cached_res = _RAG_RESPONSE_CACHE[cache_key]
+                ttl = getattr(rag_settings, "RESPONSE_CACHE_TTL_SECONDS", 300.0)
+                if time.monotonic() - cached_time < ttl:
+                    _RAG_RESPONSE_CACHE.move_to_end(cache_key)
+                    logger.debug("RAG response cache hit for query: %.40s", sanitized_query)
+                    response_time_ms = int((time.monotonic() - start_time) * 1000)
+                    query_id = None
+                    if session_id is not None:
+                        logged_query_id = log_chatbot_interaction(
+                            db,
+                            session_id=session_id,
+                            user_id=user_id,
+                            query_text=sanitized_query,
+                            response_text=cached_res.answer,
+                            retrieved_chunk_ids=[c.chunk_id for c in cached_res.citations],
+                            response_time_ms=response_time_ms,
+                        )
+                        query_id = logged_query_id if logged_query_id > 0 else None
+                    metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+                    log_inference_metrics(
+                        request_type="text",
+                        user_id=user_id,
+                        session_id=session_id,
+                        query_text=sanitized_query,
+                        metrics=metrics,
+                        status="ok" if cached_res.access_granted else "no_access",
+                    )
+                    return ChatResponse(
+                        answer=cached_res.answer,
+                        citations=cached_res.citations,
+                        access_granted=cached_res.access_granted,
+                        status_message=cached_res.status_message,
+                        response_time_ms=response_time_ms,
+                        query_id=query_id,
+                    )
+                else:
+                    del _RAG_RESPONSE_CACHE[cache_key]
+
+    else:
+        # Complex turn: LLM planner for structured tool dispatch (navigation, personal, unclear)
+        with StageTimer() as timer:
+            planned = llm_planner.execute_planned_turn(
+                sanitized_query,
+                context=context,
+                db=db,
+                confirmation_context=confirmation_context,
+            )
+        metrics.prompt_classification_ms += timer.elapsed_ms
+
+        if planned.kind != "rag":
+            response_time_ms = int((time.monotonic() - start_time) * 1000)
+            query_id = None
+            if planned.kind == "personal" and planned.personal_result is not None:
+                if session_id is not None and user_id is not None:
+                    logged_query_id = log_personal_interaction(
+                        db,
+                        session_id=session_id,
+                        user_id=user_id,
+                        intent=planned.intent or "UNKNOWN",
+                        response_time_ms=response_time_ms,
+                        is_navigational=bool(planned.navigation),
+                    )
+                    query_id = logged_query_id if logged_query_id > 0 else None
+            elif session_id is not None:
+                logged_query_id = log_chatbot_interaction(
+                    db,
+                    session_id=session_id,
+                    user_id=user_id,
+                    query_text=sanitized_query,
+                    response_text=planned.answer or "",
+                    retrieved_chunk_ids=[],
+                    response_time_ms=response_time_ms,
+                    is_navigational=planned.kind == "navigation",
                 )
                 query_id = logged_query_id if logged_query_id > 0 else None
-        elif session_id is not None:
-            logged_query_id = log_chatbot_interaction(
-                db,
-                session_id=session_id,
+
+            metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+            log_inference_metrics(
+                request_type="text",
                 user_id=user_id,
+                session_id=session_id,
                 query_text=sanitized_query,
-                response_text=planned.answer or "",
-                retrieved_chunk_ids=[],
-                response_time_ms=response_time_ms,
-                is_navigational=planned.kind == "navigation",
+                metrics=metrics,
+                status=planned.status,
             )
-            query_id = logged_query_id if logged_query_id > 0 else None
-
-        metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
-        log_inference_metrics(
-            request_type="text",
-            user_id=user_id,
-            session_id=session_id,
-            query_text=sanitized_query,
-            metrics=metrics,
-            status=planned.status,
-        )
-        navigation_data = planned.navigation
-        return ChatResponse(
-            answer=planned.answer or "",
-            citations=[],
-            access_granted=planned.access_granted,
-            status_message=planned.status_message,
-            response_time_ms=response_time_ms,
-            query_id=query_id,
-            intent=planned.intent,
-            navigation_target=(navigation_data or {}).get("navigation_target"),
-            navigation=(navigation_data or {}).get("navigation"),
-            route_summary=(navigation_data or {}).get("route_summary"),
-            instructions=(navigation_data or {}).get("instructions", []),
-            visualisation=(navigation_data or {}).get("visualisation"),
-            response_scope=planned.response_scope,
-            personal_intent=planned.intent if planned.kind == "personal" else None,
-            authentication_required=planned.authentication_required,
-        )
-
-# Step 3: RBAC access levels
+            navigation_data = planned.navigation
+            return ChatResponse(
+                answer=planned.answer or "",
+                citations=[],
+                access_granted=planned.access_granted,
+                status_message=planned.status_message,
+                response_time_ms=response_time_ms,
+                query_id=query_id,
+                intent=planned.intent,
+                navigation_target=(navigation_data or {}).get("navigation_target"),
+                navigation=(navigation_data or {}).get("navigation"),
+                route_summary=(navigation_data or {}).get("route_summary"),
+                instructions=(navigation_data or {}).get("instructions", []),
+                visualisation=(navigation_data or {}).get("visualisation"),
+                response_scope=planned.response_scope,
+                personal_intent=planned.intent if planned.kind == "personal" else None,
+                authentication_required=planned.authentication_required,
+            )
 
 # Step 4: Embed the query
     with StageTimer() as timer:
@@ -460,8 +662,8 @@ def process_chat(
         status="ok" if access_granted else "no_access",
     )
 
-# Step 10: Return response
-    return ChatResponse(
+# Step 10: Cache and return response
+    response = ChatResponse(
         answer=answer,
         citations=citations,
         access_granted=access_granted,
@@ -469,6 +671,248 @@ def process_chat(
         response_time_ms=response_time_ms,
         query_id=query_id,
     )
+
+    if access_granted:
+        cache_key = _rag_cache_key(sanitized_query, allowed_levels)
+        with _RAG_RESPONSE_CACHE_LOCK:
+            _RAG_RESPONSE_CACHE[cache_key] = (time.monotonic(), response)
+            _RAG_RESPONSE_CACHE.move_to_end(cache_key)
+            max_size = getattr(rag_settings, "RESPONSE_CACHE_SIZE", 256)
+            while len(_RAG_RESPONSE_CACHE) > max_size:
+                _RAG_RESPONSE_CACHE.popitem(last=False)
+
+    return response
+
+
+def process_chat_stream(
+    request: ChatRequest,
+    bearer_token: str | None,
+    db: Session,
+) -> Iterator[str]:
+    """
+    Execute the RAG pipeline and stream answer chunks as Server-Sent Events (SSE).
+
+    For fast/cached/blocked responses, yields the chunks followed by done.
+    For RAG responses, streams tokens directly from Gemini Live/Streaming API.
+    """
+    start_time = time.monotonic()
+    metrics = InferenceMetrics()
+
+    # Step 1: Prompt injection guard
+    with StageTimer() as timer:
+        guard_result = check_query(request.query)
+    metrics.prompt_injection_ms += timer.elapsed_ms
+
+    if not guard_result.is_safe:
+        logger.warning("Prompt injection blocked in stream. pattern=%s", guard_result.matched_pattern)
+        user_id, session_id = None, None
+        if bearer_token:
+            try:
+                user_id, session_id = _verify_session(bearer_token, db)
+            except HTTPException:
+                user_id, session_id = None, None
+        if session_id and session_id > 0:
+            log_access_denied(
+                db, session_id=session_id, user_id=user_id,
+                query_text=request.query, reason=f"prompt_injection:{guard_result.matched_pattern}",
+            )
+        blocked_resp = ChatResponse(
+            answer="I'm not able to process that request. Please ask a straightforward question about campus services or documents.",
+            citations=[], access_granted=False,
+            status_message="Request blocked: potentially unsafe query pattern detected.",
+            response_time_ms=int((time.monotonic() - start_time) * 1000),
+        )
+        for chunk in _split_stream_text(blocked_resp.answer):
+            yield _sse_event("chunk", {"text": chunk})
+        yield _sse_event("done", blocked_resp.model_dump(mode="json"))
+        return
+
+    sanitized_query = guard_result.sanitized_query or request.query
+
+    # Step 2: Auth resolution
+    context = resolve_auth_context(bearer_token, db, requested_device_id=request.device_id)
+    user_id, session_id = context.user_id, context.session_id
+    allowed_levels = get_allowed_access_levels_for_user(user_id, db) if (context.authenticated and user_id is not None) else VISITOR_ACCESS_LEVELS
+
+    # Step 2.5: Fast-path routing & cache check
+    confirmation_context = _confirmed_navigation_label(sanitized_query, db, session_id)
+    personal_intent_result = parse_personal_intent(sanitized_query)
+
+    with StageTimer() as timer:
+        route = classify_query(sanitized_query, db=db)
+    metrics.prompt_classification_ms += timer.elapsed_ms
+
+    needs_planner = (
+        confirmation_context is not None
+        or personal_intent_result.intent != PersonalIntent.UNKNOWN
+        or route.category in ("NAVIGATIONAL", "UNCLEAR")
+    )
+
+    if not needs_planner:
+        if route.category in ("GREETING", "CAPABILITY", "OUT_OF_SCOPE"):
+            fast_resp = process_chat(request, bearer_token, db)
+            for chunk in _split_stream_text(fast_resp.answer):
+                yield _sse_event("chunk", {"text": chunk})
+            yield _sse_event("done", fast_resp.model_dump(mode="json"))
+            return
+
+        # Check response cache
+        cache_key = _rag_cache_key(sanitized_query, allowed_levels)
+        with _RAG_RESPONSE_CACHE_LOCK:
+            if cache_key in _RAG_RESPONSE_CACHE:
+                cached_time, cached_res = _RAG_RESPONSE_CACHE[cache_key]
+                ttl = getattr(rag_settings, "RESPONSE_CACHE_TTL_SECONDS", 300.0)
+                if time.monotonic() - cached_time < ttl:
+                    _RAG_RESPONSE_CACHE.move_to_end(cache_key)
+                    response_time_ms = int((time.monotonic() - start_time) * 1000)
+                    query_id = None
+                    if session_id is not None:
+                        logged = log_chatbot_interaction(
+                            db, session_id=session_id, user_id=user_id, query_text=sanitized_query,
+                            response_text=cached_res.answer, retrieved_chunk_ids=[c.chunk_id for c in cached_res.citations],
+                            response_time_ms=response_time_ms,
+                        )
+                        query_id = logged if logged > 0 else None
+                    done_resp = ChatResponse(
+                        answer=cached_res.answer, citations=cached_res.citations,
+                        access_granted=cached_res.access_granted, status_message=cached_res.status_message,
+                        response_time_ms=response_time_ms, query_id=query_id,
+                    )
+                    for chunk in _split_stream_text(done_resp.answer):
+                        yield _sse_event("chunk", {"text": chunk})
+                    yield _sse_event("done", done_resp.model_dump(mode="json"))
+                    return
+    else:
+        # Fallback to standard execution for navigation / personal
+        resp = process_chat(request, bearer_token, db)
+        for chunk in _split_stream_text(resp.answer):
+            yield _sse_event("chunk", {"text": chunk})
+        yield _sse_event("done", resp.model_dump(mode="json"))
+        return
+
+    # Step 4: Embed query
+    with StageTimer() as timer:
+        try:
+            query_embedding = embed_text(sanitized_query)
+        except RuntimeError as exc:
+            logger.error("Streaming embedding failed: %s", exc)
+            yield _sse_event("error", {"message": "Embedding service is temporarily unavailable."})
+            return
+    metrics.embedding_return_ms += timer.elapsed_ms
+
+    # Step 5-6: Retrieve chunks
+    with StageTimer() as timer:
+        ranked_chunks = retrieve_chunks(
+            query_embedding=query_embedding,
+            allowed_access_levels=allowed_levels,
+            db=db,
+        )
+    metrics.embedding_db_search_ms += timer.elapsed_ms
+
+    # Step 7: Generate answer (Streamed)
+    if not ranked_chunks:
+        if not bearer_token and _has_relevant_protected_chunks(query_embedding, db):
+            answer = AUTH_REQUIRED_ANSWER
+            access_granted = False
+            status_message = AUTH_REQUIRED_STATUS
+        else:
+            answer = generate_no_access_response()
+            access_granted = False
+            status_message = "No relevant documents found for your access level."
+
+        resp = ChatResponse(
+            answer=answer,
+            citations=[],
+            access_granted=access_granted,
+            status_message=status_message,
+            response_time_ms=int((time.monotonic() - start_time) * 1000),
+            query_id=None,
+        )
+        for chunk in _split_stream_text(answer):
+            yield _sse_event("chunk", {"text": chunk})
+        yield _sse_event("done", resp.model_dump(mode="json"))
+        return
+
+    chat_history = []
+    if session_id:
+        from app.models.models import ChatbotQuery
+        recent_queries = (
+            db.query(ChatbotQuery)
+            .filter(ChatbotQuery.session_id == session_id)
+            .filter(ChatbotQuery.response_text.isnot(None))
+            .order_by(ChatbotQuery.timestamp.desc())
+            .limit(3)
+            .all()
+        )
+        for q in reversed(recent_queries):
+            chat_history.append({"user": q.query_text, "assistant": q.response_text})
+
+    generated_tokens: list[str] = []
+    try:
+        for token in generate_answer_stream(sanitized_query, ranked_chunks, chat_history=chat_history):
+            generated_tokens.append(token)
+            yield _sse_event("chunk", {"text": token})
+    except Exception as exc:
+        logger.error("LLM streaming answer generation failed: %s", exc)
+        yield _sse_event("error", {"message": "Answer generation is temporarily unavailable."})
+        return
+
+    full_answer = "".join(generated_tokens).strip()
+
+    citations: List[CitationSchema] = [
+        CitationSchema(
+            chunk_id=chunk.chunk_id,
+            document_id=chunk.document_id,
+            document_title=chunk.document_title,
+            chunk_index=chunk.chunk_index,
+            access_level=chunk.access_level,
+            excerpt=chunk.chunk_text[:200],
+        )
+        for chunk in ranked_chunks
+    ]
+
+    response_time_ms = int((time.monotonic() - start_time) * 1000)
+    query_id = None
+    if session_id is not None:
+        logged_query_id = log_chatbot_interaction(
+            db,
+            session_id=session_id,
+            user_id=user_id,
+            query_text=sanitized_query,
+            response_text=full_answer,
+            retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
+            response_time_ms=response_time_ms,
+        )
+        query_id = logged_query_id if logged_query_id > 0 else None
+
+    metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+    log_inference_metrics(
+        request_type="text",
+        user_id=user_id,
+        session_id=session_id,
+        query_text=sanitized_query,
+        metrics=metrics,
+        status="ok",
+    )
+
+    final_resp = ChatResponse(
+        answer=full_answer,
+        citations=citations,
+        access_granted=True,
+        status_message=None,
+        response_time_ms=response_time_ms,
+        query_id=query_id,
+    )
+
+    cache_key = _rag_cache_key(sanitized_query, allowed_levels)
+    with _RAG_RESPONSE_CACHE_LOCK:
+        _RAG_RESPONSE_CACHE[cache_key] = (time.monotonic(), final_resp)
+        _RAG_RESPONSE_CACHE.move_to_end(cache_key)
+        max_size = getattr(rag_settings, "RESPONSE_CACHE_SIZE", 256)
+        while len(_RAG_RESPONSE_CACHE) > max_size:
+            _RAG_RESPONSE_CACHE.popitem(last=False)
+
+    yield _sse_event("done", final_resp.model_dump(mode="json"))
 
 
 def _has_relevant_protected_chunks(query_embedding: List[float], db: Session) -> bool:

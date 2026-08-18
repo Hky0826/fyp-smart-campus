@@ -13,6 +13,7 @@ from google import genai
 from google.genai import types
 
 from RagChatbot.config import rag_settings
+from RagChatbot.gemini_client import get_gemini_client
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ def _llm_navigation_fallback(query: str, destinations: list[tuple[str, str]]) ->
         return None
 
     try:
-        client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
+        client = get_gemini_client()
         destination_context = "\n".join(
             f"- {label} ({node_type})" for label, node_type in destinations
         ) or "- No destination catalog is available"
