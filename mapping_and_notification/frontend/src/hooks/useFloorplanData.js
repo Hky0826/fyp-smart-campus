@@ -10,7 +10,7 @@
  *  - Saving all map data (nodes + edges) to the database
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { authAxios } from '../services/api';
 
 /**
@@ -92,6 +92,10 @@ export function useFloorplanData({ onFloorplanLoaded, onFloorplanCleared, onUplo
         authAxios.get('/api/floorplans').then(res => setFloorplansList(res.data)).catch(console.error);
         authAxios.get('/api/global-nodes').then(res => setGlobalNodes(res.data)).catch(console.error);
     };
+
+    useEffect(() => {
+        fetchInitialData();
+    }, []);
 
     /**
      * Refreshes the global nodes list from the API.
