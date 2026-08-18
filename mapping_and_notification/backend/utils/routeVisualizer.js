@@ -23,9 +23,16 @@
  * CID-based email embedding.
  */
 
-'use strict';
+let createCanvas = null;
+let loadImage = null;
+try {
+    const canvasPkg = require('canvas');
+    createCanvas = canvasPkg.createCanvas;
+    loadImage = canvasPkg.loadImage;
+} catch (err) {
+    // node-canvas not installed or not supported on this platform
+}
 
-const { createCanvas, loadImage } = require('canvas');
 const fs   = require('fs');
 const path = require('path');
 const queryAsync = require('./queryAsync');
@@ -284,6 +291,11 @@ function drawRouteNodes(ctx, nodesOnFloor, startNodeId, endNodeId, scaleX, scale
  */
 async function generate(routeResult, notificationId) {
     const { path: routePath, edges_traversed: edgesTraversed } = routeResult;
+
+    if (!createCanvas || !loadImage) {
+        console.warn('[RouteVisualizer] node-canvas is not available; skipping static route image rendering.');
+        return [];
+    }
 
     if (!routePath || routePath.length < 2) {
         console.warn('[RouteVisualizer] Route path is too short to visualize.');

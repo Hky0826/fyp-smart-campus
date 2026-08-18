@@ -62,7 +62,7 @@ async def proxy_to_mapping_microservice(path: str, request: Request):
     except httpx.ConnectError:
         raise HTTPException(
             status_code=503,
-            detail="Mapping & Navigation Microservice is unavailable. Ensure the Node.js service is running on port 5001.",
+            detail="Mapping & Navigation Microservice is unavailable. Ensure the Node.js service is running on port 5000.",
         )
     except httpx.TimeoutException:
         raise HTTPException(

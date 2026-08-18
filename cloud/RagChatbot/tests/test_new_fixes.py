@@ -3,10 +3,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from fastapi import HTTPException
 from RagChatbot.generation.response_validator import sanitize_text_for_speech
-from RagChatbot.generation.prompt_builder import _SYSTEM_PROMPT
-from RagChatbot.generation.prompt_builder import build_prompt
+from RagChatbot.generation.prompt_builder import _SYSTEM_PROMPT, build_prompt
 from RagChatbot.retrieval.ranking import RankedChunk
-from RagChatbot.services.audio_chat_service import _LIVE_SYSTEM_INSTRUCTION
+from RagChatbot.generation.live_session_manager import _LIVE_SYSTEM_INSTRUCTION
 from RagChatbot.personalisation.schemas import AuthenticatedChatContext
 
 
@@ -27,7 +26,7 @@ def test_sanitize_text_for_speech_empty():
 def test_system_prompt_rules_exist():
     assert "Responses appear on a 5-inch screen:" in _SYSTEM_PROMPT
     assert "Use only the provided context." in _SYSTEM_PROMPT
-    assert "Keep responses short, direct, and compact" in _LIVE_SYSTEM_INSTRUCTION
+    assert "You are the voice interface for a secure university assistant." in _LIVE_SYSTEM_INSTRUCTION
 
 
 

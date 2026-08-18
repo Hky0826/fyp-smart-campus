@@ -501,10 +501,11 @@ exports.runNavigation = async ({ currentLocation, destinationNode, rbacRole, wal
     let userRoleId = Number(rbacRole);
     if (isNaN(userRoleId)) {
         const roleLower = String(rbacRole).toLowerCase();
-        if (roleLower === 'admin') userRoleId = 1;
-        else if (roleLower === 'staff') userRoleId = 2;
+        if (roleLower === 'admin' || roleLower === 'super_admin' || roleLower === 'system_admin' || roleLower === 'content_admin') userRoleId = 1;
+        else if (roleLower === 'staff' || roleLower === 'lecturer') userRoleId = 2;
         else if (roleLower === 'student') userRoleId = 3;
-        else if (roleLower === 'visitor') userRoleId = 4;
+        else if (roleLower === 'visitor' || roleLower === 'guest') userRoleId = 4;
+        else userRoleId = 4;
     }
 
     // Fetch all nodes with building/floor context and their RBAC roles
@@ -776,13 +777,21 @@ exports.runNavigation = async ({ currentLocation, destinationNode, rbacRole, wal
  * @param {import('express').Response} res
  */
 exports.calculateRoute = async (req, res) => {
-    const currentLocation = req.body.current_location ?? req.body.startNodeId;
-    const destinationNode = req.body.destination_node  ?? req.body.endNodeId;
-    const rbacRole        = req.body.rbac_role          ?? req.body.userRoleId;
+    const currentLocation = req.body.current_location ?? req.body.startNodeId ?? req.body.start_node_id;
+    const destinationNode = req.body.destination_node  ?? req.body.endNodeId   ?? req.body.destination_node_id;
+    const rbacRole        = req.body.rbac_role          ?? req.body.userRoleId ?? req.body.role ?? (Array.isArray(req.body.roles) ? req.body.roles[0] : req.body.roles) ?? 'VISITOR';
 
-    if (!currentLocation || !destinationNode || !rbacRole) {
+    if (!currentLocation) {
+        return res.status(422).json({
+            error: 'Start location required',
+            message: 'current_location (or startNodeId / start_node_id) is required.'
+        });
+    }
+
+    if (!destinationNode) {
         return res.status(400).json({
-            message: 'current_location (or startNodeId), destination_node (or endNodeId), and rbac_role (or userRoleId) are required.'
+            error: 'Destination node required',
+            message: 'destination_node (or endNodeId / destination_node_id) is required.'
         });
     }
 

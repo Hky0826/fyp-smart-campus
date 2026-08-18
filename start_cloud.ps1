@@ -191,5 +191,18 @@ if ($Reload) {
 Write-Host "Cloud development backend is starting at http://$BindAddress`:$Port" -ForegroundColor Green
 Write-Host "Dashboard: http://localhost`:$Port/dashboard/" -ForegroundColor Green
 Write-Host "Press Ctrl+C to stop the cloud backend."
-& $python @uvicornArgs
+try {
+    & $python @uvicornArgs
+} finally {
+    Write-Host "`nStopping background microservices..." -ForegroundColor DarkCyan
+    if ($mappingServiceProcess -and -not $mappingServiceProcess.HasExited) {
+        Stop-Process -Id $mappingServiceProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+    if ($workerProcess -and -not $workerProcess.HasExited) {
+        Stop-Process -Id $workerProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+    if ($aiProcess -and -not $aiProcess.HasExited) {
+        Stop-Process -Id $aiProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+}
 exit $LASTEXITCODE

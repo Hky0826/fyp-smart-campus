@@ -39,7 +39,10 @@ _COMPOUND_ALIASES = {
     "cafiteria": "cafeteria",
 }
 
-MAPPING_MICROSERVICE_URL = os.getenv("MAPPING_MICROSERVICE_URL", "http://127.0.0.1:5000")
+from RagChatbot.config import rag_settings
+
+MAPPING_MICROSERVICE_URL = getattr(rag_settings, "MAPPING_MICROSERVICE_URL", "http://127.0.0.1:5000")
+NAVIGATION_API_KEY = getattr(rag_settings, "NAVIGATION_API_KEY", "campus_navigation_api_key_2026")
 
 
 class NavigationError(Exception):
@@ -281,23 +284,44 @@ def _candidate_data(node) -> dict:
     }
 
 
-def _call_route_microservice(*, destination_node_id: int, start_node_id: int | None, roles: list[str]) -> dict:
+def _call_route_microservice(*, destination_node_id: int, start_node_id: int | None, roles: list[str] | tuple[str, ...]) -> dict:
     """Call Node.js Mapping Microservice route calculation."""
+    if start_node_id is None:
+        raise StartLocationRequired("Start location required")
+
+    primary_role = roles[0] if roles else "VISITOR"
     payload = {
-        "destination_node_id": destination_node_id,
+        "current_location": start_node_id,
+        "destination_node": destination_node_id,
+        "rbac_role": primary_role,
         "start_node_id": start_node_id,
+        "destination_node_id": destination_node_id,
         "roles": list(roles),
+    }
+    headers = {
+        "x-api-key": NAVIGATION_API_KEY,
     }
     try:
         with httpx.Client(timeout=10.0) as client:
-            resp = client.post(f"{MAPPING_MICROSERVICE_URL.rstrip('/')}/routes", json=payload)
+            resp = client.post(
+                f"{MAPPING_MICROSERVICE_URL.rstrip('/')}/navigate",
+                json=payload,
+                headers=headers,
+            )
             if resp.status_code == 200:
                 return resp.json()
+
+            try:
+                err_data = resp.json()
+                err_msg = err_data.get("error") or err_data.get("message") or err_data.get("detail") or "Navigation error"
+            except Exception:
+                err_msg = f"HTTP {resp.status_code}"
+
             if resp.status_code == 422:
-                raise StartLocationRequired(resp.json().get("detail", "Start location required"))
+                raise StartLocationRequired(err_msg)
             if resp.status_code == 404:
-                raise NoRouteError(resp.json().get("detail", "No accessible route exists"))
-            raise NavigationError(f"Route calculation failed ({resp.status_code})")
+                raise NoRouteError(err_msg)
+            raise NavigationError(f"Route calculation failed ({resp.status_code}): {err_msg}")
     except (httpx.ConnectError, httpx.TimeoutException):
         raise NavigationError("Mapping microservice is unreachable")
 
