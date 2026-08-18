@@ -324,6 +324,14 @@ if (-not $SkipFrontendBuild) {
     } else {
         Write-Info "Node.js / npm not found on PATH. Using existing static dashboard build."
     }
+
+    # Ensure floorplan images are synced into mapping microservice uploads
+    $floorplanSource = Join-Path $repoRoot "floorplan"
+    $backendUploads = Join-Path $repoRoot "mapping_and_notification\backend\uploads"
+    if (Test-Path -LiteralPath $floorplanSource) {
+        if (-not (Test-Path -LiteralPath $backendUploads)) { New-Item -ItemType Directory -Path $backendUploads -Force | Out-Null }
+        Copy-Item -Path (Join-Path $floorplanSource "*.jpeg") -Destination $backendUploads -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # ---------------------------------------------------------------------------
