@@ -53,6 +53,8 @@ from RagChatbot.personalisation.schemas import PersonalIntent
 from RagChatbot.personalisation.service import handle_personal_request
 from RagChatbot.logging.inference_logger import InferenceMetrics, StageTimer, log_inference_metrics
 from RagChatbot.generation import llm_planner
+from RagChatbot.utils.language_detection import detect_query_language
+from RagChatbot.utils.translations import get_translated, get_capabilities_translated
 
 logger = logging.getLogger(__name__)
 
@@ -151,13 +153,18 @@ def _confirmed_navigation_label(query: str, db: Session, session_id: int | None)
         )
         response_text = str(getattr(latest, "response_text", "") or "")
         affirmative = re.fullmatch(
-            r"\s*(?:yes|yeah|yep|correct|right|that(?:'s| is) it|yes please|go ahead|proceed)\s*[.!]?\s*",
+            r"\s*(?:yes|yeah|yep|correct|right|that(?:'s| is) it|yes please|go ahead|proceed"
+            r"|ya|betul|okay|ok"
+            r"|是|对|好|没错|是的|好的|对的"
+            r"|ஆம்|சரி"
+            r"|हाँ|जी हाँ|सही|ठीक है"
+            r")\s*[.!。！]?\s*",
             query,
             flags=re.IGNORECASE,
         )
         if affirmative:
             match = re.match(
-                r"\s*Did you mean (?P<label>[^?]+)\? Is that the place you want to go\?\s*$",
+                r"\s*(?:Did you mean|您是指|Adakah anda maksudkan)\s+(?P<label>[^?？]+)",
                 response_text,
                 flags=re.IGNORECASE,
             )
@@ -170,8 +177,17 @@ def _confirmed_navigation_label(query: str, db: Session, session_id: int | None)
         # destination label. This keeps the continuation working if labels
         # or facilities change.
         if (
-            re.fullmatch(r"\s*(?:men|mens|male|women|womens|female|unisex|accessible)\s*[.!]?\s*", query, re.IGNORECASE)
-            and "washroom" in response_text.casefold()
+            re.fullmatch(
+                r"\s*(?:men|mens|male|women|womens|female|unisex|accessible"
+                r"|lelaki|perempuan|wanita"
+                r"|男|女|无障碍"
+                r"|ஆண்|பெண்"
+                r"|पुरुष|महिला"
+                r")\s*[.!。！]?\s*",
+                query,
+                re.IGNORECASE,
+            )
+            and any(w in response_text.casefold() for w in ("washroom", "toilet", "tandas", "厕所", "கழிப்பறை", "शौचालय"))
         ):
             from RagChatbot.services.map_service import _destination_matches, _normalise_label
 
@@ -345,6 +361,8 @@ def process_chat(
     # 4. For direct university RAG: check response cache, then skip the slow LLM planner entirely
     confirmation_context = _confirmed_navigation_label(sanitized_query, db, session_id)
     personal_intent_result = parse_personal_intent(sanitized_query)
+    detected_lang = detect_query_language(sanitized_query)
+    is_non_english = detected_lang != "en"
 
     with StageTimer() as timer:
         route = classify_query(sanitized_query, db=db)
@@ -354,6 +372,7 @@ def process_chat(
         confirmation_context is not None
         or personal_intent_result.intent != PersonalIntent.UNKNOWN
         or route.category in ("NAVIGATIONAL", "UNCLEAR")
+        or (is_non_english and context.authenticated)
     )
 
     if not needs_planner:
@@ -394,9 +413,10 @@ def process_chat(
             )
 
         if route.category == "CAPABILITY":
-            fast_answer = get_capabilities_summary(
+            fast_answer = get_capabilities_translated(
                 authenticated=context.authenticated,
                 personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED,
+                lang=detected_lang,
             )
             response_time_ms = int((time.monotonic() - start_time) * 1000)
             query_id = None
@@ -432,7 +452,7 @@ def process_chat(
             )
 
         if route.category == "OUT_OF_SCOPE":
-            fast_answer = "I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics."
+            fast_answer = get_translated("out_of_scope", detected_lang)
             response_time_ms = int((time.monotonic() - start_time) * 1000)
             metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
             log_inference_metrics(
@@ -447,7 +467,7 @@ def process_chat(
                 answer=fast_answer,
                 citations=[],
                 access_granted=False,
-                status_message="Request is outside the supported university assistant scope.",
+                status_message=get_translated("out_of_scope_status", detected_lang),
                 response_time_ms=response_time_ms,
                 query_id=None,
                 intent="OUT_OF_SCOPE",
@@ -586,13 +606,13 @@ def process_chat(
     with StageTimer() as timer:
         if not ranked_chunks:
             if not bearer_token and _has_relevant_protected_chunks(query_embedding, db):
-                answer = AUTH_REQUIRED_ANSWER
+                answer = get_translated("auth_required", detected_lang)
                 access_granted = False
-                status_message = AUTH_REQUIRED_STATUS
+                status_message = get_translated("auth_required_status", detected_lang)
             else:
-                answer = generate_no_access_response()
+                answer = get_translated("no_access", detected_lang)
                 access_granted = False
-                status_message = "No relevant documents found for your access level."
+                status_message = get_translated("no_access_status", detected_lang)
         else:
             try:
                 chat_history = []
@@ -737,6 +757,8 @@ def process_chat_stream(
     # Step 2.5: Fast-path routing & cache check
     confirmation_context = _confirmed_navigation_label(sanitized_query, db, session_id)
     personal_intent_result = parse_personal_intent(sanitized_query)
+    detected_lang = detect_query_language(sanitized_query)
+    is_non_english = detected_lang != "en"
 
     with StageTimer() as timer:
         route = classify_query(sanitized_query, db=db)
@@ -746,6 +768,7 @@ def process_chat_stream(
         confirmation_context is not None
         or personal_intent_result.intent != PersonalIntent.UNKNOWN
         or route.category in ("NAVIGATIONAL", "UNCLEAR")
+        or (is_non_english and context.authenticated)
     )
 
     if not needs_planner:
@@ -812,13 +835,13 @@ def process_chat_stream(
     # Step 7: Generate answer (Streamed)
     if not ranked_chunks:
         if not bearer_token and _has_relevant_protected_chunks(query_embedding, db):
-            answer = AUTH_REQUIRED_ANSWER
+            answer = get_translated("auth_required", detected_lang)
             access_granted = False
-            status_message = AUTH_REQUIRED_STATUS
+            status_message = get_translated("auth_required_status", detected_lang)
         else:
-            answer = generate_no_access_response()
+            answer = get_translated("no_access", detected_lang)
             access_granted = False
-            status_message = "No relevant documents found for your access level."
+            status_message = get_translated("no_access_status", detected_lang)
 
         resp = ChatResponse(
             answer=answer,

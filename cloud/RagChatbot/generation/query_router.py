@@ -14,6 +14,7 @@ from google.genai import types
 
 from RagChatbot.config import rag_settings
 from RagChatbot.gemini_client import get_gemini_client
+from RagChatbot.utils.language_detection import detect_query_language
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,8 @@ def _query_mentions_destination(query: str, destinations: list[tuple[str, str]])
 def _llm_navigation_fallback(query: str, destinations: list[tuple[str, str]]) -> RouteClassification | None:
     """Use a structured LLM classification when local patterns are insufficient."""
     mentions_destination = _query_mentions_destination(query, destinations)
-    if not rag_settings.GOOGLE_API_KEY or not (_NAVIGATION_HINT_PATTERN.search(query) or mentions_destination):
+    is_non_english = detect_query_language(query) != "en"
+    if not rag_settings.GOOGLE_API_KEY or not (_NAVIGATION_HINT_PATTERN.search(query) or mentions_destination or is_non_english):
         return None
 
     try:
@@ -191,8 +193,9 @@ def classify_query(query: str, db=None) -> RouteClassification:
         return RouteClassification(category="NAVIGATIONAL")
 
     # 4. UNCLEAR check
+    is_en = detect_query_language(clean_query) == "en"
     query_words = clean_query.lower().split()
-    if len(query_words) == 1 and (query_words[0] in _UNCLEAR_WORDS or len(query_words[0]) < 3):
+    if len(query_words) == 1 and (query_words[0] in _UNCLEAR_WORDS or (is_en and len(query_words[0]) < 3)):
         logger.info("Local Regex Router classified '%s' as UNCLEAR (0 LLM calls)", query)
         return RouteClassification(
             category="UNCLEAR",

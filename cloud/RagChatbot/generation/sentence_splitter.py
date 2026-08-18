@@ -17,8 +17,8 @@ _ABBREVIATIONS = {
     "st", "ave", "rd", "blvd", "dept", "vol", "no", "approx", "min", "max",
 }
 
-# Regex to match sentence end punctuation followed by whitespace or quote/bracket
-_SENTENCE_END_RE = re.compile(r'([.?!]+["\'\)]*\s+|\n+)')
+# Regex to match sentence end punctuation followed by whitespace or CJK fullwidth punctuation
+_SENTENCE_END_RE = re.compile(r'([.?!]+["\'\)]*\s+|[。！？]+["\'\)]*|\n+)')
 
 
 class StreamingSentenceSplitter:

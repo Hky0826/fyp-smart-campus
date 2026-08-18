@@ -306,7 +306,7 @@ def process_audio_chat(
                 metrics=metrics,
                 user_id=user_id,
                 session_id=resolved_session_id,
-                language_code=detected_language,
+                language_code=None,
             )
 
 # Step 2: Resolve RBAC access levels
@@ -426,6 +426,8 @@ def process_audio_chat(
     context = context or resolve_auth_context(bearer_token, db, requested_device_id=device_id)
     confirmation_context = _confirmed_navigation_label(sanitized_query, db, resolved_session_id)
     personal_intent_result = parse_personal_intent(sanitized_query)
+    lang = detected_language or detect_query_language(sanitized_query)
+    is_non_english = bool(lang and not lang.startswith("en"))
 
     with StageTimer() as timer:
         route = classify_query(sanitized_query, db=db)
@@ -435,30 +437,43 @@ def process_audio_chat(
         confirmation_context is not None
         or personal_intent_result.intent != PersonalIntent.UNKNOWN
         or route.category in ("NAVIGATIONAL", "UNCLEAR")
+        or (is_non_english and context.authenticated)
+        or route.category in ("GREETING", "CAPABILITY", "OUT_OF_SCOPE")
     )
 
     if not needs_planner:
+        planned = llm_planner.PlannedOperation(kind="rag", query=sanitized_query)
+    else:
         if route.category == "GREETING":
             name = _greeting_name(context) if context.authenticated else ""
             answer = f"Hi {name}, how may I help you today?" if name else "Hi, how may I help you today?"
             planned = llm_planner.PlannedOperation(kind="fixed", answer=answer, intent="GREETING")
         elif route.category == "CAPABILITY":
-            answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
+            answer = get_capabilities_translated(
+                authenticated=context.authenticated,
+                personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED,
+                lang=lang,
+            )
             planned = llm_planner.PlannedOperation(kind="fixed", answer=answer, intent="CAPABILITY")
         elif route.category == "OUT_OF_SCOPE":
-            answer = "I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics."
-            planned = llm_planner.PlannedOperation(kind="blocked", answer=answer, status="blocked", access_granted=False, status_message="Request is outside the supported university assistant scope.", intent="OUT_OF_SCOPE")
-        else:
-            planned = llm_planner.PlannedOperation(kind="rag", query=sanitized_query)
-    else:
-        with StageTimer() as timer:
-            planned = llm_planner.execute_planned_turn(
-                sanitized_query,
-                context=context,
-                db=db,
-                confirmation_context=confirmation_context,
+            answer = get_translated("out_of_scope", lang)
+            planned = llm_planner.PlannedOperation(
+                kind="blocked",
+                answer=answer,
+                status="blocked",
+                access_granted=False,
+                status_message=get_translated("out_of_scope_status", lang),
+                intent="OUT_OF_SCOPE",
             )
-        metrics.prompt_classification_ms += timer.elapsed_ms
+        else:
+            with StageTimer() as timer:
+                planned = llm_planner.execute_planned_turn(
+                    sanitized_query,
+                    context=context,
+                    db=db,
+                    confirmation_context=confirmation_context,
+                )
+            metrics.prompt_classification_ms += timer.elapsed_ms
 
     if planned.kind != "rag":
         context = context or resolve_auth_context(bearer_token, db, requested_device_id=device_id)
@@ -522,7 +537,7 @@ def process_audio_chat(
                 text_response=None,
                 status="error",
                 access_granted=False,
-                error_message="The search service is temporarily unavailable. Please try again later.",
+                error_message=get_translated("search_unavailable", lang),
                 start_time=start_time,
                 include_audio=include_audio,
                 metrics=metrics,
@@ -547,7 +562,7 @@ def process_audio_chat(
             # Anonymous user but there are protected chunks that match
             return _audio_response(
                 transcribed_input=user_query,
-                text_response=AUTH_REQUIRED_ANSWER,
+                text_response=get_translated("auth_required", lang),
                 status="auth_required",
                 access_granted=False,
                 start_time=start_time,
@@ -561,11 +576,7 @@ def process_audio_chat(
             # No relevant chunks at all
             return _audio_response(
                 transcribed_input=user_query,
-                text_response=(
-                    "I'm sorry, but I don't have any documents available that match your question "
-                    "based on your current access level. Please contact the campus administrator "
-                    "if you believe you should have access to this information."
-                ),
+                text_response=get_translated("no_access", lang),
                 status="no_access",
                 access_granted=False,
                 start_time=start_time,
@@ -822,6 +833,8 @@ def process_audio_chat_stream(
     )
     confirmation_context = _confirmed_navigation_label(sanitized_query, db, resolved_session_id)
     personal_intent_result = parse_personal_intent(sanitized_query)
+    lang = detected_language or detect_query_language(sanitized_query)
+    is_non_english = bool(lang and not lang.startswith("en"))
 
     with StageTimer() as timer:
         route = classify_query(sanitized_query, db=db)
@@ -831,6 +844,7 @@ def process_audio_chat_stream(
         confirmation_context is not None
         or personal_intent_result.intent != PersonalIntent.UNKNOWN
         or route.category in ("NAVIGATIONAL", "UNCLEAR")
+        or (is_non_english and context.authenticated)
     )
 
     if not needs_planner:
@@ -839,11 +853,22 @@ def process_audio_chat_stream(
             answer = f"Hi {name}, how may I help you today?" if name else "Hi, how may I help you today?"
             planned = llm_planner.PlannedOperation(kind="fixed", answer=answer, intent="GREETING")
         elif route.category == "CAPABILITY":
-            answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)
+            answer = get_capabilities_translated(
+                authenticated=context.authenticated,
+                personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED,
+                lang=lang,
+            )
             planned = llm_planner.PlannedOperation(kind="fixed", answer=answer, intent="CAPABILITY")
         elif route.category == "OUT_OF_SCOPE":
-            answer = "I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics."
-            planned = llm_planner.PlannedOperation(kind="blocked", answer=answer, status="blocked", access_granted=False, status_message="Request is outside the supported university assistant scope.", intent="OUT_OF_SCOPE")
+            answer = get_translated("out_of_scope", lang)
+            planned = llm_planner.PlannedOperation(
+                kind="blocked",
+                answer=answer,
+                status="blocked",
+                access_granted=False,
+                status_message=get_translated("out_of_scope_status", lang),
+                intent="OUT_OF_SCOPE",
+            )
         else:
             planned = llm_planner.PlannedOperation(kind="rag", query=sanitized_query)
     else:
