@@ -13,20 +13,26 @@ from sqlalchemy.orm import joinedload
 
 _CONVERSATIONAL_PREFIX = re.compile(
     r"^(?:please\s+)?(?:can\s+you\s+(?:tell\s+me\s+)?|could\s+you\s+(?:tell\s+me\s+)?|would\s+you\s+(?:tell\s+me\s+)?|show\s+me\s+)?"
-    r"(?:where(?:\s+is|\s+are|\s+can\s+i\s+(?:find|get))?|take\s+me\s+to|navigate\s+to|directions?\s+to|how\s+(?:do\s+i|can\s+i)\s+get\s+to)\s*",
+    r"(?:where(?:\s+is|\s+are|\s+can\s+i\s+(?:find|get))?|take\s+me\s+to|navigate\s+to|directions?\s+to|how\s+(?:do\s+i|can\s+i)\s+get\s+to)\s*"
+    r"|^(?:请问)?(?:请)?(?:带我|我想)?(?:怎么|如何|怎样|要怎么|怎么走)?(?:去|到|前往|找)\s*"
+    r"|^(?:请问)?(?:请)?(?:带我|带我去|领我到|导航到|带我到)\s*"
+    r"|^(?:tolong\s+)?(?:boleh\s+(?:anda\s+)?(?:beritahu|tunjukkan)\s+)?(?:macam\s+mana\s+nak\s+(?:pergi|ke)|bagaimana\s+(?:hendak|nak|cara)\s+(?:ke|pergi)|tunjukkan\s+(?:jalan|arah)\s+ke|bawa\s+saya\s+ke|di\s+mana|kat\s+mana|ke\s+mana)\s*",
     re.IGNORECASE,
 )
-_LEADING_FILLERS = re.compile(r"^(?:is|are|located|at|the|a|an|please)\s+", re.IGNORECASE)
-_TRAILING_FILLERS = re.compile(r"\s+(?:please|for\s+me)$", re.IGNORECASE)
-_WASHROOM_WORDS = {"bathroom", "restroom", "toilet", "washroom", "washrooms"}
+_LEADING_FILLERS = re.compile(r"^(?:is|are|located|at|the|a|an|please|di|ke|pada|请问|请)\s+", re.IGNORECASE)
+_TRAILING_FILLERS = re.compile(
+    r"\s*(?:please|for\s+me|tolong|ya|在哪里|在哪儿|在哪|怎么走|在何处|的位置|在哪里呢|在哪呢|怎么去)$",
+    re.IGNORECASE,
+)
+_WASHROOM_WORDS = {"bathroom", "restroom", "toilet", "washroom", "washrooms", "tandas", "washroom", "toilet"}
 _WASHROOM_TYPES = {"WASHROOM", "RESTROOM"}
-_FOOD_WORDS = {"food", "eat", "eating", "meal", "meals", "canteen", "cafeteria", "cafe", "coffee"}
+_FOOD_WORDS = {"food", "eat", "eating", "meal", "meals", "canteen", "cafeteria", "cafe", "coffee", "makanan", "kantin"}
 _FOOD_TYPES = {"FOOD", "CAFETERIA"}
-_LIFT_WORDS = {"lift", "lifts", "elevator", "elevators"}
+_LIFT_WORDS = {"lift", "lifts", "elevator", "elevators", "lif"}
 _LIFT_TYPES = {"ELEVATOR"}
-_STAIR_WORDS = {"stair", "stairs", "stairwell", "stairwells"}
+_STAIR_WORDS = {"stair", "stairs", "stairwell", "stairwells", "tangga"}
 _STAIR_TYPES = {"STAIRWELL"}
-_GENDER_WORDS = {"men", "mens", "male", "women", "womens", "female", "unisex", "accessible", "s"}
+_GENDER_WORDS = {"men", "mens", "male", "women", "womens", "female", "unisex", "accessible", "s", "lelaki", "perempuan", "wanita"}
 _COMPOUND_ALIASES = {
     "board room": "boardroom",
     "board rooms": "boardrooms",
@@ -37,6 +43,24 @@ _COMPOUND_ALIASES = {
     "caffeteria": "cafeteria",
     "cafateria": "cafeteria",
     "cafiteria": "cafeteria",
+    "洗手间": "washroom",
+    "厕所": "washroom",
+    "卫生间": "washroom",
+    "bilik air": "washroom",
+    "食堂": "cafeteria",
+    "餐厅": "cafeteria",
+    "咖啡厅": "cafe",
+    "电梯": "lift",
+    "升降梯": "elevator",
+    "楼梯": "stairwell",
+    "图书馆": "library",
+    "perpustakaan": "library",
+    "实验室": "lab",
+    "makmal": "lab",
+    "课室": "classroom",
+    "教室": "classroom",
+    "bilik kuliah": "classroom",
+    "dewan": "hall",
 }
 
 from RagChatbot.config import rag_settings

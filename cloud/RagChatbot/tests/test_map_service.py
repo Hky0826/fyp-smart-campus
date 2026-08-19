@@ -166,3 +166,27 @@ def test_unknown_navigation_destination_has_explicit_feedback(monkeypatch):
 
     assert result["navigation_target"]["candidates"] == []
     assert "couldn't find a mapped campus destination" in result["answer"]
+
+
+def test_multilingual_chinese_and_malay_navigation_prefixes(monkeypatch):
+    nodes = (SimpleNamespace(node_id=91, label="Delta Innovation Lab", floorplan_id=8, node_type="LAB", accessible=True, allowed_roles=frozenset()),)
+    monkeypatch.setattr(map_service, "get_map_snapshot", lambda db: map_service.MapSnapshot(nodes))
+    monkeypatch.setattr(map_service, "_call_route_microservice", lambda **kwargs: {
+        "route_summary": {"start_node_id": 1, "start_label": "Kiosk", "destination_label": "Delta Innovation Lab"},
+        "instructions": [{"instruction": "Walk to Delta Innovation Lab."}],
+        "visualisation": {},
+    })
+
+    # Chinese prefix tests
+    res_zh1 = map_service.calculate_navigation("怎么去 delta lab", db=object(), context=_context())
+    assert res_zh1["navigation_target"]["label"] == "Delta Innovation Lab"
+
+    res_zh2 = map_service.calculate_navigation("请问如何去 delta lab", db=object(), context=_context())
+    assert res_zh2["navigation_target"]["label"] == "Delta Innovation Lab"
+
+    res_zh3 = map_service.calculate_navigation("delta lab 在哪里", db=object(), context=_context())
+    assert res_zh3["navigation_target"]["label"] == "Delta Innovation Lab"
+
+    # Malay prefix test
+    res_ms = map_service.calculate_navigation("macam mana nak pergi ke delta lab", db=object(), context=_context())
+    assert res_ms["navigation_target"]["label"] == "Delta Innovation Lab"
