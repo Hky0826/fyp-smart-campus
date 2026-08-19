@@ -11,17 +11,22 @@ from typing import Any
 import httpx
 from sqlalchemy.orm import joinedload
 
+_PUNCTUATION_PATTERN = re.compile(r"^[\s\u3000?.!,;:\u3002\uff0c\uff01\uff1f\uff1a\uff1b\u3001\u201c\u201d\u2018\u2019]+|[\s\u3000?.!,;:\u3002\uff0c\uff01\uff1f\uff1a\uff1b\u3001\u201c\u201d\u2018\u2019]+$")
+
 _CONVERSATIONAL_PREFIX = re.compile(
     r"^(?:please\s+)?(?:can\s+you\s+(?:tell\s+me\s+)?|could\s+you\s+(?:tell\s+me\s+)?|would\s+you\s+(?:tell\s+me\s+)?|show\s+me\s+)?"
     r"(?:where(?:\s+is|\s+are|\s+can\s+i\s+(?:find|get))?|take\s+me\s+to|navigate\s+to|directions?\s+to|how\s+(?:do\s+i|can\s+i)\s+get\s+to)\s*"
-    r"|^(?:请问)?(?:请)?(?:带我|我想)?(?:怎么|如何|怎样|要怎么|怎么走)?(?:去|到|前往|找)\s*"
+    r"|^(?:请问)?(?:请)?(?:带我|我想)?(?:怎么|如何|怎样|要怎么|怎么走)?(?:去|到|前往|找|走)\s*"
     r"|^(?:请问)?(?:请)?(?:带我|带我去|领我到|导航到|带我到)\s*"
+    r"|^(?:请问|请)\s*"
     r"|^(?:tolong\s+)?(?:boleh\s+(?:anda\s+)?(?:beritahu|tunjukkan)\s+)?(?:macam\s+mana\s+nak\s+(?:pergi|ke)|bagaimana\s+(?:hendak|nak|cara)\s+(?:ke|pergi)|tunjukkan\s+(?:jalan|arah)\s+ke|bawa\s+saya\s+ke|di\s+mana|kat\s+mana|ke\s+mana)\s*",
     re.IGNORECASE,
 )
-_LEADING_FILLERS = re.compile(r"^(?:is|are|located|at|the|a|an|please|di|ke|pada|请问|请)\s+", re.IGNORECASE)
+_LEADING_FILLERS = re.compile(r"^(?:(?:is|are|located|at|the|a|an|please|di|ke|pada)\s+|(?:请问|请)\s*)", re.IGNORECASE)
 _TRAILING_FILLERS = re.compile(
-    r"\s*(?:please|for\s+me|tolong|ya|在哪里|在哪儿|在哪|怎么走|在何处|的位置|在哪里呢|在哪呢|怎么去)$",
+    r"(?:[\s,，]+(?:please|for\s+me|tolong|ya)"
+    r"|(?:\s*|(?<=[\w\u4e00-\u9fff]))(?:在哪里|在哪儿|在哪|怎么走|在何处|的位置|在哪里呢|在哪呢|怎么去|怎样去|如何去)"
+    r")\s*$",
     re.IGNORECASE,
 )
 _WASHROOM_WORDS = {"bathroom", "restroom", "toilet", "washroom", "washrooms", "tandas", "washroom", "toilet"}
@@ -194,15 +199,16 @@ def _compact(value: str) -> str:
 
 
 def _destination_text(query: str) -> str:
-    value = re.sub(r"\s+", " ", str(query or "").strip())
-    value = value.rstrip("?.!,;:").strip()
+    value = re.sub(r"[\s\u3000]+", " ", str(query or "").strip())
+    value = _PUNCTUATION_PATTERN.sub("", value).strip()
     previous = None
     while value and value != previous:
         previous = value
         value = _CONVERSATIONAL_PREFIX.sub("", value, count=1).strip()
         value = _LEADING_FILLERS.sub("", value, count=1).strip()
-    value = _TRAILING_FILLERS.sub("", value).strip()
-    return value.rstrip("?.!,;:").strip()
+        value = _TRAILING_FILLERS.sub("", value).strip()
+        value = _PUNCTUATION_PATTERN.sub("", value).strip()
+    return _PUNCTUATION_PATTERN.sub("", value).strip()
 
 
 def _node_type(node) -> str:
@@ -360,14 +366,19 @@ def _semantic_destination_matches(snapshot: MapSnapshot, query: str, roles=(), t
 
 def is_navigation_query(query: str, *, db=None) -> bool:
     """Cheap deterministic route gate shared by text, audio, and Live."""
-    text = " ".join(str(query or "").split())
-    if re.search(r"\b(?:where\s+(?:is|are|can\s+i\s+(?:find|get))|can\s+you\s+tell\s+me\s+where|take\s+me\s+to|navigate\s+to|directions?\s+to|how\s+(?:do\s+i|can\s+i)\s+get\s+to|location\s+of|find\s+the)\b", text, re.IGNORECASE):
+    cleaned = _PUNCTUATION_PATTERN.sub("", str(query or "")).strip()
+    if not cleaned:
+        return False
+    if _CONVERSATIONAL_PREFIX.search(cleaned) or _TRAILING_FILLERS.search(cleaned):
+        return True
+    if re.search(r"\b(?:where\s+(?:is|are|can\s+i\s+(?:find|get))|can\s+you\s+tell\s+me\s+where|take\s+me\s+to|navigate\s+to|directions?\s+to|how\s+(?:do\s+i|can\s+i)\s+get\s+to|location\s+of|find\s+the|nearby|nearest)\b", cleaned, re.IGNORECASE):
         return True
     if db is None:
         return False
     try:
         snapshot = get_map_snapshot(db)
-        return bool(_destination_matches(snapshot.nodes, _destination_text(text)))
+        dest = _destination_text(cleaned)
+        return bool(_destination_matches(snapshot.nodes, dest) or _semantic_destination_matches(snapshot, cleaned))
     except Exception:
         return False
 

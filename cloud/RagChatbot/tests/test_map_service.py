@@ -177,7 +177,7 @@ def test_multilingual_chinese_and_malay_navigation_prefixes(monkeypatch):
         "visualisation": {},
     })
 
-    # Chinese prefix tests
+    # Chinese prefix and CJK punctuation tests
     res_zh1 = map_service.calculate_navigation("怎么去 delta lab", db=object(), context=_context())
     assert res_zh1["navigation_target"]["label"] == "Delta Innovation Lab"
 
@@ -186,6 +186,16 @@ def test_multilingual_chinese_and_malay_navigation_prefixes(monkeypatch):
 
     res_zh3 = map_service.calculate_navigation("delta lab 在哪里", db=object(), context=_context())
     assert res_zh3["navigation_target"]["label"] == "Delta Innovation Lab"
+
+    # Full-width CJK punctuation tests (e.g. ？ U+FF1F)
+    res_zh4 = map_service.calculate_navigation("Delta Lab 在哪里？", db=object(), context=_context())
+    assert res_zh4["navigation_target"]["label"] == "Delta Innovation Lab"
+
+    res_zh5 = map_service.calculate_navigation("Delta Lab在哪里？", db=object(), context=_context())
+    assert res_zh5["navigation_target"]["label"] == "Delta Innovation Lab"
+
+    res_zh6 = map_service.calculate_navigation("请问Delta Lab怎么走？", db=object(), context=_context())
+    assert res_zh6["navigation_target"]["label"] == "Delta Innovation Lab"
 
     # Malay prefix test
     res_ms = map_service.calculate_navigation("macam mana nak pergi ke delta lab", db=object(), context=_context())

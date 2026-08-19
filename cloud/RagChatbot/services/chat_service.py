@@ -426,6 +426,54 @@ def process_chat(
     detected_lang = detect_query_language(sanitized_query)
     is_non_english = detected_lang != "en"
 
+    # Fast-path 1: Direct in-memory & dense vector navigation (instant <50ms response)
+    from RagChatbot.services.map_service import is_navigation_query
+    direct_nav = None
+    if confirmation_context is not None:
+        direct_nav = _navigation_for_query(confirmation_context, db, context)
+    elif is_navigation_query(sanitized_query, db=db):
+        direct_nav = _navigation_for_query(sanitized_query, db, context)
+
+    if direct_nav and direct_nav.get("answer"):
+        response_time_ms = int((time.monotonic() - start_time) * 1000)
+        query_id = None
+        if session_id is not None:
+            logged = log_chatbot_interaction(
+                db,
+                session_id=session_id,
+                user_id=user_id,
+                query_text=sanitized_query,
+                response_text=direct_nav["answer"],
+                retrieved_chunk_ids=[],
+                response_time_ms=response_time_ms,
+                is_navigational=True,
+            )
+            query_id = logged if logged > 0 else None
+        metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+        log_inference_metrics(
+            request_type="text",
+            user_id=user_id,
+            session_id=session_id,
+            query_text=sanitized_query,
+            metrics=metrics,
+            status="ok",
+        )
+        return ChatResponse(
+            answer=direct_nav["answer"],
+            citations=[],
+            access_granted=True,
+            status_message=None,
+            response_time_ms=response_time_ms,
+            query_id=query_id,
+            intent=_navigation_intent(direct_nav),
+            navigation_target=direct_nav.get("navigation_target"),
+            navigation=direct_nav.get("navigation"),
+            route_summary=direct_nav.get("route_summary"),
+            instructions=direct_nav.get("instructions", []),
+            visualisation=direct_nav.get("visualisation"),
+            response_scope="FACILITY",
+        )
+
     with StageTimer() as timer:
         route = classify_query(sanitized_query, db=db)
     metrics.prompt_classification_ms += timer.elapsed_ms
@@ -835,13 +883,21 @@ def process_chat_stream(
     detected_lang = detect_query_language(sanitized_query)
     is_non_english = detected_lang != "en"
 
+    # Fast-path 1: Direct in-memory & dense vector navigation (instant <50ms response)
+    from RagChatbot.services.map_service import is_navigation_query
+    if confirmation_context is not None or is_navigation_query(sanitized_query, db=db):
+        fast_resp = process_chat(request, bearer_token, db)
+        for chunk in _split_stream_text(fast_resp.answer):
+            yield _sse_event("chunk", {"text": chunk})
+        yield _sse_event("done", fast_resp.model_dump(mode="json"))
+        return
+
     with StageTimer() as timer:
         route = classify_query(sanitized_query, db=db)
     metrics.prompt_classification_ms += timer.elapsed_ms
 
     needs_planner = (
-        confirmation_context is not None
-        or personal_intent_result.intent != PersonalIntent.UNKNOWN
+        personal_intent_result.intent != PersonalIntent.UNKNOWN
         or route.category in ("NAVIGATIONAL", "UNCLEAR")
         or (is_non_english and context.authenticated)
     )
