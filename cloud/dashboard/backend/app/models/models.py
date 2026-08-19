@@ -80,6 +80,7 @@ class Node(Base):
     node_type = Column(Enum('CLASSROOM','CORRIDOR','ENTRANCE','STAIRWELL','ELEVATOR','FOOD','OFFICE','FACILITIES','HALL','WASHROOM','OUTDOOR','SOCIAL SPACES','OTHER','ROOM','CAFETERIA','LABORATORY','LECTURE_HALL','RESTROOM'), nullable=False)
     
     floorplan = relationship("Floorplan", back_populates="nodes")
+    node_embedding = relationship("NodeEmbedding", back_populates="node", uselist=False, cascade="all, delete-orphan")
     
     # Self-referential or circular dependencies: edges refer to nodes.
     # We define primaryjoin explicitly in Edge.
@@ -438,6 +439,17 @@ class EmbeddingVector(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     chunk = relationship("DocumentChunk", back_populates="embeddings")
+
+class NodeEmbedding(Base):
+    __tablename__ = "node_embeddings"
+    
+    embedding_id = Column(Integer, primary_key=True, autoincrement=True)
+    node_id = Column(Integer, ForeignKey("nodes.node_id", ondelete="CASCADE"), unique=True, nullable=False)
+    embedding = Column(VECTOR(3072), nullable=False) # Stores native 3072-dim float arrays
+    model_version = Column(String(50), nullable=False, default="gemini-embedding-2")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    
+    node = relationship("Node", back_populates="node_embedding")
 
 class ChatbotQuery(Base):
     __tablename__ = "chatbot_queries"

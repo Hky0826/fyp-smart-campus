@@ -87,6 +87,24 @@ class DestinationAmbiguous(NavigationError):
         super().__init__("Destination label matches more than one node")
 
 
+def _parse_vector(val) -> tuple[float, ...] | None:
+    if val is None:
+        return None
+    if isinstance(val, (list, tuple)):
+        return tuple(float(x) for x in val)
+    if isinstance(val, str):
+        try:
+            import json
+            parsed = json.loads(val)
+            if isinstance(parsed, list):
+                return tuple(float(x) for x in parsed)
+        except Exception:
+            return None
+    if hasattr(val, "tolist"):
+        return tuple(float(x) for x in val.tolist())
+    return None
+
+
 @dataclass(frozen=True)
 class GraphNodeSnapshot:
     node_id: int
@@ -100,25 +118,40 @@ class GraphNodeSnapshot:
     scale_ratio: float = 1.0
     building: str | None = None
     floor: int | None = None
+    embedding: tuple[float, ...] | None = None
 
 
 @dataclass(frozen=True)
 class MapSnapshot:
     nodes: tuple[GraphNodeSnapshot, ...]
 
+    def get_embedding_index(self):
+        """Build or return cached normalized embedding matrix and associated nodes."""
+        embedded_nodes = [node for node in self.nodes if getattr(node, "embedding", None)]
+        if not embedded_nodes:
+            return None, ()
+        try:
+            import numpy as np
+            matrix = np.array([node.embedding for node in embedded_nodes], dtype=np.float32)
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            matrix = matrix / norms
+            return matrix, tuple(embedded_nodes)
+        except Exception:
+            return None, ()
+
 
 def get_map_snapshot(db) -> MapSnapshot:
-    """Load lightweight node snapshot with RBAC permissions from database."""
+    """Load lightweight node snapshot with RBAC permissions and precomputed embeddings from database."""
     if db is None:
         return MapSnapshot(())
     from app.models.models import Node, NodeRBAC
 
-    db_nodes = (
-        db.query(Node)
-        .options(joinedload(Node.floorplan))
-        .order_by(Node.node_id)
-        .all()
-    )
+    query = db.query(Node).options(joinedload(Node.floorplan))
+    if hasattr(Node, "node_embedding"):
+        query = query.options(joinedload(Node.node_embedding))
+
+    db_nodes = query.order_by(Node.node_id).all()
     if not db_nodes:
         return MapSnapshot(())
 
@@ -140,6 +173,7 @@ def get_map_snapshot(db) -> MapSnapshot:
             scale_ratio=float(getattr(n.floorplan, "scale_ratio", None) or 1.0),
             building=getattr(getattr(n.floorplan, "building", None), "building_name", None),
             floor=getattr(n.floorplan, "floor_level", None),
+            embedding=_parse_vector(getattr(getattr(n, "node_embedding", None), "embedding", None)),
         )
         for n in db_nodes
     )
@@ -281,6 +315,49 @@ def _similar_destination_matches(nodes, label: str, roles=()):
     return [node for node, score in strong if score >= max(0.72, best - 0.08)]
 
 
+def _semantic_destination_matches(snapshot: MapSnapshot, query: str, roles=(), threshold: float = 0.65):
+    """Perform cross-lingual dense vector matching against precomputed node embeddings in RAM."""
+    if not query or not snapshot.nodes:
+        return []
+
+    matrix, embedded_nodes = snapshot.get_embedding_index()
+    if matrix is None or len(embedded_nodes) == 0:
+        return []
+
+    try:
+        from RagChatbot.embeddings.google_embedding_service import embed_text
+        import numpy as np
+
+        query_vec = embed_text(query)
+        if not query_vec:
+            return []
+
+        q_arr = np.array(query_vec, dtype=np.float32)
+        q_norm = np.linalg.norm(q_arr)
+        if q_norm > 0:
+            q_arr = q_arr / q_norm
+
+        scores = matrix.dot(q_arr)
+
+        candidates = []
+        for score, node in zip(scores, embedded_nodes):
+            if score >= threshold and _node_allowed(node, roles) and _node_type(node) not in {"CORRIDOR", "ENTRANCE"}:
+                candidates.append((float(score), node))
+
+        if not candidates:
+            return []
+
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        top_score = candidates[0][0]
+
+        if top_score >= 0.78 or (len(candidates) > 1 and (top_score - candidates[1][0]) > 0.06) or len(candidates) == 1:
+            return [candidates[0][1]]
+
+        return [node for s, node in candidates if (top_score - s) <= 0.06]
+    except Exception:
+        return []
+
+
 def is_navigation_query(query: str, *, db=None) -> bool:
     """Cheap deterministic route gate shared by text, audio, and Live."""
     text = " ".join(str(query or "").split())
@@ -356,6 +433,8 @@ def calculate_navigation(query: str, *, db, context):
     snapshot = get_map_snapshot(db)
     roles = getattr(context, "roles", ())
     matches = _destination_matches(snapshot.nodes, label, roles)
+    if not matches:
+        matches = _semantic_destination_matches(snapshot, query, roles)
     
     # Resolve start node id from device or user
     start_node_id = None

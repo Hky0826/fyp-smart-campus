@@ -190,3 +190,79 @@ def test_multilingual_chinese_and_malay_navigation_prefixes(monkeypatch):
     # Malay prefix test
     res_ms = map_service.calculate_navigation("macam mana nak pergi ke delta lab", db=object(), context=_context())
     assert res_ms["navigation_target"]["label"] == "Delta Innovation Lab"
+
+
+def test_semantic_vector_destination_matching_without_regex(monkeypatch):
+    # Vector simulation for cross-lingual dense matching
+    vec_delta = tuple([1.0] + [0.0] * 3071)
+    vec_library = tuple([0.0, 1.0] + [0.0] * 3070)
+
+    node_delta = map_service.GraphNodeSnapshot(
+        node_id=91, label="Delta Innovation Lab", floorplan_id=8, x=10.0, y=10.0,
+        node_type="LAB", accessible=True, allowed_roles=frozenset(), embedding=vec_delta
+    )
+    node_library = map_service.GraphNodeSnapshot(
+        node_id=92, label="Main Library", floorplan_id=8, x=20.0, y=20.0,
+        node_type="ROOM", accessible=True, allowed_roles=frozenset(), embedding=vec_library
+    )
+
+    snapshot = map_service.MapSnapshot((node_delta, node_library))
+    monkeypatch.setattr(map_service, "get_map_snapshot", lambda db: snapshot)
+    monkeypatch.setattr(map_service, "_call_route_microservice", lambda **kwargs: {
+        "route_summary": {"start_node_id": 1, "start_label": "Kiosk", "destination_label": "Delta Innovation Lab"},
+        "instructions": [{"instruction": "Walk to Delta Innovation Lab."}],
+        "visualisation": {},
+    })
+
+    # Mock embed_text returning vector close to Delta Lab for Japanese query
+    from RagChatbot.embeddings import google_embedding_service
+    monkeypatch.setattr(google_embedding_service, "embed_text", lambda query: list(vec_delta))
+
+    # Japanese query with no regex presets
+    res_ja = map_service.calculate_navigation("デルタラボへはどう行きますか", db=object(), context=_context())
+    assert res_ja["navigation_target"]["label"] == "Delta Innovation Lab"
+
+
+def test_node_embedding_service_sync(monkeypatch):
+    from RagChatbot.services.node_embedding_service import sync_missing_node_embeddings
+
+    class FakeNode:
+        def __init__(self, node_id, label):
+            self.node_id = node_id
+            self.room_label = label
+            self.node_type = "LAB"
+            self.floorplan = SimpleNamespace(floor_level=2, building=SimpleNamespace(building_name="Block A"))
+
+    class FakeQuery:
+        def __init__(self, items):
+            self.items = items
+        def options(self, *args):
+            return self
+        def filter(self, *args):
+            return self
+        def all(self):
+            return self.items
+
+    class FakeSession:
+        def __init__(self):
+            self.added = []
+        def query(self, model):
+            if getattr(model, "__tablename__", "") == "nodes":
+                return FakeQuery([FakeNode(101, "IoT Smart Lab")])
+            return FakeQuery([])  # No existing embeddings
+        def add(self, obj):
+            self.added.append(obj)
+        def commit(self):
+            pass
+        def rollback(self):
+            pass
+
+    from RagChatbot.embeddings import google_embedding_service
+    monkeypatch.setattr(google_embedding_service, "embed_text", lambda text: [0.1] * 3072)
+
+    fake_db = FakeSession()
+    count = sync_missing_node_embeddings(fake_db)
+    assert count == 1
+    assert len(fake_db.added) == 1
+    assert fake_db.added[0].node_id == 101
+
