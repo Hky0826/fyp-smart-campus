@@ -28,6 +28,8 @@ def log_chatbot_interaction(
     retrieved_chunk_ids: List[int],
     response_time_ms: Optional[int],
     is_navigational: bool = False,
+    allowed_levels: Optional[List[str]] = None,
+    is_stream: bool = False,
 ) -> int:
     """
     Persist a chatbot query record to the database.
@@ -41,6 +43,8 @@ def log_chatbot_interaction(
         retrieved_chunk_ids: IDs of chunks retrieved and used as context.
         response_time_ms: Round-trip server-side latency in milliseconds.
         is_navigational: True if the query was treated as a navigation request.
+        allowed_levels: List of access levels permitted for this session.
+        is_stream: True if the response was streamed.
 
     Returns:
         The auto-generated query_id from the database.
@@ -71,13 +75,16 @@ def log_chatbot_interaction(
         db.add(record)
         db.commit()
         db.refresh(record)
+        stream_tag = " (stream)" if is_stream else ""
         logger.info(
-            "Audit: query_id=%d user_id=%s session_id=%d chunks=%s latency=%sms",
+            "Audit: query_id=%d user_id=%s session_id=%d rbac=%s chunks=%s latency=%sms%s",
             record.query_id,
             user_id,
             session_id,
+            allowed_levels or ["PUBLIC"],
             retrieved_chunk_ids,
             response_time_ms,
+            stream_tag,
         )
         return record.query_id
     except Exception as exc:

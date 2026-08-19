@@ -722,7 +722,8 @@ def process_chat(
         for chunk in ranked_chunks
     ]
 
-    response_time_ms = int((time.monotonic() - start_time) * 1000)
+    total_elapsed = time.monotonic() - start_time
+    response_time_ms = int(total_elapsed * 1000)
 
 # Step 9: Audit log
     query_id = None
@@ -735,10 +736,18 @@ def process_chat(
             response_text=answer,
             retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
             response_time_ms=response_time_ms,
+            allowed_levels=allowed_levels,
+            is_stream=False,
         )
         query_id = logged_query_id if logged_query_id > 0 else None
 
-    metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+    metrics.total_inference_ms = total_elapsed * 1000.0
+    metrics.allowed_access_levels = allowed_levels
+    metrics.chunks_used_count = len(ranked_chunks)
+    metrics.tokens_generated = len(answer.split())
+    metrics.tokens_per_second = (metrics.tokens_generated / total_elapsed) if total_elapsed > 0 else 0.0
+    metrics.is_streaming = False
+
     log_inference_metrics(
         request_type="text",
         user_id=user_id,
@@ -941,8 +950,12 @@ def process_chat_stream(
             chat_history.append({"user": q.query_text, "assistant": q.response_text})
 
     generated_tokens: list[str] = []
+    first_token_recorded = False
     try:
         for token in generate_answer_stream(sanitized_query, ranked_chunks, chat_history=chat_history):
+            if not first_token_recorded:
+                metrics.time_to_first_token_ms = (time.monotonic() - start_time) * 1000.0
+                first_token_recorded = True
             generated_tokens.append(token)
             yield _sse_event("chunk", {"text": token})
     except Exception as exc:
@@ -964,7 +977,8 @@ def process_chat_stream(
         for chunk in ranked_chunks
     ]
 
-    response_time_ms = int((time.monotonic() - start_time) * 1000)
+    total_elapsed = time.monotonic() - start_time
+    response_time_ms = int(total_elapsed * 1000)
     query_id = None
     if session_id is not None:
         logged_query_id = log_chatbot_interaction(
@@ -975,10 +989,18 @@ def process_chat_stream(
             response_text=full_answer,
             retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
             response_time_ms=response_time_ms,
+            allowed_levels=allowed_levels,
+            is_stream=True,
         )
         query_id = logged_query_id if logged_query_id > 0 else None
 
-    metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+    metrics.total_inference_ms = total_elapsed * 1000.0
+    metrics.allowed_access_levels = allowed_levels
+    metrics.chunks_used_count = len(ranked_chunks)
+    metrics.tokens_generated = len(generated_tokens)
+    metrics.tokens_per_second = (len(generated_tokens) / total_elapsed) if total_elapsed > 0 else 0.0
+    metrics.is_streaming = True
+
     log_inference_metrics(
         request_type="text",
         user_id=user_id,

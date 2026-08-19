@@ -631,7 +631,61 @@ def create_kiosk_router(
             navigation_target=response.get("navigation_target"),
         )
 
-    @router.post("/chat/greeting/audio", response_model=ChatGreetingAudioResponse)
+    @router.post("/chat/stream")
+    async def send_chat_stream(body: ChatMessageRequest):
+        token = store.current_token()
+        headers = {"Accept": "text/event-stream", "Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token.access_token}"
+
+        payload = {
+            "query": body.query,
+            "device_id": runtime_config().sync_device_id,
+        }
+        if token and token.session_id is not None:
+            payload["session_id"] = token.session_id
+
+        async def stream_generator():
+            cloud_url = f"{runtime_config().sync_cloud_url.rstrip('/')}/api/chatbot/chat/stream"
+            import httpx
+            import json
+            try:
+                async with httpx.AsyncClient() as client:
+                    async with client.stream(
+                        "POST", cloud_url, json=payload, headers=headers, timeout=httpx.Timeout(60.0, connect=5.0)
+                    ) as resp:
+                        async for line in resp.aiter_lines():
+                            if line:
+                                try:
+                                    if line.startswith("data: "):
+                                        data_str = line[6:]
+                                        obj = json.loads(data_str)
+                                        if obj.get("event") == "done":
+                                            metadata = dict(obj.get("data") or {})
+                                            store.append_chat_exchange(
+                                                body.query,
+                                                metadata.get("answer") or "",
+                                                metadata.get("citations") or [],
+                                            )
+                                            session = store.current_chat_session()
+                                            if session is not None:
+                                                metadata["session"] = session.model_dump(mode="json")
+                                                obj["data"] = metadata
+                                            await events_manager.broadcast_state(store.serialize_state())
+                                            line = f"data: {json.dumps(obj, separators=(',', ':'))}"
+                                except Exception as parse_exc:
+                                    logger.warning("Kiosk text stream parse warning: %s", parse_exc)
+                                yield (line + "\n\n").encode("utf-8")
+            except Exception as exc:
+                logger.warning("Kiosk chat text stream proxy error: %s", exc)
+                err_payload = {"event": "error", "data": {"message": str(exc)}}
+                yield f"data: {json.dumps(err_payload)}\n\n".encode("utf-8")
+
+        return StreamingResponse(
+            stream_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
     def chat_greeting_audio() -> ChatGreetingAudioResponse:
         token = store.current_token()
         try:

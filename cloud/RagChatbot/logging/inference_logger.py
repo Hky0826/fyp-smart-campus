@@ -19,9 +19,9 @@ import hashlib
 import logging
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from RagChatbot.config import rag_settings
 
@@ -30,7 +30,7 @@ logger = logging.getLogger("RagChatbot.inference")
 
 @dataclass
 class InferenceMetrics:
-    """Structure holding timing breakdown (in milliseconds) for chatbot inference."""
+    """Structure holding timing breakdown (in milliseconds) and telemetry for chatbot inference."""
     prompt_injection_ms: float = 0.0
     prompt_classification_ms: float = 0.0
     embedding_return_ms: float = 0.0
@@ -38,7 +38,13 @@ class InferenceMetrics:
     rag_ms: float = 0.0
     tts_ms: float = 0.0
     time_to_first_tts_ms: float = 0.0
+    time_to_first_token_ms: float = 0.0
     total_inference_ms: float = 0.0
+    tokens_generated: int = 0
+    tokens_per_second: float = 0.0
+    allowed_access_levels: List[str] = field(default_factory=list)
+    chunks_used_count: int = 0
+    is_streaming: bool = False
 
     def to_dict(self) -> dict[str, float]:
         """Return timings rounded to 2 decimal places."""
@@ -50,6 +56,7 @@ class InferenceMetrics:
             "rag_ms": round(self.rag_ms, 2),
             "tts_ms": round(self.tts_ms, 2),
             "time_to_first_tts_ms": round(self.time_to_first_tts_ms, 2),
+            "time_to_first_token_ms": round(self.time_to_first_token_ms, 2),
             "total_inference_ms": round(self.total_inference_ms, 2),
         }
 
@@ -107,9 +114,14 @@ def log_inference_metrics(
     record = {
         "timestamp": timestamp_str,
         "request_type": request_type,
+        "is_streaming": metrics.is_streaming,
         "status": status,
         "user_id": user_id,
         "session_id": session_id,
+        "allowed_access_levels": metrics.allowed_access_levels,
+        "chunks_used_count": metrics.chunks_used_count,
+        "tokens_generated": metrics.tokens_generated,
+        "tokens_per_second": round(metrics.tokens_per_second, 2),
         "query_hash": hashlib.sha256((query_text or "").encode("utf-8", errors="ignore")).hexdigest() if query_text else None,
         "query_length": len(query_text or ""),
         "query_category": "personal" if (query_text or "").startswith("[PERSONAL") else "chat",
@@ -118,15 +130,19 @@ def log_inference_metrics(
     }
 
     # 1. Log human-readable summary to system logger
+    streaming_tag = " (stream)" if metrics.is_streaming else ""
     logger.info(
-        "INFERENCE_METRICS [%s] type=%s user_id=%s session_id=%s status=%s "
-        "total=%.2fms (injection=%.2fms classification=%.2fms embedding=%.2fms db_search=%.2fms rag=%.2fms tts=%.2fms first_tts=%.2fms)",
+        "INFERENCE_METRICS [%s] type=%s%s user_id=%s session_id=%s status=%s rbac=%s "
+        "total=%.2fms (ttft=%.2fms injection=%.2fms classification=%.2fms embedding=%.2fms db_search=%.2fms rag=%.2fms tts=%.2fms first_tts=%.2fms tokens=%d)",
         timestamp_str,
         request_type,
+        streaming_tag,
         user_id,
         session_id,
         status,
+        metrics.allowed_access_levels or ["PUBLIC"],
         timings["total_inference_ms"],
+        timings["time_to_first_token_ms"],
         timings["prompt_injection_ms"],
         timings["prompt_classification_ms"],
         timings["embedding_return_ms"],
@@ -134,6 +150,7 @@ def log_inference_metrics(
         timings["rag_ms"],
         timings["tts_ms"],
         timings["time_to_first_tts_ms"],
+        metrics.tokens_generated,
     )
 
     # 2. Append JSON Line record to inference log file
