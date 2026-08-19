@@ -1,22 +1,36 @@
 """
 Re-ranking utilities for retrieved document chunks.
 
-After vector similarity retrieval, chunks are re-scored and trimmed to
-the TOP_K_CONTEXT count before being sent to the LLM. Currently uses
-cosine similarity re-ranking based on the query embedding. This module
-can be extended with cross-encoder or BM25 re-ranking in the future.
+After vector similarity and lexical retrieval, candidate chunks are:
+1. Filtered against the minimum similarity threshold (RAG_SIMILARITY_THRESHOLD)
+2. Filtered against non-stopword domain keywords
+3. Optionally re-scored and re-ranked using lightweight cross-scoring
+4. Trimmed to TOP_K_CONTEXT before being formatted for LLM generation.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any, List, Optional
 
+from google.genai import types
+
+from RagChatbot.config import rag_settings
+from RagChatbot.gemini_client import get_gemini_client
 from RagChatbot.embeddings.embedding_utils import cosine_similarity
 
 logger = logging.getLogger(__name__)
+
+_COMMON_STOPWORDS = {
+    "what", "when", "where", "which", "who", "whom", "whose", "why", "how",
+    "that", "this", "these", "those", "have", "from", "with", "your", "about",
+    "tell", "give", "step", "show", "some", "more", "make", "making", "many",
+    "into", "over", "after", "before", "their", "them", "then", "there", "they",
+    "city", "best", "good", "like", "just", "know", "help", "need", "want", "find"
+}
 
 
 @dataclass
@@ -34,64 +48,147 @@ class RankedChunk:
     similarity_score: float
 
 
+def _has_significant_keyword_match(query_text: str, chunk_text: str) -> bool:
+    """Check if query contains specific domain identifiers, acronyms, or non-stopword keywords."""
+    if not query_text or not chunk_text:
+        return False
+    words = re.findall(r"[A-Za-z0-9_\-]+", query_text)
+    chunk_lower = chunk_text.lower()
+    for w in words:
+        w_lower = w.lower()
+        if w_lower in _COMMON_STOPWORDS or len(w_lower) <= 3:
+            continue
+        # Course codes (BCS204), room labels (B-2-04), or exact terms
+        is_code = bool(re.match(r"^[a-zA-Z]{2,4}[0-9]{2,4}", w_lower) or re.match(r"^[a-zA-Z]-[0-9]", w_lower))
+        if is_code and w_lower in chunk_lower:
+            return True
+        if len(w_lower) >= 6 and f" {w_lower} " in f" {chunk_lower} ":
+            return True
+    return False
+
+
+def _llm_cross_rerank(query_text: str, candidates: List[RankedChunk], top_k: int) -> List[RankedChunk]:
+    """
+    Lightweight zero-dependency cross-encoder using Gemini Flash-Lite.
+    Scores relevance of candidates against the query and reorders them.
+    """
+    if not candidates or not query_text or len(candidates) <= 1:
+        return candidates[:top_k]
+
+    # Limit pool sent to reranker to top 8 candidates to keep latency negligible
+    pool = candidates[:8]
+    candidate_prompts = []
+    for idx, c in enumerate(pool):
+        snippet = " ".join(c.chunk_text.split()[:60])
+        candidate_prompts.append(f"[{idx}] (Doc: {c.document_title}): {snippet}")
+
+    system_instruction = (
+        "You are an expert retrieval reranker. Given a query and candidate passages, "
+        "reorder the passage indices [0, 1, 2, ...] in descending order of relevance. "
+        "Return ONLY a JSON array of the most relevant indices, e.g. [2, 0, 1]."
+    )
+
+    try:
+        client = get_gemini_client()
+        content = f"Query: {query_text}\n\nPassages:\n" + "\n\n".join(candidate_prompts)
+        response = client.models.generate_content(
+            model=rag_settings.PLANNER_MODEL,
+            contents=content,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                max_output_tokens=64,
+                temperature=0.0,
+                response_mime_type="application/json",
+            ),
+        )
+        raw_text = (response.text or "").strip()
+        ordered_indices = json.loads(raw_text)
+        if isinstance(ordered_indices, list):
+            reranked: List[RankedChunk] = []
+            seen = set()
+            for idx in ordered_indices:
+                if isinstance(idx, int) and 0 <= idx < len(pool) and idx not in seen:
+                    reranked.append(pool[idx])
+                    seen.add(idx)
+            for idx, c in enumerate(pool):
+                if idx not in seen:
+                    reranked.append(c)
+            return reranked[:top_k]
+    except Exception as exc:
+        logger.debug("LLM cross-reranking failed or skipped (%s); using similarity order.", exc)
+
+    return candidates[:top_k]
+
+
 def rerank_chunks(
     chunks: List[Any],
-    query_embedding: List[float],
-    top_k: int,
+    query_embedding: Optional[List[float]] = None,
+    top_k: int = 5,
+    query_text: Optional[str] = None,
+    score_map: Optional[dict[int, float]] = None,
 ) -> List[RankedChunk]:
     """
-    Re-score retrieved chunks by cosine similarity to the query embedding,
-    then return the top-k highest scoring chunks.
-
-    Args:
-        chunks: Raw result rows from the retriever. Each row is expected to
-                have attributes: chunk_id, document_id, document_title,
-                chunk_index, chunk_text, access_level, and chunk_embedding
-                (a JSON string or list of floats).
-        query_embedding: The query's embedding vector.
-        top_k: Maximum number of chunks to return.
-
-    Returns:
-        List of RankedChunk objects sorted by descending similarity score.
+    Re-score retrieved chunks using in-memory precomputed scores (or cosine similarity),
+    filter by RAG_SIMILARITY_THRESHOLD, optionally apply cross-encoder reranking,
+    and return the top-k highest scoring chunks.
     """
     scored: List[RankedChunk] = []
+    min_threshold = getattr(rag_settings, "RAG_SIMILARITY_THRESHOLD", 0.50)
 
     for row in chunks:
         try:
-            # chunk_embedding may arrive as a JSON string from MySQL
-            raw_emb = row.chunk_embedding
-            if isinstance(raw_emb, str):
-                chunk_vec: List[float] = json.loads(raw_emb)
-            elif isinstance(raw_emb, list):
-                chunk_vec = raw_emb
+            cid = getattr(row, "chunk_id", None)
+            if score_map and cid in score_map:
+                score = score_map[cid]
+            elif query_embedding is not None and hasattr(row, "chunk_embedding"):
+                raw_emb = row.chunk_embedding
+                if isinstance(raw_emb, str):
+                    chunk_vec: List[float] = json.loads(raw_emb)
+                elif isinstance(raw_emb, list):
+                    chunk_vec = raw_emb
+                else:
+                    score = 0.50
+                score = cosine_similarity(query_embedding, chunk_vec)
             else:
-                logger.warning("Unexpected embedding type for chunk_id=%s, skipping.", row.chunk_id)
-                continue
+                score = 0.60
 
-            score = cosine_similarity(query_embedding, chunk_vec)
+            c_text = getattr(row, "chunk_text", "")
+            has_keyword = _has_significant_keyword_match(query_text or "", c_text)
 
-            scored.append(
-                RankedChunk(
-                    chunk_id=row.chunk_id,
-                    document_id=row.document_id,
-                    document_title=row.document_title or "Unknown Document",
-                    chunk_index=row.chunk_index,
-                    chunk_text=row.chunk_text,
-                    access_level=row.access_level,
-                    similarity_score=score,
+            # Keep chunk if similarity meets threshold or has strong keyword match with reasonable score
+            if score >= min_threshold or (has_keyword and score >= 0.40):
+                scored.append(
+                    RankedChunk(
+                        chunk_id=row.chunk_id,
+                        document_id=row.document_id,
+                        document_title=getattr(row, "document_title", "Unknown Document") or "Unknown Document",
+                        chunk_index=getattr(row, "chunk_index", 0),
+                        chunk_text=c_text,
+                        access_level=getattr(row, "access_level", "PUBLIC"),
+                        similarity_score=score,
+                    )
                 )
-            )
         except Exception as exc:
             logger.error("Re-ranking failed for chunk_id=%s: %s", getattr(row, "chunk_id", "?"), exc)
             continue
 
-    # Sort descending by score and trim to top_k
+    # Sort descending by initial similarity score
     scored.sort(key=lambda r: r.similarity_score, reverse=True)
-    top = scored[:top_k]
+
+    if not scored:
+        logger.debug("Re-ranking: 0 chunks passed the similarity threshold (cutoff=%.2f)", min_threshold)
+        return []
+
+    # Apply lightweight cross-encoder reranker if enabled
+    if getattr(rag_settings, "RAG_RERANKER_ENABLED", False) and query_text and len(scored) > 1:
+        top = _llm_cross_rerank(query_text, scored, top_k)
+    else:
+        top = scored[:top_k]
 
     logger.debug(
-        "Re-ranking: input=%d chunks, output=%d (top_k=%d)",
+        "Re-ranking: input=%d chunks, passed_threshold=%d, output=%d (top_k=%d)",
         len(chunks),
+        len(scored),
         len(top),
         top_k,
     )

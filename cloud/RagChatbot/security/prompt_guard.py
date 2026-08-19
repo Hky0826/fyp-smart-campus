@@ -57,7 +57,7 @@ _INJECTION_PATTERNS: List[re.Pattern] = [
     re.compile(r"(cause|trigger|generate)\s+(an?\s+)?(error|exception|traceback|stack\s+trace)", re.IGNORECASE),
 
     # DAN / jailbreak keywords
-    re.compile(r"\bdan\b", re.IGNORECASE),  # "Do Anything Now"
+    re.compile(r"\b(?:do\s+anything\s+now|DAN\s+mode|act\s+as\s+DAN|you\s+are\s+DAN|DAN\s*:)\b", re.IGNORECASE),  # "Do Anything Now"
     re.compile(r"jailbreak", re.IGNORECASE),
     re.compile(r"developer\s+mode", re.IGNORECASE),
     re.compile(r"no\s+filter\s+mode", re.IGNORECASE),

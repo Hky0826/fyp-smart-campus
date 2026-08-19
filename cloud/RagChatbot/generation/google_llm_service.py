@@ -12,10 +12,11 @@ from __future__ import annotations
 import logging
 from typing import List, Optional, Dict, Any
 
-from google import genai
+from collections.abc import Iterator
 from google.genai import types
 
 from RagChatbot.config import rag_settings
+from RagChatbot.gemini_client import get_gemini_client
 from RagChatbot.generation.prompt_builder import build_prompt
 from RagChatbot.retrieval.ranking import RankedChunk
 
@@ -44,7 +45,7 @@ def generate_answer(query: str, chunks: List[RankedChunk], chat_history: Optiona
     system_prompt, user_message = build_prompt(query, chunks, chat_history)
 
     try:
-        client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
+        client = get_gemini_client()
 
         response = client.models.generate_content(
             model=rag_settings.LLM_MODEL,
@@ -69,6 +70,52 @@ def generate_answer(query: str, chunks: List[RankedChunk], chat_history: Optiona
     except Exception as exc:
         logger.error("Google LLM generation failed: %s", exc)
         raise RuntimeError(f"Answer generation failed: {exc}") from exc
+
+
+def generate_answer_stream(
+    query: str,
+    chunks: List[RankedChunk],
+    chat_history: Optional[List[Dict[str, Any]]] = None,
+) -> Iterator[str]:
+    """
+    Generate a grounded answer using the Google Gemini streaming API.
+
+    Yields text chunks as they arrive from Gemini.
+
+    Args:
+        query: The sanitized user query.
+        chunks: Authorized, re-ranked document chunks to use as context.
+        chat_history: Optional list of previous interactions.
+
+    Yields:
+        String fragments of the answer as they are generated.
+
+    Raises:
+        RuntimeError: If the Google API streaming call fails.
+    """
+    system_prompt, user_message = build_prompt(query, chunks, chat_history)
+
+    try:
+        client = get_gemini_client()
+
+        response_stream = client.models.generate_content_stream(
+            model=rag_settings.LLM_MODEL,
+            contents=user_message,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=rag_settings.MAX_OUTPUT_TOKENS,
+                temperature=rag_settings.TEMPERATURE,
+            ),
+        )
+
+        for chunk in response_stream:
+            text = chunk.text
+            if text:
+                yield text
+
+    except Exception as exc:
+        logger.error("Google LLM stream generation failed: %s", exc)
+        raise RuntimeError(f"Answer stream generation failed: {exc}") from exc
 
 
 def generate_no_access_response() -> str:

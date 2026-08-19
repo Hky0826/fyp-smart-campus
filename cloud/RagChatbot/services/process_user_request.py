@@ -45,8 +45,21 @@ from RagChatbot.services.chat_service import (
     _greeting_name,
 )
 from RagChatbot.services.map_service import is_navigation_query
+from RagChatbot.utils.language_detection import detect_query_language
+from RagChatbot.utils.translations import get_translated, get_capabilities_translated
 
 logger = logging.getLogger(__name__)
+
+_FLASH_LITE_INTENT_MAP = {
+    "PROFILE": PersonalIntent.PROFILE,
+    "COURSES": PersonalIntent.COURSES,
+    "TIMETABLE": PersonalIntent.TIMETABLE,
+    "NEXT_CLASS": PersonalIntent.NEXT_CLASS,
+    "APPOINTMENTS": PersonalIntent.APPOINTMENTS,
+    "NEXT_APPOINTMENT": PersonalIntent.NEXT_APPOINTMENT,
+    "LOCATION": PersonalIntent.LOCATION,
+    "PRIVACY_DENIED": PersonalIntent.PRIVACY_DENIED,
+}
 
 MAX_INTENT_LENGTH = 64
 _VALID_SCOPES = {
@@ -302,33 +315,55 @@ def process_user_request(
 
     route = classification["route"]
     intent = classification["intent"]
+    detected_lang = detect_query_language(sanitized)
+
+    if route == "CAPABILITY":
+        return _result(
+            status="ok",
+            route="CAPABILITY",
+            intent=intent,
+            query=sanitized,
+            response_text=get_capabilities_translated(
+                authenticated=context.authenticated,
+                personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED,
+                lang=detected_lang,
+            ),
+            exact_response=True,
+            access_granted=True,
+        )
+
     if classification["scope"] == "OUT_OF_SCOPE" or route == "OUT_OF_SCOPE":
         return _result(
             status="blocked",
             route="OUT_OF_SCOPE",
             intent=intent,
             query=sanitized,
-            response_text="I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics.",
+            response_text=get_translated("out_of_scope", detected_lang),
             exact_response=True,
-            error_message="Request is outside the supported university assistant scope.",
+            error_message=get_translated("out_of_scope_status", detected_lang),
         )
 
     allowed_levels = _allowed_levels(user_id, db)
     if route == "PERSONAL":
         personal_route = parse_personal_intent(sanitized)
-        # The deterministic parser is the final privacy boundary. A model may
-        # classify a request as personal, but it cannot select another owner.
+        # The deterministic parser is the primary privacy boundary. For non-English
+        # queries where regex cannot extract intent, trust Flash-Lite's structured intent.
         if personal_route.intent == PersonalIntent.UNKNOWN:
-            return _result(
-                status="blocked",
-                route="PERSONAL",
-                intent=intent,
-                query=sanitized,
-                response_text="I can only provide your own personal campus information through supported personal services.",
-                exact_response=True,
-                error_message="Unsupported personal intent.",
-                response_scope="PERSONAL",
-            )
+            mapped_intent = _FLASH_LITE_INTENT_MAP.get(str(intent or "").upper())
+            if mapped_intent is not None:
+                from RagChatbot.personalisation.schemas import PersonalRoute
+                personal_route = PersonalRoute(intent=mapped_intent, requires_authentication=True)
+            else:
+                return _result(
+                    status="blocked",
+                    route="PERSONAL",
+                    intent=intent,
+                    query=sanitized,
+                    response_text=get_translated("unsupported_personal", detected_lang),
+                    exact_response=True,
+                    error_message="Unsupported personal intent.",
+                    response_scope="PERSONAL",
+                )
         personal_result = handle_personal_request(personal_route, context, db)
         if personal_result is None:
             return _result(status="error", route="PERSONAL", intent=intent, query=sanitized, response_text="Personal campus information is temporarily unavailable. Please try again later.", exact_response=True, error_message="Personal route returned no result.", response_scope="PERSONAL")
@@ -406,7 +441,7 @@ def process_user_request(
     # source, SQL, URL, file, or operation is accepted here.
     try:
         query_embedding = embed_text(sanitized)
-        ranked_chunks = retrieve_chunks(query_embedding=query_embedding, allowed_access_levels=allowed_levels, db=db)
+        ranked_chunks = retrieve_chunks(query_embedding=query_embedding, allowed_access_levels=allowed_levels, db=db, query_text=sanitized)
     except Exception as exc:
         logger.warning("Live RAG routing failed: %s", type(exc).__name__)
         return _result(status="error", route="UNIVERSITY_INFO", intent=intent, query=sanitized, response_text="The search service is temporarily unavailable. Please try again later.", exact_response=True, error_message="RAG service unavailable.")

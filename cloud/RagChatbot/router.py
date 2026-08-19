@@ -27,6 +27,7 @@ import hashlib
 from collections import OrderedDict
 from collections.abc import Iterator
 from threading import Lock, BoundedSemaphore
+from typing import AsyncIterator
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status, Request
 from fastapi.responses import StreamingResponse
@@ -51,7 +52,7 @@ from RagChatbot.schemas import (
 )
 from RagChatbot.services.audio_chat_service import process_audio_chat, process_audio_chat_stream
 from RagChatbot.services.greeting_audio_service import generate_greeting_audio
-from RagChatbot.services.chat_service import process_chat, process_public_smoke_chat
+from RagChatbot.services.chat_service import process_chat, process_chat_stream, process_public_smoke_chat
 from RagChatbot.services.ingestion_service import ingest_document
 from RagChatbot.security.auth_context import resolve_auth_context
 from app.core.rate_limit import client_ip, enforce_limit
@@ -63,7 +64,6 @@ router = APIRouter(prefix="/chatbot", tags=["RAG Chatbot"])
 # Optional bearer scheme. Missing tokens use visitor/PUBLIC access.
 _bearer_scheme = HTTPBearer(auto_error=False)
 
-
 _GREETING_AUDIO_CACHE: OrderedDict[str, str] = OrderedDict()
 _GREETING_AUDIO_CACHE_LOCK = Lock()
 _GREETING_AUDIO_CACHE_SIZE = 128
@@ -71,21 +71,15 @@ _AI_JOB_LIMIT = BoundedSemaphore(max(1, int(os.getenv("MAX_AI_CONCURRENCY", "8")
 
 
 def _enforce_ai_quota(request: Request, token: str | None, device_id: str | None, *, audio: bool = False) -> None:
-    # Request-body device_id is informational.  It must never select a higher
-    # quota; only a verified credential (or the caller IP) is a quota key.
     ip = client_ip(request)
     enforce_limit(f"ai-ip:{ip}", 120, 60, "AI request quota exceeded")
     identity = f"auth:{hashlib.sha256(token.encode()).hexdigest()[:16]}" if token else f"anon:{ip}"
     enforce_limit(identity, 60 if token else 8, 60, "AI request quota exceeded")
     if audio:
-        # Keep anonymous audio bounded while allowing the multipart endpoint's
-        # validation/error paths to be exercised independently in one minute.
         enforce_limit(f"audio:{identity}", 20, 60, "Audio request quota exceeded")
 
 
 def _greeting_text(full_name: str | None, given_name: str | None = None) -> str:
-    # Use the database's given_name field so names such as "Nur Aisyah" are
-    # not truncated to the first whitespace-delimited token.
     display_name = " ".join((given_name or "").split())
     if not display_name and full_name:
         display_name = full_name.strip().split()[0] if full_name.strip() else ""
@@ -212,8 +206,6 @@ def _should_stream_tts_audio(response: AudioChatResponse) -> bool:
     )
 
 
-from typing import AsyncIterator
-
 async def _audio_chat_stream_events(
     *,
     audio_bytes: bytes,
@@ -256,7 +248,6 @@ async def _audio_chat_stream_events(
             {"message": "An unexpected error occurred while processing the audio."},
         )
         return
-
 
 
 # ── Health Check ──────────────────────────────────────────────────────────────
@@ -399,6 +390,13 @@ def chat_greeting_audio(
     )
 
 
+def _stream_with_semaphore_release(stream_gen: Iterator[str]) -> Iterator[str]:
+    try:
+        yield from stream_gen
+    finally:
+        _AI_JOB_LIMIT.release()
+
+
 @router.post(
     "/chat/stream",
     summary="Submit a user query and stream response chunks",
@@ -412,28 +410,28 @@ def chat_stream(
     """
     Streaming chatbot endpoint for edge audio playback.
 
-    The existing RAG pipeline still performs RBAC filtering, answer generation,
+    The existing RAG pipeline performs RBAC filtering, true streaming answer generation,
     citation building, and audit logging for authenticated sessions. Without a
-    JWT, it uses visitor/PUBLIC access. The final answer is emitted as
-    Server-Sent Events so the edge device can synthesize speech in
-    sentence-sized chunks.
+    JWT, it uses visitor/PUBLIC access. The final answer is emitted as real-time
+    Server-Sent Events so the edge device receives the first response tokens with minimal latency.
     """
     bearer_token = credentials.credentials if credentials else None
     _enforce_ai_quota(request, bearer_token, body.device_id)
     if not _AI_JOB_LIMIT.acquire(blocking=False):
         raise HTTPException(status_code=503, detail="AI service is busy; retry later")
     try:
-        response = process_chat(request=body, bearer_token=bearer_token, db=db)
-    finally:
+        stream_gen = process_chat_stream(request=body, bearer_token=bearer_token, db=db)
+        return StreamingResponse(
+            _stream_with_semaphore_release(stream_gen),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    except Exception:
         _AI_JOB_LIMIT.release()
-    return StreamingResponse(
-        _chat_response_events(response),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+        raise
 
 
 # ── Audio Chat Endpoint ──────────────────────────────────────────────────────

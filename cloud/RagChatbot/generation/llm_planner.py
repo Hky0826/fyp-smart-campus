@@ -34,6 +34,8 @@ from RagChatbot.services.tool_registry import (
     tool_registry,
     tool_declarations,
 )
+from RagChatbot.utils.language_detection import detect_query_language
+from RagChatbot.utils.translations import get_translated, get_capabilities_translated
 
 logger = logging.getLogger(__name__)
 
@@ -191,12 +193,16 @@ def plan_turn(text: str, *, context: AuthenticatedChatContext, db, confirmation_
     # personal roles. Keep the original context for final authorization and
     # dispatch, but hide personal role capabilities from this planning call.
     planner_context = context
-    if parse_personal_intent(query).intent == PersonalIntent.UNKNOWN:
+    detected_lang = detect_query_language(query)
+    personal_intent = parse_personal_intent(query)
+    if personal_intent.intent == PersonalIntent.UNKNOWN:
         try:
             is_public_information = classify_query(query, db=db).category == "UNIVERSITY_INFO"
         except Exception:
             is_public_information = False
-        if is_public_information:
+        # Only strip roles for English queries where regex reliably confirmed no personal intent.
+        # For non-English queries, keep roles in context so the multilingual LLM planner can choose personal tools.
+        if is_public_information and detected_lang == "en":
             planner_context = replace(context, roles=())
 
     candidates = _catalog_candidates(query, planner_context, db)
@@ -278,6 +284,10 @@ def plan_turn(text: str, *, context: AuthenticatedChatContext, db, confirmation_
 
 def _fallback_plan(query: str, context: AuthenticatedChatContext, db) -> PlannerResult:
     """Safe deterministic recovery for provider timeout/failure."""
+    detected_lang = detect_query_language(query)
+    if detected_lang != "en":
+        return PlannerResult("UNIVERSITY_INFORMATION", PlannerToolCall("retrieve_authorized_university_information", {"query": query}))
+
     personal = parse_personal_intent(query)
     if personal.intent != PersonalIntent.UNKNOWN:
         names = {
@@ -300,19 +310,20 @@ def _fallback_plan(query: str, context: AuthenticatedChatContext, db) -> Planner
     return PlannerResult("UNIVERSITY_INFORMATION", PlannerToolCall("retrieve_authorized_university_information", {"query": query}))
 
 
-def _fixed_operation(result: PlannerResult, *, context: AuthenticatedChatContext) -> PlannedOperation:
+def _fixed_operation(result: PlannerResult, *, context: AuthenticatedChatContext, query: str = "") -> PlannedOperation:
+    detected_lang = detect_query_language(query)
     if not result.safe:
-        return PlannedOperation(kind="blocked", answer="I'm not able to process that request. Please ask a straightforward question about campus services or documents.", status="blocked", access_granted=False, status_message="Request blocked by the backend safety policy.", intent="BLOCKED")
+        return PlannedOperation(kind="blocked", answer=get_translated("blocked", detected_lang), status="blocked", access_granted=False, status_message=get_translated("blocked_status", detected_lang), intent="BLOCKED")
     if result.route == "GREETING":
         name = " ".join(str(context.full_name or "").split()) if context.authenticated else ""
         if not name and context.authenticated:
             name = " ".join(str(context.given_name or "").split())
         return PlannedOperation(kind="fixed", answer=f"Hi {name}, how may I help you today?" if name else "Hi, how may I help you today?", intent="GREETING")
     if result.route == "CAPABILITY":
-        return PlannedOperation(kind="fixed", answer=get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED), intent="CAPABILITY")
+        return PlannedOperation(kind="fixed", answer=get_capabilities_translated(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED, lang=detected_lang), intent="CAPABILITY")
     if result.route == "OUT_OF_SCOPE":
-        return PlannedOperation(kind="blocked", answer="I'm designed to answer questions based on the university information I have. I may not have reliable information about outside topics.", status="blocked", access_granted=False, status_message="Request is outside the supported university assistant scope.", intent="OUT_OF_SCOPE")
-    return PlannedOperation(kind="fixed", answer=result.clarification_question or "Could you please clarify what university information you are looking for?", intent="UNCLEAR")
+        return PlannedOperation(kind="blocked", answer=get_translated("out_of_scope", detected_lang), status="blocked", access_granted=False, status_message=get_translated("out_of_scope_status", detected_lang), intent="OUT_OF_SCOPE")
+    return PlannedOperation(kind="fixed", answer=result.clarification_question or get_translated("unclear_general", detected_lang), intent="UNCLEAR")
 
 
 def execute_planned_turn(query: str, *, context: AuthenticatedChatContext, db, confirmation_context: str | None = None) -> PlannedOperation:
@@ -323,7 +334,7 @@ def execute_planned_turn(query: str, *, context: AuthenticatedChatContext, db, c
         logger.warning("Shared planner unavailable; using safe deterministic fallback: %s: %s", type(exc).__name__, str(exc)[:240])
         planned = _fallback_plan(query, context, db)
     if planned.route in {"GREETING", "CAPABILITY", "UNCLEAR", "OUT_OF_SCOPE"}:
-        return _fixed_operation(planned, context=context)
+        return _fixed_operation(planned, context=context, query=query)
     if not planned.tool_call:
         raise PlannerInvalid("operation route has no tool")
     try:
@@ -338,8 +349,9 @@ def execute_planned_turn(query: str, *, context: AuthenticatedChatContext, db, c
             tool_arguments = {"query": query}
         result = dispatch_tool(planned.tool_call.name, tool_arguments, context=context, db=db, original_query=query)
     except ToolAuthorizationError:
+        detected_lang = detect_query_language(query)
         if not context.authenticated:
-            return PlannedOperation(kind="personal", answer="Please scan your face so I can confirm your identity before accessing your personal campus information.", status="auth_required", access_granted=False, status_message="Authentication required for personal information.", response_scope="PERSONAL", intent=planned.tool_call.name, authentication_required=True)
+            return PlannedOperation(kind="personal", answer=get_translated("auth_required_personal", detected_lang), status="auth_required", access_granted=False, status_message="Authentication required for personal information.", response_scope="PERSONAL", intent=planned.tool_call.name, authentication_required=True)
         return PlannedOperation(kind="personal", answer="Your authenticated role does not have access to that personal service.", status="no_access", access_granted=False, status_message="Personal tool authorization denied.", response_scope="PERSONAL", intent=planned.tool_call.name)
     except ToolValidationError as exc:
         logger.warning(
