@@ -51,7 +51,22 @@ class InMemoryVectorStore:
     def load_from_db(self, db: Session):
         """Loads all active chunk embeddings and texts from the database."""
         logger.info("Loading in-memory vector and lexical store from DB...")
-        sql = text("""
+        sql_direct = text("""
+            SELECT
+                dc.chunk_id,
+                dc.document_id,
+                dc.access_level,
+                dc.chunk_text,
+                ev.embedding AS chunk_embedding
+            FROM document_chunks dc
+            INNER JOIN embedding_vectors ev
+                ON dc.chunk_id = ev.chunk_id
+            INNER JOIN uploaded_documents ud
+                ON dc.document_id = ud.document_id
+            WHERE dc.is_outdated = 0 AND ud.is_active = 1
+              AND ud.access_level = dc.access_level
+        """)
+        sql_func = text("""
             SELECT
                 dc.chunk_id,
                 dc.document_id,
@@ -67,7 +82,10 @@ class InMemoryVectorStore:
               AND ud.access_level = dc.access_level
         """)
         try:
-            rows = db.execute(sql).fetchall()
+            try:
+                rows = db.execute(sql_direct).fetchall()
+            except Exception:
+                rows = db.execute(sql_func).fetchall()
         except Exception as exc:
             logger.error("Failed to fetch embeddings from DB: %s", exc)
             return
@@ -81,7 +99,18 @@ class InMemoryVectorStore:
 
         for row in rows:
             try:
-                emb = json.loads(row.chunk_embedding)
+                raw_emb = row.chunk_embedding
+                if isinstance(raw_emb, str):
+                    emb = json.loads(raw_emb)
+                elif isinstance(raw_emb, (list, tuple)):
+                    emb = list(raw_emb)
+                elif hasattr(raw_emb, "tolist"):
+                    emb = raw_emb.tolist()
+                elif isinstance(raw_emb, bytes):
+                    emb = np.frombuffer(raw_emb, dtype=np.float32).tolist()
+                else:
+                    emb = json.loads(str(raw_emb))
+
                 c_text = str(getattr(row, "chunk_text", "") or "")
                 chunk_ids.append(row.chunk_id)
                 document_ids.append(row.document_id)
@@ -99,6 +128,7 @@ class InMemoryVectorStore:
             self.chunk_texts = chunk_texts
             self.tokenized_chunks = tokenized_chunks
             self.embeddings = np.array(embeddings, dtype=np.float32)
+            logger.info("Successfully loaded %d active document chunk embeddings into memory.", len(embeddings))
         else:
             self.chunk_ids = np.array([], dtype=np.int64)
             self.access_levels = np.array([], dtype=object)
