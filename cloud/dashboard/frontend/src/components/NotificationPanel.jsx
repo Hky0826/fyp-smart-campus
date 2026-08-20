@@ -71,8 +71,11 @@ export function NotificationPanel({
                         >
                             <option value="">-- Select host --</option>
                             {notifUsers
-                                .filter(u => u.role_name === 'Admin' || u.role_name === 'Staff')
-                                .sort((a, b) => a.full_name.localeCompare(b.full_name))
+                                .filter(u => {
+                                    const r = (u.role_name || '').toUpperCase();
+                                    return r === 'ADMIN' || r === 'STAFF' || r === 'LECTURER';
+                                })
+                                .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
                                 .map(u => (
                                     <option key={u.user_id} value={u.user_id}>{u.full_name} ({u.role_name || 'Host'})</option>
                             ))}
@@ -97,8 +100,11 @@ export function NotificationPanel({
                     >
                         <option value="">-- Select visitor --</option>
                         {notifUsers
-                            .filter(u => u.role_name === 'Student' || u.role_name === 'Visitor')
-                            .sort((a, b) => a.full_name.localeCompare(b.full_name))
+                            .filter(u => {
+                                const r = (u.role_name || '').toUpperCase();
+                                return r === 'STUDENT' || r === 'VISITOR' || r === 'GUEST';
+                            })
+                            .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
                             .map(u => (
                                 <option key={u.user_id} value={u.user_id}>{u.full_name} ({u.role_name || 'Visitor'})</option>
                         ))}

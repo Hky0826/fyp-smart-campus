@@ -23,7 +23,7 @@ const db = require('../config/db');
  */
 exports.getNotifications = (req, res) => {
     const sql = `
-        SELECT n.*, u.full_name AS recipient_name, u.email AS recipient_email 
+        SELECT n.*, CONCAT(u.given_name, ' ', u.family_name) AS recipient_name, u.email AS recipient_email 
         FROM notifications n
         LEFT JOIN users u ON n.recipient_user_id = u.user_id
         ORDER BY n.created_at DESC
@@ -48,10 +48,16 @@ exports.getNotifications = (req, res) => {
  */
 exports.getUsers = (req, res) => {
     const sql = `
-        SELECT u.user_id, u.full_name, u.email, u.role_id, r.role_name 
+        SELECT 
+            u.user_id, 
+            CONCAT(u.given_name, ' ', u.family_name) AS full_name, 
+            u.email, 
+            COALESCE(ur.role_id, 5) AS role_id, 
+            COALESCE(r.role_name, 'VISITOR') AS role_name 
         FROM users u 
-        LEFT JOIN roles r ON u.role_id = r.role_id 
-        ORDER BY u.full_name ASC
+        LEFT JOIN user_roles ur ON u.user_id = ur.user_id 
+        LEFT JOIN roles r ON ur.role_id = r.role_id 
+        ORDER BY full_name ASC
     `;
     db.query(sql, (err, results) => {
         if (err) {
