@@ -517,7 +517,8 @@ exports.runNavigation = async ({ currentLocation, destinationNode, rbacRole, wal
         JOIN floorplans f ON n.floorplan_id = f.floorplan_id
         JOIN buildings  b ON f.building_id  = b.building_id
         LEFT JOIN node_rbac nr ON n.node_id = nr.node_id
-        GROUP BY n.node_id;
+        GROUP BY n.node_id, n.coord_x, n.coord_y, n.room_label, n.node_type, n.is_accessible,
+                 n.floorplan_id, f.floor_level, f.scale_ratio, b.building_id, b.building_name;
     `;
 
     // Fetch all edges with their RBAC roles
@@ -527,7 +528,8 @@ exports.runNavigation = async ({ currentLocation, destinationNode, rbacRole, wal
                GROUP_CONCAT(er.role_id) AS allowed_roles
         FROM edges e
         LEFT JOIN edge_rbac er ON e.edge_id = er.edge_id
-        GROUP BY e.edge_id;
+        GROUP BY e.edge_id, e.source_node_id, e.destination_node_id,
+                 e.weight_distance, e.is_bidirectional, e.is_accessible, e.custom_path;
     `;
 
     const nodesData = await queryAsync(sqlNodes);

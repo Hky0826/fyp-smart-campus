@@ -73,11 +73,14 @@ exports.getAllGlobalNodes = (req, res) => {
         JOIN floorplans f ON n.floorplan_id = f.floorplan_id 
         JOIN buildings b ON f.building_id = b.building_id
         LEFT JOIN node_rbac nr ON n.node_id = nr.node_id
-        GROUP BY n.node_id
+        GROUP BY n.node_id, n.room_label, n.node_type, n.floorplan_id, f.floor_level, b.building_name
         ORDER BY b.building_name, f.floor_level, n.room_label
     `;
     db.query(sql, (err, results) => {
-        if (err) return res.status(500).json({ error: "Failed to fetch global nodes." });
+        if (err) {
+            console.error("Failed to fetch global nodes:", err.message);
+            return res.status(500).json({ error: "Failed to fetch global nodes." });
+        }
         res.json(results);
     });
 };
