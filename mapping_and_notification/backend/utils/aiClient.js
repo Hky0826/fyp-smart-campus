@@ -82,6 +82,23 @@ async function parseAndExtractData(response, endpointName) {
     return json;
 }
 
+function resolveImagePath(imagePath) {
+    const cleanPath = (imagePath || '').replace(/^\/?(uploads\/)?/, '');
+    const filename = path.basename(cleanPath);
+    const candidates = [
+        path.join(__dirname, '../uploads', filename),
+        path.join(__dirname, '..', cleanPath),
+        path.join('/app/cloud/dashboard/backend/app/static/uploads', filename),
+        path.join('/app/mapping_and_notification/backend/uploads', filename),
+        path.join('/app/runtime-data/private/floorplans', filename),
+        path.resolve(cleanPath)
+    ];
+    for (const p of candidates) {
+        if (fs.existsSync(p)) return p;
+    }
+    return candidates[0];
+}
+
 async function detectWalls(imagePath, options = {}) {
     const {
         sensitivity   = 120,
@@ -90,7 +107,7 @@ async function detectWalls(imagePath, options = {}) {
         gridScale     = 8,
     } = options;
 
-    const absolutePath = path.join(__dirname, '..', imagePath);
+    const absolutePath = resolveImagePath(imagePath);
     if (!fs.existsSync(absolutePath)) {
         throw new Error(`Floorplan image file not found: ${absolutePath}`);
     }
@@ -151,7 +168,7 @@ async function analyzeFloorplan(imagePath, options = {}) {
         wallClearancePx    = 8,
     } = options;
 
-    const absolutePath = path.join(__dirname, '..', imagePath);
+    const absolutePath = resolveImagePath(imagePath);
     if (!fs.existsSync(absolutePath)) {
         throw new Error(`Floorplan image file not found: ${absolutePath}`);
     }

@@ -6,20 +6,20 @@ import logging
 # Add the parent directory of 'app' to sys.path so Python can find the 'app' module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Add project root directory to sys.path to import sync modules from the 'sync' folder
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+# Project root directory (e.g. /app or repo root)
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
+
+# Cloud root directory for RagChatbot
+cloud_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+if cloud_root not in sys.path:
+    sys.path.insert(0, cloud_root)
 
 # Add mapping AI services path to sys.path
 ai_services_path = os.path.abspath(os.path.join(project_root, "mapping_and_notification", "ai-services"))
 if ai_services_path not in sys.path:
     sys.path.insert(0, ai_services_path)
-
-# Add the 'cloud' directory to sys.path so RagChatbot package can be resolved
-cloud_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-if cloud_root not in sys.path:
-    sys.path.insert(0, cloud_root)
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
