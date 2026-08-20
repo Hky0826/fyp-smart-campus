@@ -14,6 +14,7 @@ print("=" * 60)
 print("[Supervisor] Starting Mapping & Notification Microservice (port 5000)...")
 node_env = os.environ.copy()
 node_env["PORT"] = "5000"
+node_env["AI_SERVICE_URL"] = f"http://127.0.0.1:{port}"
 node_proc = subprocess.Popen(
     ["node", "index.js"],
     cwd="/app/mapping_and_notification/backend",

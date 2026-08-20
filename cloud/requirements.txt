@@ -32,3 +32,9 @@ opencv-python>=4.8.0
 onnxruntime>=1.17.0
 torch>=2.0.0
 timm>=0.9.0
+
+# Mapping AI microservice (wall detection, room detection, geometry)
+structlog>=24.0.0
+scipy>=1.14.0
+pydantic-settings>=2.0.0
+PyYAML>=6.0

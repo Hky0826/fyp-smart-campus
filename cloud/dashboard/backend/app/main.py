@@ -11,6 +11,11 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+# Add mapping AI services path to sys.path
+ai_services_path = os.path.abspath(os.path.join(project_root, "mapping_and_notification", "ai-services"))
+if ai_services_path not in sys.path:
+    sys.path.insert(0, ai_services_path)
+
 # Add the 'cloud' directory to sys.path so RagChatbot package can be resolved
 cloud_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 if cloud_root not in sys.path:
@@ -100,6 +105,13 @@ app.include_router(edge_auth_router, prefix="/api")
 app.include_router(chatbot_router, prefix="/api")
 app.include_router(mapping_notification_router, prefix="/api/mapping-notification")
 
+# Mapping & Floorplan AI Computer Vision microservice endpoints (/api/v1/wall-detection, /api/v1/analyze/floorplan)
+try:
+    from src.api.router import api_router as ai_api_router
+    app.include_router(ai_api_router)
+except Exception as exc:
+    logger.warning("Mapping AI services router could not be mounted: %s", exc)
+
 
 # Redirect root to /dashboard/
 @app.get("/")
@@ -120,6 +132,7 @@ def dashboard_spa_fallback(full_path: str):
 app.mount("/static", StaticFiles(directory=static_dir), name="static-assets")
 app.mount("/dashboard", StaticFiles(directory=static_dir, html=True), name="static")
 
-@app.get("/api/health")
+@app.get("/health", tags=["Health"])
+@app.get("/api/health", tags=["Health"])
 def health_check():
-    return {"status": "healthy", "service": "Smart Campus Dashboard API"}
+    return {"status": "healthy", "service": "Smart Campus Dashboard & AI API"}
