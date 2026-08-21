@@ -34,7 +34,6 @@ from .access_audio import AccessControlAudioCoordinator
 
 
 logger = logging.getLogger(__name__)
-MULTIPLE_FACE_REASON = "Only one person can be in the frame."
 SPACE_KEY = ord(" ")
 QUIT_KEY = ord("q")
 
@@ -184,14 +183,6 @@ class AccessControlPipeline:
             timer.total()
             return self._deny(
                 "No face detected", 0, AuthenticationResult.RETRY_NO_FACE,
-                metrics=timer.metrics, bboxes=bboxes,
-            )
-
-        if face_count > 1:
-            self._reset_active_track()
-            timer.total()
-            return self._deny(
-                MULTIPLE_FACE_REASON, face_count, AuthenticationResult.DENY_MULTIPLE_FACES,
                 metrics=timer.metrics, bboxes=bboxes,
             )
 
@@ -529,7 +520,12 @@ class AccessControlPipeline:
 
     def _detect(self, frame: np.ndarray) -> List[DetectedFace]:
         raw_faces = self.detector.detect(frame)
-        return [self._coerce_face(face) for face in raw_faces]
+        faces = [self._coerce_face(face) for face in raw_faces]
+        if not faces:
+            return []
+        # Keep only the face closest to the camera (largest bounding box area)
+        closest_face = max(faces, key=lambda face: face.width() * face.height())
+        return [closest_face]
 
     @staticmethod
     def _coerce_face(face: Any) -> DetectedFace:

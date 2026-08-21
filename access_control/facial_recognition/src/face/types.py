@@ -12,7 +12,6 @@ import numpy as np
 class AuthenticationResult(Enum):
     GRANT = "grant"
     DENY_NO_MATCH = "deny_no_match"
-    DENY_MULTIPLE_FACES = "deny_multiple_faces"
     DENY_SPOOF = "deny_spoof"
     RETRY_NO_FACE = "retry_no_face"
     RETRY_UNSTABLE_TRACK = "retry_unstable_track"

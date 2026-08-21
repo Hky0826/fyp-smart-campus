@@ -5,7 +5,7 @@ Item {
     property string mode: "idle"
     property string titleText: ""
     property string subtitleText: ""
-    visible: mode === "access-granted" || mode === "access-denied" || mode === "only-one-person"
+    visible: mode === "access-granted" || mode === "access-denied"
 
     Rectangle {
         anchors.centerIn: parent

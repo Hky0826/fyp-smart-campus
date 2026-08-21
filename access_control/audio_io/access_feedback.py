@@ -21,7 +21,6 @@ class AccessFeedbackPlayer:
     _CLIPS = {
         "access-granted": SOUND_DIR / "access_granted.wav",
         "access-denied": SOUND_DIR / "access_denied.wav",
-        "only-one-person": SOUND_DIR / "only_one_person.wav",
     }
 
     def __init__(self, player_factory: Callable[[], AudioPlayer] = AudioPlayer) -> None:

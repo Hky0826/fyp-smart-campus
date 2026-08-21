@@ -105,4 +105,9 @@ class YuNetDetector:
                 landmarks=landmarks,
             ))
 
-        return faces
+        if not faces:
+            return []
+
+        # Select only the single face closest to the camera (largest bounding box area)
+        closest_face = max(faces, key=lambda f: f.width() * f.height())
+        return [closest_face]
