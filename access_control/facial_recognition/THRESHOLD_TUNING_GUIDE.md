@@ -12,8 +12,7 @@ The access control system evaluates incoming camera frames sequentially using th
 graph TD
     Frame[Camera Frame] --> Detect{1. Face Detection}
     Detect -- None --> RetryNoFace[Message: No face detected]
-    Detect -- Multiple --> DenyMultiple[Message: Multiple faces detected]
-    Detect -- One Face --> Stable{2. Track Stability}
+    Detect -- Face Found (Selects Closest Face) --> Stable{2. Track Stability}
     Stable -- Unstable --> RetryUnstable[Message: Face track is not stable yet]
     Stable -- Stable --> Quality{3. Quality Checks}
     Quality -- Fail --> RetryQuality[Message: Face quality check failed]
@@ -84,20 +83,7 @@ Each output message in the access control application is triggered by a specific
 
 ---
 
-### 3. "Only one user is allowed within the frame."
-* **Authentication Result:** `AuthenticationResult.DENY_MULTIPLE_FACES`
-* **Trigger:** The object detector detects more than one face within the active region.
-* **Key Tuning Parameters:**
-  * **`EDGE_ACCESS_DETECTION_THRESHOLD`** (Default: `0.50`)
-    * *Type:* SCRFD face detector confidence limit.
-    * *Tuning:* If background details (paintings, screen displays) are falsely detected as secondary faces, raise this threshold to `0.60` or `0.65` to ignore low-confidence false detections.
-  * **`EDGE_ACCESS_MIN_FACE_SIZE`** (Default: `48`)
-    * *Type:* Minimum bounding box width/height in pixels.
-    * *Tuning:* If bystanders far in the background are triggering the multiple-face denial, raise this limit to `80` or `100` so only the person standing directly in front of the kiosk is registered.
-
----
-
-### 4. "Spoofing/liveness check failed."
+### 3. "Spoofing/liveness check failed."
 * **Authentication Result:** `AuthenticationResult.DENY_SPOOF`
 * **Trigger:** The face tracker registers the face, but the motion or pose changes are insufficient over a designated frame duration (indicating a printed photo or static screen presentation).
 * **Key Tuning Parameters (in code at `MotionSpoofDetector`):**
@@ -113,7 +99,7 @@ Each output message in the access control application is triggered by a specific
 
 ---
 
-### 5. "No face detected"
+### 4. "No face detected"
 * **Authentication Result:** `AuthenticationResult.RETRY_NO_FACE`
 * **Trigger:** The SCRFD detector returns zero candidate bounding boxes in the frame.
 * **Key Tuning Parameters:**
@@ -124,7 +110,7 @@ Each output message in the access control application is triggered by a specific
 
 ---
 
-### 6. "Face track is not stable yet"
+### 5. "Face track is not stable yet"
 * **Authentication Result:** `AuthenticationResult.RETRY_UNSTABLE_TRACK` (or when liveness is inconclusive)
 * **Trigger:** A face is visible, but tracking coordinates are jumping or the face has not been tracked continuously for the minimum duration.
 * **Key Tuning Parameters:**
@@ -135,7 +121,7 @@ Each output message in the access control application is triggered by a specific
 
 ---
 
-### 7. "Face quality check failed: [reason]"
+### 6. "Face quality check failed: [reason]"
 * **Authentication Result:** `AuthenticationResult.RETRY_LOW_QUALITY`
 * **Trigger:** The face passes detection and tracking, but fails one of the quality metrics in the `FaceQualityConfig`.
 * **Specific Quality Checks & Parameters to Tune in Code:**

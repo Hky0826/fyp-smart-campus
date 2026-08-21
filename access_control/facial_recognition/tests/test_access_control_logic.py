@@ -8,7 +8,7 @@ from access_control.facial_recognition.src.face.matching import FaceTemplate
 from access_control.facial_recognition.src.face.quality import FaceQualityResult
 from access_control.facial_recognition.src.face.spoofing import SpoofResult
 from access_control.facial_recognition.src.face.types import AuthenticationResult, DetectedFace
-from access_control.facial_recognition.src.pipelines.access_control import AccessControlPipeline, MULTIPLE_FACE_REASON
+from access_control.facial_recognition.src.pipelines.access_control import AccessControlPipeline
 
 
 LANDMARKS = np.array([[30, 35], [60, 35], [45, 50], [34, 65], [56, 65]], dtype=np.float32)
@@ -120,11 +120,15 @@ class AccessControlLogicTests(unittest.TestCase):
         self.assertEqual(AccessControlConfig().detector_model_path.name, "face_detection_yunet_2023mar_int8bq.onnx")
         self.assertEqual(AccessControlConfig().embedding_model_path.name, "face_recognition_sface_2021dec.onnx")
 
-    def test_multiple_faces_has_explicit_denial(self):
-        pipeline = self.pipeline([face(), face(25, 20, 95, 90)], [1, 0], [])
+    def test_multiple_faces_selects_closest_face(self):
+        small_face = face(10, 10, 40, 40)
+        large_face = face(20, 20, 100, 100)
+        template = FaceTemplate("user_001", np.array([1.0, 0.0]), "front")
+        pipeline = self.pipeline([small_face, large_face], [1, 0], [template])
         result = pipeline.process_frame(self.frame)
-        self.assertEqual(result["reason"], MULTIPLE_FACE_REASON)
-        self.assertEqual(result["authentication_result"], AuthenticationResult.DENY_MULTIPLE_FACES.value)
+        self.assertEqual(result["face_count"], 1)
+        self.assertEqual(result["bbox"], [20, 20, 100, 100])
+        self.assertEqual(result["authentication_result"], AuthenticationResult.GRANT.value)
 
     def test_unstable_track_retries_before_liveness(self):
         pipeline = self.pipeline([face()], [1, 0], [], stable_frames=2)

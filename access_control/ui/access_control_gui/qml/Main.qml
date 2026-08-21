@@ -11,8 +11,7 @@ ApplicationWindow {
     title: "Edge Access Control"
     readonly property bool showAccessGlow: !accessController.chatExpanded
                                            && (accessController.mode === "access-granted"
-                                               || accessController.mode === "access-denied"
-                                               || accessController.mode === "only-one-person")
+                                               || accessController.mode === "access-denied")
 
     CameraView {
         id: cameraView

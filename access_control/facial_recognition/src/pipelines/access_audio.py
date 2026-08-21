@@ -172,7 +172,7 @@ class AccessControlAudioCoordinator:
 
     def handle_access_result(self, result: dict[str, Any]) -> None:
         if not result.get("access_granted"):
-            if result.get("authentication_result") in {"deny_no_match", "deny_multiple_faces", "deny_spoof"}:
+            if result.get("authentication_result") in {"deny_no_match", "deny_spoof"}:
                 if self.feedback_player:
                     self.feedback_player.play_denied()
             return

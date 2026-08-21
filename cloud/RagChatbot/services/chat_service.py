@@ -83,25 +83,18 @@ def clear_rag_response_cache() -> None:
         _RAG_RESPONSE_CACHE.clear()
 
 
-def _split_stream_text(text: str, max_chars: int = 240) -> Iterator[str]:
-    """Split a generated answer into TTS-friendly streamed chunks."""
+def _split_stream_text(text: str, max_chars: int = 30) -> Iterator[str]:
+    """Split a generated answer into small streamed chunks for smooth live display."""
     pending = " ".join(text.split())
     while len(pending) > max_chars:
-        split_at = max(
-            pending.rfind(". ", 0, max_chars),
-            pending.rfind("? ", 0, max_chars),
-            pending.rfind("! ", 0, max_chars),
-            pending.rfind(", ", 0, max_chars),
-        )
-        if split_at < max_chars // 2:
-            split_at = pending.rfind(" ", 0, max_chars)
+        split_at = pending.rfind(" ", 0, max_chars)
         if split_at <= 0:
             split_at = max_chars
 
-        chunk = pending[: split_at + 1].strip()
+        chunk = pending[:split_at].strip()
         if chunk:
-            yield chunk
-        pending = pending[split_at + 1 :].strip()
+            yield chunk + " "
+        pending = pending[split_at:].strip()
 
     if pending:
         yield pending

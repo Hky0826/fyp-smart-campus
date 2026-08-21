@@ -415,10 +415,6 @@ class AccessController(QObject):
         if attempt and int(attempt.get("face_count") or 0) > 0 and self._is_recent_attempt(attempt):
             if attempt.get("access_decision") == "GRANTED":
                 return "access-granted"
-            reason = str(attempt.get("reason") or "")
-            face_count = int(attempt.get("face_count") or 0)
-            if face_count > 1 or "multiple" in reason.lower() or "only one person" in reason.lower():
-                return "only-one-person"
             return "access-denied"
 
         session = self._session
@@ -506,7 +502,7 @@ class AccessController(QObject):
     def _get_access_title(self) -> str:
         if self._mode == "access-granted":
             return "Access granted"
-        if self._mode in {"access-denied", "only-one-person"}:
+        if self._mode == "access-denied":
             return "Access denied"
         if self._mode == "access-verifying":
             return "Verifying access"
@@ -518,13 +514,8 @@ class AccessController(QObject):
         attempt = self._attempt or {}
         if self._mode == "access-granted":
             return "Door access has priority over chatbot interaction."
-        if self._mode == "only-one-person":
-            return "Only one person can be in the frame."
         if self._mode == "access-denied":
-            reason = str(attempt.get("reason") or "Access was denied.")
-            if int(attempt.get("face_count") or 0) > 1 or "multiple" in reason.lower() or "one" in reason.lower():
-                return "Only one person can be in the frame."
-            return reason
+            return str(attempt.get("reason") or "Access was denied.")
         if self._mode == "chat-verifying":
             return "Keep your face inside the guide to start a private chatbot session."
         if self._mode == "access-verifying":
