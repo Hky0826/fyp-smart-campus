@@ -148,9 +148,10 @@ class RagTtsModelTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual([event["event"] for event in events], ["metadata", "chunk", "done"])
-        self.assertEqual(events[0]["data"]["status"], "ok")
-        self.assertTrue(events[0]["data"]["access_granted"])
+        self.assertEqual([event["event"] for event in events], ["transcript", "metadata", "chunk", "done"])
+        self.assertEqual(events[0]["data"]["transcribed_input"], "What is my next class?")
+        self.assertEqual(events[1]["data"]["status"], "ok")
+        self.assertTrue(events[1]["data"]["access_granted"])
 
     def test_tts_wrapper_return_time_for_100_300_700_characters(self):
         """Measure app wrapper return time without making slow external TTS calls."""

@@ -45,7 +45,7 @@ from RagChatbot.generation.audio_query_extractor import (
 from RagChatbot.generation.gemini_live_service import (
     GeminiLiveError,
 )
-from RagChatbot.generation.google_llm_service import generate_answer
+from RagChatbot.generation.google_llm_service import generate_answer, generate_answer_stream
 from RagChatbot.generation.sentence_splitter import StreamingSentenceSplitter
 from RagChatbot.generation.response_validator import (
     ValidationResult,
@@ -827,6 +827,7 @@ def process_audio_chat_stream(
         return
 
     sanitized_query = guard_result.sanitized_query or user_query
+    yield {"event": "transcript", "data": {"transcribed_input": user_query}}
     context = context or resolve_auth_context(
         bearer_token,
         db,
@@ -1127,25 +1128,24 @@ def process_audio_chat_stream(
     pending_tts: list[tuple[str, concurrent.futures.Future]] = []
 
     try:
-        answer_text = generate_answer(
+        for token in generate_answer_stream(
             sanitized_query,
             ranked_chunks,
             chat_history=_recent_chat_history(db, resolved_session_id),
-        )
+        ):
+            full_answer_parts.append(token)
+            yield {"event": "chunk", "data": {"text": token}}
+            for sentence in splitter.feed(token):
+                val = validate_sentence(sentence)
+                clean_sentence = val.sanitized_text or sentence if not val.valid else sentence
+                logger.info("STREAM_DEBUG [%.3f]: Yielding sentence text: %s", time.time(), clean_sentence)
+                yield {"event": "sentence", "data": {"text": clean_sentence}}
+                if rag_settings.AUDIO_TTS_ENABLED:
+                    pending_tts.append((clean_sentence, _TTS_EXECUTOR.submit(_tts_job, clean_sentence, detected_language)))
+                yield from _drain_tts_queue(pending_tts, metrics, start_time)
     except RuntimeError as exc:
         logger.error("Audio chat stream: generation failed for user_id=%s: %s", user_id, exc)
         raise GeminiLiveError(f"Response generation failed: {exc}") from exc
-
-    full_answer_parts.append(answer_text)
-    yield {"event": "chunk", "data": {"text": answer_text}}
-    for sentence in splitter.feed(answer_text):
-        val = validate_sentence(sentence)
-        clean_sentence = val.sanitized_text or sentence if not val.valid else sentence
-        logger.info("STREAM_DEBUG [%.3f]: Yielding sentence text: %s", time.time(), clean_sentence)
-        yield {"event": "sentence", "data": {"text": clean_sentence}}
-        if rag_settings.AUDIO_TTS_ENABLED:
-            pending_tts.append((clean_sentence, _TTS_EXECUTOR.submit(_tts_job, clean_sentence, detected_language)))
-        yield from _drain_tts_queue(pending_tts, metrics, start_time)
 
     for sentence in splitter.flush():
         val = validate_sentence(sentence)

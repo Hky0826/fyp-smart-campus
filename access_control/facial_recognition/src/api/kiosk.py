@@ -649,37 +649,44 @@ def create_kiosk_router(
             cloud_url = f"{runtime_config().sync_cloud_url.rstrip('/')}/api/chatbot/chat/stream"
             import httpx
             import json
+            current_event = None
             try:
                 async with httpx.AsyncClient() as client:
                     async with client.stream(
                         "POST", cloud_url, json=payload, headers=headers, timeout=httpx.Timeout(60.0, connect=5.0)
                     ) as resp:
                         async for line in resp.aiter_lines():
-                            if line:
+                            if not line:
+                                yield b"\n"
+                                continue
+                            if line.startswith("event: "):
+                                current_event = line[7:].strip()
+                                yield f"event: {current_event}\n".encode("utf-8")
+                            elif line.startswith("data: "):
+                                data_str = line[6:].strip()
                                 try:
-                                    if line.startswith("data: "):
-                                        data_str = line[6:]
-                                        obj = json.loads(data_str)
-                                        if obj.get("event") == "done":
-                                            metadata = dict(obj.get("data") or {})
-                                            store.append_chat_exchange(
-                                                body.query,
-                                                metadata.get("answer") or "",
-                                                metadata.get("citations") or [],
-                                            )
-                                            session = store.current_chat_session()
-                                            if session is not None:
-                                                metadata["session"] = session.model_dump(mode="json")
-                                                obj["data"] = metadata
-                                            await events_manager.broadcast_state(store.serialize_state())
-                                            line = f"data: {json.dumps(obj, separators=(',', ':'))}"
+                                    obj = json.loads(data_str)
+                                    if current_event == "done" or (isinstance(obj, dict) and obj.get("answer") is not None and current_event != "chunk"):
+                                        metadata = dict(obj)
+                                        store.append_chat_exchange(
+                                            body.query,
+                                            metadata.get("answer") or "",
+                                            metadata.get("citations") or [],
+                                        )
+                                        session = store.current_chat_session()
+                                        if session is not None:
+                                            metadata["session"] = session.model_dump(mode="json")
+                                            obj = metadata
+                                        data_str = json.dumps(obj, separators=(",", ":"))
                                 except Exception as parse_exc:
                                     logger.warning("Kiosk text stream parse warning: %s", parse_exc)
-                                yield (line + "\n\n").encode("utf-8")
+                                yield f"data: {data_str}\n\n".encode("utf-8")
+                            else:
+                                yield f"{line}\n".encode("utf-8")
             except Exception as exc:
                 logger.warning("Kiosk chat text stream proxy error: %s", exc)
-                err_payload = {"event": "error", "data": {"message": str(exc)}}
-                yield f"data: {json.dumps(err_payload)}\n\n".encode("utf-8")
+                err_payload = {"message": str(exc)}
+                yield f"event: error\ndata: {json.dumps(err_payload)}\n\n".encode("utf-8")
 
         return StreamingResponse(
             stream_generator(),
@@ -813,7 +820,6 @@ def create_kiosk_router(
                                         if session is not None:
                                             metadata["session"] = session.model_dump(mode="json")
                                             obj["data"] = metadata
-                                        await events_manager.broadcast_state(store.serialize_state())
                                         line = json.dumps(obj, separators=(",", ":"))
                                 except Exception as json_exc:
                                     logger.warning("Kiosk stream proxy json parse error: %s", json_exc)
