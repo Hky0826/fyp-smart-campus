@@ -3,7 +3,7 @@ Re-ranking utilities for retrieved document chunks.
 
 After vector similarity and lexical retrieval, candidate chunks are:
 1. Filtered against the minimum similarity threshold (RAG_SIMILARITY_THRESHOLD)
-2. Filtered against non-stopword domain keywords
+2. Filtered against non-stopword domain keywords and entity tags
 3. Optionally re-scored and re-ranked using lightweight cross-scoring
 4. Trimmed to TOP_K_CONTEXT before being formatted for LLM generation.
 """
@@ -13,8 +13,8 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
-from typing import Any, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, List, Optional, Dict
 
 from google.genai import types
 
@@ -38,27 +38,39 @@ class RankedChunk:
     """
     A retrieved and ranked document chunk ready for LLM context building.
     """
-
     chunk_id: int
     document_id: int
     document_title: str
     chunk_index: int
     chunk_text: str
-    access_level: str
-    similarity_score: float
+    access_level: str = "VISITOR"
+    allowed_roles: Optional[List[str]] = field(default_factory=lambda: ["VISITOR"])
+    similarity_score: float = 0.0
+    chunk_type: str = "DETAIL"
+    section_path: Optional[str] = None
+    entity_tags: Optional[List[Dict[str, Any]]] = field(default_factory=list)
+    parent_chunk_id: Optional[int] = None
 
 
-def _has_significant_keyword_match(query_text: str, chunk_text: str) -> bool:
-    """Check if query contains specific domain identifiers, acronyms, or non-stopword keywords."""
-    if not query_text or not chunk_text:
+def _has_significant_keyword_match(query_text: str, chunk_text: str, entity_tags: Optional[List[Dict[str, Any]]] = None) -> bool:
+    """Check if query contains specific domain identifiers, acronyms, course codes, or entity tags."""
+    if not query_text:
         return False
+    
+    # Check entity tags directly
+    if entity_tags:
+        query_upper = query_text.upper()
+        for tag in entity_tags:
+            code = tag.get("entity_code") or tag.get("label") or tag.get("name") or ""
+            if code and len(code) >= 3 and code.upper() in query_upper:
+                return True
+
     words = re.findall(r"[A-Za-z0-9_\-]+", query_text)
-    chunk_lower = chunk_text.lower()
+    chunk_lower = chunk_text.lower() if chunk_text else ""
     for w in words:
         w_lower = w.lower()
         if w_lower in _COMMON_STOPWORDS or len(w_lower) <= 3:
             continue
-        # Course codes (BCS204), room labels (B-2-04), or exact terms
         is_code = bool(re.match(r"^[a-zA-Z]{2,4}[0-9]{2,4}", w_lower) or re.match(r"^[a-zA-Z]-[0-9]", w_lower))
         if is_code and w_lower in chunk_lower:
             return True
@@ -75,7 +87,6 @@ def _llm_cross_rerank(query_text: str, candidates: List[RankedChunk], top_k: int
     if not candidates or not query_text or len(candidates) <= 1:
         return candidates[:top_k]
 
-    # Limit pool sent to reranker to top 8 candidates to keep latency negligible
     pool = candidates[:8]
     candidate_prompts = []
     for idx, c in enumerate(pool):
@@ -153,43 +164,50 @@ def rerank_chunks(
                 score = 0.60
 
             c_text = getattr(row, "chunk_text", "")
-            has_keyword = _has_significant_keyword_match(query_text or "", c_text)
+            raw_tags = getattr(row, "entity_tags", None)
+            if isinstance(raw_tags, str):
+                try:
+                    parsed_tags = json.loads(raw_tags)
+                except Exception:
+                    parsed_tags = []
+            elif isinstance(raw_tags, list):
+                parsed_tags = raw_tags
+            raw_roles = getattr(row, "allowed_roles", None)
+            if isinstance(raw_roles, str):
+                try:
+                    parsed_roles = json.loads(raw_roles)
+                except Exception:
+                    parsed_roles = [raw_roles]
+            elif isinstance(raw_roles, (list, set, tuple)):
+                parsed_roles = list(raw_roles)
+            else:
+                parsed_roles = ["VISITOR"]
 
-            # Keep chunk if similarity meets threshold or has strong keyword match with reasonable score
-            if score >= min_threshold or (has_keyword and score >= 0.40):
+            has_keyword = _has_significant_keyword_match(query_text or "", c_text, entity_tags=parsed_tags)
+
+            if score >= min_threshold or (has_keyword and score >= 0.35):
                 scored.append(
                     RankedChunk(
-                        chunk_id=row.chunk_id,
-                        document_id=row.document_id,
-                        document_title=getattr(row, "document_title", "Unknown Document") or "Unknown Document",
+                        chunk_id=getattr(row, "chunk_id", 0),
+                        document_id=getattr(row, "document_id", 0),
+                        document_title=getattr(row, "document_title", ""),
                         chunk_index=getattr(row, "chunk_index", 0),
                         chunk_text=c_text,
-                        access_level=getattr(row, "access_level", "PUBLIC"),
+                        access_level=getattr(row, "access_level", "VISITOR"),
+                        allowed_roles=parsed_roles,
                         similarity_score=score,
+                        chunk_type=str(getattr(row, "chunk_type", "DETAIL") or "DETAIL"),
+                        section_path=getattr(row, "section_path", None),
+                        entity_tags=parsed_tags,
+                        parent_chunk_id=getattr(row, "parent_chunk_id", None),
                     )
                 )
         except Exception as exc:
-            logger.error("Re-ranking failed for chunk_id=%s: %s", getattr(row, "chunk_id", "?"), exc)
-            continue
+            logger.warning("Error scoring candidate chunk: %s", exc)
 
-    # Sort descending by initial similarity score
-    scored.sort(key=lambda r: r.similarity_score, reverse=True)
+    scored.sort(key=lambda item: item.similarity_score, reverse=True)
 
-    if not scored:
-        logger.debug("Re-ranking: 0 chunks passed the similarity threshold (cutoff=%.2f)", min_threshold)
-        return []
+    if getattr(rag_settings, "RAG_CROSS_RERANKING_ENABLED", False) and query_text and len(scored) > 1:
+        return _llm_cross_rerank(query_text=query_text, candidates=scored, top_k=top_k)
 
-    # Apply lightweight cross-encoder reranker if enabled
-    if getattr(rag_settings, "RAG_RERANKER_ENABLED", False) and query_text and len(scored) > 1:
-        top = _llm_cross_rerank(query_text, scored, top_k)
-    else:
-        top = scored[:top_k]
-
-    logger.debug(
-        "Re-ranking: input=%d chunks, passed_threshold=%d, output=%d (top_k=%d)",
-        len(chunks),
-        len(scored),
-        len(top),
-        top_k,
-    )
-    return top
+    return scored[:top_k]

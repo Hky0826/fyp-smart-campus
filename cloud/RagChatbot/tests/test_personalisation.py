@@ -96,8 +96,8 @@ class PersonalisationTests(unittest.TestCase):
     def test_multiple_roles_union_permissions_and_personal_contexts(self):
         from RagChatbot.security.rbac import resolve_allowed_access_levels
 
-        self.assertEqual(resolve_allowed_access_levels(["STUDENT", "LECTURER"]), ["PUBLIC", "STUDENT", "LECTURER"])
-        self.assertEqual(resolve_allowed_access_levels(["VISITOR", "STUDENT"]), ["PUBLIC", "STUDENT"])
+        self.assertEqual(set(resolve_allowed_access_levels(["STUDENT", "LECTURER"])), {"VISITOR", "STUDENT", "LECTURER"})
+        self.assertEqual(set(resolve_allowed_access_levels(["VISITOR", "STUDENT"])), {"VISITOR", "STUDENT"})
 
         repo = FakeRepository()
         context = AuthenticatedChatContext(7, 9, roles=("STUDENT", "LECTURER"), student_id="S7", lecturer_id="L7", staff_id="ST7", authenticated=True)

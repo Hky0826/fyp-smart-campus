@@ -213,6 +213,44 @@ def run_one_migration(connection, migration_name: str) -> None:
         )
         create_index_if_missing(connection, "users", "ix_users_location_seen", "last_known_location, last_seen")
 
+    elif migration_name == "20260822_rag_storage_hierarchy_metadata.sql":
+        add_column_if_missing(
+            connection,
+            "uploaded_documents",
+            "category",
+            "ENUM('ACADEMIC', 'ADMISSIONS', 'FEES_SCHOLARSHIPS', 'FACILITIES', 'POLICIES', 'STUDENT_LIFE', 'RESEARCH', 'INTERNATIONAL', 'GENERAL') NOT NULL DEFAULT 'GENERAL'"
+        )
+        add_column_if_missing(connection, "uploaded_documents", "faculty_code", "VARCHAR(32) NULL")
+        add_column_if_missing(
+            connection,
+            "uploaded_documents",
+            "target_audience",
+            "ENUM('UNDERGRADUATE', 'POSTGRADUATE', 'INTERNATIONAL', 'STAFF', 'STUDENT', 'ALL') NOT NULL DEFAULT 'ALL'"
+        )
+        add_column_if_missing(connection, "uploaded_documents", "validity_year", "INT NULL")
+        
+        add_column_if_missing(
+            connection,
+            "document_chunks",
+            "chunk_type",
+            "ENUM('SUMMARY', 'DETAIL', 'TABLE', 'FAQ', 'PARENT') NOT NULL DEFAULT 'DETAIL'"
+        )
+        add_column_if_missing(connection, "document_chunks", "parent_chunk_id", "INT NULL")
+        add_column_if_missing(connection, "document_chunks", "section_path", "VARCHAR(500) NULL")
+        add_column_if_missing(connection, "document_chunks", "entity_tags", "JSON NULL")
+
+        create_index_if_missing(connection, "uploaded_documents", "idx_docs_cat_faculty", "category, faculty_code")
+        create_index_if_missing(connection, "document_chunks", "idx_chunks_parent_type", "parent_chunk_id, chunk_type")
+        
+        if table_exists(connection, "document_chunks"):
+            try:
+                connection.execute(text(
+                    "ALTER TABLE document_chunks ADD CONSTRAINT fk_document_chunks_parent "
+                    "FOREIGN KEY (parent_chunk_id) REFERENCES document_chunks(chunk_id) ON DELETE CASCADE"
+                ))
+            except Exception:
+                pass
+
     else:
         raise RuntimeError(f"No safe handler exists for migration {migration_name}")
 
@@ -225,6 +263,7 @@ def run_migrations() -> None:
         "20260728_face_auth_challenges.sql",
         "20260728_private_data.sql",
         "20260730_mapping_notification_hardening.sql",
+        "20260822_rag_storage_hierarchy_metadata.sql",
     ]
 
     with engine.begin() as connection:

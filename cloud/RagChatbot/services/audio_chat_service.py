@@ -646,6 +646,9 @@ def process_audio_chat(
             chunk_index=chunk.chunk_index,
             access_level=chunk.access_level,
             excerpt=chunk.chunk_text[:200],
+            chunk_type=getattr(chunk, "chunk_type", "DETAIL"),
+            section_path=getattr(chunk, "section_path", None),
+            entity_tags=getattr(chunk, "entity_tags", []),
         )
         for chunk in ranked_chunks
     ]

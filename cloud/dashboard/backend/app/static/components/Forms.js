@@ -1881,10 +1881,10 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                 <input 
                                     type="number" 
                                     required
-                                    value={userId}
-                                    onChange={e => setUserId(e.target.value)}
-                                    placeholder="Insert staff user ID..."
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"
+                                    value={userId} 
+                                    onChange={e => setUserId(e.target.value)} 
+                                    placeholder="Insert staff user ID..." 
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono" 
                                 />
                             </div>
                         </div>
@@ -1924,15 +1924,48 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
         function DocumentForm({ item, onSubmit, onCancel }) {
             const [title, setTitle] = useState(item?.title || "");
             const [uploadedBy, setUploadedBy] = useState(item?.uploaded_by || 1); // default system admin user id
-            const [accessLevel, setAccessLevel] = useState(item?.access_level || "PUBLIC");
+            
+            const initialRoles = (() => {
+                if (item?.allowed_roles) {
+                    if (Array.isArray(item.allowed_roles)) return item.allowed_roles;
+                    try {
+                        const parsed = JSON.parse(item.allowed_roles);
+                        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+                    } catch (e) {}
+                }
+                if (item?.access_level) {
+                    return item.access_level === "PUBLIC" ? ["VISITOR"] : [item.access_level];
+                }
+                return ["VISITOR"];
+            })();
+
+            const [selectedRoles, setSelectedRoles] = useState(initialRoles);
             const [file, setFile] = useState(null);
+
+            const ALL_SYSTEM_ROLES = [
+                { id: "VISITOR", label: "Visitor", badge: "Public / All", desc: "Open to everyone including guests and unauthenticated visitors" },
+                { id: "STUDENT", label: "Student", badge: "Students", desc: "Enrolled university students" },
+                { id: "LECTURER", label: "Lecturer", badge: "Faculty", desc: "Academic teaching staff and professors" },
+                { id: "STAFF", label: "Staff", badge: "Operations", desc: "Administrative, technical, and facility staff" },
+                { id: "ADMIN", label: "Admin", badge: "Admins", desc: "System and content administrators" },
+            ];
+
+            const toggleRole = (roleId) => {
+                if (selectedRoles.includes(roleId)) {
+                    if (selectedRoles.length === 1) return; // Prevent 0 roles selected
+                    setSelectedRoles(selectedRoles.filter(r => r !== roleId));
+                } else {
+                    setSelectedRoles([...selectedRoles, roleId]);
+                }
+            };
 
             const handleSubmit = (e) => {
                 e.preventDefault();
                 const formData = new FormData();
                 formData.append("title", title);
                 formData.append("uploaded_by", uploadedBy);
-                formData.append("access_level", accessLevel);
+                formData.append("allowed_roles", JSON.stringify(selectedRoles));
+                formData.append("access_level", selectedRoles[0] || "VISITOR");
                 formData.append("is_active", true);
                 if (file) {
                     formData.append("file", file);
@@ -1941,30 +1974,62 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
             };
 
             return (
-                <form onSubmit={handleSubmit} className="space-y-4">
+                <form onSubmit={handleSubmit} className="space-y-5">
                     <div>
                         <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Document Title</label>
-                        <input type="text" required value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" />
+                        <input type="text" required value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500" />
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Document File</label>
-                            <input type="file" required={!item?.document_id} onChange={e => setFile(e.target.files[0])} accept=".txt,.md,.csv" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-900/30 file:text-emerald-400 hover:file:bg-emerald-900/50" />
-                            {item?.file_path && !file && <p className="text-xs text-slate-500 mt-1">Current file: {item.filename}</p>}
-                        </div>
-                        <div>
-                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Access Level Clearance</label>
-                            <select value={accessLevel} onChange={e => setAccessLevel(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500">
-                                <option value="PUBLIC">PUBLIC</option>
-                                <option value="STUDENT">STUDENT</option>
-                                <option value="LECTURER">LECTURER</option>
-                                <option value="ADMIN">ADMIN</option>
-                            </select>
-                        </div>
+
+                    <div>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Document File</label>
+                        <input type="file" required={!item?.document_id} onChange={e => setFile(e.target.files[0])} accept=".txt,.md,.csv" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-900/30 file:text-indigo-400 hover:file:bg-indigo-900/50" />
+                        {item?.file_path && !file && <p className="text-xs text-slate-500 mt-1">Current file: {item.filename}</p>}
                     </div>
-                    <div className="flex justify-end gap-3 mt-6">
+
+                    <div>
+                        <div className="flex items-center justify-between mb-2">
+                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider">Who Can Access (Select Multiple Roles)</label>
+                            <span className="text-[11px] text-slate-500 font-medium">Selected: {selectedRoles.join(", ")}</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            {ALL_SYSTEM_ROLES.map((r) => {
+                                const isChecked = selectedRoles.includes(r.id);
+                                return (
+                                    <div
+                                        key={r.id}
+                                        onClick={() => toggleRole(r.id)}
+                                        className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all duration-200 ${isChecked ? 'bg-indigo-950/40 border-indigo-500/60 shadow-sm' : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700 opacity-70 hover:opacity-100'}`}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={() => {}}
+                                            className="mt-0.5 rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-900 pointer-events-none"
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <span className={`text-xs font-bold ${isChecked ? 'text-indigo-200' : 'text-slate-300'}`}>{r.label}</span>
+                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/50 uppercase">{r.badge}</span>
+                                            </div>
+                                            <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">{r.desc}</p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        {selectedRoles.includes("VISITOR") && (
+                            <div className="mt-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-start gap-2.5">
+                                <Icon name="check-circle" className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
+                                <div>
+                                    <span className="font-bold">Universal / Public Access Active:</span> When <strong>Visitor</strong> is selected, this document is universally accessible to <strong>all campus roles</strong> (Visitors, Students, Lecturers, Staff, and Admins).
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex justify-end gap-3 mt-6 pt-2 border-t border-slate-800/60">
                         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
-                        <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300">Submit Document</button>
+                        <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all duration-300 shadow-sm">Save Document</button>
                     </div>
                 </form>
             );

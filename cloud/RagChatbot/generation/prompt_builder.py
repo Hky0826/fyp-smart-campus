@@ -59,7 +59,6 @@ Rules:
 """
 
 
-
 def build_context_block(chunks: List[RankedChunk]) -> str:
     """
     Format the retrieved chunks into a readable, deduplicated context block for the prompt.
@@ -85,7 +84,10 @@ def build_context_block(chunks: List[RankedChunk]) -> str:
         seen_texts.add(norm_snippet)
 
         title = chunk.document_title or "Campus Document"
-        parts.append(f"[Source: {title}]\n{raw_text}")
+        section_path = chunk.section_path or ""
+        header = f"[Source: {title} > {section_path}]" if section_path and section_path != title else f"[Source: {title}]"
+        chunk_type_tag = f" ({chunk.chunk_type})" if chunk.chunk_type in ("TABLE", "SUMMARY", "FAQ") else ""
+        parts.append(f"{header}{chunk_type_tag}\n{raw_text}")
 
     return "\n\n---\n\n".join(parts) if parts else "No relevant context documents are available."
 

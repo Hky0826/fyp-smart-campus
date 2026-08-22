@@ -2,7 +2,7 @@
 RBAC (Role-Based Access Control) for the RAG Chatbot.
 
 Resolves a user's roles from the database and maps them to the
-document access levels they are permitted to view. Role information
+document allowed roles they are permitted to view. Role information
 is NEVER taken from the request body — it is always resolved from
 the trusted JWT and the backend database.
 """
@@ -16,113 +16,68 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-# Mapping from role_name (as stored in roles table) to the document
-# access_level values the role is allowed to read.
-# The hierarchy is cumulative: higher roles include all lower levels.
-_ROLE_ACCESS_MAP: dict[str, List[str]] = {
-    "STUDENT":  ["PUBLIC", "STUDENT"],
-    "LECTURER": ["PUBLIC", "STUDENT", "LECTURER"],
-    "STAFF":    ["PUBLIC", "STUDENT", "LECTURER"],
-    "ADMIN":    ["PUBLIC", "STUDENT", "LECTURER", "ADMIN"],
-    "VISITOR":  ["PUBLIC"],
-    # SUPER_ADMIN / SYSTEM_ADMIN / CONTENT_ADMIN are admin-portal roles;
-    # they map to ADMIN tier document access.
-    "SUPER_ADMIN":    ["PUBLIC", "STUDENT", "LECTURER", "ADMIN"],
-    "SYSTEM_ADMIN":   ["PUBLIC", "STUDENT", "LECTURER", "ADMIN"],
-    "CONTENT_ADMIN":  ["PUBLIC", "STUDENT", "LECTURER", "ADMIN"],
-}
+ALL_CANONICAL_ROLES: List[str] = [
+    "VISITOR",
+    "STUDENT",
+    "LECTURER",
+    "STAFF",
+    "ADMIN",
+]
 
-# When a user has no recognized role, they get public-only access.
-_DEFAULT_ACCESS: List[str] = ["PUBLIC"]
-
-
-ROLE_PRIORITY_ORDER: List[str] = [
+ADMIN_ROLES: Set[str] = {
+    "ADMIN",
     "SUPER_ADMIN",
     "SYSTEM_ADMIN",
     "CONTENT_ADMIN",
-    "ADMIN",
-    "LECTURER",
-    "STAFF",
-    "STUDENT",
-    "VISITOR",
-]
+}
+
+# Base access when unauthenticated
+VISITOR_ACCESS_LEVELS: List[str] = ["VISITOR"]
 
 
-def get_highest_role(roles: List[str]) -> str:
+def get_user_roles(user_id: int | None, db: Session) -> List[str]:
     """
-    Find the highest role from a list/tuple of roles based on hierarchy.
+    Query the database to retrieve all role_names assigned to a user,
+    always including 'VISITOR' baseline access.
     """
-    if not roles:
-        return "VISITOR"
-    roles_upper = {role.upper() for role in roles}
-    for role_name in ROLE_PRIORITY_ORDER:
-        if role_name in roles_upper:
-            return role_name
-    return sorted(list(roles_upper))[0]
+    if user_id is None:
+        return list(VISITOR_ACCESS_LEVELS)
 
-
-def get_user_roles(user_id: int, db: Session) -> List[str]:
-    """
-    Query the database to retrieve all role_names assigned to a user.
-
-    Args:
-        user_id: The authenticated user's ID (from the JWT payload).
-        db: An active SQLAlchemy database session.
-
-    Returns:
-        A list of role_name strings (e.g. ["STUDENT"]).
-    """
-    # Import here to avoid circular import at module level
     from app.models.models import User
 
     user = db.query(User).filter_by(user_id=user_id, is_active=True).first()
     if not user:
-        logger.warning("RBAC: user_id=%d not found or inactive.", user_id)
-        return []
+        logger.warning("RBAC: user_id=%s not found or inactive; defaulting to VISITOR.", user_id)
+        return list(VISITOR_ACCESS_LEVELS)
 
-    roles = [role.role_name for role in user.roles]
-    logger.debug("RBAC: user_id=%d has roles=%s", user_id, roles)
-    return roles
+    user_roles = {str(role.role_name).upper() for role in user.roles}
+    user_roles.add("VISITOR")
+
+    # If user is any type of admin, grant full role set
+    if user_roles & ADMIN_ROLES:
+        user_roles.update(ALL_CANONICAL_ROLES)
+
+    roles_list = sorted(list(user_roles))
+    logger.debug("RBAC: user_id=%d resolved roles=%s", user_id, roles_list)
+    return roles_list
 
 
 def resolve_allowed_access_levels(roles: List[str]) -> List[str]:
     """
-    Determine which document access_level values a user may view,
-    given their list of role names.
-
-    Args:
-        roles: List of role names (e.g. ["STUDENT", "VISITOR"]).
-
-    Returns:
-        A deduplicated, sorted list of allowed access_level strings.
+    Determine which document roles a user may view, given their list of role names.
     """
-    allowed: Set[str] = set()
-    for role in roles or []:
-        allowed.update(_ROLE_ACCESS_MAP.get(str(role).upper(), []))
+    roles_set = {str(r).upper() for r in (roles or [])}
+    roles_set.add("VISITOR")
 
-    if not allowed:
-        # Fall back to public-only access for unknown roles
-        allowed.update(_DEFAULT_ACCESS)
+    if roles_set & ADMIN_ROLES:
+        roles_set.update(ALL_CANONICAL_ROLES)
 
-    # Canonical ordering matches the DB ENUM ordering
-    order = ["PUBLIC", "STUDENT", "LECTURER", "ADMIN"]
-    result = [level for level in order if level in allowed]
-    logger.debug("RBAC: resolved access levels=%s for roles=%s", result, roles)
-    return result
+    return sorted(list(roles_set))
 
 
-
-def get_allowed_access_levels_for_user(user_id: int, db: Session) -> List[str]:
+def get_allowed_access_levels_for_user(user_id: int | None, db: Session) -> List[str]:
     """
     Convenience function: resolves user roles from DB and returns allowed
-    document access levels in one call.
-
-    Args:
-        user_id: Authenticated user ID from JWT.
-        db: Active DB session.
-
-    Returns:
-        List of allowed access_level strings.
+    document access roles in one call.
     """
-    roles = get_user_roles(user_id, db)
-    return resolve_allowed_access_levels(roles)
+    return get_user_roles(user_id, db)

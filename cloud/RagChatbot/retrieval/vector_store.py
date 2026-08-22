@@ -1,9 +1,10 @@
 """
 In-Memory Vector & Lexical Hybrid Store for RAG Document Chunks.
 
-Maintains a fast, local index of all active document embeddings and text chunks to
-compute exact cosine similarity, tokenized BM25 lexical relevance, and Reciprocal
-Rank Fusion (RRF) with strict pre-retrieval RBAC filtering.
+Maintains a fast, local index of all active document embeddings, text chunks, and metadata
+to compute exact cosine similarity, tokenized BM25 lexical relevance, and Reciprocal
+Rank Fusion (RRF) with multi-role RBAC authorization and faceted metadata filtering
+(Category, Faculty, Target Audience, Chunk Type).
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import json
 import logging
 import math
 import re
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any, Optional, Set
 import numpy as np
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -20,11 +21,33 @@ from sqlalchemy import text
 logger = logging.getLogger(__name__)
 
 _WORD_PATTERN = re.compile(r"[A-Za-z0-9_#\-]+")
+ADMIN_ROLES = {"ADMIN", "SUPER_ADMIN", "SYSTEM_ADMIN", "CONTENT_ADMIN"}
 
 
 def _tokenize(text: str) -> list[str]:
     """Tokenize text into lowercase alphanumeric keywords and acronyms."""
     return [w.lower() for w in _WORD_PATTERN.findall(text or "") if len(w) > 1]
+
+
+def _parse_roles(raw_roles: Any, fallback_level: Any = None) -> Set[str]:
+    """Parse JSON or string roles into a standardized uppercase set."""
+    if isinstance(raw_roles, str):
+        try:
+            parsed = json.loads(raw_roles)
+            if isinstance(parsed, list):
+                return {str(r).upper() for r in parsed}
+        except Exception:
+            return {raw_roles.upper()}
+    elif isinstance(raw_roles, (list, set, tuple)):
+        return {str(r).upper() for r in raw_roles}
+
+    if fallback_level:
+        lvl_str = str(fallback_level).upper()
+        if lvl_str == "PUBLIC":
+            return {"VISITOR"}
+        return {lvl_str}
+
+    return {"VISITOR"}
 
 
 class InMemoryVectorStore:
@@ -41,7 +64,15 @@ class InMemoryVectorStore:
             return
         self.chunk_ids = np.array([], dtype=np.int64)
         self.access_levels = np.array([], dtype=object)
+        self.allowed_roles: list[Set[str]] = []
         self.document_ids = np.array([], dtype=np.int64)
+        self.categories = np.array([], dtype=object)
+        self.faculty_codes = np.array([], dtype=object)
+        self.target_audiences = np.array([], dtype=object)
+        self.chunk_types = np.array([], dtype=object)
+        self.parent_chunk_ids = np.array([], dtype=np.int64)
+        self.section_paths: list[str] = []
+        self.entity_tags: list[Any] = []
         self.chunk_texts: list[str] = []
         self.tokenized_chunks: list[list[str]] = []
         self.embeddings = np.array([], dtype=np.float32).reshape(0, 0)
@@ -49,14 +80,22 @@ class InMemoryVectorStore:
         self.is_loaded = False
 
     def load_from_db(self, db: Session):
-        """Loads all active chunk embeddings and texts from the database."""
-        logger.info("Loading in-memory vector and lexical store from DB...")
+        """Loads all active chunk embeddings, texts, and metadata facets from the database."""
+        logger.info("Loading in-memory vector and lexical store from DB with multi-role RBAC...")
         sql_direct = text("""
             SELECT
                 dc.chunk_id,
                 dc.document_id,
+                COALESCE(dc.allowed_roles, ud.allowed_roles) AS allowed_roles,
                 dc.access_level,
                 dc.chunk_text,
+                COALESCE(dc.chunk_type, 'DETAIL') AS chunk_type,
+                COALESCE(dc.parent_chunk_id, -1) AS parent_chunk_id,
+                COALESCE(dc.section_path, '') AS section_path,
+                dc.entity_tags,
+                COALESCE(ud.category, 'GENERAL') AS category,
+                COALESCE(ud.faculty_code, '') AS faculty_code,
+                COALESCE(ud.target_audience, 'ALL') AS target_audience,
                 ev.embedding AS chunk_embedding
             FROM document_chunks dc
             INNER JOIN embedding_vectors ev
@@ -64,14 +103,21 @@ class InMemoryVectorStore:
             INNER JOIN uploaded_documents ud
                 ON dc.document_id = ud.document_id
             WHERE dc.is_outdated = 0 AND ud.is_active = 1
-              AND ud.access_level = dc.access_level
         """)
         sql_func = text("""
             SELECT
                 dc.chunk_id,
                 dc.document_id,
+                COALESCE(dc.allowed_roles, ud.allowed_roles) AS allowed_roles,
                 dc.access_level,
                 dc.chunk_text,
+                COALESCE(dc.chunk_type, 'DETAIL') AS chunk_type,
+                COALESCE(dc.parent_chunk_id, -1) AS parent_chunk_id,
+                COALESCE(dc.section_path, '') AS section_path,
+                dc.entity_tags,
+                COALESCE(ud.category, 'GENERAL') AS category,
+                COALESCE(ud.faculty_code, '') AS faculty_code,
+                COALESCE(ud.target_audience, 'ALL') AS target_audience,
                 VECTOR_TO_STRING(ev.embedding) AS chunk_embedding
             FROM document_chunks dc
             INNER JOIN embedding_vectors ev
@@ -79,7 +125,6 @@ class InMemoryVectorStore:
             INNER JOIN uploaded_documents ud
                 ON dc.document_id = ud.document_id
             WHERE dc.is_outdated = 0 AND ud.is_active = 1
-              AND ud.access_level = dc.access_level
         """)
         try:
             try:
@@ -92,7 +137,15 @@ class InMemoryVectorStore:
 
         chunk_ids = []
         access_levels = []
+        allowed_roles_list = []
         document_ids = []
+        categories = []
+        faculty_codes = []
+        target_audiences = []
+        chunk_types = []
+        parent_chunk_ids = []
+        section_paths = []
+        entity_tags = []
         chunk_texts = []
         tokenized_chunks = []
         embeddings = []
@@ -112,9 +165,30 @@ class InMemoryVectorStore:
                     emb = json.loads(str(raw_emb))
 
                 c_text = str(getattr(row, "chunk_text", "") or "")
+                raw_tags = getattr(row, "entity_tags", None)
+                if isinstance(raw_tags, str):
+                    try:
+                        parsed_tags = json.loads(raw_tags)
+                    except Exception:
+                        parsed_tags = []
+                elif isinstance(raw_tags, list):
+                    parsed_tags = raw_tags
+                else:
+                    parsed_tags = []
+
+                parsed_roles = _parse_roles(getattr(row, "allowed_roles", None), getattr(row, "access_level", None))
+
                 chunk_ids.append(row.chunk_id)
                 document_ids.append(row.document_id)
-                access_levels.append(row.access_level)
+                access_levels.append(str(getattr(row, "access_level", "VISITOR") or "VISITOR"))
+                allowed_roles_list.append(parsed_roles)
+                categories.append(str(getattr(row, "category", "GENERAL") or "GENERAL"))
+                faculty_codes.append(str(getattr(row, "faculty_code", "") or ""))
+                target_audiences.append(str(getattr(row, "target_audience", "ALL") or "ALL"))
+                chunk_types.append(str(getattr(row, "chunk_type", "DETAIL") or "DETAIL"))
+                parent_chunk_ids.append(int(getattr(row, "parent_chunk_id", -1) or -1))
+                section_paths.append(str(getattr(row, "section_path", "") or ""))
+                entity_tags.append(parsed_tags)
                 chunk_texts.append(c_text)
                 tokenized_chunks.append(_tokenize(c_text))
                 embeddings.append(emb)
@@ -124,21 +198,40 @@ class InMemoryVectorStore:
         if embeddings:
             self.chunk_ids = np.array(chunk_ids, dtype=np.int64)
             self.access_levels = np.array(access_levels, dtype=object)
+            self.allowed_roles = allowed_roles_list
             self.document_ids = np.array(document_ids, dtype=np.int64)
+            self.categories = np.array(categories, dtype=object)
+            self.faculty_codes = np.array(faculty_codes, dtype=object)
+            self.target_audiences = np.array(target_audiences, dtype=object)
+            self.chunk_types = np.array(chunk_types, dtype=object)
+            self.parent_chunk_ids = np.array(parent_chunk_ids, dtype=np.int64)
+            self.section_paths = section_paths
+            self.entity_tags = entity_tags
             self.chunk_texts = chunk_texts
             self.tokenized_chunks = tokenized_chunks
             self.embeddings = np.array(embeddings, dtype=np.float32)
             logger.info("Successfully loaded %d active document chunk embeddings into memory.", len(embeddings))
         else:
-            self.chunk_ids = np.array([], dtype=np.int64)
-            self.access_levels = np.array([], dtype=object)
-            self.document_ids = np.array([], dtype=np.int64)
-            self.chunk_texts = []
-            self.tokenized_chunks = []
-            self.embeddings = np.array([], dtype=np.float32).reshape(0, 0)
+            self._reset_empty()
 
         self.is_loaded = True
-        logger.info("Hybrid store loaded with %d chunks.", len(self.chunk_ids))
+        logger.info("Hybrid faceted store loaded with %d chunks.", len(self.chunk_ids))
+
+    def _reset_empty(self):
+        self.chunk_ids = np.array([], dtype=np.int64)
+        self.access_levels = np.array([], dtype=object)
+        self.allowed_roles = []
+        self.document_ids = np.array([], dtype=np.int64)
+        self.categories = np.array([], dtype=object)
+        self.faculty_codes = np.array([], dtype=object)
+        self.target_audiences = np.array([], dtype=object)
+        self.chunk_types = np.array([], dtype=object)
+        self.parent_chunk_ids = np.array([], dtype=np.int64)
+        self.section_paths = []
+        self.entity_tags = []
+        self.chunk_texts = []
+        self.tokenized_chunks = []
+        self.embeddings = np.array([], dtype=np.float32).reshape(0, 0)
 
     def add_chunk(
         self,
@@ -147,26 +240,51 @@ class InMemoryVectorStore:
         embedding: list[float],
         document_id: int | None = None,
         chunk_text: str = "",
+        category: str = "GENERAL",
+        faculty_code: str = "",
+        target_audience: str = "ALL",
+        chunk_type: str = "DETAIL",
+        parent_chunk_id: int = -1,
+        section_path: str = "",
+        entity_tags: list | None = None,
+        allowed_roles: list | None = None,
     ):
-        """Dynamically add a chunk to the in-memory store."""
+        """Dynamically add a chunk with metadata to the in-memory store."""
         emb_arr = np.array([embedding], dtype=np.float32)
         toks = _tokenize(chunk_text)
+        tags = entity_tags or []
+        roles = _parse_roles(allowed_roles, access_level)
         
         if len(self.chunk_ids) == 0:
             self.chunk_ids = np.array([chunk_id], dtype=np.int64)
             self.access_levels = np.array([access_level], dtype=object)
+            self.allowed_roles = [roles]
             self.document_ids = np.array([document_id if document_id is not None else -1], dtype=np.int64)
+            self.categories = np.array([category], dtype=object)
+            self.faculty_codes = np.array([faculty_code], dtype=object)
+            self.target_audiences = np.array([target_audience], dtype=object)
+            self.chunk_types = np.array([chunk_type], dtype=object)
+            self.parent_chunk_ids = np.array([parent_chunk_id], dtype=np.int64)
+            self.section_paths = [section_path]
+            self.entity_tags = [tags]
             self.chunk_texts = [chunk_text]
             self.tokenized_chunks = [toks]
             self.embeddings = emb_arr
         else:
             self.chunk_ids = np.append(self.chunk_ids, chunk_id)
             self.access_levels = np.append(self.access_levels, access_level)
+            self.allowed_roles.append(roles)
             self.document_ids = np.append(self.document_ids, document_id if document_id is not None else -1)
+            self.categories = np.append(self.categories, category)
+            self.faculty_codes = np.append(self.faculty_codes, faculty_code)
+            self.target_audiences = np.append(self.target_audiences, target_audience)
+            self.chunk_types = np.append(self.chunk_types, chunk_type)
+            self.parent_chunk_ids = np.append(self.parent_chunk_ids, parent_chunk_id)
+            self.section_paths.append(section_path)
+            self.entity_tags.append(tags)
             self.chunk_texts.append(chunk_text)
             self.tokenized_chunks.append(toks)
             self.embeddings = np.vstack([self.embeddings, emb_arr])
-        logger.debug("Added chunk %d to hybrid vector store.", chunk_id)
 
     def remove_document(self, document_id: int) -> None:
         """Remove every indexed vector and text belonging to a document."""
@@ -177,48 +295,124 @@ class InMemoryVectorStore:
 
         self.chunk_ids = self.chunk_ids[keep_mask]
         self.access_levels = self.access_levels[keep_mask]
+        self.allowed_roles = [self.allowed_roles[i] for i in keep_indices]
         self.document_ids = self.document_ids[keep_mask]
+        self.categories = self.categories[keep_mask]
+        self.faculty_codes = self.faculty_codes[keep_mask]
+        self.target_audiences = self.target_audiences[keep_mask]
+        self.chunk_types = self.chunk_types[keep_mask]
+        self.parent_chunk_ids = self.parent_chunk_ids[keep_mask]
+        self.section_paths = [self.section_paths[i] for i in keep_indices]
+        self.entity_tags = [self.entity_tags[i] for i in keep_indices]
         self.chunk_texts = [self.chunk_texts[i] for i in keep_indices]
         self.tokenized_chunks = [self.tokenized_chunks[i] for i in keep_indices]
         self.embeddings = self.embeddings[keep_mask] if self.embeddings.size else self.embeddings
 
     def replace_document(self, document_id: int, chunks: list[tuple]) -> None:
-        """
-        Atomically replace one document's vectors and text chunks in the in-memory index.
-        Accepts tuples of (chunk_id, access_level, embedding) or (chunk_id, access_level, embedding, chunk_text).
-        """
+        """Replace document chunks in memory."""
         self.remove_document(document_id)
         for item in chunks:
             if len(item) == 4:
                 chunk_id, access_level, embedding, c_text = item
+                meta = {}
+            elif len(item) >= 5:
+                chunk_id, access_level, embedding, c_text, meta = item[:5]
             else:
                 chunk_id, access_level, embedding = item[:3]
                 c_text = ""
-            self.add_chunk(chunk_id, access_level, embedding, document_id=document_id, chunk_text=c_text)
+                meta = {}
+            self.add_chunk(
+                chunk_id=chunk_id,
+                access_level=access_level,
+                embedding=embedding,
+                document_id=document_id,
+                chunk_text=c_text,
+                category=meta.get("category", "GENERAL"),
+                faculty_code=meta.get("faculty_code", ""),
+                target_audience=meta.get("target_audience", "ALL"),
+                chunk_type=meta.get("chunk_type", "DETAIL"),
+                parent_chunk_id=meta.get("parent_chunk_id", -1),
+                section_path=meta.get("section_path", ""),
+                entity_tags=meta.get("entity_tags", []),
+                allowed_roles=meta.get("allowed_roles", ["VISITOR"]),
+            )
 
-    def search(self, query_embedding: list[float], allowed_access_levels: list[str], top_k: int) -> list[int]:
-        """Search top_k chunk_ids by cosine similarity with RBAC filtering."""
-        results = self.search_with_scores(query_embedding, allowed_access_levels, top_k)
-        return [cid for cid, _ in results]
+    def replace_document_hierarchical(self, document_id: int, chunks: list[tuple]) -> None:
+        """Atomically replace document chunks with hierarchical metadata in memory."""
+        self.replace_document(document_id, chunks)
+
+    def _build_filter_mask(
+        self,
+        allowed_roles: list[str],
+        category: Optional[str] = None,
+        faculty_code: Optional[str] = None,
+        target_audience: Optional[str] = None,
+        chunk_types: Optional[List[str]] = None,
+    ) -> np.ndarray:
+        """Construct fast boolean mask combining multi-role RBAC and faceted filters."""
+        if len(self.chunk_ids) == 0:
+            return np.array([], dtype=bool)
+
+        user_roles_set = {str(r).upper() for r in (allowed_roles or [])}
+        user_roles_set.add("VISITOR")
+        is_admin = bool(user_roles_set & ADMIN_ROLES)
+
+        if is_admin:
+            mask = np.ones(len(self.chunk_ids), dtype=bool)
+        else:
+            # Match if user roles intersect with chunk allowed_roles or chunk is accessible to VISITOR
+            mask = np.array([
+                bool(user_roles_set & c_roles or "VISITOR" in c_roles or "PUBLIC" in c_roles)
+                for c_roles in self.allowed_roles
+            ], dtype=bool)
+
+        if category and category.upper() != "ALL":
+            mask = mask & (self.categories == category.upper())
+        if faculty_code and faculty_code.upper() != "ALL":
+            mask = mask & ((self.faculty_codes == faculty_code.upper()) | (self.faculty_codes == ""))
+        if target_audience and target_audience.upper() != "ALL":
+            mask = mask & ((self.target_audiences == target_audience.upper()) | (self.target_audiences == "ALL"))
+        if chunk_types:
+            mask = mask & np.isin(self.chunk_types, chunk_types)
+
+        return mask
 
     def search_with_scores(
-        self, query_embedding: list[float], allowed_access_levels: list[str], top_k: int
+        self,
+        query_embedding: list[float],
+        allowed_access_levels: list[str],
+        top_k: int,
+        category: Optional[str] = None,
+        faculty_code: Optional[str] = None,
+        target_audience: Optional[str] = None,
+        chunk_types: Optional[List[str]] = None,
+        prefer_summary: bool = False,
     ) -> list[tuple[int, float]]:
-        """Search top_k (chunk_id, cosine_similarity_score) with RBAC filtering."""
+        """Search top_k (chunk_id, cosine_similarity_score) with RBAC and facet pre-filtering."""
         if len(self.chunk_ids) == 0:
             return []
 
-        # Boolean mask for access control
-        mask = np.isin(self.access_levels, allowed_access_levels)
+        mask = self._build_filter_mask(
+            allowed_access_levels,
+            category=category,
+            faculty_code=faculty_code,
+            target_audience=target_audience,
+            chunk_types=chunk_types,
+        )
         valid_indices = np.where(mask)[0]
+
+        # Fallback to general RBAC if facet yielded no results
+        if len(valid_indices) == 0 and (category or faculty_code or chunk_types):
+            mask = self._build_filter_mask(allowed_access_levels)
+            valid_indices = np.where(mask)[0]
 
         if len(valid_indices) == 0:
             return []
 
         valid_embeddings = self.embeddings[valid_indices]
         valid_chunk_ids = self.chunk_ids[valid_indices]
+        valid_chunk_types = self.chunk_types[valid_indices]
 
-        # Calculate cosine similarity
         q_emb = np.array(query_embedding, dtype=np.float32)
         norms_valid = np.linalg.norm(valid_embeddings, axis=1)
         norm_q = np.linalg.norm(q_emb)
@@ -228,18 +422,28 @@ class InMemoryVectorStore:
 
         similarities = np.dot(valid_embeddings, q_emb) / (norms_valid * norm_q)
 
+        # Apply summary preference boost if requested
+        if prefer_summary:
+            summary_boost = np.where(valid_chunk_types == "SUMMARY", 0.15, 0.0)
+            similarities = similarities + summary_boost
+
         k = min(top_k, len(similarities))
         top_indices = np.argsort(similarities)[-k:][::-1]
 
         return [(int(valid_chunk_ids[i]), float(similarities[i])) for i in top_indices]
 
     def search_lexical(
-        self, query_text: str, allowed_access_levels: list[str], top_k: int
+        self,
+        query_text: str,
+        allowed_access_levels: list[str],
+        top_k: int,
+        category: Optional[str] = None,
+        faculty_code: Optional[str] = None,
+        target_audience: Optional[str] = None,
+        chunk_types: Optional[List[str]] = None,
+        prefer_summary: bool = False,
     ) -> list[tuple[int, float]]:
-        """
-        In-memory BM25-style lexical keyword matching with RBAC filtering.
-        Excels at acronyms, course codes, building labels, and exact names.
-        """
+        """In-memory BM25-style lexical keyword matching with multi-role filtering."""
         if len(self.chunk_ids) == 0 or not query_text.strip():
             return []
 
@@ -247,12 +451,21 @@ class InMemoryVectorStore:
         if not query_tokens:
             return []
 
-        mask = np.isin(self.access_levels, allowed_access_levels)
+        mask = self._build_filter_mask(
+            allowed_access_levels,
+            category=category,
+            faculty_code=faculty_code,
+            target_audience=target_audience,
+            chunk_types=chunk_types,
+        )
         valid_indices = np.where(mask)[0]
+        if len(valid_indices) == 0:
+            mask = self._build_filter_mask(allowed_access_levels)
+            valid_indices = np.where(mask)[0]
+
         if len(valid_indices) == 0:
             return []
 
-        # BM25 parameters
         k1 = 1.5
         b = 0.75
 
@@ -263,7 +476,6 @@ class InMemoryVectorStore:
             else 1.0
         ) or 1.0
 
-        # Calculate IDF for each query term among authorized docs
         doc_freqs: dict[str, int] = {}
         for q_token in set(query_tokens):
             df = sum(1 for i in valid_indices if q_token in set(self.tokenized_chunks[i]))
@@ -275,10 +487,13 @@ class InMemoryVectorStore:
             toks = self.tokenized_chunks[i]
             doc_len = len(toks)
             
-            # Exact phrase bonus
             phrase_bonus = 0.0
             if len(query_tokens) > 1 and query_text.lower() in self.chunk_texts[i].lower():
                 phrase_bonus = 3.0
+
+            # Prefer summary bonus
+            if prefer_summary and self.chunk_types[i] == "SUMMARY":
+                phrase_bonus += 2.0
 
             chunk_score = phrase_bonus
             tf_map: dict[str, int] = {}
@@ -290,7 +505,6 @@ class InMemoryVectorStore:
                 if tf == 0:
                     continue
                 df = doc_freqs.get(q_token, 0)
-                # Standard BM25 IDF
                 idf = math.log(1.0 + (total_docs - df + 0.5) / (df + 0.5))
                 term_score = idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (doc_len / avg_doc_len)))
                 chunk_score += term_score
@@ -301,29 +515,6 @@ class InMemoryVectorStore:
         scores.sort(key=lambda item: item[1], reverse=True)
         return scores[:top_k]
 
-    def search_hybrid(
-        self,
-        query_text: str,
-        query_embedding: list[float],
-        allowed_access_levels: list[str],
-        top_k: int,
-        dense_weight: float = 0.7,
-        lexical_weight: float = 0.3,
-    ) -> list[int]:
-        """
-        Execute parallel dense semantic search and tokenized BM25 lexical search,
-        combining results via Reciprocal Rank Fusion (RRF).
-        """
-        results = self.search_hybrid_with_scores(
-            query_text=query_text,
-            query_embedding=query_embedding,
-            allowed_access_levels=allowed_access_levels,
-            top_k=top_k,
-            dense_weight=dense_weight,
-            lexical_weight=lexical_weight,
-        )
-        return [cid for cid, _ in results]
-
     def search_hybrid_with_scores(
         self,
         query_text: str,
@@ -332,15 +523,34 @@ class InMemoryVectorStore:
         top_k: int,
         dense_weight: float = 0.7,
         lexical_weight: float = 0.3,
+        category: Optional[str] = None,
+        faculty_code: Optional[str] = None,
+        target_audience: Optional[str] = None,
+        chunk_types: Optional[List[str]] = None,
+        prefer_summary: bool = False,
     ) -> list[tuple[int, float]]:
-        """
-        Execute parallel dense semantic search and tokenized BM25 lexical search,
-        combining results via Reciprocal Rank Fusion (RRF).
-        Returns list of (chunk_id, similarity_score).
-        """
+        """Parallel dense & BM25 search with Reciprocal Rank Fusion (RRF) and multi-role RBAC."""
         candidate_pool = max(top_k * 2, 20)
-        dense_results = self.search_with_scores(query_embedding, allowed_access_levels, candidate_pool)
-        lexical_results = self.search_lexical(query_text, allowed_access_levels, candidate_pool)
+        dense_results = self.search_with_scores(
+            query_embedding,
+            allowed_access_levels,
+            candidate_pool,
+            category=category,
+            faculty_code=faculty_code,
+            target_audience=target_audience,
+            chunk_types=chunk_types,
+            prefer_summary=prefer_summary,
+        )
+        lexical_results = self.search_lexical(
+            query_text,
+            allowed_access_levels,
+            candidate_pool,
+            category=category,
+            faculty_code=faculty_code,
+            target_audience=target_audience,
+            chunk_types=chunk_types,
+            prefer_summary=prefer_summary,
+        )
 
         if not dense_results and not lexical_results:
             return []
@@ -349,15 +559,12 @@ class InMemoryVectorStore:
         rrf_scores: dict[int, float] = {}
         rrf_k = 60.0
 
-        # Dense ranking contributions
         for rank, (cid, _) in enumerate(dense_results):
             rrf_scores[cid] = rrf_scores.get(cid, 0.0) + dense_weight * (1.0 / (rrf_k + rank + 1))
 
-        # Lexical ranking contributions
         for rank, (cid, _) in enumerate(lexical_results):
             rrf_scores[cid] = rrf_scores.get(cid, 0.0) + lexical_weight * (1.0 / (rrf_k + rank + 1))
 
-        # Sort chunk IDs by descending RRF score
         sorted_candidates = sorted(rrf_scores.items(), key=lambda item: item[1], reverse=True)
         top_candidates = sorted_candidates[:top_k]
         return [(cid, float(dense_score_map.get(cid, 0.60))) for cid, _ in top_candidates]

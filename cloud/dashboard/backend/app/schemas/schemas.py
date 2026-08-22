@@ -36,6 +36,32 @@ class AccessLevelEnum(str, Enum):
     LECTURER = "LECTURER"
     ADMIN = "ADMIN"
 
+class DocumentCategoryEnum(str, Enum):
+    ACADEMIC = "ACADEMIC"
+    ADMISSIONS = "ADMISSIONS"
+    FEES_SCHOLARSHIPS = "FEES_SCHOLARSHIPS"
+    FACILITIES = "FACILITIES"
+    POLICIES = "POLICIES"
+    STUDENT_LIFE = "STUDENT_LIFE"
+    RESEARCH = "RESEARCH"
+    INTERNATIONAL = "INTERNATIONAL"
+    GENERAL = "GENERAL"
+
+class TargetAudienceEnum(str, Enum):
+    UNDERGRADUATE = "UNDERGRADUATE"
+    POSTGRADUATE = "POSTGRADUATE"
+    INTERNATIONAL = "INTERNATIONAL"
+    STAFF = "STAFF"
+    STUDENT = "STUDENT"
+    ALL = "ALL"
+
+class ChunkTypeEnum(str, Enum):
+    SUMMARY = "SUMMARY"
+    DETAIL = "DETAIL"
+    TABLE = "TABLE"
+    FAQ = "FAQ"
+    PARENT = "PARENT"
+
 class DeviceTypeEnum(str, Enum):
     KIOSK = "KIOSK"
     ENTRY_GATE = "ENTRY_GATE"
@@ -356,12 +382,24 @@ class AdminResponse(AdminBase):
 # ==========================================
 # Category 2: RAG Schemas
 # ==========================================
+class DocumentRoleEnum(str, Enum):
+    VISITOR = "VISITOR"
+    STUDENT = "STUDENT"
+    LECTURER = "LECTURER"
+    STAFF = "STAFF"
+    ADMIN = "ADMIN"
+
 class UploadedDocumentBase(BaseSchema):
     title: str
     filename: str
     file_path: str
     uploaded_by: int
-    access_level: AccessLevelEnum = AccessLevelEnum.PUBLIC
+    access_level: Optional[str] = "VISITOR"
+    allowed_roles: List[str] = Field(default_factory=lambda: ["VISITOR"])
+    category: DocumentCategoryEnum = DocumentCategoryEnum.GENERAL
+    faculty_code: Optional[str] = None
+    target_audience: TargetAudienceEnum = TargetAudienceEnum.ALL
+    validity_year: Optional[int] = None
     is_active: bool = True
 
 class UploadedDocumentCreate(UploadedDocumentBase):
@@ -378,7 +416,12 @@ class DocumentChunkBase(BaseSchema):
     chunk_index: int
     chunk_text: str
     char_count: Optional[int] = None
-    access_level: AccessLevelEnum
+    access_level: Optional[str] = "VISITOR"
+    allowed_roles: List[str] = Field(default_factory=lambda: ["VISITOR"])
+    chunk_type: ChunkTypeEnum = ChunkTypeEnum.DETAIL
+    parent_chunk_id: Optional[int] = None
+    section_path: Optional[str] = None
+    entity_tags: Optional[List[Any]] = None
     is_outdated: bool = False
 
 class DocumentChunkResponse(DocumentChunkBase):

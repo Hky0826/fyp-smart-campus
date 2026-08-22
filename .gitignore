@@ -65,3 +65,4 @@ scripts/
 !scripts/deploy_cloud_run.ps1
 !scripts/test_cloud_connections.py
 !scripts/migrate_mysql_to_tidb.py
+presentation_assets/

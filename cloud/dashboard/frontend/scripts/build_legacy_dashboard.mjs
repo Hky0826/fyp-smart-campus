@@ -20,5 +20,5 @@ fs.copyFileSync(path.join(here, "node_modules/react/umd/react.production.min.js"
 fs.copyFileSync(path.join(here, "node_modules/react-dom/umd/react-dom.production.min.js"), path.join(assets, "react-dom.min.js"));
 fs.copyFileSync(path.join(here, "node_modules/lucide/dist/umd/lucide.min.js"), path.join(assets, "lucide.min.js"));
 fs.writeFileSync(path.join(assets, "tailwind.input.css"), "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n");
-execFileSync(process.execPath, [path.join(here, "node_modules/tailwindcss/lib/cli.js"), "-c", path.join(here, "tailwind.config.js"), "-i", path.join(assets, "tailwind.input.css"), "-o", path.join(assets, "tailwind.css"), "--minify"], { stdio: "inherit" });
+execFileSync(process.execPath, [path.join(here, "node_modules/tailwindcss/lib/cli.js"), "-c", path.join(here, "tailwind.config.js"), "-i", path.join(assets, "tailwind.input.css"), "-o", path.join(assets, "tailwind.css"), "--minify"], { stdio: "inherit", cwd: here });
 console.log("Built pinned local dashboard assets.");

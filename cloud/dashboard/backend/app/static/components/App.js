@@ -961,8 +961,30 @@ function CampusMapTab() {
                         }
                     }
                     if (currentTab === "rag") {
-                        if (subTab === "documents") return (q === "" || item.title?.toLowerCase().includes(q) || item.filename?.toLowerCase().includes(q)) && (accessLevelFilter === "ALL" || item.access_level === accessLevelFilter);
-                        if (subTab === "chunks") return (q === "" || item.chunk_text?.toLowerCase().includes(q)) && (accessLevelFilter === "ALL" || item.access_level === accessLevelFilter);
+                        if (subTab === "documents") {
+                            const matchesQuery = q === "" || item.title?.toLowerCase().includes(q) || item.filename?.toLowerCase().includes(q);
+                            const roles = (item.allowed_roles && item.allowed_roles.length > 0)
+                                ? item.allowed_roles
+                                : (item.access_level === "PUBLIC" ? ["VISITOR"] : [item.access_level || "VISITOR"]);
+                            const isUniversal = roles.includes("VISITOR") || roles.includes("PUBLIC");
+                            const matchesRole = accessLevelFilter === "ALL"
+                                || (accessLevelFilter === "VISITOR" && isUniversal)
+                                || (roles.includes(accessLevelFilter))
+                                || (isUniversal);
+                            return matchesQuery && matchesRole;
+                        }
+                        if (subTab === "chunks") {
+                            const matchesQuery = q === "" || item.chunk_text?.toLowerCase().includes(q);
+                            const roles = (item.allowed_roles && item.allowed_roles.length > 0)
+                                ? item.allowed_roles
+                                : (item.access_level === "PUBLIC" ? ["VISITOR"] : [item.access_level || "VISITOR"]);
+                            const isUniversal = roles.includes("VISITOR") || roles.includes("PUBLIC");
+                            const matchesRole = accessLevelFilter === "ALL"
+                                || (accessLevelFilter === "VISITOR" && isUniversal)
+                                || (roles.includes(accessLevelFilter))
+                                || (isUniversal);
+                            return matchesQuery && matchesRole;
+                        }
                         if (subTab === "chatbot-queries") return q === "" || item.query_text?.toLowerCase().includes(q);
                     }
                     if (currentTab === "infra") {
@@ -1557,96 +1579,143 @@ function CampusMapTab() {
                                                                 </td>
                                                             </tr>
                                                         );
+
                                                         if (subTab === "facial-recognition") return (
                                                             <tr key={idx} className="hover:bg-slate-800/40 transition-colors group">
                                                                 <td className="p-4 pl-6">
-                                                                    <div className="flex items-center gap-4">
-                                                                        <div className="w-10 h-10 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center font-bold text-slate-300 text-xs shrink-0 shadow-sm">
-                                                                            {item.full_name?.split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase() || "??"}
+                                                                    <div className="flex items-center gap-3">
+                                                                        <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden shrink-0">
+                                                                            {item.imagepath ? (
+                                                                                <img src={item.imagepath} alt={item.full_name} className="w-full h-full object-cover" />
+                                                                            ) : (
+                                                                                <Icon name="user" className="w-5 h-5 text-slate-400" />
+                                                                            )}
                                                                         </div>
                                                                         <div>
-                                                                            <p className="font-bold text-slate-200 text-sm">{item.full_name}</p>
-                                                                            <p className="text-xs text-slate-500 mt-0.5">{item.email}</p>
+                                                                            <div className="font-bold text-slate-200 text-sm">{item.full_name}</div>
+                                                                            <div className="text-xs text-slate-400 font-mono">{item.email}</div>
+                                                                            <div className="flex gap-1 mt-1">
+                                                                                {(item.roles || []).map((r, rI) => (
+                                                                                    <span key={rI} className="text-[10px] font-bold tracking-wider px-1.5 py-0.2 bg-slate-800 text-indigo-300 border border-slate-700/50 rounded uppercase">
+                                                                                        {r.role_name}
+                                                                                    </span>
+                                                                                ))}
+                                                                            </div>
                                                                         </div>
                                                                     </div>
                                                                 </td>
                                                                 <td className="p-4">
-                                                                    {item.face_vector ? (
-                                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Enrolled
+                                                                    {item.face_vector || item.face_enrolled ? (
+                                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold">
+                                                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                                                            Enrolled
                                                                         </span>
                                                                     ) : (
-                                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Not Enrolled
+                                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 text-slate-400 border border-slate-700/50 rounded-full text-xs font-bold">
+                                                                            <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+                                                                            Not Enrolled
                                                                         </span>
                                                                     )}
                                                                 </td>
-                                                                <td className="p-4 text-xs font-mono text-slate-600 max-w-[160px] truncate">
-                                                                    {item.face_vector ? `${item.face_vector.slice(0, 30)}…` : "—"}
+                                                                <td className="p-4 text-xs font-mono text-slate-400">
+                                                                    {item.face_vector ? "512-dim SFace Feature Vector" : "No biometric features"}
                                                                 </td>
                                                                 <td className="p-4 pr-6 text-right">
-                                                                    <button onClick={() => { setSelectedItem(item); setEnrollMethod("photo"); setPhotoPose("front"); setConfidence(0); setScanStep(0); setScanning(false); setShowFaceModal(true); }}
-                                                                            className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-xl text-xs inline-flex items-center gap-2 transition-all shadow-sm shadow-indigo-900/20">
-                                                                            <Icon name="camera" className="w-4 h-4" />
-                                                                            <span>{item.face_vector ? "Re-enroll Face ID" : "Enroll Face ID"}</span>
+                                                                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                        <button onClick={() => { setSelectedItem(item); setModalType("edit"); setShowModal(true); }} title="Manage Biometrics"
+                                                                            className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white">
+                                                                            <Icon name="scan-face" className="w-4 h-4" />
                                                                         </button>
+                                                                    </div>
                                                                 </td>
                                                             </tr>
                                                         );
 
-                                                        // Users sub-tab
-                                                        const userObj = item.user || item;
-                                                        const studentObj = item.student || null;
-                                                        const lecturerObj = item.lecturer || null;
-                                                        const staffObj = item.staff || null;
-                                                        const visitorObj = item.visitor || null;
-                                                        const adminObj = item.admin || null;
-                                                        return (
-                                                            <tr key={idx} className="hover:bg-slate-800/40 transition-colors group">
-                                                                <td className="p-4 pl-6">
-                                                                    <div className="flex items-center gap-4">
-                                                                        <div className="w-10 h-10 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center font-bold text-slate-300 text-xs shrink-0 shadow-sm">
-                                                                            {userObj.full_name?.split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase() || "??"}
+                                                        if (subTab === "users") {
+                                                            const studentObj = item.student;
+                                                            const lecturerObj = item.lecturer;
+                                                            const staffObj = item.staff;
+                                                            const visitorObj = item.visitor;
+                                                            const adminObj = item.admin;
+
+                                                            return (
+                                                                <tr key={idx} className="hover:bg-slate-800/40 transition-colors group">
+                                                                    <td className="p-4 pl-6">
+                                                                        <div className="flex items-center gap-3">
+                                                                            <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden shrink-0">
+                                                                                {item.imagepath ? (
+                                                                                    <img src={item.imagepath} alt={item.full_name} className="w-full h-full object-cover" />
+                                                                                ) : (
+                                                                                    <span className="text-xs font-bold text-slate-300">
+                                                                                        {item.given_name?.[0] || ""}{item.family_name?.[0] || ""}
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                            <div>
+                                                                                <div className="font-bold text-slate-200 text-sm flex items-center gap-2">
+                                                                                    {item.full_name}
+                                                                                </div>
+                                                                                <div className="text-xs text-slate-400 font-mono">{item.email}</div>
+                                                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                                                    {(item.roles || []).map((r, rI) => (
+                                                                                        <span key={rI} className="text-[10px] font-bold tracking-wider px-1.5 py-0.5 bg-indigo-950/80 text-indigo-300 border border-indigo-700/50 rounded uppercase">
+                                                                                            {r.role_name}
+                                                                                        </span>
+                                                                                    ))}
+                                                                                </div>
+                                                                            </div>
                                                                         </div>
-                                                                        <div>
-                                                                            <p className="font-bold text-slate-200 text-sm">{userObj.full_name}</p>
-                                                                            <p className="text-xs text-slate-500 mt-0.5">{userObj.email}</p>
+                                                                    </td>
+                                                                    <td className="p-4">
+                                                                        <div className="space-y-1">
+                                                                            {studentObj && (
+                                                                                <div className="text-xs text-slate-300 flex items-center gap-1.5">
+                                                                                    <Icon name="graduation-cap" className="w-3.5 h-3.5 text-indigo-400" />
+                                                                                    <span className="font-mono text-indigo-400 font-semibold">{studentObj.student_id}</span>
+                                                                                    {studentObj.program && <span className="text-slate-400">· {studentObj.program}</span>}
+                                                                                </div>
+                                                                            )}
+                                                                            {lecturerObj && (
+                                                                                <div className="text-xs text-slate-300 flex items-center gap-1.5">
+                                                                                    <Icon name="book-open" className="w-3.5 h-3.5 text-purple-400" />
+                                                                                    <span className="font-mono text-purple-400 font-semibold">{lecturerObj.lecturer_id}</span>
+                                                                                    {lecturerObj.Position_desc && <span className="text-slate-400">· {lecturerObj.Position_desc}</span>}
+                                                                                </div>
+                                                                            )}
+                                                                            {staffObj && (
+                                                                                <div className="text-xs text-slate-300 flex items-center gap-1.5">
+                                                                                    <Icon name="briefcase" className="w-3.5 h-3.5 text-emerald-400" />
+                                                                                    <span className="font-mono text-emerald-400 font-semibold">{staffObj.staff_id}</span>
+                                                                                    {staffObj.Position_desc && <span className="text-slate-400">· {staffObj.Position_desc}</span>}
+                                                                                </div>
+                                                                            )}
+                                                                            {visitorObj && (
+                                                                                <div className="text-xs text-slate-300 flex items-center gap-1.5">
+                                                                                    <Icon name="user-check" className="w-3.5 h-3.5 text-amber-400" />
+                                                                                    <span className="font-mono text-amber-400 font-semibold">{visitorObj.id_number}</span>
+                                                                                    {visitorObj.organization && <span className="text-slate-400">· {visitorObj.organization}</span>}
+                                                                                </div>
+                                                                            )}
+                                                                            {adminObj && (
+                                                                                <div className="text-xs text-slate-300 flex items-center gap-1.5">
+                                                                                    <Icon name="shield" className="w-3.5 h-3.5 text-rose-400" />
+                                                                                    <span className="font-mono text-rose-400 font-semibold">{adminObj.admin_id}</span>
+                                                                                    <span className="text-slate-400">· {adminObj.admin_type}</span>
+                                                                                </div>
+                                                                            )}
+                                                                            {!studentObj && !lecturerObj && !staffObj && !visitorObj && !adminObj && (
+                                                                                <span className="text-xs text-slate-500 italic">No specific profile assigned</span>
+                                                                            )}
                                                                         </div>
-                                                                    </div>
-                                                                </td>
-                                                                <td className="p-4">
-                                                                    <div className="space-y-2">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="text-[10px] font-bold tracking-widest bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded-md uppercase border border-slate-700/50">
-                                                                                {primaryRoleName(userObj)}
-                                                                            </span>
-                                                                            <span className="text-xs text-slate-500 font-mono bg-slate-900 px-1.5 py-0.5 rounded">#{userObj.user_id}</span>
-                                                                        </div>
-                                                                        {studentObj && <div className="text-xs text-slate-400 flex items-center gap-1.5"><Icon name="book" className="w-3 h-3 text-slate-500"/> <span className="text-indigo-400 font-mono">{studentObj.student_id}</span> · {studentObj.program}</div>}
-                                                                        {lecturerObj && <div className="text-xs text-slate-400 flex items-center gap-1.5"><Icon name="briefcase" className="w-3 h-3 text-slate-500"/> <span className="text-indigo-400 font-mono">{lecturerObj.lecturer_id}</span> · {lecturerObj.position}</div>}
-                                                                        {staffObj && <div className="text-xs text-slate-400 flex items-center gap-1.5"><Icon name="briefcase" className="w-3 h-3 text-slate-500"/> <span className="text-indigo-400 font-mono">{staffObj.staff_id}</span> · {staffObj.position}</div>}
-                                                                        {visitorObj && <div className="text-xs text-slate-400 flex items-center gap-1.5"><Icon name="user-check" className="w-3 h-3 text-slate-500"/> <span className="text-indigo-400 font-mono">{visitorObj.id_number}</span> · Exp {new Date(visitorObj.access_expiry).toLocaleDateString()}</div>}
-                                                                        {adminObj && <div className="text-xs text-slate-400 flex items-center gap-1.5"><Icon name="shield" className="w-3 h-3 text-slate-500"/> <span className="text-indigo-400 font-mono">{adminObj.admin_id}</span> · {adminObj.admin_type}</div>}
-                                                                    </div>
-                                                                </td>
-                                                                <td className="p-4">
-                                                                    {(subTab === "admins" && adminType !== "SUPER_ADMIN") ? (
-                                                                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${userObj.is_active ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
-                                                                            <span className={`w-1.5 h-1.5 rounded-full ${userObj.is_active ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
-                                                                            {userObj.is_active ? 'Active' : 'Deactivated'}
-                                                                        </span>
-                                                                    ) : (
+                                                                    </td>
+                                                                    <td className="p-4">
                                                                         <button onClick={() => handleToggleStatus(item)}
-                                                                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-all ${userObj.is_active ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500 hover:text-white hover:border-emerald-500' : 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500 hover:text-white hover:border-red-500'}`}>
-                                                                            <span className={`w-1.5 h-1.5 rounded-full ${userObj.is_active ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
-                                                                            {userObj.is_active ? 'Active' : 'Deactivated'}
+                                                                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-all ${item.is_active ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500 hover:text-white hover:border-emerald-500' : 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500 hover:text-white'}`}>
+                                                                            <span className={`w-1.5 h-1.5 rounded-full ${item.is_active ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
+                                                                            {item.is_active ? 'Active' : 'Deactivated'}
                                                                         </button>
-                                                                    )}
-                                                                </td>
-                                                                <td className="p-4 pr-6 text-right">
-                                                                    {(subTab === "admins" && adminType !== "SUPER_ADMIN") ? (
-                                                                        <span className="text-xs text-slate-600 italic">Restricted</span>
-                                                                    ) : (
+                                                                    </td>
+                                                                    <td className="p-4 pr-6 text-right">
                                                                         <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                                                             <button onClick={() => { setSelectedItem(item); setModalType("edit"); setShowModal(true); }} title="Edit User"
                                                                                 className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white">
@@ -1657,10 +1726,11 @@ function CampusMapTab() {
                                                                                 <Icon name="trash-2" className="w-4 h-4" />
                                                                             </button>
                                                                         </div>
-                                                                    )}
-                                                                </td>
-                                                            </tr>
-                                                        );
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        }
+                                                        return null;
                                                     })}
                                                 </tbody>
                                             </table>
@@ -1696,11 +1766,12 @@ function CampusMapTab() {
                                     customAction={subTab === 'documents' ? (
                                         <select value={accessLevelFilter} onChange={e => setAccessLevelFilter(e.target.value)}
                                             className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer">
-                                            <option value="ALL">All Access Levels</option>
-                                            <option value="PUBLIC">Public</option>
-                                            <option value="STUDENT">Students Only</option>
-                                            <option value="LECTURER">Lecturers Only</option>
-                                            <option value="ADMIN">Admins Only</option>
+                                            <option value="ALL">All Roles</option>
+                                            <option value="VISITOR">Visitor (Public)</option>
+                                            <option value="STUDENT">Students</option>
+                                            <option value="LECTURER">Lecturers</option>
+                                            <option value="STAFF">Staff</option>
+                                            <option value="ADMIN">Admins</option>
                                         </select>
                                     ) : null}
                                 />
@@ -1710,7 +1781,7 @@ function CampusMapTab() {
                                         <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
                                         <span className="text-sm font-semibold">Loading knowledge base...</span>
                                     </div>
-                               ) : listData.length === 0 ? (
+                                ) : listData.length === 0 ? (
                                     <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-800 bg-slate-900/30 rounded-3xl py-24">
                                         <div className="p-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-2xl mb-5"><Icon name="book-open" className="w-8 h-8" /></div>
                                         <h4 className="text-base font-bold text-slate-200">No content yet</h4>
@@ -1744,7 +1815,19 @@ function CampusMapTab() {
                                                                     </div>
                                                                 </td>
                                                                 <td className="p-4">
-                                                                    <span className="text-[10px] font-bold tracking-widest px-2.5 py-1 bg-slate-800 text-slate-300 border border-slate-700/50 rounded-md uppercase">{item.access_level}</span>
+                                                                    <div className="flex flex-wrap gap-1.5 max-w-xs">
+                                                                        {((item.allowed_roles && item.allowed_roles.length > 0)
+                                                                            ? item.allowed_roles
+                                                                            : (item.access_level === "PUBLIC" ? ["VISITOR"] : [item.access_level || "VISITOR"])
+                                                                        ).map((role, rIdx) => {
+                                                                            const isVisitor = role === "VISITOR" || role === "PUBLIC";
+                                                                            return (
+                                                                                <span key={rIdx} className={`text-[10px] font-bold tracking-wider px-2.5 py-0.5 rounded-md uppercase border ${isVisitor ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/50' : 'bg-indigo-950/80 text-indigo-300 border-indigo-700/50'}`}>
+                                                                                    {isVisitor ? "VISITOR (ALL ROLES)" : role}
+                                                                                </span>
+                                                                            );
+                                                                        })}
+                                                                    </div>
                                                                 </td>
                                                                 <td className="p-4 text-xs font-mono text-slate-400">{item.uploaded_at}</td>
                                                                 <td className="p-4">

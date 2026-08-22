@@ -46,8 +46,12 @@ class CitationSchema(BaseModel):
     document_id: int
     document_title: str
     chunk_index: int
-    access_level: str
+    access_level: Optional[str] = "VISITOR"
+    allowed_roles: Optional[List[str]] = Field(default_factory=lambda: ["VISITOR"])
     excerpt: str = Field(description="A short excerpt (first 200 chars) of the chunk text.")
+    chunk_type: Optional[str] = "DETAIL"
+    section_path: Optional[str] = None
+    entity_tags: Optional[List[Any]] = None
 
     model_config = {"from_attributes": True}
 

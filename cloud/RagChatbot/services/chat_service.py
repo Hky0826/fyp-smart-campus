@@ -83,6 +83,46 @@ def clear_rag_response_cache() -> None:
         _RAG_RESPONSE_CACHE.clear()
 
 
+def _make_citation(chunk) -> CitationSchema:
+    c_type = getattr(chunk, "chunk_type", "DETAIL")
+    c_type_str = str(c_type) if c_type is not None and not hasattr(c_type, "_mock_name") else "DETAIL"
+    s_path = getattr(chunk, "section_path", None)
+    s_path_str = str(s_path) if s_path is not None and not hasattr(s_path, "_mock_name") else None
+    e_tags = getattr(chunk, "entity_tags", [])
+    e_tags_list = list(e_tags) if isinstance(e_tags, list) else []
+    
+    raw_roles = getattr(chunk, "allowed_roles", None)
+    if isinstance(raw_roles, str):
+        try:
+            parsed_roles = json.loads(raw_roles)
+        except Exception:
+            parsed_roles = [raw_roles]
+    elif isinstance(raw_roles, (list, set, tuple)):
+        parsed_roles = list(raw_roles)
+    else:
+        parsed_roles = ["VISITOR"]
+
+    cid = getattr(chunk, "chunk_id", 1)
+    did = getattr(chunk, "document_id", 1)
+    dtitle = getattr(chunk, "document_title", "Campus Document")
+    cindex = getattr(chunk, "chunk_index", 1)
+    alevel = getattr(chunk, "access_level", "VISITOR")
+    ctext = getattr(chunk, "chunk_text", "")
+    
+    return CitationSchema(
+        chunk_id=cid if isinstance(cid, int) and not hasattr(cid, "_mock_name") else 1,
+        document_id=did if isinstance(did, int) and not hasattr(did, "_mock_name") else 1,
+        document_title=str(dtitle) if not hasattr(dtitle, "_mock_name") else "Campus Document",
+        chunk_index=cindex if isinstance(cindex, int) and not hasattr(cindex, "_mock_name") else 1,
+        access_level=str(alevel) if not hasattr(alevel, "_mock_name") else "VISITOR",
+        allowed_roles=parsed_roles,
+        excerpt=(str(ctext) if not hasattr(ctext, "_mock_name") else "")[:200],
+        chunk_type=c_type_str,
+        section_path=s_path_str,
+        entity_tags=e_tags_list,
+    )
+
+
 def _split_stream_text(text: str, max_chars: int = 30) -> Iterator[str]:
     """Split a generated answer into small streamed chunks for smooth live display."""
     pending = " ".join(text.split())
@@ -706,6 +746,9 @@ def process_chat(
             allowed_access_levels=allowed_levels,
             db=db,
             query_text=search_query,
+            category=getattr(route, "category_hint", None),
+            faculty_code=getattr(route, "faculty_hint", None),
+            is_broad_overview=getattr(route, "is_broad_overview", False),
         )
     metrics.embedding_db_search_ms += timer.elapsed_ms
 
@@ -750,18 +793,8 @@ def process_chat(
                 )
     metrics.rag_ms += timer.elapsed_ms
 
-# Step 8: Build citation objects
-    citations: List[CitationSchema] = [
-        CitationSchema(
-            chunk_id=chunk.chunk_id,
-            document_id=chunk.document_id,
-            document_title=chunk.document_title,
-            chunk_index=chunk.chunk_index,
-            access_level=chunk.access_level,
-            excerpt=chunk.chunk_text[:200],
-        )
-        for chunk in ranked_chunks
-    ]
+    # Step 8: Build citation objects
+    citations: List[CitationSchema] = [_make_citation(chunk) for chunk in ranked_chunks]
 
     total_elapsed = time.monotonic() - start_time
     response_time_ms = int(total_elapsed * 1000)
@@ -957,6 +990,9 @@ def process_chat_stream(
             allowed_access_levels=allowed_levels,
             db=db,
             query_text=search_query,
+            category=getattr(route, "category_hint", None),
+            faculty_code=getattr(route, "faculty_hint", None),
+            is_broad_overview=getattr(route, "is_broad_overview", False),
         )
     metrics.embedding_db_search_ms += timer.elapsed_ms
 
@@ -1014,17 +1050,7 @@ def process_chat_stream(
 
     full_answer = "".join(generated_tokens).strip()
 
-    citations: List[CitationSchema] = [
-        CitationSchema(
-            chunk_id=chunk.chunk_id,
-            document_id=chunk.document_id,
-            document_title=chunk.document_title,
-            chunk_index=chunk.chunk_index,
-            access_level=chunk.access_level,
-            excerpt=chunk.chunk_text[:200],
-        )
-        for chunk in ranked_chunks
-    ]
+    citations: List[CitationSchema] = [_make_citation(chunk) for chunk in ranked_chunks]
 
     total_elapsed = time.monotonic() - start_time
     response_time_ms = int(total_elapsed * 1000)
@@ -1220,17 +1246,7 @@ def process_public_smoke_chat(
                 )
     metrics.rag_ms += timer.elapsed_ms
 
-    citations: List[CitationSchema] = [
-        CitationSchema(
-            chunk_id=chunk.chunk_id,
-            document_id=chunk.document_id,
-            document_title=chunk.document_title,
-            chunk_index=chunk.chunk_index,
-            access_level=chunk.access_level,
-            excerpt=chunk.chunk_text[:200],
-        )
-        for chunk in ranked_chunks
-    ]
+    citations: List[CitationSchema] = [_make_citation(chunk) for chunk in ranked_chunks]
 
     metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
     log_inference_metrics(

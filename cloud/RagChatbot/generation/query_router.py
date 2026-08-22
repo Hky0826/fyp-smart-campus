@@ -3,11 +3,13 @@ LLM-based query router for the RAG chatbot.
 
 Classifies incoming queries to determine if they need vector database retrieval,
 or if they can be answered directly (e.g., greetings, out of scope, navigational).
+Extracts query facets (category, faculty, target audience) and overview hints for faceted RAG retrieval.
 """
 
 import json
 import logging
 import re
+from typing import Optional
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
@@ -47,12 +49,27 @@ _NAVIGATIONAL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Only send queries that contain a plausible movement/location hint to the LLM.
-# This preserves the cheap local path for ordinary document questions.
 _NAVIGATION_HINT_PATTERN = re.compile(
     r"\b(where|go|going|take|navigate|destination|directions?|route|reach|arrive|head|walk|guide|point|locate|nearby|nearest|located|food|eat|canteen|cashier|toilet|washroom|restroom|bathroom|library|cafeteria|cafe|reception|office|classroom|elevator|stairwell|entrance|pharmacy)\b",
     re.IGNORECASE,
 )
+
+_BROAD_OVERVIEW_PATTERN = re.compile(
+    r"\b(what\s+(?:programmes?|courses?|degrees?|faculties|schools?|scholarships?)\s+(?:are|do\s+you)\s+(?:offered|available|have)|list\s+all|overview\s+of|all\s+(?:degree|undergraduate|postgraduate|programmes?|faculties)|what\s+can\s+i\s+study)\b",
+    re.IGNORECASE,
+)
+
+_CATEGORY_FEES_PATTERN = re.compile(r"\b(fees?|tuition|scholarships?|financial\s+aid|ptptn|cost|pricing|discount|coverage)\b", re.IGNORECASE)
+_CATEGORY_ADMISSIONS_PATTERN = re.compile(r"\b(entry\s+requirements?|requirements?|eligibility|intakes?|apply|admission|deadline|qualifications?)\b", re.IGNORECASE)
+_CATEGORY_POLICIES_PATTERN = re.compile(r"\b(polic(?:y|ies)|plagiarism|appeals?|disciplinary|grading|attendance|deferment|withdrawal)\b", re.IGNORECASE)
+_CATEGORY_FACILITIES_PATTERN = re.compile(r"\b(facilit(?:y|ies)|hostel|accommodation|library|lab|laboratory|parking|bus|transport)\b", re.IGNORECASE)
+
+_FACULTY_PATTERNS = {
+    "FOCS": re.compile(r"\b(computer\s+science|computing|software|information\s+technology|it\b|bcs|bit)\b", re.IGNORECASE),
+    "FOHS": re.compile(r"\b(pharmacy|medicine|mbbs|biomedical|nursing|health)\b", re.IGNORECASE),
+    "FEST": re.compile(r"\b(engineering|mechatronics|electronic|biotechnology|environmental)\b", re.IGNORECASE),
+    "FOBP": re.compile(r"\b(business|finance|accountancy|accounting|bba|management)\b", re.IGNORECASE),
+}
 
 _ROUTE_CATEGORIES = {"GREETING", "CAPABILITY", "NAVIGATIONAL", "OUT_OF_SCOPE", "UNCLEAR", "UNIVERSITY_INFO"}
 _ROUTER_SYSTEM_PROMPT = """Classify the user's request into exactly one category.
@@ -73,6 +90,31 @@ class RouteClassification(BaseModel):
         default=None, 
         description="If category is UNCLEAR, provide a short clarifying question."
     )
+    category_hint: Optional[str] = None
+    faculty_hint: Optional[str] = None
+    is_broad_overview: bool = False
+
+
+def _extract_facets_from_query(query: str) -> tuple[Optional[str], Optional[str], bool]:
+    """Extract category hint, faculty hint, and overview flag using fast local regex matching."""
+    category_hint = None
+    if _CATEGORY_FEES_PATTERN.search(query):
+        category_hint = "FEES_SCHOLARSHIPS"
+    elif _CATEGORY_ADMISSIONS_PATTERN.search(query):
+        category_hint = "ADMISSIONS"
+    elif _CATEGORY_POLICIES_PATTERN.search(query):
+        category_hint = "POLICIES"
+    elif _CATEGORY_FACILITIES_PATTERN.search(query):
+        category_hint = "FACILITIES"
+
+    faculty_hint = None
+    for fac_code, pat in _FACULTY_PATTERNS.items():
+        if pat.search(query):
+            faculty_hint = fac_code
+            break
+
+    is_broad = bool(_BROAD_OVERVIEW_PATTERN.search(query))
+    return category_hint, faculty_hint, is_broad
 
 
 def _load_destination_catalog(db) -> list[tuple[str, str]]:
@@ -151,14 +193,18 @@ def _llm_navigation_fallback(query: str, destinations: list[tuple[str, str]]) ->
         category = str(payload.get("category", "")).upper()
         if category not in _ROUTE_CATEGORIES:
             return None
+        
+        cat_hint, fac_hint, is_broad = _extract_facets_from_query(query)
         result = RouteClassification(
             category=category,
             clarification_question=payload.get("clarification_question"),
+            category_hint=cat_hint,
+            faculty_hint=fac_hint,
+            is_broad_overview=is_broad,
         )
         logger.info("LLM query router classified request as %s", result.category)
         return result
     except Exception as exc:
-        # Intent classification must never prevent normal RAG handling.
         logger.warning("LLM query router fallback failed: %s", type(exc).__name__)
         return None
 
@@ -166,7 +212,6 @@ def _llm_navigation_fallback(query: str, destinations: list[tuple[str, str]]) ->
 def classify_query(query: str, db=None) -> RouteClassification:
     """
     Local Regex Guard & Intent Router (~2ms — 0 LLM calls).
-    
     Classifies queries locally first, with a targeted LLM fallback for navigation hints.
     """
     clean_query = query.strip()
@@ -175,6 +220,8 @@ def classify_query(query: str, db=None) -> RouteClassification:
             category="UNCLEAR",
             clarification_question="Could you please ask a question about campus services or documents?",
         )
+
+    cat_hint, fac_hint, is_broad = _extract_facets_from_query(clean_query)
 
     # 1. GREETING Fast-Path
     if _GREETING_PATTERN.match(clean_query):
@@ -190,7 +237,12 @@ def classify_query(query: str, db=None) -> RouteClassification:
     from RagChatbot.services.map_service import is_navigation_query
     if _NAVIGATIONAL_PATTERN.search(clean_query) or is_navigation_query(clean_query, db=db):
         logger.info("Local Regex Router classified '%s' as NAVIGATIONAL (0 LLM calls)", query)
-        return RouteClassification(category="NAVIGATIONAL")
+        return RouteClassification(
+            category="NAVIGATIONAL",
+            category_hint=cat_hint,
+            faculty_hint=fac_hint,
+            is_broad_overview=is_broad,
+        )
 
     # 4. UNCLEAR check
     is_en = detect_query_language(clean_query) == "en"
@@ -207,15 +259,26 @@ def classify_query(query: str, db=None) -> RouteClassification:
     if _query_mentions_destination(clean_query, destinations) and _normalise_query(clean_query) in {
         _normalise_query(label) for label, _ in destinations
     }:
-        return RouteClassification(category="NAVIGATIONAL")
+        return RouteClassification(
+            category="NAVIGATIONAL",
+            category_hint=cat_hint,
+            faculty_hint=fac_hint,
+            is_broad_overview=is_broad,
+        )
 
     llm_route = _llm_navigation_fallback(clean_query, destinations)
     if llm_route is not None:
         return llm_route
 
     # 6. Default: Substantive RAG Query (UNIVERSITY_INFO)
-    logger.info("Query router classified '%s' as UNIVERSITY_INFO", query)
-    return RouteClassification(category="UNIVERSITY_INFO")
+    logger.info("Query router classified '%s' as UNIVERSITY_INFO (category_hint=%s, faculty_hint=%s, broad=%s)",
+                query, cat_hint, fac_hint, is_broad)
+    return RouteClassification(
+        category="UNIVERSITY_INFO",
+        category_hint=cat_hint,
+        faculty_hint=fac_hint,
+        is_broad_overview=is_broad,
+    )
 
 
 def _normalise_query(value: str) -> str:

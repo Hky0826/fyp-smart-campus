@@ -123,3 +123,37 @@ def embed_document_chunk(chunk_text: str) -> List[float]:
     except Exception as exc:
         logger.error("Google document embedding API call failed: %s", exc)
         raise RuntimeError(f"Document embedding generation failed: {exc}") from exc
+
+
+def embed_document_chunks_batch(chunk_texts: List[str], batch_size: int = 50) -> List[List[float]]:
+    """
+    Generate embeddings for multiple document chunks in batched API calls.
+    Drastically reduces HTTP roundtrips and avoids rate limits.
+    """
+    if not chunk_texts:
+        return []
+
+    _configure_client()
+    embeddings: List[List[float]] = []
+
+    for i in range(0, len(chunk_texts), batch_size):
+        batch = chunk_texts[i:i + batch_size]
+        try:
+            result = genai.embed_content(
+                model=f"models/{rag_settings.EMBEDDING_MODEL}",
+                content=batch,
+                task_type="retrieval_document",
+            )
+            batch_embs = result.get("embedding", [])
+            embeddings.extend(batch_embs)
+            logger.debug("Batch embedded %d chunks (total so far: %d)", len(batch), len(embeddings))
+        except Exception as exc:
+            logger.warning("Batch embedding failed for batch %d..%d (%s); falling back to single calls", i, i + len(batch), exc)
+            for text in batch:
+                try:
+                    embeddings.append(embed_document_chunk(text))
+                except Exception as sub_exc:
+                    logger.error("Single chunk embedding fallback failed: %s", sub_exc)
+                    embeddings.append([])
+    return embeddings
+

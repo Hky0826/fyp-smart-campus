@@ -52,12 +52,41 @@ def background_ingest(document_id: int, force_reindex: bool = False):
 def list_documents(db: Session = Depends(get_db), current_admin=Depends(verify_content_admin)):
     return db.query(UploadedDocument).all()
 
+def _parse_form_roles(raw_roles: Optional[str], fallback_access_level: Optional[str] = None) -> List[str]:
+    """Helper to parse allowed_roles form parameter."""
+    valid_roles = {"VISITOR", "STUDENT", "LECTURER", "STAFF", "ADMIN"}
+    parsed: List[str] = []
+    if raw_roles:
+        try:
+            val = json.loads(raw_roles)
+            if isinstance(val, list):
+                parsed = [str(r).upper() for r in val if str(r).upper() in valid_roles]
+            elif isinstance(val, str) and val.upper() in valid_roles:
+                parsed = [val.upper()]
+        except Exception:
+            parsed = [r.strip().upper() for r in raw_roles.split(",") if r.strip().upper() in valid_roles]
+
+    if not parsed and fallback_access_level:
+        lvl = str(fallback_access_level).upper()
+        if lvl == "PUBLIC":
+            parsed = ["VISITOR"]
+        elif lvl in valid_roles:
+            parsed = [lvl]
+
+    return parsed if parsed else ["VISITOR"]
+
+
 @router.post("/documents", response_model=schemas.UploadedDocumentResponse)
 async def create_document(
     background_tasks: BackgroundTasks,
     title: str = Form(...),
-    access_level: str = Form(...),
+    access_level: Optional[str] = Form(None),
+    allowed_roles: Optional[str] = Form(None),
     uploaded_by: int = Form(...),
+    category: str = Form("GENERAL"),
+    faculty_code: Optional[str] = Form(None),
+    target_audience: str = Form("ALL"),
+    validity_year: Optional[int] = Form(None),
     is_active: bool = Form(True),
     file: UploadFile = File(None),
     db: Session = Depends(get_db), 
@@ -69,14 +98,20 @@ async def create_document(
         filename, stored_path = await save_upload(file, "documents", ALLOWED_DOCUMENT_EXTENSIONS, settings.MAX_DOCUMENT_BYTES)
         file_path = filename
 
-    if access_level not in {"PUBLIC", "STUDENT", "LECTURER", "ADMIN"}:
-        raise HTTPException(status_code=400, detail="Invalid document access level")
+    resolved_roles = _parse_form_roles(allowed_roles, access_level)
+    primary_role = resolved_roles[0] if resolved_roles else "VISITOR"
+
     doc = UploadedDocument(
         title=title,
         filename=filename,
         file_path=file_path,
         uploaded_by=current_admin.user_id,
-        access_level=access_level,
+        access_level=primary_role,
+        allowed_roles=resolved_roles,
+        category=category,
+        faculty_code=faculty_code,
+        target_audience=target_audience,
+        validity_year=validity_year,
         is_active=is_active
     )
     db.add(doc)
@@ -94,8 +129,13 @@ async def update_document(
     document_id: int, 
     background_tasks: BackgroundTasks,
     title: str = Form(None),
-    access_level: str = Form(None),
+    access_level: Optional[str] = Form(None),
+    allowed_roles: Optional[str] = Form(None),
     uploaded_by: int = Form(None),
+    category: Optional[str] = Form(None),
+    faculty_code: Optional[str] = Form(None),
+    target_audience: Optional[str] = Form(None),
+    validity_year: Optional[int] = Form(None),
     is_active: bool = Form(None),
     file: UploadFile = File(None),
     db: Session = Depends(get_db), 
@@ -106,13 +146,19 @@ async def update_document(
         raise HTTPException(status_code=404, detail="Document not found")
         
     if title is not None: doc.title = title
-    old_access_level = doc.access_level
-    if access_level is not None:
-        if access_level not in {"PUBLIC", "STUDENT", "LECTURER", "ADMIN"}:
-            raise HTTPException(status_code=400, detail="Invalid document access level")
-        doc.access_level = access_level
+    if category is not None: doc.category = category
+    if faculty_code is not None: doc.faculty_code = faculty_code
+    if target_audience is not None: doc.target_audience = target_audience
+    if validity_year is not None: doc.validity_year = validity_year
+
+    if allowed_roles is not None or access_level is not None:
+        resolved_roles = _parse_form_roles(allowed_roles, access_level)
+        doc.allowed_roles = resolved_roles
+        doc.access_level = resolved_roles[0] if resolved_roles else "VISITOR"
         for chunk in doc.chunks:
-            chunk.access_level = access_level
+            chunk.allowed_roles = resolved_roles
+            chunk.access_level = doc.access_level
+
     doc.uploaded_by = current_admin.user_id
     if is_active is not None: doc.is_active = is_active
     
@@ -128,7 +174,7 @@ async def update_document(
     if file:
         # Trigger re-ingestion in background if a new file is uploaded
         background_tasks.add_task(background_ingest, doc.document_id, True)
-    elif access_level is not None and access_level != old_access_level:
+    elif allowed_roles is not None or access_level is not None:
         from RagChatbot.retrieval.vector_store import vector_store
         if vector_store.is_loaded:
             vector_store.load_from_db(db)
