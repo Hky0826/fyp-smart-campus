@@ -438,13 +438,17 @@ class EmbeddingVectorResponse(EmbeddingVectorBase):
     created_at: datetime.datetime
 
 class ChatbotQueryBase(BaseSchema):
-    session_id: int
+    session_id: Optional[int] = None
     user_id: Optional[int] = None
     query_text: str
+    query_category: Optional[str] = None
     response_text: Optional[str] = None
     retrieved_chunks: Optional[List[int]] = None
     response_time_ms: Optional[int] = None
     is_navigational: bool = False
+    user_name: Optional[str] = None
+    user_email: Optional[str] = None
+    user_role: Optional[str] = None
 
 class ChatbotQueryResponse(ChatbotQueryBase):
     query_id: int

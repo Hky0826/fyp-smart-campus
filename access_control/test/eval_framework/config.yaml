@@ -11,8 +11,8 @@ datasets:
   lfw:
     name: "LFW"
     data_dir: "./data/lfw" # Where the LFW dataset is/will be downloaded
-    pairs_file: "./data/lfw/pairs.txt"
-    sample_size: 5000 # Sample around 5000 images worth of pairs
+    pairs_file: "./data/lfw/pairs.csv"
+    sample_size: 6000 # Evaluate full 6000 pairs
   cfp:
     name: "CFP"
     data_dir: "./data/cfp" # Where CFP will be downloaded
@@ -21,7 +21,7 @@ datasets:
 
 # Threshold parameters for Cosine Similarity
 thresholds:
-  start: 0.3
+  start: 0.1
   end: 0.9
   step: 0.01
 

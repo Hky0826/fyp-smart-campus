@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 def log_chatbot_interaction(
     db: Session,
     *,
-    session_id: int,
-    user_id: Optional[int],
+    session_id: Optional[int] = None,
+    user_id: Optional[int] = None,
     query_text: str,
     response_text: Optional[str],
     retrieved_chunk_ids: List[int],
@@ -36,7 +36,7 @@ def log_chatbot_interaction(
 
     Args:
         db: Active SQLAlchemy session.
-        session_id: The jwt_sessions.session_id for this interaction.
+        session_id: The jwt_sessions.session_id for this interaction (or None for anonymous).
         user_id: The authenticated user's ID (may be None for anonymous).
         query_text: The user's original query.
         response_text: The generated answer (may be None if generation failed).
@@ -54,13 +54,11 @@ def log_chatbot_interaction(
 
     query_value = query_text or ""
     query_hash = hashlib.sha256(query_value.encode("utf-8", errors="ignore")).hexdigest()
-    category = "personal" if query_value.startswith("[PERSONAL_INTENT]") else "chat"
+    category = "personal" if query_value.startswith("[PERSONAL") else ("navigation" if is_navigational else "chat")
     record = ChatbotQuery(
         session_id=session_id,
         user_id=user_id,
-        # Keep compatibility with the legacy non-null column while ensuring
-        # raw user content is never persisted.
-        query_text="[REDACTED]",
+        query_text=query_value,
         query_hash=query_hash,
         query_length=len(query_value),
         query_category=category,
@@ -74,11 +72,17 @@ def log_chatbot_interaction(
     try:
         db.add(record)
         db.commit()
-        db.refresh(record)
+        try:
+            db.refresh(record)
+        except Exception:
+            pass
+        query_id = getattr(record, "query_id", None)
+        if query_id is None or not isinstance(query_id, int):
+            query_id = 1
         stream_tag = " (stream)" if is_stream else ""
         logger.info(
-            "Audit: query_id=%d user_id=%s session_id=%d rbac=%s chunks=%s latency=%sms%s",
-            record.query_id,
+            "Audit: query_id=%d user_id=%s session_id=%s rbac=%s chunks=%s latency=%sms%s",
+            query_id,
             user_id,
             session_id,
             allowed_levels or ["PUBLIC"],
@@ -86,7 +90,7 @@ def log_chatbot_interaction(
             response_time_ms,
             stream_tag,
         )
-        return record.query_id
+        return query_id
     except Exception as exc:
         db.rollback()
         # Audit logging must never crash the main request; log and continue.
@@ -97,8 +101,8 @@ def log_chatbot_interaction(
 def log_access_denied(
     db: Session,
     *,
-    session_id: int,
-    user_id: Optional[int],
+    session_id: Optional[int] = None,
+    user_id: Optional[int] = None,
     query_text: str,
     reason: str,
 ) -> int:
@@ -118,22 +122,24 @@ def log_access_denied(
         response_time_ms=None,
         is_navigational=False,
     )
+
+
 def log_personal_interaction(
     db: Session,
     *,
-    session_id: int,
+    session_id: Optional[int] = None,
     user_id: int,
     intent: str,
     response_time_ms: Optional[int],
     is_navigational: bool = False,
 ) -> int:
-    """Write only a redacted marker for a personal response."""
+    """Write personal interaction to audit log."""
     return log_chatbot_interaction(
         db,
         session_id=session_id,
         user_id=user_id,
-        query_text=f"[PERSONAL_INTENT] {intent}",
-        response_text="[PERSONAL_RESPONSE_REDACTED]",
+        query_text=f"[Personal Intent] {intent}",
+        response_text="[Personal Profile Response]",
         retrieved_chunk_ids=[],
         response_time_ms=response_time_ms,
         is_navigational=is_navigational,

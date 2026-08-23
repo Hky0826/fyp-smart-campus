@@ -30,25 +30,49 @@ class PersonalDataRepository:
         user = self.db.query(User).filter_by(user_id=context.user_id, is_active=True).first()
         if not user:
             return []
-        name = getattr(user, "full_name", "").strip()
+        name = getattr(user, "full_name", "").strip() or f"{getattr(user, 'given_name', '')} {getattr(user, 'family_name', '')}".strip() or "User"
         profiles: list[SafeProfile] = []
-        if context.student_id and getattr(user, "student", None):
-            student = user.student
-            profiles.append(SafeProfile(name=name, role="STUDENT", programme=getattr(student, "program", None), faculty=getattr(student, "faculty", None)))
-        if context.lecturer_id and getattr(user, "lecturer", None):
-            lecturer = user.lecturer
-            profiles.append(SafeProfile(name=name, role="LECTURER", faculty=getattr(lecturer, "faculty", None), department=getattr(lecturer, "department", None), position=getattr(lecturer, "position", None), office=self._location(getattr(lecturer, "office", None)).display or None))
+        
+        # 1. Student profile
+        student = getattr(user, "student", None)
+        if student or context.student_id or "STUDENT" in context.roles:
+            prog = getattr(student, "program", None) or context.program
+            fac = getattr(student, "faculty", None) or context.faculty
+            profiles.append(SafeProfile(name=name, role="STUDENT", programme=prog, faculty=fac))
+            
+        # 2. Lecturer profile
+        lecturer = getattr(user, "lecturer", None)
+        if lecturer or context.lecturer_id or "LECTURER" in context.roles:
+            fac = getattr(lecturer, "faculty", None) or context.faculty
+            dept = getattr(lecturer, "department", None) or context.department
+            pos = getattr(lecturer, "position", None) or getattr(lecturer, "Position_desc", None) or context.position_desc
+            off = self._location(getattr(lecturer, "office", None)).display if lecturer else None
+            profiles.append(SafeProfile(name=name, role="LECTURER", faculty=fac, department=dept, position=pos, office=off or None))
+            
+        # 3. Staff profile
         staff = getattr(user, "staff", None)
-        if staff and context.staff_id:
-            profiles.append(SafeProfile(name=name, role="STAFF", department=getattr(staff, "department", None), position=getattr(staff, "position", None), office=self._location(getattr(staff, "office", None)).display or None))
-        if context.visitor_id and getattr(user, "visitor", None):
-            visitor = user.visitor
-            if not self._visitor_expired(getattr(visitor, "access_expiry", None)):
-                profiles.append(SafeProfile(name=name, role="VISITOR"))
-        if context.admin_id:
-            profiles.append(SafeProfile(name=name, role="ADMINISTRATOR"))
+        if (staff or context.staff_id or "STAFF" in context.roles) and not lecturer:
+            dept = getattr(staff, "department", None) or context.department
+            pos = getattr(staff, "position", None) or getattr(staff, "Position_desc", None) or context.position_desc
+            off = self._location(getattr(staff, "office", None)).display if staff else None
+            profiles.append(SafeProfile(name=name, role="STAFF", department=dept, position=pos, office=off or None))
+            
+        # 4. Admin profile
+        admin = getattr(user, "admin", None)
+        if admin or context.admin_id or "ADMIN" in context.roles:
+            adm_type = getattr(admin, "admin_type", None) or context.admin_type or "ADMINISTRATOR"
+            profiles.append(SafeProfile(name=name, role="ADMINISTRATOR", position=adm_type))
+            
+        # 5. Visitor profile
+        visitor = getattr(user, "visitor", None)
+        if visitor or context.visitor_id or "VISITOR" in context.roles:
+            if not visitor or not self._visitor_expired(getattr(visitor, "access_expiry", None)):
+                org = getattr(visitor, "organization", None) or context.organization
+                profiles.append(SafeProfile(name=name, role="VISITOR", department=org))
+                
         if not profiles:
-            profiles.append(SafeProfile(name=name, role=(context.roles[0] if context.roles else "USER")))
+            role_name = context.roles[0] if context.roles else "USER"
+            profiles.append(SafeProfile(name=name, role=role_name))
         return profiles
 
     def profile(self, context: AuthenticatedChatContext) -> Optional[SafeProfile]:

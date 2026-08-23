@@ -337,6 +337,10 @@ class Lecturer(Base):
     def is_head_of_department(self):
         return False
 
+    @is_head_of_department.setter
+    def is_head_of_department(self, val):
+        pass
+
 class Visitor(Base):
     __tablename__ = "visitors"
     
@@ -466,7 +470,7 @@ class ChatbotQuery(Base):
     __tablename__ = "chatbot_queries"
     
     query_id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(Integer, ForeignKey("jwt_sessions.session_id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("jwt_sessions.session_id"), nullable=True)
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
     query_text = Column(Text, nullable=False)
     query_hash = Column(String(64), nullable=True)

@@ -82,6 +82,11 @@ _TTS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     thread_name_prefix="rag-audio-tts",
 )
 
+def _safe_query_id(val: Any) -> Optional[int]:
+    if isinstance(val, int) and val > 0:
+        return val
+    return None
+
 def _tts_base64(text: str, language_code: Optional[str] = None) -> Optional[str]:
     """Generate base64 PCM audio for safe response text."""
     if not rag_settings.AUDIO_TTS_ENABLED or not text.strip():
@@ -479,28 +484,27 @@ def process_audio_chat(
         context = context or resolve_auth_context(bearer_token, db, requested_device_id=device_id)
         query_id = None
         response_time_ms = int((time.monotonic() - start_time) * 1000)
-        if resolved_session_id is not None and user_id is not None:
-            if planned.kind == "personal":
-                logged_query_id = log_personal_interaction(
-                    db,
-                    session_id=resolved_session_id,
-                    user_id=user_id,
-                    intent=planned.intent or "UNKNOWN",
-                    response_time_ms=response_time_ms,
-                    is_navigational=bool(planned.navigation),
-                )
-            else:
-                logged_query_id = log_chatbot_interaction(
-                    db,
-                    session_id=resolved_session_id,
-                    user_id=user_id,
-                    query_text=sanitized_query,
-                    response_text=planned.answer or "",
-                    retrieved_chunk_ids=[],
-                    response_time_ms=response_time_ms,
-                    is_navigational=planned.kind == "navigation",
-                )
-            query_id = logged_query_id if logged_query_id > 0 else None
+        if planned.kind == "personal":
+            logged_query_id = log_personal_interaction(
+                db,
+                session_id=resolved_session_id,
+                user_id=user_id or 0,
+                intent=planned.intent or "UNKNOWN",
+                response_time_ms=response_time_ms,
+                is_navigational=bool(planned.navigation),
+            )
+        else:
+            logged_query_id = log_chatbot_interaction(
+                db,
+                session_id=resolved_session_id,
+                user_id=user_id,
+                query_text=sanitized_query,
+                response_text=planned.answer or "",
+                retrieved_chunk_ids=[],
+                response_time_ms=response_time_ms,
+                is_navigational=planned.kind == "navigation",
+            )
+        query_id = _safe_query_id(logged_query_id)
         navigation_data = planned.navigation
         return _audio_response(
             transcribed_input=user_query,
@@ -595,6 +599,7 @@ def process_audio_chat(
                 sanitized_query,
                 ranked_chunks,
                 chat_history=_recent_chat_history(db, resolved_session_id),
+                user_context=context,
             )
         except RuntimeError as exc:
             logger.error("Audio chat: generation failed for user_id=%s: %s", user_id, exc)
@@ -656,18 +661,16 @@ def process_audio_chat(
     response_time_ms = int(metrics.time_to_first_tts_ms) if metrics.time_to_first_tts_ms > 0 else int((time.monotonic() - start_time) * 1000)
 
 # Step 13: Audit log
-    audit_query_id: Optional[int] = None
-    if resolved_session_id is not None and resolved_session_id > 0:
-        logged_id = log_chatbot_interaction(
-            db,
-            session_id=resolved_session_id,
-            user_id=user_id,
-            query_text=sanitized_query,
-            response_text=answer_text,
-            retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
-            response_time_ms=response_time_ms,
-        )
-        audit_query_id = logged_id if logged_id > 0 else None
+    logged_id = log_chatbot_interaction(
+        db,
+        session_id=resolved_session_id,
+        user_id=user_id,
+        query_text=sanitized_query,
+        response_text=answer_text,
+        retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
+        response_time_ms=response_time_ms,
+    )
+    audit_query_id: Optional[int] = _safe_query_id(logged_id)
 
 # Step 14: Return AudioChatResponse
     return _audio_response(
@@ -1049,9 +1052,8 @@ def process_audio_chat_stream(
         if rag_settings.AUDIO_TTS_ENABLED and fast_answer:
             pending.append((fast_answer, _TTS_EXECUTOR.submit(_tts_job, fast_answer, detected_language)))
         yield from _drain_tts_queue(pending, metrics, start_time, wait=True)
-        if resolved_session_id is not None and resolved_session_id > 0:
-            tts_time = int(metrics.time_to_first_tts_ms) if metrics.time_to_first_tts_ms > 0 else int((time.monotonic() - start_time) * 1000)
-            log_chatbot_interaction(db, session_id=resolved_session_id, user_id=user_id, query_text=sanitized_query, response_text=fast_answer, retrieved_chunk_ids=[], response_time_ms=tts_time, is_navigational=bool(navigation_data))
+        tts_time = int(metrics.time_to_first_tts_ms) if metrics.time_to_first_tts_ms > 0 else int((time.monotonic() - start_time) * 1000)
+        log_chatbot_interaction(db, session_id=resolved_session_id, user_id=user_id, query_text=sanitized_query, response_text=fast_answer, retrieved_chunk_ids=[], response_time_ms=tts_time, is_navigational=bool(navigation_data))
         yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
         return
 
@@ -1135,6 +1137,7 @@ def process_audio_chat_stream(
             sanitized_query,
             ranked_chunks,
             chat_history=_recent_chat_history(db, resolved_session_id),
+            user_context=context,
         ):
             full_answer_parts.append(token)
             yield {"event": "chunk", "data": {"text": token}}
@@ -1164,21 +1167,20 @@ def process_audio_chat_stream(
 
     full_answer = "".join(full_answer_parts)
     audit_query_id: Optional[int] = None
-    if resolved_session_id is not None and resolved_session_id > 0:
-        try:
-            tts_time = int(metrics.time_to_first_tts_ms) if metrics.time_to_first_tts_ms > 0 else int((time.monotonic() - start_time) * 1000)
-            logged_id = log_chatbot_interaction(
-                db,
-                session_id=resolved_session_id,
-                user_id=user_id,
-                query_text=sanitized_query,
-                response_text=full_answer,
-                retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
-                response_time_ms=tts_time,
-            )
-            audit_query_id = logged_id if logged_id > 0 else None
-        except Exception:
-            logger.warning("Audio chat stream: unable to persist conversation", exc_info=True)
+    try:
+        tts_time = int(metrics.time_to_first_tts_ms) if metrics.time_to_first_tts_ms > 0 else int((time.monotonic() - start_time) * 1000)
+        logged_id = log_chatbot_interaction(
+            db,
+            session_id=resolved_session_id,
+            user_id=user_id,
+            query_text=sanitized_query,
+            response_text=full_answer,
+            retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
+            response_time_ms=tts_time,
+        )
+        audit_query_id = _safe_query_id(logged_id)
+    except Exception:
+        logger.warning("Audio chat stream: unable to persist conversation", exc_info=True)
     final_res = _audio_response(
         transcribed_input=user_query,
         text_response=full_answer,

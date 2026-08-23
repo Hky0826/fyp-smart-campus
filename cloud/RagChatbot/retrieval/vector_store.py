@@ -366,12 +366,12 @@ class InMemoryVectorStore:
                 for c_roles in self.allowed_roles
             ], dtype=bool)
 
-        if category and category.upper() != "ALL":
-            mask = mask & (self.categories == category.upper())
-        if faculty_code and faculty_code.upper() != "ALL":
-            mask = mask & ((self.faculty_codes == faculty_code.upper()) | (self.faculty_codes == ""))
-        if target_audience and target_audience.upper() != "ALL":
-            mask = mask & ((self.target_audiences == target_audience.upper()) | (self.target_audiences == "ALL"))
+        if category and category.upper() not in ("ALL", "GENERAL"):
+            mask = mask & ((self.categories == category.upper()) | (self.categories == "GENERAL") | (self.categories == ""))
+        if faculty_code and faculty_code.upper() not in ("ALL", "GENERAL"):
+            mask = mask & ((self.faculty_codes == faculty_code.upper()) | (self.faculty_codes == "GENERAL") | (self.faculty_codes == ""))
+        if target_audience and target_audience.upper() not in ("ALL", "GENERAL"):
+            mask = mask & ((self.target_audiences == target_audience.upper()) | (self.target_audiences == "ALL") | (self.target_audiences == "GENERAL") | (self.target_audiences == ""))
         if chunk_types:
             mask = mask & np.isin(self.chunk_types, chunk_types)
 

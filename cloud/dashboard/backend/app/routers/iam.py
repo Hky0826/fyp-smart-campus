@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 
 from app.core.database import get_db
-from app.core.security import verify_system_admin, verify_super_admin, get_password_hash, validate_strong_password
+from app.core.security import verify_system_admin, verify_super_admin, verify_content_admin, get_password_hash, validate_strong_password
 from app.core.config import settings
 from app.core.private_storage import private_path, safe_existing_path
 from app.core.audit import record_audit
@@ -545,7 +545,8 @@ def update_student(student_id: str, student_in: schemas.StudentUpdate, db: Sessi
     
     # Update Student fields
     for field, val in student_data.items():
-        setattr(student, field, val)
+        if hasattr(student, field):
+            setattr(student, field, val)
         
     if faculty_id or faculty:
         fac = resolve_faculty(db, faculty_id, faculty)
@@ -672,11 +673,13 @@ def update_lecturer(lecturer_id: str, lecturer_in: schemas.LecturerUpdate, db: S
     department_id = lecturer_data.pop("department_id", None)
     faculty_id = lecturer_data.pop("faculty_id", None)
     position = lecturer_data.pop("position", None)
-    office_node_id = lecturer_data.get("office_node_id", None)
+    is_head_of_department = lecturer_data.pop("is_head_of_department", None)
+    office_node_id = lecturer_data.pop("office_node_id", None)
     
     # Update Lecturer fields
     for field, val in lecturer_data.items():
-        setattr(lecturer, field, val)
+        if hasattr(lecturer, field):
+            setattr(lecturer, field, val)
         
     if position is not None:
         lecturer.Position_desc = position
@@ -794,7 +797,8 @@ def update_staff(staff_id: str, staff_in: schemas.StaffUpdate, db: Session = Dep
     staff_type = staff_data.pop("staff_type", None)
     
     for field, val in staff_data.items():
-        setattr(staff, field, val)
+        if hasattr(staff, field):
+            setattr(staff, field, val)
         
     if department_id is not None or department is not None:
         dept = resolve_department(db, department_id, department)
@@ -897,7 +901,8 @@ def update_visitor(visitor_id: str, visitor_in: schemas.VisitorUpdate, db: Sessi
     user_data = visitor_data.pop("user", None)
     
     for field, val in visitor_data.items():
-        setattr(visitor, field, val)
+        if hasattr(visitor, field):
+            setattr(visitor, field, val)
         
     if user_data:
         apply_user_update(db, visitor.user, user_data)
@@ -1010,7 +1015,8 @@ def update_admin(admin_id: str, admin_in: schemas.AdminUpdate, db: Session = Dep
     office_node_id = admin_data.pop("office_node_id", None)
     
     for field, val in admin_data.items():
-        setattr(admin, field, val)
+        if hasattr(admin, field):
+            setattr(admin, field, val)
         
     if password:
         try:
@@ -1135,7 +1141,7 @@ def download_user_face_image(
     user_id: int,
     pose: str,
     db: Session = Depends(get_db),
-    current_admin=Depends(verify_super_admin),
+    current_admin=Depends(verify_content_admin),
 ):
     from app.models.models import UserImage
     image = db.query(UserImage).filter_by(user_id=user_id, template_name=pose).first()

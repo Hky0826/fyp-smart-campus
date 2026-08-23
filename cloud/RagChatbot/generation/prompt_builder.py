@@ -4,6 +4,7 @@ Prompt builder for the RAG Chatbot.
 Constructs the system and user prompts sent to the Google LLM.
 The system prompt enforces:
   - Grounding (answer only from provided context)
+  - User identity & role awareness (tailored persona and contextual guidance)
   - Role boundary (never reveal system details, API keys, or database schema)
   - Safe fallback (politely decline if context is insufficient)
 
@@ -56,7 +57,106 @@ Rules:
 12. Group broad lists by faculty or category.
 13. Preserve dates, times, fees, names, and codes exactly.
 14. Be concise, accurate, and respectful.
+15. Ground personalization and tone in the verified active user profile.
 """
+
+
+def build_user_identity_block(user_context: Optional[Any]) -> str:
+    """
+    Construct an authoritative user identity and persona block for system prompt injection.
+    """
+    if not user_context:
+        return (
+            "Active User Identity & Role Context:\n"
+            "- Authentication: Unauthenticated Visitor / Guest\n"
+            "- Roles: VISITOR\n"
+            "- Tone & Persona: Friendly, welcoming campus host. Guide the visitor with directions, public events, admissions, visitor parking, and campus facilities."
+        )
+
+    is_auth = getattr(user_context, "authenticated", False)
+    if isinstance(user_context, dict):
+        is_auth = user_context.get("authenticated", False)
+
+    if not is_auth:
+        return (
+            "Active User Identity & Role Context:\n"
+            "- Authentication: Unauthenticated Visitor / Guest\n"
+            "- Roles: VISITOR\n"
+            "- Tone & Persona: Friendly, welcoming campus host. Guide the visitor with directions, public events, admissions, visitor parking, and campus facilities."
+        )
+
+    def _get(key, default=None):
+        if isinstance(user_context, dict):
+            return user_context.get(key, default)
+        return getattr(user_context, key, default)
+
+    full_name = _get("full_name") or _get("name") or "User"
+    given_name = _get("given_name")
+    roles = _get("roles", ())
+    roles_list = list(roles) if isinstance(roles, (list, tuple, set)) else [str(roles)]
+    roles_str = ", ".join(roles_list) if roles_list else "USER"
+
+    student_id = _get("student_id")
+    lecturer_id = _get("lecturer_id")
+    staff_id = _get("staff_id")
+    visitor_id = _get("visitor_id")
+    admin_id = _get("admin_id")
+    admin_type = _get("admin_type")
+    program = _get("program")
+    faculty = _get("faculty")
+    department = _get("department")
+    position_desc = _get("position_desc")
+    organization = _get("organization")
+    device_label = _get("device_label")
+
+    lines = ["Active User Identity & Role Context:"]
+    lines.append(f"- Full Name: {full_name}")
+    if given_name:
+        lines.append(f"- Given Name: {given_name}")
+    lines.append(f"- Verified Roles: {roles_str}")
+
+    if student_id:
+        lines.append(f"- Student ID: {student_id}")
+    if program:
+        lines.append(f"- Programme of Study: {program}")
+    if faculty:
+        lines.append(f"- Faculty: {faculty}")
+    if lecturer_id:
+        lines.append(f"- Lecturer ID: {lecturer_id}")
+    if position_desc:
+        lines.append(f"- Position / Designation: {position_desc}")
+    if staff_id:
+        lines.append(f"- Staff ID: {staff_id}")
+    if department:
+        lines.append(f"- Department: {department}")
+    if admin_id or admin_type:
+        adm_desc = f"{admin_id} ({admin_type})" if admin_id and admin_type else (admin_id or admin_type)
+        lines.append(f"- Administrator Authority: {adm_desc}")
+    if visitor_id or organization:
+        v_desc = f"{visitor_id} from {organization}" if visitor_id and organization else (visitor_id or organization)
+        lines.append(f"- Visitor Registration: {v_desc}")
+    if device_label:
+        lines.append(f"- Current Interaction Location: {device_label}")
+
+    # Role-adaptive tone guidance
+    lines.append("\nRole-Adaptive Guidance Instructions:")
+    upper_roles = [r.upper() for r in roles_list]
+    if "STUDENT" in upper_roles:
+        addr = given_name or (full_name.split()[0] if full_name else "Student")
+        lines.append(f"- Address the student warmly (e.g., '{addr}').")
+        lines.append("- Tailor answers to student academic regulations, course policies, faculty guidelines, schedules, and student support services.")
+    elif "LECTURER" in upper_roles:
+        lines.append(f"- Address the user respectfully as academic faculty (e.g., 'Prof./Dr./Lecturer {full_name}').")
+        lines.append("- Tailor answers to academic governance, faculty curriculum, classroom/lab policies, and teaching schedules.")
+    elif "STAFF" in upper_roles:
+        lines.append(f"- Address the staff member professionally (e.g., '{full_name}').")
+        lines.append("- Provide operational, administrative, and workplace guidance.")
+    elif "ADMIN" in upper_roles:
+        lines.append("- Address the administrator with comprehensive system, governance, and institutional policy clarity.")
+    else:
+        lines.append("- Address the user politely and helpfully based on their campus context.")
+
+    return "\n".join(lines)
 
 
 def build_context_block(chunks: List[RankedChunk]) -> str:
@@ -77,7 +177,6 @@ def build_context_block(chunks: List[RankedChunk]) -> str:
 
     for chunk in chunks:
         raw_text = chunk.chunk_text.strip()
-        # Normalize for deduplication
         norm_snippet = " ".join(raw_text.split()[:30]).lower()
         if norm_snippet in seen_texts:
             continue
@@ -92,7 +191,12 @@ def build_context_block(chunks: List[RankedChunk]) -> str:
     return "\n\n---\n\n".join(parts) if parts else "No relevant context documents are available."
 
 
-def build_prompt(query: str, chunks: List[RankedChunk], chat_history: Optional[List[Dict[str, Any]]] = None) -> tuple[str, str]:
+def build_prompt(
+    query: str,
+    chunks: List[RankedChunk],
+    chat_history: Optional[List[Dict[str, Any]]] = None,
+    user_context: Optional[Any] = None,
+) -> tuple[str, str]:
     """
     Build the system and user messages to send to the LLM.
 
@@ -100,11 +204,15 @@ def build_prompt(query: str, chunks: List[RankedChunk], chat_history: Optional[L
         query: The sanitized user query.
         chunks: Authorized, re-ranked document chunks.
         chat_history: Optional list of previous interactions (dicts with 'user' and 'assistant' keys).
+        user_context: Optional AuthenticatedChatContext or dict with verified user identity & roles.
 
     Returns:
         A tuple of (system_prompt, user_message) strings.
     """
     context_block = build_context_block(chunks)
+    identity_block = build_user_identity_block(user_context)
+
+    system_prompt = f"{_SYSTEM_PROMPT}\n\n---\n\n{identity_block}"
 
     history_block = ""
     if chat_history:
@@ -121,4 +229,4 @@ def build_prompt(query: str, chunks: List[RankedChunk], chat_history: Optional[L
         f"Answer based only on the context documents above:"
     )
 
-    return _SYSTEM_PROMPT, user_message
+    return system_prompt, user_message

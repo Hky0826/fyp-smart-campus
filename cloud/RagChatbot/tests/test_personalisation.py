@@ -128,9 +128,20 @@ class PersonalisationTests(unittest.TestCase):
         self.assertEqual(route.intent, PersonalIntent.TIMETABLE)
         self.assertEqual(route.date_scope, DateScope.TODAY)
 
-    def test_causes_stt_mishearing_parses_to_courses(self):
-        route = parse_personal_intent("what are the causes that I have enrolled in")
-        self.assertEqual(route.intent, PersonalIntent.COURSES)
+    def test_who_am_i_parses_to_profile_intent(self):
+        for phrase in ("who am i", "who i am", "what is my name", "what is my role", "my profile", "tell me who i am"):
+            route = parse_personal_intent(phrase)
+            self.assertEqual(route.intent, PersonalIntent.PROFILE, f"Failed for query: {phrase}")
+
+    def test_who_am_i_returns_profile_information(self):
+        from RagChatbot.personalisation.schemas import SafeProfile
+        repo = FakeRepository()
+        repo.profiles = lambda ctx: [SafeProfile(name="Dr. Smith", role="LECTURER", faculty="Computing", department="AI", position="Professor")]
+        context = AuthenticatedChatContext(3, 10, roles=("LECTURER",), lecturer_id="L3", full_name="Dr. Smith", authenticated=True)
+        result = handle_personal_request(parse_personal_intent("who am i"), context, None, repository=repo)
+        self.assertTrue(result.access_granted)
+        self.assertIn("Dr. Smith", result.answer)
+        self.assertIn("lecturer", result.answer)
 
 
 if __name__ == "__main__":

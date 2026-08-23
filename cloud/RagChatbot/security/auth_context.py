@@ -100,24 +100,43 @@ def resolve_auth_context(
         role_names.add("ADMIN")
     roles = tuple(sorted(role_names))
 
-    # Identity records are independent of role ordering. A person can hold
-    # more than one role and each applicable record remains available to the
-    # personalisation layer.
-    student_id = getattr(getattr(user, "student", None), "student_id", None)
-    lecturer_id = getattr(getattr(user, "lecturer", None), "lecturer_id", None)
-    staff_id = getattr(getattr(user, "staff", None), "staff_id", None)
-    visitor_id = getattr(getattr(user, "visitor", None), "visitor_id", None)
-    admin_id = getattr(getattr(user, "admin", None), "admin_id", None)
+    student_obj = getattr(user, "student", None)
+    lecturer_obj = getattr(user, "lecturer", None)
+    staff_obj = getattr(user, "staff", None)
+    visitor_obj = getattr(user, "visitor", None)
+    admin_obj = getattr(user, "admin", None)
+
+    student_id = getattr(student_obj, "student_id", None)
+    lecturer_id = getattr(lecturer_obj, "lecturer_id", None)
+    staff_id = getattr(staff_obj, "staff_id", None)
+    visitor_id = getattr(visitor_obj, "visitor_id", None) or getattr(visitor_obj, "id_number", None)
+    admin_id = getattr(admin_obj, "admin_id", None)
+    admin_type = getattr(admin_obj, "admin_type", None)
+
+    program = getattr(student_obj, "program", None)
+    faculty = getattr(student_obj, "faculty", None) or getattr(lecturer_obj, "faculty", None)
+    department = getattr(staff_obj, "department", None) or getattr(admin_obj, "department", None)
+    position_desc = getattr(lecturer_obj, "Position_desc", None) or getattr(staff_obj, "Position_desc", None)
+    organization = getattr(visitor_obj, "organization", None)
+
     full_name = getattr(user, "full_name", None) or getattr(user, "name", None)
     given_name = getattr(user, "given_name", None)
 
     return AuthenticatedChatContext(
-        user_id=user_id, session_id=int(session.session_id), roles=roles,
+        user_id=user_id,
+        session_id=int(session.session_id),
+        roles=roles,
         student_id=student_id,
         lecturer_id=lecturer_id,
         staff_id=staff_id,
         visitor_id=visitor_id,
         admin_id=admin_id,
+        admin_type=admin_type,
+        program=program,
+        faculty=faculty,
+        department=department,
+        position_desc=position_desc,
+        organization=organization,
         device_id=getattr(session, "device_id", None),
         device_node_id=getattr(trusted_device, "node_id", None),
         device_label=getattr(getattr(trusted_device, "node", None), "room_label", None),

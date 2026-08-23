@@ -23,7 +23,12 @@ from RagChatbot.retrieval.ranking import RankedChunk
 logger = logging.getLogger(__name__)
 
 
-def generate_answer(query: str, chunks: List[RankedChunk], chat_history: Optional[List[Dict[str, Any]]] = None) -> str:
+def generate_answer(
+    query: str,
+    chunks: List[RankedChunk],
+    chat_history: Optional[List[Dict[str, Any]]] = None,
+    user_context: Optional[Any] = None,
+) -> str:
     """
     Generate a grounded answer using the Google Gemini model.
 
@@ -35,6 +40,7 @@ def generate_answer(query: str, chunks: List[RankedChunk], chat_history: Optiona
         query: The sanitized user query.
         chunks: Authorized, re-ranked document chunks to use as context.
         chat_history: Optional list of previous interactions (dicts with 'user' and 'assistant' keys).
+        user_context: Optional verified user identity, roles, and persona context.
 
     Returns:
         The generated answer string.
@@ -42,7 +48,7 @@ def generate_answer(query: str, chunks: List[RankedChunk], chat_history: Optiona
     Raises:
         RuntimeError: If the Google API call fails.
     """
-    system_prompt, user_message = build_prompt(query, chunks, chat_history)
+    system_prompt, user_message = build_prompt(query, chunks, chat_history, user_context=user_context)
 
     try:
         client = get_gemini_client()
@@ -76,6 +82,7 @@ def generate_answer_stream(
     query: str,
     chunks: List[RankedChunk],
     chat_history: Optional[List[Dict[str, Any]]] = None,
+    user_context: Optional[Any] = None,
 ) -> Iterator[str]:
     """
     Generate a grounded answer using the Google Gemini streaming API.
@@ -86,6 +93,7 @@ def generate_answer_stream(
         query: The sanitized user query.
         chunks: Authorized, re-ranked document chunks to use as context.
         chat_history: Optional list of previous interactions.
+        user_context: Optional verified user identity, roles, and persona context.
 
     Yields:
         String fragments of the answer as they are generated.
@@ -93,7 +101,7 @@ def generate_answer_stream(
     Raises:
         RuntimeError: If the Google API streaming call fails.
     """
-    system_prompt, user_message = build_prompt(query, chunks, chat_history)
+    system_prompt, user_message = build_prompt(query, chunks, chat_history, user_context=user_context)
 
     try:
         client = get_gemini_client()

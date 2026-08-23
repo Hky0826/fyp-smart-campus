@@ -9,7 +9,11 @@ from fastapi import HTTPException, UploadFile
 
 from app.core.config import settings
 
-ALLOWED_DOCUMENT_EXTENSIONS = {".txt", ".md", ".csv"}
+ALLOWED_DOCUMENT_EXTENSIONS = {
+    ".txt", ".md", ".csv",
+    ".pdf",
+    ".docx", ".doc",
+}
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
 

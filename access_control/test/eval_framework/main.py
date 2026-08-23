@@ -42,6 +42,7 @@ def run_evaluation(dataset, model_interface, thresholds, far_targets, results_di
     
     labels = []
     scores = []
+    processed_pairs = []
     skipped_count = 0
     
     # 2. Extract Embeddings and Compute Scores
@@ -53,6 +54,7 @@ def run_evaluation(dataset, model_interface, thresholds, far_targets, results_di
             
             labels.append(is_same)
             scores.append(score)
+            processed_pairs.append((img1, img2, is_same, score))
         except Exception as e:
             if skipped_count < 2:
                 print(f"\n[Warning] Skipped pair due to error: {e}")
@@ -91,6 +93,7 @@ def run_evaluation(dataset, model_interface, thresholds, far_targets, results_di
     # 5. Export Data
     pd.DataFrame({'genuine_scores': genuine_scores}).to_csv(os.path.join(results_dir, "genuine_scores.csv"), index=False)
     pd.DataFrame({'impostor_scores': impostor_scores}).to_csv(os.path.join(results_dir, "impostor_scores.csv"), index=False)
+    pd.DataFrame(processed_pairs, columns=['img1', 'img2', 'is_same', 'similarity_score']).to_csv(os.path.join(results_dir, "detailed_pairs.csv"), index=False)
     threshold_df.to_csv(os.path.join(results_dir, "threshold_results.csv"), index=False)
     
     metrics = {
@@ -114,6 +117,7 @@ def main():
     parser.add_argument("--dataset", type=str, choices=['all', 'lfw', 'cfp'], default='all', help="Which dataset to evaluate")
     parser.add_argument("--detector", type=str, default="face_detection_yunet_2023mar_int8bq.onnx", help="Filename of the detector model")
     parser.add_argument("--embedder", type=str, default="face_recognition_sface_2021dec.onnx", help="Filename of the embedder model")
+    parser.add_argument("--simulate-camera", action="store_true", help="Enable camera degradation simulation")
     args = parser.parse_args()
 
     config = load_config()
@@ -126,12 +130,15 @@ def main():
     embedder_path = os.path.join(models_dir, args.embedder)
     
     print(f"Using Detector: {args.detector}")
-    print(f"Using Embedder: {args.embedder}\n")
+    print(f"Using Embedder: {args.embedder}")
+    print(f"Camera Simulation: {args.simulate_camera}\n")
 
+    from model_interface import CameraSimulator
     model_interface = ModelInterface(
         detector_path=detector_path,
         embedder_path=embedder_path,
-        device="cpu"
+        device="cpu",
+        camera_simulator=CameraSimulator(enabled=args.simulate_camera)
     )
     
     t_start = config['thresholds']['start']

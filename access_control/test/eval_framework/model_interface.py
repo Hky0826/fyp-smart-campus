@@ -12,7 +12,7 @@ from access_control.facial_recognition.src.face.detection import YuNetDetector
 from access_control.facial_recognition.src.face.alignment import FaceAligner
 from access_control.facial_recognition.src.face.embedding import SFaceEmbedder
 
-ENABLE_CAMERA_SIMULATION = True
+ENABLE_CAMERA_SIMULATION = False
 CAMERA_SCALE_PERCENT = 20
 CAMERA_BLUR_KERNEL = (5, 5)
 CAMERA_NOISE_VARIANCE = 10.0

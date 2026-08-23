@@ -1927,23 +1927,33 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
             
             const initialRoles = (() => {
                 if (item?.allowed_roles) {
-                    if (Array.isArray(item.allowed_roles)) return item.allowed_roles;
+                    if (Array.isArray(item.allowed_roles)) {
+                        return item.allowed_roles.includes("VISITOR")
+                            ? ["VISITOR", "STUDENT", "LECTURER", "STAFF", "ADMIN"]
+                            : item.allowed_roles;
+                    }
                     try {
                         const parsed = JSON.parse(item.allowed_roles);
-                        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+                        if (Array.isArray(parsed) && parsed.length > 0) {
+                            return parsed.includes("VISITOR")
+                                ? ["VISITOR", "STUDENT", "LECTURER", "STAFF", "ADMIN"]
+                                : parsed;
+                        }
                     } catch (e) {}
                 }
                 if (item?.access_level) {
-                    return item.access_level === "PUBLIC" ? ["VISITOR"] : [item.access_level];
+                    return item.access_level === "PUBLIC" || item.access_level === "VISITOR"
+                        ? ["VISITOR", "STUDENT", "LECTURER", "STAFF", "ADMIN"]
+                        : [item.access_level];
                 }
-                return ["VISITOR"];
+                return ["VISITOR", "STUDENT", "LECTURER", "STAFF", "ADMIN"];
             })();
 
             const [selectedRoles, setSelectedRoles] = useState(initialRoles);
             const [file, setFile] = useState(null);
 
             const ALL_SYSTEM_ROLES = [
-                { id: "VISITOR", label: "Visitor", badge: "Public / All", desc: "Open to everyone including guests and unauthenticated visitors" },
+                { id: "VISITOR", label: "Visitor", badge: "All Roles / Public", desc: "Selecting Visitor automatically grants access to all system roles" },
                 { id: "STUDENT", label: "Student", badge: "Students", desc: "Enrolled university students" },
                 { id: "LECTURER", label: "Lecturer", badge: "Faculty", desc: "Academic teaching staff and professors" },
                 { id: "STAFF", label: "Staff", badge: "Operations", desc: "Administrative, technical, and facility staff" },
@@ -1951,11 +1961,34 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
             ];
 
             const toggleRole = (roleId) => {
-                if (selectedRoles.includes(roleId)) {
-                    if (selectedRoles.length === 1) return; // Prevent 0 roles selected
-                    setSelectedRoles(selectedRoles.filter(r => r !== roleId));
+                const allRoleIds = ALL_SYSTEM_ROLES.map(r => r.id);
+                const nonVisitorRoleIds = ["STUDENT", "LECTURER", "STAFF", "ADMIN"];
+
+                if (roleId === "VISITOR") {
+                    if (selectedRoles.includes("VISITOR")) {
+                        // Unchecking VISITOR: keep remaining roles if any, else default to STUDENT
+                        const remaining = selectedRoles.filter(r => r !== "VISITOR");
+                        setSelectedRoles(remaining.length > 0 ? remaining : ["STUDENT"]);
+                    } else {
+                        // Checking VISITOR: automatically selects ALL roles!
+                        setSelectedRoles(allRoleIds);
+                    }
                 } else {
-                    setSelectedRoles([...selectedRoles, roleId]);
+                    if (selectedRoles.includes(roleId)) {
+                        // Unchecking an individual role: remove that role AND also remove VISITOR
+                        const next = selectedRoles.filter(r => r !== roleId && r !== "VISITOR");
+                        if (next.length === 0) return; // Prevent 0 roles selected
+                        setSelectedRoles(next);
+                    } else {
+                        // Checking an individual role: add it
+                        const next = [...selectedRoles, roleId];
+                        // If all non-visitor roles are now selected, auto-select VISITOR as well
+                        const hasAllNonVisitor = nonVisitorRoleIds.every(r => next.includes(r));
+                        if (hasAllNonVisitor && !next.includes("VISITOR")) {
+                            next.push("VISITOR");
+                        }
+                        setSelectedRoles(next);
+                    }
                 }
             };
 
@@ -1981,8 +2014,8 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     </div>
 
                     <div>
-                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Document File</label>
-                        <input type="file" required={!item?.document_id} onChange={e => setFile(e.target.files[0])} accept=".txt,.md,.csv" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-900/30 file:text-indigo-400 hover:file:bg-indigo-900/50" />
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Document File (PDF, Word, Text, Markdown, CSV)</label>
+                        <input type="file" required={!item?.document_id} onChange={e => setFile(e.target.files[0])} accept=".txt,.md,.csv,.pdf,.docx,.doc" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-900/30 file:text-indigo-400 hover:file:bg-indigo-900/50" />
                         {item?.file_path && !file && <p className="text-xs text-slate-500 mt-1">Current file: {item.filename}</p>}
                     </div>
 
@@ -2017,14 +2050,6 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                 );
                             })}
                         </div>
-                        {selectedRoles.includes("VISITOR") && (
-                            <div className="mt-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-start gap-2.5">
-                                <Icon name="check-circle" className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
-                                <div>
-                                    <span className="font-bold">Universal / Public Access Active:</span> When <strong>Visitor</strong> is selected, this document is universally accessible to <strong>all campus roles</strong> (Visitors, Students, Lecturers, Staff, and Admins).
-                                </div>
-                            </div>
-                        )}
                     </div>
 
                     <div className="flex justify-end gap-3 mt-6 pt-2 border-t border-slate-800/60">

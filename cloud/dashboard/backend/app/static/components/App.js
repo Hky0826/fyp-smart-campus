@@ -948,13 +948,13 @@ function CampusMapTab() {
                     if (currentTab === "iam") {
                         if (subTab === "roles") return q === "" || item.role_name?.toLowerCase().includes(q) || item.description?.toLowerCase().includes(q);
                         if (subTab === "facial-recognition") {
-                            const mQ = q === "" || item.full_name?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q);
+                            const mQ = q === "" || item.full_name?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q) || String(item.user_id).includes(q);
                             const mR = faceRoleFilter === "ALL" || userHasRole(item, faceRoleFilter);
                             const mS = faceStatusFilter === "ALL" || (faceStatusFilter === "ENROLLED" ? !!item.face_vector : !item.face_vector);
                             return mQ && mR && mS;
                         }
                         if (subTab === "users") {
-                            const mQ = q === "" || item.full_name?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q) || item.student?.student_id?.toLowerCase().includes(q) || item.lecturer?.lecturer_id?.toLowerCase().includes(q) || item.staff?.staff_id?.toLowerCase().includes(q);
+                            const mQ = q === "" || item.full_name?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q) || String(item.user_id).includes(q) || item.student?.student_id?.toLowerCase().includes(q) || item.lecturer?.lecturer_id?.toLowerCase().includes(q) || item.staff?.staff_id?.toLowerCase().includes(q);
                             const mR = roleFilter === "ALL" || userHasRole(item, roleFilter);
                             const mS = statusFilter === "ALL" || (statusFilter === "ACTIVE" ? item.is_active : !item.is_active);
                             return mQ && mR && mS;
@@ -985,7 +985,20 @@ function CampusMapTab() {
                                 || (isUniversal);
                             return matchesQuery && matchesRole;
                         }
-                        if (subTab === "chatbot-queries") return q === "" || item.query_text?.toLowerCase().includes(q);
+                        if (subTab === "chatbot-queries") {
+                            const matchesQuery = q === "" 
+                                || item.query_text?.toLowerCase().includes(q)
+                                || item.response_text?.toLowerCase().includes(q)
+                                || item.user_name?.toLowerCase().includes(q)
+                                || item.user_email?.toLowerCase().includes(q);
+                            const matchesRole = roleFilter === "ALL" 
+                                || (item.user_role?.toUpperCase() === roleFilter.toUpperCase())
+                                || (roleFilter === "VISITOR" && (!item.user_role || item.user_role === "VISITOR"));
+                            const matchesNav = accessLevelFilter === "ALL"
+                                || (accessLevelFilter === "NAV" && item.is_navigational)
+                                || (accessLevelFilter === "INFO" && !item.is_navigational);
+                            return matchesQuery && matchesRole && matchesNav;
+                        }
                     }
                     if (currentTab === "infra") {
                         if (subTab === "devices") return q === "" || item.device_name?.toLowerCase().includes(q) || item.device_id?.toLowerCase().includes(q);
@@ -1100,6 +1113,72 @@ function CampusMapTab() {
 
             // ── Render modal form ─────────────────────────────
             const renderModalForm = () => {
+                if (modalType === "view-chatbot-query" && selectedItem) {
+                    return (
+                        <div className="space-y-5 text-sm">
+                            <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">User / Requester</span>
+                                    <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider border ${
+                                        selectedItem.user_role === 'ADMIN' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                        selectedItem.user_role === 'LECTURER' ? 'bg-violet-500/10 text-violet-400 border-violet-500/20' :
+                                        selectedItem.user_role === 'STUDENT' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                        selectedItem.user_role === 'STAFF' ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' :
+                                        'bg-slate-800 text-slate-400 border-slate-700/50'
+                                    }`}>
+                                        {selectedItem.user_role || "VISITOR"}
+                                    </span>
+                                </div>
+                                <div>
+                                    <p className="font-bold text-slate-100 text-base">{selectedItem.user_name || "Anonymous Visitor"}</p>
+                                    {selectedItem.user_email && <p className="text-xs text-slate-400 font-mono mt-0.5">{selectedItem.user_email}</p>}
+                                    {selectedItem.user_id && <p className="text-[11px] text-slate-500 font-mono mt-0.5">User ID: #{selectedItem.user_id} {selectedItem.session_id ? `• Session ID: #${selectedItem.session_id}` : ''}</p>}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Question Asked</label>
+                                <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-slate-100 text-sm font-medium leading-relaxed">
+                                    {selectedItem.query_text}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Chatbot Response</label>
+                                <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-slate-300 text-xs font-normal leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap">
+                                    {selectedItem.response_text || "No response recorded."}
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3">
+                                    <span className="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Response Time</span>
+                                    <span className="text-xs font-mono font-bold text-indigo-400">{selectedItem.response_time_ms ? `${selectedItem.response_time_ms} ms` : 'N/A'}</span>
+                                </div>
+                                <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3">
+                                    <span className="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Intent / Type</span>
+                                    <span className="text-xs font-bold text-slate-300">{selectedItem.is_navigational ? 'Navigation' : 'Information'}</span>
+                                </div>
+                                <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3 col-span-2 sm:col-span-1">
+                                    <span className="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Source Chunks</span>
+                                    <span className="text-xs font-mono text-slate-300">{selectedItem.retrieved_chunks?.length ? `${selectedItem.retrieved_chunks.length} chunk${selectedItem.retrieved_chunks.length > 1 ? 's' : ''}` : 'None'}</span>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-between items-center text-xs text-slate-500 font-mono pt-2 border-t border-slate-800">
+                                <span>Query ID: #{selectedItem.query_id}</span>
+                                <span>{selectedItem.timestamp ? new Date(selectedItem.timestamp).toLocaleString() : ''}</span>
+                            </div>
+
+                            <div className="pt-2">
+                                <button type="button" onClick={() => setShowModal(false)}
+                                    className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition-colors">
+                                    Close Details
+                                </button>
+                            </div>
+                        </div>
+                    );
+                }
                 if (subTab === "users") return <UserForm item={selectedItem} roles={refs.roles} nodes={refs.nodes} programmes={refs.programmes} faculties={refs.faculties} departments={refs.departments} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (subTab === "roles") return <RoleForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "rag" && subTab === "documents") return <DocumentForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
@@ -1585,14 +1664,15 @@ function CampusMapTab() {
                                                                 <td className="p-4 pl-6">
                                                                     <div className="flex items-center gap-3">
                                                                         <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden shrink-0">
-                                                                            {item.imagepath ? (
-                                                                                <img src={item.imagepath} alt={item.full_name} className="w-full h-full object-cover" />
-                                                                            ) : (
-                                                                                <Icon name="user" className="w-5 h-5 text-slate-400" />
-                                                                            )}
+                                                                            <span className="text-xs font-bold text-slate-300">
+                                                                                {((item.given_name?.[0] || "") + (item.family_name?.[0] || "")).toUpperCase() || (item.full_name?.slice(0, 2).toUpperCase() || "U")}
+                                                                            </span>
                                                                         </div>
                                                                         <div>
-                                                                            <div className="font-bold text-slate-200 text-sm">{item.full_name}</div>
+                                                                            <div className="font-bold text-slate-200 text-sm flex items-center gap-2">
+                                                                                {item.full_name}
+                                                                                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60">ID: #{item.user_id}</span>
+                                                                            </div>
                                                                             <div className="text-xs text-slate-400 font-mono">{item.email}</div>
                                                                             <div className="flex gap-1 mt-1">
                                                                                 {(item.roles || []).map((r, rI) => (
@@ -1643,17 +1723,14 @@ function CampusMapTab() {
                                                                     <td className="p-4 pl-6">
                                                                         <div className="flex items-center gap-3">
                                                                             <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden shrink-0">
-                                                                                {item.imagepath ? (
-                                                                                    <img src={item.imagepath} alt={item.full_name} className="w-full h-full object-cover" />
-                                                                                ) : (
-                                                                                    <span className="text-xs font-bold text-slate-300">
-                                                                                        {item.given_name?.[0] || ""}{item.family_name?.[0] || ""}
-                                                                                    </span>
-                                                                                )}
+                                                                                <span className="text-xs font-bold text-slate-300">
+                                                                                    {((item.given_name?.[0] || "") + (item.family_name?.[0] || "")).toUpperCase() || (item.full_name?.slice(0, 2).toUpperCase() || "U")}
+                                                                                </span>
                                                                             </div>
                                                                             <div>
                                                                                 <div className="font-bold text-slate-200 text-sm flex items-center gap-2">
                                                                                     {item.full_name}
+                                                                                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60">ID: #{item.user_id}</span>
                                                                                 </div>
                                                                                 <div className="text-xs text-slate-400 font-mono">{item.email}</div>
                                                                                 <div className="flex flex-wrap gap-1 mt-1">
@@ -1757,7 +1834,7 @@ function CampusMapTab() {
                                     title={subTab === 'documents' ? "Uploaded Documents" : "Chatbot Conversations"}
                                     description={
                                         subTab === 'documents' ? "Upload and manage documents that the campus chatbot uses to answer questions." :
-                                        "Review chatbot conversation history and response quality."
+                                        "Review and analyze user queries submitted to the chatbot, response quality, and latency."
                                     }
                                     searchVal={searchQuery}
                                     onSearchChange={setSearchQuery}
@@ -1773,6 +1850,24 @@ function CampusMapTab() {
                                             <option value="STAFF">Staff</option>
                                             <option value="ADMIN">Admins</option>
                                         </select>
+                                    ) : subTab === 'chatbot-queries' ? (
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}
+                                                className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer">
+                                                <option value="ALL">All Roles</option>
+                                                <option value="VISITOR">Visitor</option>
+                                                <option value="STUDENT">Student</option>
+                                                <option value="LECTURER">Lecturer</option>
+                                                <option value="STAFF">Staff</option>
+                                                <option value="ADMIN">Admin</option>
+                                            </select>
+                                            <select value={accessLevelFilter} onChange={e => setAccessLevelFilter(e.target.value)}
+                                                className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer">
+                                                <option value="ALL">All Types</option>
+                                                <option value="INFO">Information</option>
+                                                <option value="NAV">Navigation</option>
+                                            </select>
+                                        </div>
                                     ) : null}
                                 />
 
@@ -1819,14 +1914,11 @@ function CampusMapTab() {
                                                                         {((item.allowed_roles && item.allowed_roles.length > 0)
                                                                             ? item.allowed_roles
                                                                             : (item.access_level === "PUBLIC" ? ["VISITOR"] : [item.access_level || "VISITOR"])
-                                                                        ).map((role, rIdx) => {
-                                                                            const isVisitor = role === "VISITOR" || role === "PUBLIC";
-                                                                            return (
-                                                                                <span key={rIdx} className={`text-[10px] font-bold tracking-wider px-2.5 py-0.5 rounded-md uppercase border ${isVisitor ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/50' : 'bg-indigo-950/80 text-indigo-300 border-indigo-700/50'}`}>
-                                                                                    {isVisitor ? "VISITOR (ALL ROLES)" : role}
-                                                                                </span>
-                                                                            );
-                                                                        })}
+                                                                        ).map((role, rIdx) => (
+                                                                            <span key={rIdx} className="text-[10px] font-bold tracking-wider px-2.5 py-0.5 rounded-md uppercase border bg-indigo-950/80 text-indigo-300 border-indigo-700/50">
+                                                                                {role === "PUBLIC" ? "VISITOR" : role}
+                                                                            </span>
+                                                                        ))}
                                                                     </div>
                                                                 </td>
                                                                 <td className="p-4 text-xs font-mono text-slate-400">{item.uploaded_at}</td>
@@ -1885,25 +1977,85 @@ function CampusMapTab() {
                                                 <table className="w-full text-left text-sm">
                                                     <thead>
                                                         <tr className="bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80">
-                                                            <th className="p-4 pl-6 font-semibold">Question Asked</th>
+                                                            <th className="p-4 pl-6 font-semibold">User / Requester</th>
+                                                            <th className="p-4 font-semibold">Question Asked</th>
                                                             <th className="p-4 font-semibold">Response</th>
-                                                            <th className="p-4 w-44 font-semibold">Time to First TTS</th>
-                                                            <th className="p-4 pr-6 w-36 text-right font-semibold">Type</th>
+                                                            <th className="p-4 w-32 font-semibold">Latency</th>
+                                                            <th className="p-4 w-36 font-semibold">Type</th>
+                                                            <th className="p-4 pr-6 w-24 text-right font-semibold">Actions</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y divide-slate-800/50">
                                                         {paginatedData.map((item, idx) => (
-                                                            <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
-                                                                <td className="p-4 pl-6">
-                                                                    <p className="font-bold text-slate-200 text-sm">{item.query_text}</p>
-                                                                    <span className="text-[10px] text-slate-500 font-mono mt-1 block">{item.timestamp}</span>
+                                                            <tr key={idx} className="hover:bg-slate-800/40 transition-colors group">
+                                                                <td className="p-4 pl-6 align-top">
+                                                                    <div className="flex items-start gap-3">
+                                                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                                                                            item.user_role === 'ADMIN' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                                                                            item.user_role === 'LECTURER' ? 'bg-violet-500/10 text-violet-400 border border-violet-500/20' :
+                                                                            item.user_role === 'STUDENT' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                                                                            item.user_role === 'STAFF' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20' :
+                                                                            'bg-slate-800 text-slate-400 border border-slate-700/50'
+                                                                        }`}>
+                                                                            {item.user_name ? item.user_name.charAt(0).toUpperCase() : <Icon name="user" className="w-4 h-4"/>}
+                                                                        </div>
+                                                                        <div>
+                                                                            <p className="font-bold text-slate-200 text-xs">{item.user_name || "Anonymous Visitor"}</p>
+                                                                            <span className={`inline-block mt-0.5 text-[9px] font-bold tracking-wider px-1.5 py-0.2 rounded uppercase border ${
+                                                                                item.user_role === 'ADMIN' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                                                                item.user_role === 'LECTURER' ? 'bg-violet-500/10 text-violet-400 border-violet-500/20' :
+                                                                                item.user_role === 'STUDENT' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                                                                item.user_role === 'STAFF' ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' :
+                                                                                'bg-slate-800 text-slate-400 border-slate-700/50'
+                                                                            }`}>
+                                                                                {item.user_role || "VISITOR"}
+                                                                            </span>
+                                                                            {item.user_email && <p className="text-[10px] text-slate-500 truncate max-w-[140px] mt-0.5">{item.user_email}</p>}
+                                                                        </div>
+                                                                    </div>
                                                                 </td>
-                                                                <td className="p-4 text-xs text-slate-400 leading-relaxed max-w-lg">{item.response_text || "No response recorded."}</td>
-                                                                <td className="p-4 text-xs font-mono text-indigo-400 font-semibold">{item.response_time_ms ? `${item.response_time_ms}ms` : 'N/A'}</td>
-                                                                <td className="p-4 pr-6 text-right text-xs">
-                                                                    {item.is_navigational
-                                                                        ? <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-bold uppercase tracking-wider text-[10px]"><Icon name="map" className="w-3 h-3"/> Navigation</span>
-                                                                        : <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 border border-slate-700/50 text-slate-400 font-bold uppercase tracking-wider text-[10px]"><Icon name="info" className="w-3 h-3"/> Information</span>}
+                                                                <td className="p-4 align-top max-w-xs">
+                                                                    <p className="font-bold text-slate-200 text-xs leading-snug line-clamp-2">{item.query_text}</p>
+                                                                    <span className="text-[10px] text-slate-500 font-mono mt-1 block">
+                                                                        {item.timestamp ? new Date(item.timestamp).toLocaleString() : ''}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="p-4 align-top text-xs text-slate-400 leading-relaxed max-w-sm">
+                                                                    <p className="line-clamp-2">{item.response_text || "No response recorded."}</p>
+                                                                    {item.retrieved_chunks && item.retrieved_chunks.length > 0 && (
+                                                                        <span className="text-[10px] text-indigo-400 font-mono mt-1 inline-flex items-center gap-1">
+                                                                            <Icon name="book-open" className="w-3 h-3" /> {item.retrieved_chunks.length} source chunk{item.retrieved_chunks.length > 1 ? 's' : ''}
+                                                                        </span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="p-4 align-top text-xs font-mono">
+                                                                    {item.response_time_ms ? (
+                                                                        <span className="px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-semibold">
+                                                                            {item.response_time_ms}ms
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="text-slate-600">N/A</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="p-4 align-top text-xs">
+                                                                    {item.is_navigational ? (
+                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-bold uppercase tracking-wider text-[9px]">
+                                                                            <Icon name="map" className="w-3 h-3"/> Navigation
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 border border-slate-700/50 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
+                                                                            <Icon name="info" className="w-3 h-3"/> Information
+                                                                        </span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="p-4 pr-6 align-top text-right">
+                                                                    <button
+                                                                        onClick={() => { setSelectedItem(item); setModalType("view-chatbot-query"); setShowModal(true); }}
+                                                                        title="View Details"
+                                                                        className="p-1.5 bg-slate-800 hover:bg-indigo-600 hover:text-white border border-slate-700/50 text-slate-300 rounded-lg transition-colors inline-flex items-center gap-1 text-xs font-medium"
+                                                                    >
+                                                                        <Icon name="eye" className="w-3.5 h-3.5" />
+                                                                    </button>
                                                                 </td>
                                                             </tr>
                                                         ))}
@@ -2488,9 +2640,11 @@ function CampusMapTab() {
                                     <div className="flex justify-between items-start mb-6">
                                         <div>
                                             <h3 className="text-xl font-bold text-slate-100 tracking-tight">
-                                                {modalType === "create" ? "Add New Record" : "Edit Record"}
+                                                {modalType === "create" ? "Add New Record" : modalType === "view-chatbot-query" ? "Chatbot Query Details" : "Edit Record"}
                                             </h3>
-                                            <p className="text-xs text-slate-400 mt-1">Fill in the details below and save your changes.</p>
+                                            <p className="text-xs text-slate-400 mt-1">
+                                                {modalType === "view-chatbot-query" ? "Detailed inspection of user interaction and model response." : "Fill in the details below and save your changes."}
+                                            </p>
                                         </div>
                                         <button onClick={() => setShowModal(false)} disabled={formSubmitting}
                                             className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-all ml-4 shrink-0 bg-slate-900/50 border border-transparent hover:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed">

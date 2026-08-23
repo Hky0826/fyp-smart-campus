@@ -15,15 +15,11 @@ class LFWDataset(BaseDataset):
         # We need pairs.txt
         # Kaggle's lfw-dataset contains 'pairs.csv' or 'pairs.txt'.
         # Let's assume standard pairs.txt format or a fallback logic.
-        pairs_file = os.path.join(self.data_dir, "pairs.txt")
+        pairs_file = os.path.join(self.data_dir, "pairs.csv")
+        if not os.path.exists(pairs_file):
+            pairs_file = os.path.join(self.data_dir, "pairs.txt")
         if not os.path.exists(pairs_file):
             pairs_file = os.path.join(self.data_dir, "lfw_allnames.csv") # Alternate check
-        
-        # Mock logic to generate pairs if pairs.txt is missing from kaggle download
-        # A standard LFW pairs.txt has:
-        # 10 300
-        # name1 id1 id2
-        # name1 id1 name2 id2
         
         self.pairs = []
         lfw_dir = os.path.join(self.data_dir, "lfw-deepfunneled", "lfw-deepfunneled")
@@ -34,8 +30,23 @@ class LFWDataset(BaseDataset):
             # Try root if lfw-deepfunneled not there
             lfw_dir = self.data_dir
 
-        if os.path.exists(pairs_file) and pairs_file.endswith(".txt"):
-            with open(pairs_file, 'r') as f:
+        if os.path.exists(pairs_file) and pairs_file.endswith(".csv") and "allnames" not in pairs_file:
+            import csv
+            with open(pairs_file, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                header = next(reader, None)
+                for row in reader:
+                    parts = [x.strip() for x in row if x.strip() != '']
+                    if len(parts) == 3: # Genuine: name, id1, id2
+                        img1 = os.path.join(lfw_dir, parts[0], f"{parts[0]}_{int(parts[1]):04d}.jpg")
+                        img2 = os.path.join(lfw_dir, parts[0], f"{parts[0]}_{int(parts[2]):04d}.jpg")
+                        self.pairs.append((img1, img2, True))
+                    elif len(parts) == 4: # Impostor: name1, id1, name2, id2
+                        img1 = os.path.join(lfw_dir, parts[0], f"{parts[0]}_{int(parts[1]):04d}.jpg")
+                        img2 = os.path.join(lfw_dir, parts[2], f"{parts[2]}_{int(parts[3]):04d}.jpg")
+                        self.pairs.append((img1, img2, False))
+        elif os.path.exists(pairs_file) and pairs_file.endswith(".txt"):
+            with open(pairs_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
                 for line in lines[1:]: # Skip header
                     parts = line.strip().split()

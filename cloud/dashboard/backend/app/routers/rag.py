@@ -1,17 +1,17 @@
 import os
+import json
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 from typing import List, Optional
 
 from app.core.database import get_db
 from app.core.security import verify_content_admin
-from app.models.models import UploadedDocument, DocumentChunk, EmbeddingVector, ChatbotQuery
+from app.models.models import UploadedDocument, DocumentChunk, EmbeddingVector, ChatbotQuery, User
 from app.schemas import schemas
 from app.core.config import settings
 from app.core.private_storage import save_upload, safe_existing_path, ALLOWED_DOCUMENT_EXTENSIONS
-
-# Determine upload directory based on the location of this file
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 router = APIRouter(prefix="/rag", tags=["RAG Knowledge Base & Documents"])
@@ -265,12 +265,54 @@ def list_embeddings(
 @router.get("/chatbot-queries", response_model=List[schemas.ChatbotQueryResponse])
 def list_chatbot_queries(
     skip: int = 0, 
-    limit: int = 50, 
+    limit: int = 100, 
     user_id: Optional[int] = None,
+    category: Optional[str] = None,
+    is_navigational: Optional[bool] = None,
+    search: Optional[str] = None,
     db: Session = Depends(get_db), 
     current_admin=Depends(verify_content_admin)
 ):
-    query = db.query(ChatbotQuery)
+    query = db.query(ChatbotQuery).options(
+        joinedload(ChatbotQuery.user).joinedload(User.roles)
+    )
     if user_id is not None:
-        query = query.filter_by(user_id=user_id)
-    return query.order_by(ChatbotQuery.timestamp.desc()).offset(skip).limit(limit).all()
+        query = query.filter(ChatbotQuery.user_id == user_id)
+    if category is not None and category.upper() != "ALL":
+        query = query.filter(ChatbotQuery.query_category == category.lower())
+    if is_navigational is not None:
+        query = query.filter(ChatbotQuery.is_navigational == is_navigational)
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.join(ChatbotQuery.user, isouter=True).filter(
+            or_(
+                ChatbotQuery.query_text.ilike(search_pattern),
+                ChatbotQuery.response_text.ilike(search_pattern),
+                User.given_name.ilike(search_pattern),
+                User.family_name.ilike(search_pattern),
+                User.email.ilike(search_pattern),
+            )
+        )
+    records = query.order_by(ChatbotQuery.timestamp.desc()).offset(skip).limit(limit).all()
+
+    results = []
+    for r in records:
+        user_name = r.user.full_name if r.user else "Anonymous Visitor"
+        user_email = r.user.email if r.user else None
+        user_role = r.user.roles[0].role_name if (r.user and r.user.roles) else ("VISITOR" if not r.user else "USER")
+        results.append(schemas.ChatbotQueryResponse(
+            query_id=r.query_id,
+            session_id=r.session_id,
+            user_id=r.user_id,
+            query_text=r.query_text,
+            query_category=r.query_category,
+            response_text=r.response_text,
+            retrieved_chunks=r.retrieved_chunks,
+            response_time_ms=r.response_time_ms,
+            is_navigational=r.is_navigational,
+            timestamp=r.timestamp,
+            user_name=user_name,
+            user_email=user_email,
+            user_role=user_role
+        ))
+    return results

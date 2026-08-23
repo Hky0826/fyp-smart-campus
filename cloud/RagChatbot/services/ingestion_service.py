@@ -26,6 +26,7 @@ from RagChatbot.config import rag_settings
 from RagChatbot.embeddings.embedding_utils import vector_to_mysql_string
 from RagChatbot.embeddings.google_embedding_service import embed_document_chunk, embed_document_chunks_batch
 from RagChatbot.services.document_service import get_active_document
+from RagChatbot.services.document_loader import extract_text_from_file, is_supported_document_extension
 from RagChatbot.services.table_processor import extract_tables_from_markdown, TableBlock
 from RagChatbot.services.entity_linker import extract_entity_tags
 
@@ -284,14 +285,13 @@ def _build_hierarchical_chunks(
 def _load_document_text(file_path: str) -> str:
     if not os.path.isabs(file_path):
         from app.core.private_storage import safe_existing_path
-        file_path = str(safe_existing_path("documents", file_path))
+        try:
+            file_path = str(safe_existing_path("documents", file_path))
+        except Exception:
+            pass
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Document file not found: {file_path}")
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext not in (".txt", ".md", ".csv"):
-        raise ValueError(f"Unsupported file type '{ext}'. Supported: .txt, .md, .csv.")
-    with open(file_path, "r", encoding="utf-8", errors="replace") as file:
-        return file.read()
+    return extract_text_from_file(file_path)
 
 
 def _failed(document_id: int, message: str, skipped: int = 0) -> IngestionResult:

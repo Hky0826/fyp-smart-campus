@@ -48,6 +48,12 @@ class AuthenticatedChatContext:
     staff_id: Optional[str] = None
     visitor_id: Optional[str] = None
     admin_id: Optional[str] = None
+    admin_type: Optional[str] = None
+    program: Optional[str] = None
+    faculty: Optional[str] = None
+    department: Optional[str] = None
+    position_desc: Optional[str] = None
+    organization: Optional[str] = None
     # Trusted only: resolved from JWTSession.device_id and Device.node_id.
     # These fields are never populated from a chatbot request body.
     device_id: Optional[str] = None

@@ -83,6 +83,12 @@ def clear_rag_response_cache() -> None:
         _RAG_RESPONSE_CACHE.clear()
 
 
+def _safe_query_id(val: Any) -> Optional[int]:
+    if isinstance(val, int) and val > 0:
+        return val
+    return None
+
+
 def _make_citation(chunk) -> CitationSchema:
     c_type = getattr(chunk, "chunk_type", "DETAIL")
     c_type_str = str(c_type) if c_type is not None and not hasattr(c_type, "_mock_name") else "DETAIL"
@@ -403,14 +409,13 @@ def process_chat(
             except HTTPException:
                 user_id, session_id = None, None
 
-        if session_id and session_id > 0:
-            log_access_denied(
-                db,
-                session_id=session_id,
-                user_id=user_id,
-                query_text=request.query,
-                reason=f"prompt_injection:{guard_result.matched_pattern}",
-            )
+        log_access_denied(
+            db,
+            session_id=session_id,
+            user_id=user_id,
+            query_text=request.query,
+            reason=f"prompt_injection:{guard_result.matched_pattern}",
+        )
 
         metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
         log_inference_metrics(
@@ -469,19 +474,17 @@ def process_chat(
 
     if direct_nav and direct_nav.get("answer"):
         response_time_ms = int((time.monotonic() - start_time) * 1000)
-        query_id = None
-        if session_id is not None:
-            logged = log_chatbot_interaction(
-                db,
-                session_id=session_id,
-                user_id=user_id,
-                query_text=sanitized_query,
-                response_text=direct_nav["answer"],
-                retrieved_chunk_ids=[],
-                response_time_ms=response_time_ms,
-                is_navigational=True,
-            )
-            query_id = logged if logged > 0 else None
+        logged = log_chatbot_interaction(
+            db,
+            session_id=session_id,
+            user_id=user_id,
+            query_text=sanitized_query,
+            response_text=direct_nav["answer"],
+            retrieved_chunk_ids=[],
+            response_time_ms=response_time_ms,
+            is_navigational=True,
+        )
+        query_id = _safe_query_id(logged)
         metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
         log_inference_metrics(
             request_type="text",
@@ -523,19 +526,17 @@ def process_chat(
             name = _greeting_name(context) if context.authenticated else ""
             fast_answer = f"Hi {name}, how may I help you today?" if name else "Hi, how may I help you today?"
             response_time_ms = int((time.monotonic() - start_time) * 1000)
-            query_id = None
-            if session_id is not None:
-                logged = log_chatbot_interaction(
-                    db,
-                    session_id=session_id,
-                    user_id=user_id,
-                    query_text=sanitized_query,
-                    response_text=fast_answer,
-                    retrieved_chunk_ids=[],
-                    response_time_ms=response_time_ms,
-                    is_navigational=False,
-                )
-                query_id = logged if logged > 0 else None
+            logged = log_chatbot_interaction(
+                db,
+                session_id=session_id,
+                user_id=user_id,
+                query_text=sanitized_query,
+                response_text=fast_answer,
+                retrieved_chunk_ids=[],
+                response_time_ms=response_time_ms,
+                is_navigational=False,
+            )
+            query_id = _safe_query_id(logged)
             metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
             log_inference_metrics(
                 request_type="text",
@@ -562,19 +563,17 @@ def process_chat(
                 lang=detected_lang,
             )
             response_time_ms = int((time.monotonic() - start_time) * 1000)
-            query_id = None
-            if session_id is not None:
-                logged = log_chatbot_interaction(
-                    db,
-                    session_id=session_id,
-                    user_id=user_id,
-                    query_text=sanitized_query,
-                    response_text=fast_answer,
-                    retrieved_chunk_ids=[],
-                    response_time_ms=response_time_ms,
-                    is_navigational=False,
-                )
-                query_id = logged if logged > 0 else None
+            logged = log_chatbot_interaction(
+                db,
+                session_id=session_id,
+                user_id=user_id,
+                query_text=sanitized_query,
+                response_text=fast_answer,
+                retrieved_chunk_ids=[],
+                response_time_ms=response_time_ms,
+                is_navigational=False,
+            )
+            query_id = _safe_query_id(logged)
             metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
             log_inference_metrics(
                 request_type="text",
@@ -597,6 +596,17 @@ def process_chat(
         if route.category == "OUT_OF_SCOPE":
             fast_answer = get_translated("out_of_scope", detected_lang)
             response_time_ms = int((time.monotonic() - start_time) * 1000)
+            logged = log_chatbot_interaction(
+                db,
+                session_id=session_id,
+                user_id=user_id,
+                query_text=sanitized_query,
+                response_text=fast_answer,
+                retrieved_chunk_ids=[],
+                response_time_ms=response_time_ms,
+                is_navigational=False,
+            )
+            query_id = _safe_query_id(logged)
             metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
             log_inference_metrics(
                 request_type="text",
@@ -612,7 +622,7 @@ def process_chat(
                 access_granted=False,
                 status_message=get_translated("out_of_scope_status", detected_lang),
                 response_time_ms=response_time_ms,
-                query_id=None,
+                query_id=query_id,
                 intent="OUT_OF_SCOPE",
             )
 
@@ -626,18 +636,16 @@ def process_chat(
                     _RAG_RESPONSE_CACHE.move_to_end(cache_key)
                     logger.debug("RAG response cache hit for query: %.40s", sanitized_query)
                     response_time_ms = int((time.monotonic() - start_time) * 1000)
-                    query_id = None
-                    if session_id is not None:
-                        logged_query_id = log_chatbot_interaction(
-                            db,
-                            session_id=session_id,
-                            user_id=user_id,
-                            query_text=sanitized_query,
-                            response_text=cached_res.answer,
-                            retrieved_chunk_ids=[c.chunk_id for c in cached_res.citations],
-                            response_time_ms=response_time_ms,
-                        )
-                        query_id = logged_query_id if logged_query_id > 0 else None
+                    logged_query_id = log_chatbot_interaction(
+                        db,
+                        session_id=session_id,
+                        user_id=user_id,
+                        query_text=sanitized_query,
+                        response_text=cached_res.answer,
+                        retrieved_chunk_ids=[c.chunk_id for c in cached_res.citations],
+                        response_time_ms=response_time_ms,
+                    )
+                    query_id = logged_query_id if logged_query_id > 0 else None
                     metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
                     log_inference_metrics(
                         request_type="text",
@@ -671,19 +679,17 @@ def process_chat(
 
         if planned.kind != "rag":
             response_time_ms = int((time.monotonic() - start_time) * 1000)
-            query_id = None
             if planned.kind == "personal" and planned.personal_result is not None:
-                if session_id is not None and user_id is not None:
-                    logged_query_id = log_personal_interaction(
-                        db,
-                        session_id=session_id,
-                        user_id=user_id,
-                        intent=planned.intent or "UNKNOWN",
-                        response_time_ms=response_time_ms,
-                        is_navigational=bool(planned.navigation),
-                    )
-                    query_id = logged_query_id if logged_query_id > 0 else None
-            elif session_id is not None:
+                logged_query_id = log_personal_interaction(
+                    db,
+                    session_id=session_id,
+                    user_id=user_id or 0,
+                    intent=planned.intent or "UNKNOWN",
+                    response_time_ms=response_time_ms,
+                    is_navigational=bool(planned.navigation),
+                )
+                query_id = _safe_query_id(logged_query_id)
+            else:
                 logged_query_id = log_chatbot_interaction(
                     db,
                     session_id=session_id,
@@ -694,7 +700,7 @@ def process_chat(
                     response_time_ms=response_time_ms,
                     is_navigational=planned.kind == "navigation",
                 )
-                query_id = logged_query_id if logged_query_id > 0 else None
+                query_id = _safe_query_id(logged_query_id)
 
             metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
             log_inference_metrics(
@@ -782,7 +788,7 @@ def process_chat(
                             "assistant": q.response_text
                         })
 
-                answer = generate_answer(sanitized_query, ranked_chunks, chat_history=chat_history)
+                answer = generate_answer(sanitized_query, ranked_chunks, chat_history=chat_history, user_context=context)
                 access_granted = True
                 status_message = None
             except RuntimeError as exc:
@@ -800,20 +806,18 @@ def process_chat(
     response_time_ms = int(total_elapsed * 1000)
 
 # Step 9: Audit log
-    query_id = None
-    if session_id is not None:
-        logged_query_id = log_chatbot_interaction(
-            db,
-            session_id=session_id,
-            user_id=user_id,
-            query_text=sanitized_query,
-            response_text=answer,
-            retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
-            response_time_ms=response_time_ms,
-            allowed_levels=allowed_levels,
-            is_stream=False,
-        )
-        query_id = logged_query_id if logged_query_id > 0 else None
+    logged_query_id = log_chatbot_interaction(
+        db,
+        session_id=session_id,
+        user_id=user_id,
+        query_text=sanitized_query,
+        response_text=answer,
+        retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
+        response_time_ms=response_time_ms,
+        allowed_levels=allowed_levels,
+        is_stream=False,
+    )
+    query_id = _safe_query_id(logged_query_id)
 
     metrics.total_inference_ms = total_elapsed * 1000.0
     metrics.allowed_access_levels = allowed_levels
@@ -945,14 +949,12 @@ def process_chat_stream(
                 if time.monotonic() - cached_time < ttl:
                     _RAG_RESPONSE_CACHE.move_to_end(cache_key)
                     response_time_ms = int((time.monotonic() - start_time) * 1000)
-                    query_id = None
-                    if session_id is not None:
-                        logged = log_chatbot_interaction(
-                            db, session_id=session_id, user_id=user_id, query_text=sanitized_query,
-                            response_text=cached_res.answer, retrieved_chunk_ids=[c.chunk_id for c in cached_res.citations],
-                            response_time_ms=response_time_ms,
-                        )
-                        query_id = logged if logged > 0 else None
+                    logged = log_chatbot_interaction(
+                        db, session_id=session_id, user_id=user_id, query_text=sanitized_query,
+                        response_text=cached_res.answer, retrieved_chunk_ids=[c.chunk_id for c in cached_res.citations],
+                        response_time_ms=response_time_ms,
+                    )
+                    query_id = _safe_query_id(logged)
                     done_resp = ChatResponse(
                         answer=cached_res.answer, citations=cached_res.citations,
                         access_granted=cached_res.access_granted, status_message=cached_res.status_message,
@@ -1037,7 +1039,7 @@ def process_chat_stream(
     generated_tokens: list[str] = []
     first_token_recorded = False
     try:
-        for token in generate_answer_stream(sanitized_query, ranked_chunks, chat_history=chat_history):
+        for token in generate_answer_stream(sanitized_query, ranked_chunks, chat_history=chat_history, user_context=context):
             if not first_token_recorded:
                 metrics.time_to_first_token_ms = (time.monotonic() - start_time) * 1000.0
                 first_token_recorded = True
@@ -1054,20 +1056,18 @@ def process_chat_stream(
 
     total_elapsed = time.monotonic() - start_time
     response_time_ms = int(total_elapsed * 1000)
-    query_id = None
-    if session_id is not None:
-        logged_query_id = log_chatbot_interaction(
-            db,
-            session_id=session_id,
-            user_id=user_id,
-            query_text=sanitized_query,
-            response_text=full_answer,
-            retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
-            response_time_ms=response_time_ms,
-            allowed_levels=allowed_levels,
-            is_stream=True,
-        )
-        query_id = logged_query_id if logged_query_id > 0 else None
+    logged_query_id = log_chatbot_interaction(
+        db,
+        session_id=session_id,
+        user_id=user_id,
+        query_text=sanitized_query,
+        response_text=full_answer,
+        retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
+        response_time_ms=response_time_ms,
+        allowed_levels=allowed_levels,
+        is_stream=True,
+    )
+    query_id = _safe_query_id(logged_query_id)
 
     metrics.total_inference_ms = total_elapsed * 1000.0
     metrics.allowed_access_levels = allowed_levels
