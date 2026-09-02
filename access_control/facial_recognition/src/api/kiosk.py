@@ -828,7 +828,14 @@ def create_kiosk_router(
                 logger.warning("Kiosk audio stream proxy error: %s", exc)
                 yield json.dumps({"event": "error", "data": {"message": str(exc)}}).encode("utf-8") + b"\n"
 
-        return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+        return StreamingResponse(
+            stream_generator(),
+            media_type="application/x-ndjson",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @router.post("/chat/lock", response_model=ChatVerifyResponse)
     def lock_chat() -> ChatVerifyResponse:

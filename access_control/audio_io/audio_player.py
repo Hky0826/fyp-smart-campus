@@ -70,6 +70,7 @@ class AudioPlayer:
         Raises:
             AudioPlaybackError: If playback fails.
         """
+        self._stop_requested.clear()
         if not pcm_bytes:
             logger.warning("No audio data to play")
             return
@@ -141,6 +142,7 @@ class AudioPlayer:
 
     def play_pcm_stream(self, pcm_chunks: Iterable[bytes]) -> None:
         """Play a stream of raw PCM chunks as one continuous audio output."""
+        self._stop_requested.clear()
         if self.config.playback_backend == "alsa":
             self._play_pcm_stream_alsa(pcm_chunks)
             return

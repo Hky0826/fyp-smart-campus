@@ -1,0 +1,9 @@
+{
+  "ambient_noise_rms": 41.0,
+  "ambient_peak_rms": 109.1,
+  "speech_mean_rms": 1309.3,
+  "speech_peak_rms": 3496.5,
+  "speech_threshold_rms": 469.2,
+  "speech_threshold_db": -36.9,
+  "silence_duration_sec": 0.75
+}

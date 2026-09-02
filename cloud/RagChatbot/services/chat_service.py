@@ -733,74 +733,22 @@ def process_chat(
     chat_history = _load_recent_chat_history(session_id, db)
     search_query = _condense_query_with_history(sanitized_query, chat_history)
 
-# Step 4: Embed the query
+    # Step 4-8: Execute through Agentic RAG graph (Decomposition, Hybrid Retrieval, CRAG Grading, Rewriting, Groundedness Critic)
     with StageTimer() as timer:
-        try:
-            query_embedding = embed_text(search_query)
-        except RuntimeError as exc:
-            logger.error("Embedding failed for user_id=%s: %s", user_id, exc)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Embedding service is temporarily unavailable. Please try again later.",
-            )
-    metrics.embedding_return_ms += timer.elapsed_ms
-
-# Steps 5-6: Retrieve and re-rank authorized chunks
-    with StageTimer() as timer:
-        ranked_chunks = retrieve_chunks(
-            query_embedding=query_embedding,
-            allowed_access_levels=allowed_levels,
+        from RagChatbot.agent.graph import run_agentic_rag
+        agent_res = run_agentic_rag(
+            query=sanitized_query,
+            auth_context=context,
             db=db,
-            query_text=search_query,
-            category=getattr(route, "category_hint", None),
-            faculty_code=getattr(route, "faculty_hint", None),
-            is_broad_overview=getattr(route, "is_broad_overview", False),
+            chat_history=chat_history,
         )
-    metrics.embedding_db_search_ms += timer.elapsed_ms
-
-# Step 7: Generate answer
-    with StageTimer() as timer:
-        if not ranked_chunks:
-            if not bearer_token and _has_relevant_protected_chunks(query_embedding, db):
-                answer = get_translated("auth_required", detected_lang)
-                access_granted = False
-                status_message = get_translated("auth_required_status", detected_lang)
-            else:
-                answer = get_translated("no_access", detected_lang)
-                access_granted = False
-                status_message = get_translated("no_access_status", detected_lang)
-        else:
-            try:
-                chat_history = []
-                if session_id:
-                    from app.models.models import ChatbotQuery
-                    recent_queries = (
-                        db.query(ChatbotQuery)
-                        .filter(ChatbotQuery.session_id == session_id)
-                        .filter(ChatbotQuery.response_text.isnot(None))
-                        .order_by(ChatbotQuery.timestamp.desc())
-                        .limit(3)
-                        .all()
-                    )
-                    for q in reversed(recent_queries):
-                        chat_history.append({
-                            "user": q.query_text,
-                            "assistant": q.response_text
-                        })
-
-                answer = generate_answer(sanitized_query, ranked_chunks, chat_history=chat_history, user_context=context)
-                access_granted = True
-                status_message = None
-            except RuntimeError as exc:
-                logger.error("LLM generation failed for user_id=%s: %s", user_id, exc)
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Answer generation is temporarily unavailable. Please try again later.",
-                )
     metrics.rag_ms += timer.elapsed_ms
 
-    # Step 8: Build citation objects
-    citations: List[CitationSchema] = [_make_citation(chunk) for chunk in ranked_chunks]
+    answer = agent_res.answer
+    access_granted = agent_res.access_granted
+    status_message = agent_res.status_message
+    citations: List[CitationSchema] = agent_res.citations
+    ranked_chunks = []
 
     total_elapsed = time.monotonic() - start_time
     response_time_ms = int(total_elapsed * 1000)

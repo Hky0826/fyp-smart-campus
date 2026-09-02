@@ -29,7 +29,7 @@ from collections.abc import Iterator
 from threading import Lock, BoundedSemaphore
 from typing import AsyncIterator
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.concurrency import iterate_in_threadpool
@@ -594,3 +594,139 @@ def ingest(
         message=result.message,
         status=result.status,
     )
+
+
+# ── Gemini Live Bi-Directional Duplex WebSocket Endpoint ───────────────────────
+
+@router.websocket("/live/ws")
+async def live_websocket_chat(
+    websocket: WebSocket,
+    token: str | None = None,
+    device_id: str | None = None,
+    session_id: int | None = None,
+):
+    """
+    Bi-directional full-duplex WebSocket connection for real-time Gemini Live.
+    Streams continuous 16kHz PCM from microphone directly into Gemini Live,
+    invokes process_user_request for Agentic RAG, and streams 24kHz PCM audio back.
+    """
+    await websocket.accept()
+    from app.core.database import SessionLocal
+    from RagChatbot.generation.live_session_manager import GeminiLiveSession
+    from RagChatbot.services.process_user_request import process_user_request
+
+    live_session = GeminiLiveSession()
+    try:
+        await live_session.start()
+        await websocket.send_json({
+            "event": "ready",
+            "data": {
+                "status": "connected",
+                "model": rag_settings.LIVE_MODEL,
+                "input_sample_rate": rag_settings.LIVE_INPUT_SAMPLE_RATE,
+                "output_sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
+            }
+        })
+    except Exception as exc:
+        logger.error("Gemini Live WebSocket connection failed to start: %s", exc)
+        await websocket.send_json({"event": "error", "data": {"message": str(exc)}})
+        await websocket.close()
+        return
+
+    active = True
+
+    async def on_transcript(transcript: str):
+        if active:
+            try:
+                await websocket.send_json({"event": "transcript", "data": {"text": transcript}})
+            except Exception:
+                pass
+
+    async def on_tool_call(call: dict[str, Any]) -> dict[str, Any]:
+        transcript = call.get("transcript", "")
+        if active:
+            try:
+                await websocket.send_json({"event": "rag_status", "data": {"status": "searching", "query": transcript}})
+            except Exception:
+                pass
+        with SessionLocal() as db:
+            result = process_user_request(
+                transcript=transcript,
+                bearer_token=token,
+                device_id=device_id,
+                session_id=session_id,
+                db=db,
+            )
+        if active:
+            try:
+                await websocket.send_json({
+                    "event": "rag_complete",
+                    "data": {
+                        "route": result.get("route"),
+                        "status": result.get("status"),
+                        "citations": result.get("citations", []),
+                        "access_granted": result.get("access_granted", True),
+                    }
+                })
+            except Exception:
+                pass
+        return result
+
+    async def on_audio(pcm_bytes: bytes):
+        if active and pcm_bytes:
+            try:
+                await websocket.send_json({
+                    "event": "audio",
+                    "data": {
+                        "encoding": "pcm_s16le",
+                        "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
+                        "chunk": base64.b64encode(pcm_bytes).decode("ascii"),
+                    }
+                })
+            except Exception:
+                pass
+
+    async def on_output_transcript(text: str):
+        if active and text:
+            try:
+                await websocket.send_json({"event": "output_transcript", "data": {"text": text}})
+            except Exception:
+                pass
+
+    try:
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+
+            if "bytes" in message and message["bytes"]:
+                await live_session.send_audio(message["bytes"])
+            elif "text" in message and message["text"]:
+                try:
+                    payload = json.loads(message["text"])
+                    event = payload.get("event")
+                    if event == "audio_chunk":
+                        b64_data = payload.get("data", {}).get("chunk")
+                        if b64_data:
+                            await live_session.send_audio(base64.b64decode(b64_data))
+                    elif event in ("activity_end", "finish_turn"):
+                        await live_session.finish_input(
+                            on_transcript=on_transcript,
+                            on_tool_call=on_tool_call,
+                            on_audio=on_audio,
+                            on_output_transcript=on_output_transcript,
+                        )
+                        await websocket.send_json({"event": "turn_complete"})
+                except json.JSONDecodeError:
+                    pass
+    except WebSocketDisconnect:
+        logger.info("Gemini Live client disconnected normally.")
+    except Exception as exc:
+        logger.exception("Gemini Live WebSocket session error: %s", exc)
+    finally:
+        active = False
+        try:
+            await live_session.close()
+        except Exception:
+            pass
+

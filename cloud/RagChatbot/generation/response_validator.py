@@ -172,26 +172,26 @@ def sanitize_text_for_speech(text: str) -> str:
 
 
 _LANGUAGE_VOICE_MAP = {
-    "en": ("en-US", "en-US-Chirp3-HD-Kore"),
+    "en": ("en-US", "en-US-Neural2-F"),
     "ms": ("ms-MY", "ms-MY-Wavenet-A"),
-    "id": ("id-ID", "id-ID-Chirp3-HD-Kore"),
-    "zh": ("cmn-CN", "cmn-CN-Chirp3-HD-Kore"),
-    "cmn": ("cmn-CN", "cmn-CN-Chirp3-HD-Kore"),
-    "ta": ("ta-IN", "ta-IN-Chirp3-HD-Kore"),
-    "hi": ("hi-IN", "hi-IN-Chirp3-HD-Kore"),
-    "ar": ("ar-XA", "ar-XA-Chirp3-HD-Kore"),
-    "bn": ("bn-IN", "bn-IN-Chirp3-HD-Kore"),
-    "de": ("de-DE", "de-DE-Chirp3-HD-Kore"),
-    "es": ("es-ES", "es-ES-Chirp3-HD-Kore"),
-    "fr": ("fr-FR", "fr-FR-Chirp3-HD-Kore"),
-    "it": ("it-IT", "it-IT-Chirp3-HD-Kore"),
-    "ja": ("ja-JP", "ja-JP-Chirp3-HD-Kore"),
-    "ko": ("ko-KR", "ko-KR-Chirp3-HD-Kore"),
-    "pt": ("pt-BR", "pt-BR-Chirp3-HD-Kore"),
-    "ru": ("ru-RU", "ru-RU-Chirp3-HD-Kore"),
-    "th": ("th-TH", "th-TH-Chirp3-HD-Kore"),
-    "tr": ("tr-TR", "tr-TR-Chirp3-HD-Kore"),
-    "vi": ("vi-VN", "vi-VN-Chirp3-HD-Kore"),
+    "id": ("id-ID", "id-ID-Wavenet-A"),
+    "zh": ("cmn-CN", "cmn-CN-Wavenet-A"),
+    "cmn": ("cmn-CN", "cmn-CN-Wavenet-A"),
+    "ta": ("ta-IN", "ta-IN-Wavenet-A"),
+    "hi": ("hi-IN", "hi-IN-Wavenet-A"),
+    "ar": ("ar-XA", "ar-XA-Wavenet-A"),
+    "bn": ("bn-IN", "bn-IN-Wavenet-A"),
+    "de": ("de-DE", "de-DE-Neural2-F"),
+    "es": ("es-ES", "es-ES-Neural2-F"),
+    "fr": ("fr-FR", "fr-FR-Neural2-F"),
+    "it": ("it-IT", "it-IT-Neural2-F"),
+    "ja": ("ja-JP", "ja-JP-Neural2-B"),
+    "ko": ("ko-KR", "ko-KR-Neural2-A"),
+    "pt": ("pt-BR", "pt-BR-Neural2-A"),
+    "ru": ("ru-RU", "ru-RU-Wavenet-A"),
+    "th": ("th-TH", "th-TH-Neural2-C"),
+    "tr": ("tr-TR", "tr-TR-Wavenet-A"),
+    "vi": ("vi-VN", "vi-VN-Neural2-A"),
 }
 
 
@@ -200,15 +200,13 @@ def _voice_for_language(language_code: Optional[str]) -> tuple[str, str]:
     if not language_code:
         voice_name = configured_voice
         if voice_name == "Kore":
-            voice_name = "en-US-Chirp3-HD-Kore"
+            voice_name = "en-US-Neural2-F"
         language = "-".join(voice_name.split("-")[:2]) if "-" in voice_name else "en-US"
         return language, voice_name
 
     normalized = str(language_code).strip().lower().replace("_", "-")
     language_key = normalized.split("-", 1)[0]
     language, voice_name = _LANGUAGE_VOICE_MAP.get(language_key, _LANGUAGE_VOICE_MAP["en"])
-    # A fully-qualified configured voice remains an explicit override for
-    # English; non-English languages use their locale-specific native voice.
     if language_key == "en" and configured_voice not in {"", "Kore"}:
         voice_name = configured_voice
         language = "-".join(voice_name.split("-")[:2]) if "-" in voice_name else "en-US"
@@ -217,19 +215,15 @@ def _voice_for_language(language_code: Optional[str]) -> tuple[str, str]:
 
 def generate_audio_from_text(text: str, language_code: Optional[str] = None) -> Optional[bytes]:
     """
-    Generate audio from validated text using Google Cloud TTS.
-
-    Uses the configured Google Cloud Text-to-Speech API with a Chirp 3
-    model to produce spoken audio output.
+    Generate audio from validated text using Gemini Live Voice (primary)
+    falling back to standard Google Cloud TTS (Neural2/Wavenet).
 
     Args:
         text: The validated text to convert to speech.
+        language_code: Optional ISO language code.
 
     Returns:
         Raw audio bytes (LINEAR16, 24 kHz), or None if generation fails.
-
-    Raises:
-        RuntimeError: If the TTS API call fails entirely.
     """
     if not text or not text.strip():
         logger.warning("generate_audio_from_text called with empty text.")
@@ -240,38 +234,73 @@ def generate_audio_from_text(text: str, language_code: Optional[str] = None) -> 
         logger.warning("generate_audio_from_text called with empty text after sanitisation.")
         return None
 
+    # 1. Primary path: Gemini Live Voice Speech Output
+    try:
+        from RagChatbot.gemini_client import get_gemini_client
+        from google.genai import types
+
+        client = get_gemini_client()
+        gemini_voice = getattr(rag_settings, "AUDIO_TTS_VOICE", "Kore") or "Kore"
+        if "Chirp" in gemini_voice or "-" in gemini_voice:
+            gemini_voice = "Kore"
+
+        tts_models = [
+            getattr(rag_settings, "AUDIO_TTS_MODEL", "gemini-2.0-flash"),
+            "gemini-2.0-flash",
+            "gemini-2.5-flash-preview-tts",
+        ]
+        for tts_model in tts_models:
+            try:
+                response = client.models.generate_content(
+                    model=tts_model,
+                    contents=clean_speech_text,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["AUDIO"],
+                        speech_config=types.SpeechConfig(
+                            voice_config=types.VoiceConfig(
+                                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                    voice_name=gemini_voice,
+                                )
+                            )
+                        ),
+                    ),
+                )
+                if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+                    for part in response.candidates[0].content.parts:
+                        if part.inline_data and part.inline_data.data:
+                            audio_bytes = part.inline_data.data
+                            logger.info("Gemini Live Voice generated %d bytes of audio with model=%s voice=%s", len(audio_bytes), tts_model, gemini_voice)
+                            return audio_bytes
+            except Exception as model_err:
+                logger.debug("Gemini Live Voice model %s failed: %s", tts_model, model_err)
+    except Exception as exc:
+        logger.debug("Gemini Live Voice call failed: %s", exc)
+
+    # 2. Fallback path: Google Cloud Text-to-Speech (Neural2/Wavenet)
     try:
         import os
         client_options = {}
         tts_api_key = getattr(rag_settings, "GOOGLE_CLOUD_TTS_API_KEY", "") or rag_settings.GOOGLE_API_KEY
 
-        # Prioritize GOOGLE_APPLICATION_CREDENTIALS for service accounts if set.
-        # Otherwise use the API key.
         if "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ and tts_api_key:
             client_options["api_key"] = tts_api_key
 
         client = texttospeech.TextToSpeechClient(
             client_options=client_options if client_options else None
         )
-    except Exception as exc:
-        logger.error("Failed to create Google Cloud TTS client: %s", exc)
-        raise RuntimeError(f"TTS client initialisation failed: {exc}") from exc
+        language_code, voice_name = _voice_for_language(language_code)
 
-    language_code, voice_name = _voice_for_language(language_code)
+        voice = texttospeech.VoiceSelectionParams(
+            language_code=language_code,
+            name=voice_name,
+        )
 
-    voice = texttospeech.VoiceSelectionParams(
-        language_code=language_code,
-        name=voice_name,
-    )
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.LINEAR16,
+            sample_rate_hertz=24000
+        )
 
-    audio_config = texttospeech.AudioConfig(
-        audio_encoding=texttospeech.AudioEncoding.LINEAR16,
-        sample_rate_hertz=24000
-    )
-
-    synthesis_input = texttospeech.SynthesisInput(text=clean_speech_text)
-
-    try:
+        synthesis_input = texttospeech.SynthesisInput(text=clean_speech_text)
         response = client.synthesize_speech(
             input=synthesis_input,
             voice=voice,

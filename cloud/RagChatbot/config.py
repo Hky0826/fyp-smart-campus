@@ -55,7 +55,7 @@ class RagSettings:
     PLANNER_TIMEOUT_SECONDS: float = float(os.getenv("RAG_PLANNER_TIMEOUT_SECONDS", "12"))
     PLANNER_CATALOG_CANDIDATE_LIMIT: int = int(os.getenv("RAG_PLANNER_CATALOG_CANDIDATE_LIMIT", "8"))
 
-    AUDIO_STT_MODEL: str = os.getenv("RAG_AUDIO_STT_MODEL", "chirp_3")
+    AUDIO_STT_MODEL: str = os.getenv("RAG_AUDIO_STT_MODEL", "gemini-3.1-flash-lite")
 
     # One-shot model used to extract a structured query from raw audio.
     AUDIO_EXTRACTION_MODEL: str = os.getenv(
@@ -103,7 +103,7 @@ class RagSettings:
     LIVE_ROUTING_MODEL: str = os.getenv(
         "RAG_LIVE_ROUTING_MODEL", "gemini-3.1-flash-lite"
     )
-    LIVE_MODEL: str = os.getenv("RAG_LIVE_MODEL", "gemini-3.1-flash-lite")
+    LIVE_MODEL: str = os.getenv("RAG_LIVE_MODEL", "gemini-3.1-flash-live-preview")
     LIVE_MANUAL_ACTIVITY: bool = os.getenv("RAG_LIVE_MANUAL_ACTIVITY", "true").strip().lower() in {"1", "true", "yes", "on"}
     LIVE_THINKING_LEVEL: str = os.getenv("RAG_LIVE_THINKING_LEVEL", "low")
     LIVE_CONNECT_TIMEOUT_SECONDS: float = float(os.getenv("RAG_LIVE_CONNECT_TIMEOUT_SECONDS", "10"))
@@ -126,6 +126,17 @@ class RagSettings:
     RAG_RERANKER_ENABLED: bool = os.getenv("RAG_RERANKER_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
     # Multi-turn conversational query rewrite/condensation
     RAG_QUERY_REWRITE_ENABLED: bool = os.getenv("RAG_QUERY_REWRITE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+    # Agentic RAG settings (All using gemini-3.1-flash-lite)
+    AGENT_GRADER_MODEL: str = os.getenv("RAG_AGENT_GRADER_MODEL", "gemini-3.1-flash-lite")
+    AGENT_DECOMPOSER_MODEL: str = os.getenv("RAG_AGENT_DECOMPOSER_MODEL", "gemini-3.1-flash-lite")
+    AGENT_CRITIC_MODEL: str = os.getenv("RAG_AGENT_CRITIC_MODEL", "gemini-3.1-flash-lite")
+    AGENT_REWRITER_MODEL: str = os.getenv("RAG_AGENT_REWRITER_MODEL", "gemini-3.1-flash-lite")
+    AGENT_MAX_REWRITE_LOOPS: int = int(os.getenv("RAG_AGENT_MAX_REWRITE_LOOPS", "1"))
+    AGENT_GROUNDEDNESS_CHECK_ENABLED: bool = os.getenv("RAG_AGENT_GROUNDEDNESS_CHECK_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    AGENT_FAST_PATH_ENABLED: bool = os.getenv("RAG_AGENT_FAST_PATH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    LIVE_ACOUSTIC_BRIDGE_ENABLED: bool = os.getenv("RAG_LIVE_ACOUSTIC_BRIDGE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    LIVE_IDLE_TIMEOUT_SECONDS: float = float(os.getenv("RAG_LIVE_IDLE_TIMEOUT_SECONDS", "15.0"))
 
     # LLM generation parameters
     MAX_OUTPUT_TOKENS: int = int(os.getenv("RAG_MAX_OUTPUT_TOKENS", "384"))

@@ -437,35 +437,45 @@ def process_user_request(
         answer = classification["clarification_question"] or "Could you please clarify what university information you are looking for?"
         return _fixed_response(answer, "UNCLEAR", sanitized, resolved_session_id, user_id, db, intent=intent)
 
-    # UNIVERSITY_INFO is the only route that can reach RAG. No model-generated
-    # source, SQL, URL, file, or operation is accepted here.
+    # UNIVERSITY_INFO routes through the full Agentic RAG graph (CRAG grading, query rewriting, parent hydration)
     try:
-        query_embedding = embed_text(sanitized)
-        ranked_chunks = retrieve_chunks(query_embedding=query_embedding, allowed_access_levels=allowed_levels, db=db, query_text=sanitized)
+        from RagChatbot.agent.graph import run_agentic_rag
+        agent_res = run_agentic_rag(query=sanitized, auth_context=context, db=db)
     except Exception as exc:
-        logger.warning("Live RAG routing failed: %s", type(exc).__name__)
+        logger.warning("Live Agentic RAG execution failed: %s", exc)
         return _result(status="error", route="UNIVERSITY_INFO", intent=intent, query=sanitized, response_text="The search service is temporarily unavailable. Please try again later.", exact_response=True, error_message="RAG service unavailable.")
 
-    if not ranked_chunks:
+    if not agent_res.access_granted and not agent_res.citations:
         protected = False
         if not bearer_token:
             try:
-                protected = bool(retrieve_chunks(query_embedding=query_embedding, allowed_access_levels=PROTECTED_ACCESS_LEVELS, db=db, top_k_retrieval=3, top_k_context=1))
+                q_emb = embed_text(sanitized)
+                protected = bool(retrieve_chunks(query_embedding=q_emb, allowed_access_levels=PROTECTED_ACCESS_LEVELS, db=db, top_k_retrieval=3, top_k_context=1))
             except Exception:
                 protected = False
         if protected:
             return _result(status="auth_required", route="UNIVERSITY_INFO", intent=intent, query=sanitized, response_text=AUTH_REQUIRED_ANSWER, exact_response=True, error_message=AUTH_REQUIRED_STATUS, authentication_required=True)
         return _result(status="no_access", route="UNIVERSITY_INFO", intent=intent, query=sanitized, response_text="I'm sorry, but I don't have any documents available that match your question based on your current access level. Please contact the campus administrator if you believe you should have access to this information.", exact_response=True, error_message="No authorized RAG sources matched the request.")
 
-    citations = [_citation(chunk) for chunk in ranked_chunks]
+    citations = [
+        CitationSchema(
+            chunk_id=c.chunk_id,
+            document_id=c.document_id,
+            document_title=c.document_title,
+            chunk_index=c.chunk_index,
+            access_level=c.access_level,
+            excerpt=c.excerpt,
+        )
+        for c in agent_res.citations
+    ]
     if resolved_session_id is not None:
         logged = log_chatbot_interaction(
             db,
             session_id=resolved_session_id,
             user_id=user_id,
             query_text=sanitized,
-            response_text="[LIVE_GROUNDED_RESPONSE]",
-            retrieved_chunk_ids=[chunk.chunk_id for chunk in ranked_chunks],
+            response_text=agent_res.answer or "[LIVE_GROUNDED_RESPONSE]",
+            retrieved_chunk_ids=[c.chunk_id for c in agent_res.citations],
             response_time_ms=int((time.monotonic() - started) * 1000),
         )
         query_id = logged if logged > 0 else None
@@ -477,8 +487,9 @@ def process_user_request(
         intent=intent,
         query=sanitized,
         access_granted=True,
-        citations=citations,
-        grounded_context=build_context_block(ranked_chunks),
+        citations=[c.model_dump() for c in citations],
+        response_text=agent_res.answer,
+        grounded_context=agent_res.answer,
         query_id=query_id,
     )
 
