@@ -37,20 +37,34 @@ except ImportError:
 
 from google import genai
 from google.genai import types
-from shitz.rag_engine import search_knowledge
+from shitz.flash_lite_rag import standalone_flash_lite, FlashLiteRAG
 
 _SYSTEM_INSTRUCTION = """
-You are a friendly, natural, and helpful university voice assistant for Quest International University (QIU).
+You are the voice interface for Quest International University (QIU) Smart Campus.
 
-Core Behavior:
-1. Speak concisely, clearly, and warmly in a natural voice.
-2. When the user asks about the university, admissions, tuition fees, faculties, courses, locations, or guidelines, ALWAYS call the function `search_campus_knowledge` with their query.
-3. You can acknowledge the user naturally (e.g. "Sure, let me check that for you...") while retrieving records.
-4. Base your answers strictly on the knowledge returned by the tool. If the information is not found in the documents, politely state so.
+Core Rules:
+1. Transcribe microphone input and, for any question regarding university matters, programmes, faculties, admissions, fees, locations, rules, facilities, or policies, ALWAYS call the backend function process_campus_request with the user's inquiry.
+2. Never answer a university question from your own pre-trained knowledge. Do not emit answer audio before the backend function response.
+3. The backend function response is authoritative and grounded by Gemini 3.1 Flash Lite. Present the `answer` in that response naturally in spoken voice. Do not alter factual dates, names, fees, or policy decisions.
+4. Speak concisely, clearly, and warmly in a natural voice.
 """.strip()
 
 _RAG_TOOL_DECLARATION = {
     "function_declarations": [
+        {
+            "name": "process_campus_request",
+            "description": "Grounds and synthesizes official QIU campus information, programmes, tuition fees, faculty contacts, locations, and guidelines via Gemini 3.1 Flash Lite.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "query": {
+                        "type": "STRING",
+                        "description": "The user's question or search query about the campus.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
         {
             "name": "search_campus_knowledge",
             "description": "Searches official campus documents, courses, tuition fees, faculty contacts, locations, and guidelines.",
@@ -213,19 +227,25 @@ class GeminiLiveRAG:
                                 on_tool_call(call_name, query)
 
                             print(f"\n[Tool Invocation] Gemini Live requested: {call_name}(query='{query}')")
-                            rag_result = search_knowledge(query)
+                            flash_res = await standalone_flash_lite.process_query_async(query)
+                            print(f"[Flash Lite RAG] Engine: {flash_res.source_engine} | Route: {flash_res.route} in {flash_res.latency_ms:.0f}ms (Sources: {flash_res.sources})")
+                            print(f"[Flash Lite RAG Grounded Answer]:\n{flash_res.answer}\n")
 
                             # Send tool response back to Gemini Live
                             async with self._send_lock:
                                 func_response = types.FunctionResponse(
                                     name=call_name,
                                     id=call_id,
-                                    response={"result": rag_result},
+                                    response={
+                                        "answer": flash_res.answer,
+                                        "sources": flash_res.sources,
+                                        "route": flash_res.route,
+                                    },
                                 )
                                 await self.session.send_tool_response(
                                     function_responses=[func_response]
                                 )
-                            print("[Tool Response] Grounded RAG context sent back to Gemini Live.")
+                            print("[Tool Response] Grounded answer sent back to Gemini Live.")
             except asyncio.CancelledError:
                 break
             except Exception as exc:
