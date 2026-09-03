@@ -451,6 +451,21 @@ class InMemoryVectorStore:
         if not query_tokens:
             return []
 
+        # Expand academic query synonyms (e.g. course -> programme)
+        expanded_tokens = list(query_tokens)
+        synonyms_map = {
+            "course": ["programme", "programmes", "degree"],
+            "courses": ["programmes", "programme", "degrees"],
+            "degree": ["programme", "programmes", "course"],
+            "degrees": ["programmes", "courses"],
+        }
+        for tok in query_tokens:
+            if tok in synonyms_map:
+                for syn in synonyms_map[tok]:
+                    if syn not in expanded_tokens:
+                        expanded_tokens.append(syn)
+        query_tokens = expanded_tokens
+
         mask = self._build_filter_mask(
             allowed_access_levels,
             category=category,

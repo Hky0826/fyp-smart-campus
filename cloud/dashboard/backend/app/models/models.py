@@ -76,6 +76,7 @@ class Node(Base):
     cord_x = synonym("coord_x")
     cord_y = synonym("coord_y")
     room_label = Column(String(100), nullable=False)
+    label = synonym("room_label")
     is_accessible = Column(Enum("ALLOW", "DENY"), default="ALLOW", nullable=False)
     node_type = Column(Enum('CLASSROOM','CORRIDOR','ENTRANCE','STAIRWELL','ELEVATOR','FOOD','OFFICE','FACILITIES','HALL','WASHROOM','OUTDOOR','SOCIAL SPACES','OTHER','ROOM','CAFETERIA','LABORATORY','LECTURE_HALL','RESTROOM'), nullable=False)
     

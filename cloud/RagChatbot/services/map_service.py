@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
+import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 import httpx
@@ -15,11 +18,16 @@ _PUNCTUATION_PATTERN = re.compile(r"^[\s\u3000?.!,;:\u3002\uff0c\uff01\uff1f\uff
 
 _CONVERSATIONAL_PREFIX = re.compile(
     r"^(?:please\s+)?(?:can\s+you\s+(?:tell\s+me\s+)?|could\s+you\s+(?:tell\s+me\s+)?|would\s+you\s+(?:tell\s+me\s+)?|show\s+me\s+)?"
-    r"(?:where(?:\s+is|\s+are|\s+can\s+i\s+(?:find|get))?|take\s+me\s+to|navigate\s+to|directions?\s+to|how\s+(?:do\s+i|can\s+i)\s+get\s+to)\s*"
+    r"(?:where(?:\s+is|\s+are|\s+can\s+i\s+(?:find|get))?|take\s+me\s+to|navigate\s+to|directions?\s+(?:to|for)?|how\s+(?:do\s+i|can\s+i|to)\s+(?:get|go)\s+to|way\s+to|route\s+to|guide\s+me\s+to|lead\s+me\s+to)\s*"
     r"|^(?:请问)?(?:请)?(?:带我|我想)?(?:怎么|如何|怎样|要怎么|怎么走)?(?:去|到|前往|找|走)\s*"
     r"|^(?:请问)?(?:请)?(?:带我|带我去|领我到|导航到|带我到)\s*"
     r"|^(?:请问|请)\s*"
     r"|^(?:tolong\s+)?(?:boleh\s+(?:anda\s+)?(?:beritahu|tunjukkan)\s+)?(?:macam\s+mana\s+nak\s+(?:pergi|ke)|bagaimana\s+(?:hendak|nak|cara)\s+(?:ke|pergi)|tunjukkan\s+(?:jalan|arah)\s+ke|bawa\s+saya\s+ke|di\s+mana|kat\s+mana|ke\s+mana)\s*",
+    re.IGNORECASE,
+)
+
+_FROM_TO_PATTERN = re.compile(
+    r"(?:how\s+(?:do\s+i|can\s+i|to)\s+(?:get|go)\s+|directions?\s+|way\s+|route\s+)?(?:from|dari|从)\s+(?P<origin>.+?)\s+(?:to|ke|到|前往)\s+(?P<destination>.+)",
     re.IGNORECASE,
 )
 _LEADING_FILLERS = re.compile(r"^(?:(?:is|are|located|at|the|a|an|please|di|ke|pada)\s+|(?:请问|请)\s*)", re.IGNORECASE)
@@ -219,14 +227,15 @@ def _node_allowed(node, roles) -> bool:
     if str(getattr(node, "accessible", True)).upper() in {"DENY", "FALSE", "0"}:
         return False
     allowed_roles = {str(role).upper() for role in (getattr(node, "allowed_roles", ()) or ())}
-    role_set = {str(role).upper() for role in (roles or ())}
+    role_set = {str(role).upper() for role in (roles or ())} or {"VISITOR"}
     return not allowed_roles or bool(allowed_roles & role_set) or "SUPER_ADMIN" in role_set
 
 
 def _candidate_nodes(nodes, roles):
+    effective_roles = tuple(roles) if roles else ("VISITOR",)
     return [
         node for node in nodes
-        if _node_type(node) not in {"CORRIDOR", "ENTRANCE"} and _node_allowed(node, roles)
+        if _node_type(node) not in {"CORRIDOR", "ENTRANCE"} and _node_allowed(node, effective_roles)
     ]
 
 
@@ -396,6 +405,44 @@ def _candidate_data(node) -> dict:
     }
 
 
+def _ensure_mapping_microservice() -> bool:
+    """Check if mapping microservice on port 5000 is listening; if not, spawn it automatically."""
+    url = MAPPING_MICROSERVICE_URL.rstrip('/')
+    headers = {"x-api-key": NAVIGATION_API_KEY}
+    try:
+        with httpx.Client(timeout=0.6) as client:
+            resp = client.post(f"{url}/navigate", json={}, headers=headers)
+            if resp.status_code < 500:
+                return True
+    except Exception:
+        pass
+
+    repo_root = Path(__file__).resolve().parents[3]
+    node_dir = repo_root / "mapping_and_notification" / "backend"
+    index_file = node_dir / "index.js"
+    if index_file.exists():
+        try:
+            subprocess.Popen(
+                ["node", "index.js"],
+                cwd=str(node_dir),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            for _ in range(6):
+                time.sleep(0.5)
+                try:
+                    with httpx.Client(timeout=0.6) as client:
+                        resp = client.post(f"{url}/navigate", json={}, headers=headers)
+                        if resp.status_code < 500:
+                            return True
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    return False
+
+
 def _call_route_microservice(*, destination_node_id: int, start_node_id: int | None, roles: list[str] | tuple[str, ...]) -> dict:
     """Call Node.js Mapping Microservice route calculation."""
     if start_node_id is None:
@@ -413,52 +460,84 @@ def _call_route_microservice(*, destination_node_id: int, start_node_id: int | N
     headers = {
         "x-api-key": NAVIGATION_API_KEY,
     }
-    try:
-        with httpx.Client(timeout=10.0) as client:
-            resp = client.post(
-                f"{MAPPING_MICROSERVICE_URL.rstrip('/')}/navigate",
-                json=payload,
-                headers=headers,
-            )
-            if resp.status_code == 200:
-                return resp.json()
+    for attempt in range(2):
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.post(
+                    f"{MAPPING_MICROSERVICE_URL.rstrip('/')}/navigate",
+                    json=payload,
+                    headers=headers,
+                )
+                if resp.status_code == 200:
+                    return resp.json()
 
-            try:
-                err_data = resp.json()
-                err_msg = err_data.get("error") or err_data.get("message") or err_data.get("detail") or "Navigation error"
-            except Exception:
-                err_msg = f"HTTP {resp.status_code}"
+                try:
+                    err_data = resp.json()
+                    err_msg = err_data.get("error") or err_data.get("message") or err_data.get("detail") or "Navigation error"
+                except Exception:
+                    err_msg = f"HTTP {resp.status_code}"
 
-            if resp.status_code == 422:
-                raise StartLocationRequired(err_msg)
-            if resp.status_code == 404:
-                raise NoRouteError(err_msg)
-            raise NavigationError(f"Route calculation failed ({resp.status_code}): {err_msg}")
-    except (httpx.ConnectError, httpx.TimeoutException):
-        raise NavigationError("Mapping microservice is unreachable")
+                if resp.status_code == 422:
+                    raise StartLocationRequired(err_msg)
+                if resp.status_code == 404:
+                    raise NoRouteError(err_msg)
+                raise NavigationError(f"Route calculation failed ({resp.status_code}): {err_msg}")
+        except (httpx.ConnectError, httpx.TimeoutException):
+            if attempt == 0 and _ensure_mapping_microservice():
+                continue
+            raise NavigationError("Mapping microservice is unreachable")
 
 
 def calculate_navigation(query: str, *, db, context):
     """Resolve and calculate one trusted, RBAC-filtered campus route via Mapping Microservice."""
-    label = _destination_text(query)
+    from_to_match = _FROM_TO_PATTERN.search(query)
+    origin_text = None
+    if from_to_match:
+        origin_text = _destination_text(from_to_match.group("origin"))
+        label = _destination_text(from_to_match.group("destination"))
+    else:
+        label = _destination_text(query)
+
     snapshot = get_map_snapshot(db)
-    roles = getattr(context, "roles", ())
+    roles = getattr(context, "roles", ()) or ("VISITOR",)
     matches = _destination_matches(snapshot.nodes, label, roles)
     if not matches:
         matches = _semantic_destination_matches(snapshot, query, roles)
     
-    # Resolve start node id from device or user
+    # Resolve start node id from explicit verbal origin, device, or user
     start_node_id = None
-    if getattr(context, "device_node_id", None) is not None:
-        start_node_id = context.device_node_id
-    elif getattr(context, "user_id", None) is not None:
-        from app.models.models import User
-        user = db.query(User).filter(User.user_id == context.user_id, User.is_active.is_(True)).first()
-        if user and getattr(user, "last_known_location", None):
-            start_node_id = user.last_known_location
+    if origin_text:
+        origin_matches = _destination_matches(snapshot.nodes, origin_text, roles)
+        if not origin_matches:
+            origin_matches = _semantic_destination_matches(snapshot, origin_text, roles)
+        if origin_matches:
+            start_node_id = origin_matches[0].node_id
+
+    if start_node_id is None:
+        if getattr(context, "device_node_id", None) is not None:
+            start_node_id = context.device_node_id
+        elif getattr(context, "user_id", None) is not None:
+            from app.models.models import User
+            user = db.query(User).filter(User.user_id == context.user_id, User.is_active.is_(True)).first()
+            if user and getattr(user, "last_known_location", None):
+                start_node_id = user.last_known_location
+
+    # Default fallback: if no start location known, start from Node 1 (Reception / Main Entrance)
+    if start_node_id is None:
+        start_node_id = 1
+
+    category_words = set(_normalise_label(label).split())
+    is_facility = bool(category_words & (_LIFT_WORDS | _STAIR_WORDS))
 
     route = None
-    if len(matches) > 1 and _is_nearest_query(label):
+    if start_node_id is not None and len(matches) > 1 and (_is_nearest_query(label) or is_facility):
+        start_node = next((n for n in snapshot.nodes if n.node_id == start_node_id), None)
+        if start_node:
+            same_floor_matches = [n for n in matches if n.floorplan_id == start_node.floorplan_id]
+            if same_floor_matches:
+                matches = same_floor_matches
+
+    if len(matches) > 1 and (_is_nearest_query(label) or (is_facility and start_node_id is not None)):
         route_candidates = []
         start_required = False
         for node in matches:
@@ -503,7 +582,17 @@ def calculate_navigation(query: str, *, db, context):
                 }
         if len(matches) > 1:
             query_words = set(_normalise_label(label).split())
-            labels = ", ".join(node.label for node in matches)
+            seen_desc = set()
+            formatted_labels = []
+            for node in matches:
+                floor_str = f"Level {node.floor}" if getattr(node, "floor", None) is not None else ""
+                bldg_str = f"in {node.building}" if getattr(node, "building", None) else ""
+                loc_extra = f" ({floor_str} {bldg_str})".strip() if (floor_str or bldg_str) else ""
+                desc = f"{node.label}{loc_extra}"
+                if desc not in seen_desc:
+                    seen_desc.add(desc)
+                    formatted_labels.append(desc)
+            labels = ", ".join(formatted_labels[:6])
             answer = (
                 f"I found these food destinations: {labels}. Which one do you mean?"
                 if query_words & _FOOD_WORDS
@@ -530,14 +619,35 @@ def calculate_navigation(query: str, *, db, context):
                 roles=list(roles),
             )
     except StartLocationRequired:
-        return {"intent": "NAVIGATIONAL", "navigation_target": {"node_id": matches[0].node_id, "label": matches[0].label}, "answer": "I found the destination, but I need your current campus location to give directions."}
-    except NoRouteError:
-        return {"intent": "NAVIGATIONAL", "navigation_target": {"node_id": matches[0].node_id, "label": matches[0].label}, "answer": "I could not find an accessible route to that destination."}
-    except NavigationError as exc:
-        return {"intent": "NAVIGATIONAL", "navigation_target": {"node_id": matches[0].node_id, "label": matches[0].label}, "answer": f"Navigation service error: {str(exc)}"}
+        floor_desc = f"on level {matches[0].floor}" if matches[0].floor is not None else ""
+        bldg_desc = f"in {matches[0].building}" if matches[0].building else ""
+        loc_str = f"{floor_desc} {bldg_desc}".strip()
+        loc_text = f", located {loc_str}" if loc_str else ""
+        return {
+            "intent": "NAVIGATIONAL",
+            "navigation_target": {"node_id": matches[0].node_id, "label": matches[0].label, "floor": matches[0].floor, "building": matches[0].building},
+            "answer": f"I found {matches[0].label}{loc_text}. Please tell me where you are currently standing or check the campus map to see step-by-step directions.",
+        }
+    except (NoRouteError, NavigationError) as exc:
+        floor_desc = f"on level {matches[0].floor}" if matches[0].floor is not None else ""
+        bldg_desc = f"in {matches[0].building}" if matches[0].building else ""
+        loc_str = f"{floor_desc} {bldg_desc}".strip()
+        loc_text = f", located {loc_str}" if loc_str else ""
+        return {
+            "intent": "NAVIGATIONAL",
+            "navigation_target": {"node_id": matches[0].node_id, "label": matches[0].label, "floor": matches[0].floor, "building": matches[0].building},
+            "answer": f"{matches[0].label} is{loc_text}. You can view the destination on the campus map.",
+        }
 
     summary = route.get("route_summary", {})
-    speakable = " ".join(step["instruction"] for step in route.get("instructions", []) if step.get("instruction"))
+    formatted_steps = []
+    for step in route.get("instructions", []):
+        text = str(step.get("instruction") or "").strip()
+        if text:
+            if not text.endswith((".", "!", "?", ";")):
+                text += "."
+            formatted_steps.append(text)
+    speakable = " ".join(formatted_steps)
     return {
         "intent": "NAVIGATIONAL",
         "navigation_target": {"node_id": matches[0].node_id, "label": matches[0].label},

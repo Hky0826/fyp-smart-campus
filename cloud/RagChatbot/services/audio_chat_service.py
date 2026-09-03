@@ -879,9 +879,10 @@ def process_audio_chat_stream(
         yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
         return
 
-    # Query routing: check if query is related to university information
+    # Query routing: classify query intent (navigational, greeting, capability, or university info)
     with StageTimer() as timer:
-        route = type("Route", (), {"category": "UNIVERSITY_INFO"})()
+        from RagChatbot.generation.query_router import classify_query
+        route = classify_query(sanitized_query, db=db)
     metrics.prompt_classification_ms += timer.elapsed_ms
 
     navigation_data = None

@@ -18,6 +18,7 @@ Security:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import datetime
 import json
@@ -610,6 +611,7 @@ async def live_websocket_chat(
     Streams continuous 16kHz PCM from microphone directly into Gemini Live,
     invokes process_user_request for Agentic RAG, and streams 24kHz PCM audio back.
     """
+    device_id = device_id or "ENTRY-A8F3D155"
     await websocket.accept()
     from app.core.database import SessionLocal
     from RagChatbot.generation.live_session_manager import GeminiLiveSession
@@ -629,8 +631,11 @@ async def live_websocket_chat(
         })
     except Exception as exc:
         logger.error("Gemini Live WebSocket connection failed to start: %s", exc)
-        await websocket.send_json({"event": "error", "data": {"message": str(exc)}})
-        await websocket.close()
+        try:
+            await websocket.send_json({"event": "error", "data": {"message": str(exc)}})
+            await websocket.close()
+        except Exception:
+            pass
         return
 
     active = True
@@ -659,15 +664,24 @@ async def live_websocket_chat(
             )
         if active:
             try:
+                rag_payload = {
+                    "route": result.get("route"),
+                    "status": result.get("status"),
+                    "citations": result.get("citations", []),
+                    "access_granted": result.get("access_granted", True),
+                }
+                nav_data = result.get("navigation")
+                if nav_data:
+                    rag_payload["navigation"] = nav_data
                 await websocket.send_json({
                     "event": "rag_complete",
-                    "data": {
-                        "route": result.get("route"),
-                        "status": result.get("status"),
-                        "citations": result.get("citations", []),
-                        "access_granted": result.get("access_granted", True),
-                    }
+                    "data": rag_payload,
                 })
+                if nav_data:
+                    await websocket.send_json({
+                        "event": "navigation",
+                        "data": nav_data,
+                    })
             except Exception:
                 pass
         return result
@@ -693,6 +707,24 @@ async def live_websocket_chat(
             except Exception:
                 pass
 
+    async def on_turn_complete():
+        if active:
+            try:
+                await websocket.send_json({"event": "turn_complete"})
+            except Exception:
+                pass
+
+    receiver_task = asyncio.create_task(
+        live_session.receive_events(
+            on_audio=on_audio,
+            on_transcript=on_transcript,
+            on_tool_call=on_tool_call,
+            on_output_transcript=on_output_transcript,
+            on_turn_complete=on_turn_complete,
+        ),
+        name="gemini-live-ws-receiver",
+    )
+
     try:
         while True:
             message = await websocket.receive()
@@ -710,21 +742,17 @@ async def live_websocket_chat(
                         if b64_data:
                             await live_session.send_audio(base64.b64decode(b64_data))
                     elif event in ("activity_end", "finish_turn"):
-                        await live_session.finish_input(
-                            on_transcript=on_transcript,
-                            on_tool_call=on_tool_call,
-                            on_audio=on_audio,
-                            on_output_transcript=on_output_transcript,
-                        )
-                        await websocket.send_json({"event": "turn_complete"})
+                        # Optional turn boundary hint; continuous VAD handles turns automatically
+                        pass
                 except json.JSONDecodeError:
                     pass
     except WebSocketDisconnect:
         logger.info("Gemini Live client disconnected normally.")
     except Exception as exc:
-        logger.exception("Gemini Live WebSocket session error: %s", exc)
+        logger.warning("Gemini Live WebSocket session ended: %s", exc)
     finally:
         active = False
+        receiver_task.cancel()
         try:
             await live_session.close()
         except Exception:

@@ -13,6 +13,9 @@ import wave
 import threading
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 
 def body_hash(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
@@ -134,125 +137,225 @@ def play_audio_response(pcm_or_wav_bytes: bytes, sample_rate: int = 24000):
         print(f"[Audio Playback Error] {exc}")
 
 
+def calculate_rms(pcm_bytes: bytes) -> float:
+    if not pcm_bytes:
+        return 0.0
+    import numpy as np
+    arr = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
+    if arr.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(arr ** 2)))
+
+
 async def run_gemini_live_duplex_session(ws_url: str, token: str, device_id: str, session_id: int):
     """
     Full-duplex real-time Gemini Live WebSocket session.
-    Streams microphone PCM chunks in real time and plays received audio chunks immediately.
+    Streams continuous 16kHz microphone PCM directly into Gemini Live,
+    supports natural multi-turn conversations with automated echo-suppression,
+    and displays live RBAC citations and wayfinding navigation.
     """
     import websockets
     import sounddevice as sd
     import numpy as np
 
     print(f"\nConnecting to Gemini Live WebSocket ({ws_url})...")
-    async with websockets.connect(ws_url) as ws:
-        # Wait for ready event
-        init_msg = await ws.recv()
-        init_data = json.loads(init_msg)
-        print(f"[Gemini Live Connected] Ready: {init_data.get('data', {})}")
+    try:
+        ws = await websockets.connect(ws_url)
+    except Exception as exc:
+        print(f"\n[Error] Could not connect to Gemini Live: {exc}")
+        return
 
+    try:
+        init_msg = await asyncio.wait_for(ws.recv(), timeout=15.0)
+        init_data = json.loads(init_msg) if isinstance(init_msg, str) else {}
+        ready_payload = init_data.get("data", {})
+        print(f"[Gemini Live Connected] Ready: Model={ready_payload.get('model', 'gemini-live')} | Device={device_id}")
+    except Exception as exc:
+        print(f"[Warning] Handshake notice: {exc}")
+
+    RATE = 16000
+    CHUNK = 1600  # 100ms blocks
+    PLAYBACK_RATE = 24000
+
+    output_stream = sd.RawOutputStream(
+        samplerate=PLAYBACK_RATE,
+        channels=1,
+        dtype="int16",
+        blocksize=2400,
+    )
+    output_stream.start()
+
+    audio_play_queue: asyncio.Queue[bytes] = asyncio.Queue()
+    mic_queue: asyncio.Queue[bytes] = asyncio.Queue()
+    playback_busy_until = 0.0
+    loop = asyncio.get_running_loop()
+
+    def mic_callback(indata, frames, time_info, status):
+        pcm = indata.tobytes()
+        loop.call_soon_threadsafe(mic_queue.put_nowait, pcm)
+
+    mic_stream = sd.InputStream(
+        samplerate=RATE,
+        channels=1,
+        dtype="int16",
+        blocksize=CHUNK,
+        callback=mic_callback,
+    )
+    mic_stream.start()
+
+    speech_threshold_rms = 300.0
+    vad_config_file = Path("shitz/vad_config.json")
+    if vad_config_file.exists():
+        try:
+            with open(vad_config_file, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                speech_threshold_rms = float(cfg.get("speech_threshold_rms", 300.0))
+        except Exception:
+            pass
+
+    print(f"\n[Live Voice Stream Ready] Hands-free multi-turn active! (RMS > {speech_threshold_rms:.1f})")
+    print("Speak naturally into your microphone at any time (Ctrl+C to stop).")
+    print("Example prompts:")
+    print("  - 'Where is the cashier?'")
+    print("  - 'Where is the lift?'")
+    print("  - 'Where is the washroom?'")
+    print("  - 'What courses are offered?'\n")
+
+    async def player_loop():
+        nonlocal playback_busy_until
         while True:
-            input("\nPress ENTER and speak naturally (Gemini Live is listening in real time)...")
-            print("[Gemini Live Listening] Speak your question now... Press ENTER when done speaking.")
-            
-            stop_event = threading.Event()
-            audio_queue = asyncio.Queue()
-            loop = asyncio.get_running_loop()
-
-            def mic_callback(indata, frames, time_info, status):
-                if not stop_event.is_set():
-                    pcm_bytes = indata.tobytes()
-                    loop.call_soon_threadsafe(audio_queue.put_nowait, pcm_bytes)
-
-            input_stream = sd.InputStream(
-                samplerate=16000,
-                channels=1,
-                dtype="int16",
-                blocksize=1600,  # 100ms chunks
-                callback=mic_callback,
-            )
-
-            start_turn = time.monotonic()
-            first_audio = False
-
-            async def stream_mic_sender():
-                with input_stream:
-                    while not stop_event.is_set():
-                        try:
-                            pcm = await asyncio.wait_for(audio_queue.get(), timeout=0.1)
-                            await ws.send(pcm)
-                        except asyncio.TimeoutError:
-                            continue
-
-            # Continuous audio output stream - keeps the soundcard open to prevent choppy/breaking audio
-            output_stream = sd.RawOutputStream(
-                samplerate=24000,
-                channels=1,
-                dtype="int16",
-                blocksize=2400,
-            )
-            output_stream.start()
-
-            async def receiver_loop():
-                nonlocal first_audio
-                while True:
-                    msg = await ws.recv()
-                    data = json.loads(msg) if isinstance(msg, str) else {}
-                    event = data.get("event")
-                    event_data = data.get("data", {})
-
-                    if event == "transcript":
-                        print(f"\n[You]: \"{event_data.get('text', '')}\"")
-                    elif event == "rag_status":
-                        print(f"[Agentic RAG]: Searching authorized campus records...")
-                    elif event == "rag_complete":
-                        cits = [c.get('document_title') for c in event_data.get('citations', [])]
-                        if cits:
-                            print(f"[Citations]: {cits}")
-                    elif event == "audio":
-                        if not first_audio:
-                            first_audio = True
-                            ttfa = int((time.monotonic() - start_turn) * 1000)
-                            print(f"[Time to First Audio (TTFA): {ttfa} ms]")
-                        b64_chunk = event_data.get("chunk")
-                        if b64_chunk:
-                            raw_pcm = base64.b64decode(b64_chunk)
-                            try:
-                                await asyncio.to_thread(output_stream.write, raw_pcm)
-                            except Exception:
-                                pass
-                    elif event == "output_transcript":
-                        print(f"[Gemini Live]: {event_data.get('text', '')}")
-                    elif event == "turn_complete":
-                        total_ms = int((time.monotonic() - start_turn) * 1000)
-                        print(f"[Turn Completed in {total_ms} ms]")
-                        break
-
-            # Launch streaming tasks
-            sender_task = asyncio.create_task(stream_mic_sender())
-            
-            # Wait for user keypress to finish speaking
-            def wait_stop():
-                input()
-                stop_event.set()
-
-            stop_thread = threading.Thread(target=wait_stop)
-            stop_thread.start()
-
-            while not stop_event.is_set():
-                await asyncio.sleep(0.05)
-
-            sender_task.cancel()
-            await ws.send(json.dumps({"event": "finish_turn"}))
-            print("[Processing turn with Gemini Live...]")
-
-            try:
-                await receiver_loop()
-            finally:
+            chunk = await audio_play_queue.get()
+            if chunk:
+                duration = len(chunk) / 48000.0
+                playback_busy_until = time.monotonic() + duration + 0.1
                 try:
-                    output_stream.stop()
-                    output_stream.close()
+                    await asyncio.to_thread(output_stream.write, chunk)
                 except Exception:
                     pass
+
+    async def receiver_loop():
+        nonlocal playback_busy_until
+        try:
+            async for raw_msg in ws:
+                try:
+                    event_data = json.loads(raw_msg)
+                except Exception:
+                    continue
+
+                event = event_data.get("event")
+                data = event_data.get("data") or {}
+
+                if event == "transcript":
+                    text = data.get("text", "")
+                    if text:
+                        print(f"\n[You]: {text}")
+
+                elif event == "rag_status":
+                    status = data.get("status", "")
+                    query = data.get("query", "")
+                    print(f"\n[Cloud RBAC Engine]: Searching authorized campus records for '{query}'...")
+
+                elif event == "navigation":
+                    print("\n" + "=" * 60)
+                    print("  [CAMPUS MAP NAVIGATION WAYFINDING]")
+                    target = data.get("navigation_target") or {}
+                    summary = data.get("route_summary") or {}
+                    dest_label = target.get("label") or summary.get("destination_label") or "Destination"
+                    start_label = summary.get("start_label") or "Your location"
+                    print(f"  Route:       {start_label} -> {dest_label}")
+                    if summary.get("total_distance_m"):
+                        print(f"  Distance:    {summary.get('total_distance_m')} m ({summary.get('estimated_time_label', '')})")
+                    if data.get("instructions"):
+                        print("  Wayfinding Instructions:")
+                        for idx, step in enumerate(data.get("instructions", []), 1):
+                            print(f"    {idx}. {step.get('instruction')}")
+                    print("=" * 60 + "\n")
+
+                elif event == "rag_complete":
+                    route = data.get("route", "")
+                    access_granted = data.get("access_granted", True)
+                    citations = data.get("citations") or data.get("sources") or []
+                    print(f"\n[RBAC Route: {route} | Access: {'GRANTED' if access_granted else 'DENIED'}]")
+                    if citations:
+                        print(f"  Authorized Citations ({len(citations)}):")
+                        for idx, c in enumerate(citations[:3], 1):
+                            title = c.get("document_title") or f"Doc #{c.get('document_id')}"
+                            sec = c.get("access_level") or "PUBLIC"
+                            print(f"    [{idx}] {title} (Level: {sec})")
+
+                elif event == "output_transcript":
+                    text = data.get("text", "")
+                    if text:
+                        print(f"[Assistant]: {text}", end="", flush=True)
+
+                elif event == "audio":
+                    b64_chunk = data.get("chunk", "")
+                    if b64_chunk:
+                        pcm_bytes = base64.b64decode(b64_chunk)
+                        await audio_play_queue.put(pcm_bytes)
+
+                elif event == "turn_complete":
+                    print("\n[Turn Finished - Ready for next question!]\n")
+                    if audio_play_queue.empty():
+                        playback_busy_until = 0.0
+
+                elif event == "error":
+                    print(f"\n[Backend Error]: {data.get('message', 'Unknown error')}")
+
+        except websockets.ConnectionClosed:
+            print("\n[Connection Closed] Backend disconnected.")
+        except asyncio.CancelledError:
+            pass
+
+    async def sender_loop():
+        nonlocal playback_busy_until
+        while True:
+            pcm_chunk = await mic_queue.get()
+            if not pcm_chunk:
+                continue
+
+            rms = calculate_rms(pcm_chunk)
+            now = time.monotonic()
+            is_playing = (now < playback_busy_until) or (not audio_play_queue.empty())
+
+            # Echo suppression: do not stream while speaker is actively playing
+            if is_playing:
+                if rms >= speech_threshold_rms * 2.0:
+                    playback_busy_until = 0.0
+                    while not audio_play_queue.empty():
+                        try:
+                            audio_play_queue.get_nowait()
+                        except Exception:
+                            break
+                    print("\n[Interrupted - Listening to you...]")
+                else:
+                    continue
+
+            try:
+                await ws.send(pcm_chunk)
+            except Exception:
+                break
+
+    player_task = asyncio.create_task(player_loop())
+    receiver_task = asyncio.create_task(receiver_loop())
+    sender_task = asyncio.create_task(sender_loop())
+
+    try:
+        await asyncio.gather(receiver_task, sender_task)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        player_task.cancel()
+        receiver_task.cancel()
+        sender_task.cancel()
+        try:
+            mic_stream.stop()
+            mic_stream.close()
+            output_stream.stop()
+            output_stream.close()
+            await ws.close()
+        except Exception:
+            pass
 
 
 def record_microphone_audio(sample_rate: int = 16000, channels: int = 1) -> bytes:
@@ -341,6 +444,19 @@ def main():
     try:
         access_token, session_id = get_edge_token(server_url, device_id, device_secret, target_uid)
         print(f"Successfully obtained Edge Token! Session ID: {session_id}")
+        try:
+            sys.path.insert(0, "cloud/dashboard/backend")
+            sys.path.insert(0, "cloud")
+            from app.core.database import SessionLocal
+            from app.models.models import Device, Node
+            with SessionLocal() as _db:
+                dev = _db.query(Device).filter(Device.device_id == device_id).first()
+                if dev and dev.node:
+                    bldg_name = getattr(getattr(dev.node.floorplan, "building", None), "building_name", "") if dev.node.floorplan else ""
+                    flr_level = getattr(dev.node.floorplan, "floor_level", "") if dev.node.floorplan else ""
+                    print(f"Device Physical Location: Node {dev.node_id} ('{dev.node.room_label}', Level {flr_level} in {bldg_name})")
+        except Exception:
+            pass
     except Exception as e:
         print(f"Failed to authenticate: {e}")
         return
@@ -409,6 +525,11 @@ def main():
                     print(f"Status Message:    {result.get('status_message')}")
                 if result.get('sources'):
                     print(f"Citations ({len(result.get('sources'))}): {[s.get('document_title') for s in result.get('sources')]}")
+                instructions = result.get("instructions") or (result.get("navigation") or {}).get("instructions")
+                if instructions:
+                    print("Wayfinding Turn-by-Turn Steps:")
+                    for idx, step in enumerate(instructions, 1):
+                        print(f"  {idx}. {step.get('instruction')}")
 
                 b64_audio = result.get("audio_response") or result.get("audio_bytes")
                 if b64_audio:
@@ -456,6 +577,11 @@ def main():
                 print(f"\nTranscribed Input: \"{result.get('transcribed_input', '')}\"")
                 print(f"Assistant Answer:  {result.get('text_response') or result.get('text', '')}")
                 print(f"Access Granted:    {result.get('access_granted')}")
+                instructions = result.get("instructions") or (result.get("navigation") or {}).get("instructions")
+                if instructions:
+                    print("Wayfinding Turn-by-Turn Steps:")
+                    for idx, step in enumerate(instructions, 1):
+                        print(f"  {idx}. {step.get('instruction')}")
                 b64_audio = result.get("audio_response") or result.get("audio_bytes")
                 if b64_audio:
                     pcm_bytes = base64.b64decode(b64_audio)
@@ -502,6 +628,11 @@ def main():
                 nav = data.get("navigation_target")
                 if nav:
                     print(f"[Navigation Triggered: {nav.get('label')}]")
+                instructions = data.get("instructions") or (data.get("navigation") or {}).get("instructions")
+                if instructions:
+                    print("Wayfinding Turn-by-Turn Steps:")
+                    for idx, step in enumerate(instructions, 1):
+                        print(f"  {idx}. {step.get('instruction')}")
             else:
                 try:
                     err = resp.json()

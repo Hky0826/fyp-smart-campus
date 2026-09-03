@@ -497,15 +497,17 @@ function generateInstructions(pathNodes, edgesTraversed, edgeLookup) {
  * @throws {{ status: number, message: string, noRoute?: boolean }} On missing nodes, same start/end, or no valid route.
  */
 exports.runNavigation = async ({ currentLocation, destinationNode, rbacRole, walkingSpeed = 1.2 }) => {
-    // Resolve string role names to their numeric IDs
+    // Resolve string role names to their numeric IDs matching MySQL roles table:
+    // 1: ADMIN, 2: STAFF, 3: LECTURER, 4: STUDENT, 5: VISITOR
     let userRoleId = Number(rbacRole);
     if (isNaN(userRoleId)) {
         const roleLower = String(rbacRole).toLowerCase();
         if (roleLower === 'admin' || roleLower === 'super_admin' || roleLower === 'system_admin' || roleLower === 'content_admin') userRoleId = 1;
-        else if (roleLower === 'staff' || roleLower === 'lecturer') userRoleId = 2;
-        else if (roleLower === 'student') userRoleId = 3;
-        else if (roleLower === 'visitor' || roleLower === 'guest') userRoleId = 4;
-        else userRoleId = 4;
+        else if (roleLower === 'staff') userRoleId = 2;
+        else if (roleLower === 'lecturer') userRoleId = 3;
+        else if (roleLower === 'student') userRoleId = 4;
+        else if (roleLower === 'visitor' || roleLower === 'guest') userRoleId = 5;
+        else userRoleId = 5;
     }
 
     // Fetch all nodes with building/floor context and their RBAC roles
@@ -577,7 +579,8 @@ exports.runNavigation = async ({ currentLocation, destinationNode, rbacRole, wal
     edgesData.forEach(e => {
         if (e.is_accessible === 'DENY') return;
         const edgeRoles = e.allowed_roles ? e.allowed_roles.split(',').map(Number) : [];
-        if (edgeRoles.length > 0 && !edgeRoles.includes(userRoleId)) return;
+        const isAllowed = userRoleId === 1 || edgeRoles.length === 0 || edgeRoles.includes(userRoleId) || (userRoleId === 3 && edgeRoles.includes(2));
+        if (!isAllowed) return;
 
         const src  = e.source_node_id;
         const dest = e.destination_node_id;
@@ -745,8 +748,8 @@ exports.runNavigation = async ({ currentLocation, destinationNode, rbacRole, wal
             const neighborNode = nodeMap[neighbor.target];
             if (!neighborNode) return;
             if (neighborNode.is_accessible === 'DENY') return;
-            if (neighborNode.allowed_roles.length > 0 &&
-                !neighborNode.allowed_roles.includes(userRoleId)) return;
+            const nodeAllowed = userRoleId === 1 || neighborNode.allowed_roles.length === 0 || neighborNode.allowed_roles.includes(userRoleId) || (userRoleId === 3 && neighborNode.allowed_roles.includes(2));
+            if (!nodeAllowed) return;
 
             const tentativeG = gScore[currentId] + neighbor.weight;
             if (tentativeG < gScore[neighbor.target]) {

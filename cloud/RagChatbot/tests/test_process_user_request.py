@@ -38,12 +38,17 @@ def test_process_user_request_calls_flash_lite_only_for_structured_routing():
     fake_models.generate_content.return_value = _flash_response()
     fake_client = SimpleNamespace(models=fake_models)
 
+    fake_agent_res = SimpleNamespace(
+        access_granted=True,
+        citations=[chunk],
+        answer="Admissions context",
+    )
+
     with (
         patch.object(request_module.genai, "Client", return_value=fake_client),
         patch.object(request_module, "resolve_auth_context", return_value=AuthenticatedChatContext(None, None)),
         patch.object(request_module, "embed_text", return_value=[0.1, 0.2]),
-        patch.object(request_module, "retrieve_chunks", return_value=[chunk]),
-        patch.object(request_module, "build_context_block", return_value="Admissions context"),
+        patch("RagChatbot.agent.graph.run_agentic_rag", return_value=fake_agent_res),
     ):
         result = request_module.process_user_request(
             transcript="What are the admission requirements?",
@@ -54,9 +59,8 @@ def test_process_user_request_calls_flash_lite_only_for_structured_routing():
         )
 
     assert result["route"] == "UNIVERSITY_INFO"
-    assert result["response_text"] is None
     assert result["grounded_context"] == "Admissions context"
-    assert result["sources"][0]["chunk_id"] == 1
+    assert result["citations"][0]["chunk_id"] == 1
     assert fake_models.generate_content.call_args.kwargs["model"] == "gemini-3.1-flash-lite"
 
 

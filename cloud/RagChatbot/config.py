@@ -104,7 +104,7 @@ class RagSettings:
         "RAG_LIVE_ROUTING_MODEL", "gemini-3.1-flash-lite"
     )
     LIVE_MODEL: str = os.getenv("RAG_LIVE_MODEL", "gemini-3.1-flash-live-preview")
-    LIVE_MANUAL_ACTIVITY: bool = os.getenv("RAG_LIVE_MANUAL_ACTIVITY", "true").strip().lower() in {"1", "true", "yes", "on"}
+    LIVE_MANUAL_ACTIVITY: bool = os.getenv("RAG_LIVE_MANUAL_ACTIVITY", "false").strip().lower() in {"1", "true", "yes", "on"}
     LIVE_THINKING_LEVEL: str = os.getenv("RAG_LIVE_THINKING_LEVEL", "low")
     LIVE_CONNECT_TIMEOUT_SECONDS: float = float(os.getenv("RAG_LIVE_CONNECT_TIMEOUT_SECONDS", "10"))
     LIVE_IO_TIMEOUT_SECONDS: float = float(os.getenv("RAG_LIVE_IO_TIMEOUT_SECONDS", "30"))

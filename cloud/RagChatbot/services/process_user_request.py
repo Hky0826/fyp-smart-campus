@@ -130,6 +130,7 @@ def _result(
         "access_granted": access_granted,
         "authentication_required": authentication_required,
         "sources": citations or [],
+        "citations": citations or [],
         "grounded_context": grounded_context,
         "navigation": navigation,
         "error_message": error_message,
@@ -464,7 +465,7 @@ def process_user_request(
             document_title=c.document_title,
             chunk_index=c.chunk_index,
             access_level=c.access_level,
-            excerpt=c.excerpt,
+            excerpt=getattr(c, "excerpt", getattr(c, "chunk_text", "")),
         )
         for c in agent_res.citations
     ]
