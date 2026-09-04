@@ -9,14 +9,15 @@ Item {
     property string presenceState: "UNKNOWN"
     property bool listening: false
     property bool busy: false
+    property bool speaking: false
+    property string ragStatus: ""
+    property var currentNavigation: null
+    property var citations: []
     property bool muted: false
     property bool verifying: false
     property string errorText: ""
 
     signal closeRequested()
-    signal pushToTalkStarted()
-    signal pushToTalkStopped()
-    signal pushToTalkToggled()
     signal stopAnsweringRequested()
 
     onVisibleChanged: {
@@ -181,10 +182,11 @@ Item {
 
                             Text {
                                 width: parent.width
-                                visible: false
+                                visible: modelData.citations && modelData.citations.length > 0 && modelData.role !== "user"
                                 text: citationText(modelData.citations)
-                                color: "#64748b"
+                                color: "#0369a1"
                                 font.pixelSize: 11
+                                font.bold: true
                                 wrapMode: Text.WordWrap
                             }
                         }
@@ -203,35 +205,122 @@ Item {
                 horizontalAlignment: Text.AlignHCenter
             }
 
-            // Push to Speak Controls (Optimized for 5-inch 800x480 touch display)
+            // RAG Status Banner (searching indicator)
             Rectangle {
-                id: pttButton
                 Layout.fillWidth: true
-                height: 46
-                radius: 8
-                enabled: !root.verifying
-                opacity: root.verifying ? 0.5 : 1.0
+                height: 28
+                radius: 6
+                color: "#e0f2fe"
+                border.width: 1
+                border.color: "#38bdf8"
+                visible: root.ragStatus.length > 0
 
-                color: root.busy ? "#475569" : root.listening ? "#dc2626" : "#0284c7"
-
-                Behavior on color { ColorAnimation { duration: 150 } }
-
-                // Pulse Animation while listening
-                Rectangle {
-                    anchors.fill: parent
-                    radius: parent.radius
-                    color: "transparent"
-                    border.width: 3
-                    border.color: "#ef4444"
-                    visible: root.listening
-
-                    SequentialAnimation on opacity {
-                        running: root.listening
-                        loops: Animation.Infinite
-                        NumberAnimation { to: 0.2; duration: 400 }
-                        NumberAnimation { to: 1.0; duration: 400 }
+                RowLayout {
+                    anchors.centerIn: parent
+                    spacing: 6
+                    Text {
+                        text: "🔍"
+                        font.pixelSize: 12
+                    }
+                    Text {
+                        text: root.ragStatus
+                        color: "#0369a1"
+                        font.pixelSize: 12
+                        font.bold: true
                     }
                 }
+            }
+
+            // Turn-by-Turn Navigation Card (Wayfinding)
+            Rectangle {
+                id: navCard
+                Layout.fillWidth: true
+                radius: 8
+                color: "#f0fdf4"
+                border.width: 1
+                border.color: "#86efac"
+                visible: root.currentNavigation !== null && root.currentNavigation !== undefined && Object.keys(root.currentNavigation).length > 0
+                implicitHeight: navCol.implicitHeight + 16
+
+                ColumnLayout {
+                    id: navCol
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 4
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        Text {
+                            text: "🗺️ Campus Navigation"
+                            font.pixelSize: 13
+                            font.bold: true
+                            color: "#166534"
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            text: {
+                                var sum = root.currentNavigation ? (root.currentNavigation.route_summary || {}) : {}
+                                var dist = sum.total_distance_m ? (sum.total_distance_m + " m") : ""
+                                var timeLabel = sum.estimated_time_label || ""
+                                return dist ? (dist + " (" + timeLabel + ")") : ""
+                            }
+                            font.pixelSize: 11
+                            color: "#15803d"
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: {
+                            var sum = root.currentNavigation ? (root.currentNavigation.route_summary || {}) : {}
+                            var target = root.currentNavigation ? (root.currentNavigation.navigation_target || {}) : {}
+                            var dest = target.label || sum.destination_label || "Destination"
+                            var start = sum.start_label || "Your location"
+                            return start + " ➔ " + dest
+                        }
+                        font.pixelSize: 12
+                        font.bold: true
+                        color: "#14532d"
+                        elide: Text.ElideRight
+                    }
+
+                    Column {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Repeater {
+                            model: (root.currentNavigation && root.currentNavigation.instructions) ? root.currentNavigation.instructions : []
+                            RowLayout {
+                                width: parent.width
+                                spacing: 4
+                                Text {
+                                    text: (index + 1) + "."
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    color: "#166534"
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: modelData.instruction || ""
+                                    font.pixelSize: 11
+                                    color: "#1e293b"
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fully Hands-Free Live Voice Status Indicator
+            Rectangle {
+                id: handsFreeIndicator
+                Layout.fillWidth: true
+                height: 42
+                radius: 8
+                color: root.busy ? "#334155" : root.speaking ? "#15803d" : root.listening ? "#0284c7" : "#64748b"
+
+                Behavior on color { ColorAnimation { duration: 200 } }
 
                 RowLayout {
                     anchors.centerIn: parent
@@ -239,60 +328,38 @@ Item {
 
                     // Mic Icon Indicator
                     Item {
-                        width: 20
-                        height: 20
+                        width: 18
+                        height: 18
                         visible: !root.busy
 
                         Rectangle {
-                            x: 6
-                            y: 2
+                            x: 5
+                            y: 1
                             width: 8
-                            height: 11
+                            height: 10
                             radius: 4
                             color: "#ffffff"
                         }
                         Rectangle {
-                            x: 4
-                            y: 8
+                            x: 3
+                            y: 7
                             width: 12
-                            height: 7
+                            height: 6
                             radius: 4
                             color: "transparent"
                             border.width: 2
                             border.color: "#ffffff"
                         }
                         Rectangle {
-                            x: 9
-                            y: 15
+                            x: 8
+                            y: 13
                             width: 2
                             height: 4
                             color: "#ffffff"
                         }
                     }
 
-                    // Interrupt icon shown while the answer is being spoken.
-                    Item {
-                        width: 20
-                        height: 20
-                        visible: root.busy
-
-                        Rectangle {
-                            anchors.centerIn: parent
-                            width: 14
-                            height: 14
-                            radius: 2
-                            color: "#ffffff"
-                        }
-                    }
-
-                    Text {
-                        text: root.busy ? "Stop answering" : root.listening ? "Listening... Release/Tap to Send" : "Hold or Tap to Speak"
-                        color: "#ffffff"
-                        font.pixelSize: 14
-                        font.bold: true
-                    }
-
-                    // Processing Spinner Dots
+                    // Speaking / Busy Animation
                     Row {
                         spacing: 4
                         visible: root.busy
@@ -303,7 +370,7 @@ Item {
                                 width: 5
                                 height: 5
                                 radius: 3
-                                color: "#ffffff"
+                                color: "#38bdf8"
 
                                 SequentialAnimation on opacity {
                                     running: root.busy
@@ -315,59 +382,39 @@ Item {
                             }
                         }
                     }
-                }
 
-                MouseArea {
-                    id: pttMouseArea
-                    anchors.fill: parent
-                    enabled: !root.verifying
-
-                    property bool heldMode: false
-                    property bool interruptMode: false
-
-                    Timer {
-                        id: holdTimer
-                        interval: 220
-                        repeat: false
-                        onTriggered: {
-                            pttMouseArea.heldMode = true
-                            root.pushToTalkStarted()
-                        }
+                    Text {
+                        text: root.busy
+                              ? "Assistant speaking... (Speak to interrupt)"
+                              : root.speaking
+                              ? "Listening to you..."
+                              : root.listening
+                              ? "Hands-free voice active — speak naturally at any time"
+                              : "Microphone standby"
+                        color: "#ffffff"
+                        font.pixelSize: 13
+                        font.bold: true
                     }
 
-                    onPressed: {
-                        pttMouseArea.interruptMode = root.busy
-                        if (root.busy) {
-                            root.stopAnsweringRequested()
-                            return
+                    // Stop / Interrupt Button (only visible while assistant is answering)
+                    Button {
+                        visible: root.busy
+                        implicitWidth: 64
+                        implicitHeight: 28
+                        text: "Interrupt"
+                        onClicked: root.stopAnsweringRequested()
+                        background: Rectangle {
+                            radius: 4
+                            color: "#ef4444"
                         }
-                        pttMouseArea.heldMode = false
-                        holdTimer.start()
-                    }
-
-                    onReleased: {
-                        if (pttMouseArea.interruptMode) {
-                            return
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#ffffff"
+                            font.pixelSize: 11
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
-                        holdTimer.stop()
-                        if (pttMouseArea.heldMode) {
-                            root.pushToTalkStopped()
-                        }
-                    }
-
-                    onClicked: {
-                        if (pttMouseArea.interruptMode) {
-                            pttMouseArea.interruptMode = false
-                            return
-                        }
-                        if (!pttMouseArea.heldMode) {
-                            if (root.listening) {
-                                root.pushToTalkStopped()
-                            } else {
-                                root.pushToTalkStarted()
-                            }
-                        }
-                        pttMouseArea.heldMode = false
                     }
                 }
             }

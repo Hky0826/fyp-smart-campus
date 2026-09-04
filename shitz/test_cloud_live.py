@@ -194,7 +194,10 @@ async def run_client():
                     if citations:
                         print(f"\n[RAG Sources]: {len(citations)} chunks retrieved from database.")
                         for idx, c in enumerate(citations[:3], 1):
-                            title = c.get("document_title") or f"Document #{c.get('document_id', 'N/A')}"
+                            if isinstance(c, dict):
+                                title = c.get("document_title") or f"Document #{c.get('document_id', 'N/A')}"
+                            else:
+                                title = str(c)
                             print(f"    [{idx}] {title}")
 
                 elif event == "output_transcript":
@@ -226,6 +229,7 @@ async def run_client():
     async def sender_loop():
         nonlocal playback_busy_until
         speech_active = False
+        silence_started = 0.0
 
         while True:
             pcm_chunk = await mic_queue.get()
@@ -256,15 +260,24 @@ async def run_client():
             except Exception:
                 break
 
-            # Visual feedback on speech detection
+            # Visual feedback on speech detection and client VAD turn-end signal
             if rms >= speech_threshold_rms:
                 if not speech_active:
                     speech_active = True
+                    silence_started = 0.0
                     sys.stdout.write("\n[You]: Speaking... ")
                     sys.stdout.flush()
             elif speech_active:
-                speech_active = False
-                print("\n[Speech paused - Waiting for response...]")
+                if silence_started == 0.0:
+                    silence_started = now
+                elif (now - silence_started) >= 0.45:  # 450ms pause finishes turn
+                    speech_active = False
+                    silence_started = 0.0
+                    print("\n[Speech paused - Waiting for response...]")
+                    try:
+                        await ws.send(json.dumps({"event": "activity_end"}))
+                    except Exception:
+                        pass
 
     tasks = [
         asyncio.create_task(player_loop()),

@@ -193,6 +193,17 @@ class GeminiLiveSession:
         except Exception as exc:
             raise GeminiLiveSessionError("Gemini Live audio send failed") from exc
 
+    async def end_user_turn(self) -> None:
+        """Signal Gemini Live that the user's speech activity has finished."""
+        if not self.is_connected or not self._session:
+            return
+        try:
+            async with self._send_lock:
+                await self._session.send_realtime_input(activity_end=types.ActivityEnd())
+            logger.debug("Sent activity_end to Gemini Live session")
+        except Exception as exc:
+            logger.debug("Failed to signal activity_end: %s", exc)
+
     async def receive_events(
         self,
         on_audio: Callable[[bytes], Any],

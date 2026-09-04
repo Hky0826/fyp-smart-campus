@@ -279,8 +279,12 @@ async def run_gemini_live_duplex_session(ws_url: str, token: str, device_id: str
                     if citations:
                         print(f"  Authorized Citations ({len(citations)}):")
                         for idx, c in enumerate(citations[:3], 1):
-                            title = c.get("document_title") or f"Doc #{c.get('document_id')}"
-                            sec = c.get("access_level") or "PUBLIC"
+                            if isinstance(c, dict):
+                                title = c.get("document_title") or f"Doc #{c.get('document_id', 'N/A')}"
+                                sec = c.get("access_level") or "PUBLIC"
+                            else:
+                                title = str(c)
+                                sec = "PUBLIC"
                             print(f"    [{idx}] {title} (Level: {sec})")
 
                 elif event == "output_transcript":
@@ -309,6 +313,9 @@ async def run_gemini_live_duplex_session(ws_url: str, token: str, device_id: str
 
     async def sender_loop():
         nonlocal playback_busy_until
+        is_speaking = False
+        silence_started = 0.0
+
         while True:
             pcm_chunk = await mic_queue.get()
             if not pcm_chunk:
@@ -335,6 +342,22 @@ async def run_gemini_live_duplex_session(ws_url: str, token: str, device_id: str
                 await ws.send(pcm_chunk)
             except Exception:
                 break
+
+            # Client VAD turn-end detection for instant response
+            if rms >= speech_threshold_rms:
+                if not is_speaking:
+                    is_speaking = True
+                    silence_started = 0.0
+            elif is_speaking:
+                if silence_started == 0.0:
+                    silence_started = now
+                elif (now - silence_started) >= 0.45:  # 450ms silence after speech
+                    is_speaking = False
+                    silence_started = 0.0
+                    try:
+                        await ws.send(json.dumps({"event": "activity_end"}))
+                    except Exception:
+                        pass
 
     player_task = asyncio.create_task(player_loop())
     receiver_task = asyncio.create_task(receiver_loop())

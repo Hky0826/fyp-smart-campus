@@ -226,6 +226,7 @@ def process_user_request(
     session_id: int | None,
     db: Session,
     turn_id: str | None = None,
+    fast_voice: bool = False,
 ) -> dict[str, Any]:
     """Validate and route one completed Live user turn.
 
@@ -284,15 +285,27 @@ def process_user_request(
         return _blocked(query, reason=f"prompt_injection:{guard.matched_pattern}", session_id=resolved_session_id, user_id=user_id, db=db)
     sanitized = guard.sanitized_query or query
 
-    # Navigation is resolved by the same deterministic catalog helper used by
-    # text and uploaded-audio requests. The Live classifier may validate scope,
-    # but it must not be allowed to turn a known destination into RAG text.
+    _GREETING_PATTERN = re.compile(
+        r"^(?:hello|hi|hey|good\s+(?:morning|afternoon|evening)|how\s+are\s+you|who\s+are\s+you|你好|早安|午安)[.?!]*$",
+        re.IGNORECASE,
+    )
+
+    # Navigation and Greetings are resolved deterministically before calling any model.
     if is_navigation_query(sanitized, db=db):
         classification = {
             "safe": True,
             "scope": "NAVIGATIONAL",
             "route": "NAVIGATIONAL",
             "intent": "NAVIGATIONAL",
+            "reason": None,
+            "clarification_question": None,
+        }
+    elif _GREETING_PATTERN.match(sanitized.strip()):
+        classification = {
+            "safe": True,
+            "scope": "IN_SCOPE",
+            "route": "GREETING",
+            "intent": "GREETING",
             "reason": None,
             "clarification_question": None,
         }
@@ -437,6 +450,25 @@ def process_user_request(
     if route == "UNCLEAR":
         answer = classification["clarification_question"] or "Could you please clarify what university information you are looking for?"
         return _fixed_response(answer, "UNCLEAR", sanitized, resolved_session_id, user_id, db, intent=intent)
+
+    # Fast voice path for real-time live voice sessions
+    if fast_voice:
+        try:
+            from RagChatbot.generation.live_fast_rag import live_fast_rag
+            fast_res = live_fast_rag.process_voice_query(sanitized, auth_context=context, db=db)
+            return _result(
+                status=fast_res.get("status", "ok"),
+                route="UNIVERSITY_INFO",
+                intent=intent or "UNIVERSITY_INFO",
+                query=sanitized,
+                response_text=fast_res.get("answer", ""),
+                exact_response=False,
+                access_granted=True,
+                citations=fast_res.get("sources", []),
+                grounded_context=fast_res.get("answer", ""),
+            )
+        except Exception as exc:
+            logger.warning("LiveFastRAG fallback to Agentic RAG: %s", exc)
 
     # UNIVERSITY_INFO routes through the full Agentic RAG graph (CRAG grading, query rewriting, parent hydration)
     try:

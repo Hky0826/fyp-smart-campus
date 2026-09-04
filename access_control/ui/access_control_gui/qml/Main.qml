@@ -32,13 +32,14 @@ ApplicationWindow {
         presenceState: accessController.presenceState
         listening: chatbotController.listening
         busy: chatbotController.busy
+        speaking: chatbotController.speaking
+        ragStatus: chatbotController.ragStatus
+        currentNavigation: chatbotController.currentNavigation
+        citations: chatbotController.citations
         muted: chatbotController.muted
         errorText: accessController.chatError
         verifying: accessController.chatVerificationActive
         onCloseRequested: accessController.exitChat()
-        onPushToTalkStarted: chatbotController.startPushToTalk()
-        onPushToTalkStopped: chatbotController.stopPushToTalk()
-        onPushToTalkToggled: chatbotController.togglePushToTalk()
         onStopAnsweringRequested: chatbotController.stopAudioPlayback()
     }
 

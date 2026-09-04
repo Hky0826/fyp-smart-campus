@@ -170,6 +170,16 @@ class ChatGreetingAudioResponse(BaseModel):
     sample_rate: int = 24000
 
 
+class ChatLiveConfigResponse(BaseModel):
+    ws_url: str
+    cloud_url: str
+    device_id: str
+    access_token: Optional[str] = None
+    session_id: Optional[int] = None
+    user_id: Optional[int] = None
+    roles: list[str] = Field(default_factory=list)
+
+
 @dataclass
 class _StoredChatSession:
     view: ChatSessionView
@@ -854,6 +864,33 @@ def create_kiosk_router(
         # Browser playback is controlled by the frontend. The endpoint exists so
         # kiosk orchestration can treat audio interruption as a backend action.
         return {"success": True}
+
+    @router.get("/chat/live-config", response_model=ChatLiveConfigResponse)
+    def get_chat_live_config() -> ChatLiveConfigResponse:
+        try:
+            token = store.current_token()
+        except HTTPException:
+            token = None
+
+        cfg = runtime_config()
+        cloud_url = cfg.sync_cloud_url.rstrip("/")
+        ws_scheme = "wss" if cloud_url.startswith("https") else "ws"
+        host = cloud_url.split("://")[-1]
+        access_token = token.access_token if token else ""
+        session_id = str(token.session_id) if token and token.session_id is not None else ""
+        ws_url = (
+            f"{ws_scheme}://{host}/api/chatbot/live/ws?"
+            f"token={access_token}&device_id={cfg.sync_device_id}&session_id={session_id}"
+        )
+        return ChatLiveConfigResponse(
+            ws_url=ws_url,
+            cloud_url=cloud_url,
+            device_id=cfg.sync_device_id,
+            access_token=token.access_token if token else None,
+            session_id=token.session_id if token else None,
+            user_id=token.user_id if token else None,
+            roles=list(token.roles) if token else ["VISITOR"],
+        )
 
     return router
 

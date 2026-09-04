@@ -49,6 +49,9 @@ class KioskApiClient:
     def get_state(self) -> dict[str, Any]:
         return self._request_json("GET", "/kiosk/state")
 
+    def get_live_config(self) -> dict[str, Any]:
+        return self._request_json("GET", "/kiosk/chat/live-config")
+
     def get_database_status(self) -> dict[str, Any]:
         return self._request_json("GET", "/database/status")
 

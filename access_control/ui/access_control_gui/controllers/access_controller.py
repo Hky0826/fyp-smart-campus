@@ -271,7 +271,20 @@ class AccessController(QObject):
             elif name == "chat-presence-frame":
                 launched_followup_frame = self._handle_presence_payload(payload)
             elif name in {"chat-message", "chat-audio"}:
-                self._merge_chat_session(payload.get("session"))
+                session = payload.get("session")
+                if session:
+                    self._merge_chat_session(session)
+                elif self._session:
+                    user_text = payload.get("transcribed_input")
+                    bot_text = payload.get("text_response")
+                    citations = payload.get("citations", [])
+                    history = list(self._session.get("conversation_history") or [])
+                    now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
+                    if user_text:
+                        history.append({"role": "user", "content": user_text, "created_at": now_iso, "citations": []})
+                    if bot_text:
+                        history.append({"role": "assistant", "content": bot_text, "created_at": now_iso, "citations": citations})
+                    self._merge_chat_session({**self._session, "conversation_history": history})
                 self._chat_error = ""
             elif name == "lock-chat":
                 self._merge_chat_session(payload.get("session"))

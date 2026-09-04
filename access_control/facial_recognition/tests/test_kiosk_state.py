@@ -144,6 +144,35 @@ class KioskStateTests(unittest.TestCase):
         self.assertIsNone(store.state("ok").active_chat_session)
         self.assertFalse(store.state("ok").chat_recoverable)
 
+    def test_chat_live_config_endpoint(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from access_control.facial_recognition.src.api.kiosk import create_kiosk_router
+
+        config = RuntimeConfig(
+            sync_cloud_url="http://127.0.0.1:8000",
+            sync_device_id="ENTRY-A8F3D155",
+            sync_device_secret="secret",
+        )
+        app = FastAPI()
+        app.include_router(
+            create_kiosk_router(
+                runtime_config=lambda: config,
+                access_pipeline=lambda: None,
+                chatbot_client=lambda: None,
+                sync_status=lambda: "ok",
+            )
+        )
+        client = TestClient(app)
+
+        # Visitor / no active session
+        resp = client.get("/kiosk/chat/live-config")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("ws://127.0.0.1:8000/api/chatbot/live/ws", data["ws_url"])
+        self.assertEqual(data["roles"], ["VISITOR"])
+        self.assertEqual(data["device_id"], "ENTRY-A8F3D155")
+
 
 if __name__ == "__main__":
     unittest.main()

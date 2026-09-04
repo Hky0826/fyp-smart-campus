@@ -108,3 +108,37 @@ def test_live_navigation_uses_shared_deterministic_resolver(monkeypatch):
     assert result["route"] == "NAVIGATIONAL"
     assert result["response_text"] == "Walk to the Boardroom."
     client.assert_not_called()
+
+
+def test_process_user_request_fast_voice_routes_to_live_fast_rag():
+    db = MagicMock()
+    fake_fast_res = {
+        "answer": "Fast spoken answer",
+        "sources": ["campus_guide.md"],
+        "status": "ok",
+        "route": "UNIVERSITY_INFO",
+    }
+    fake_models = MagicMock()
+    fake_models.generate_content.return_value = _flash_response()
+    fake_client = SimpleNamespace(models=fake_models)
+
+    with (
+        patch.object(request_module.genai, "Client", return_value=fake_client),
+        patch.object(request_module, "resolve_auth_context", return_value=AuthenticatedChatContext(None, None)),
+        patch("RagChatbot.generation.live_fast_rag.live_fast_rag.process_voice_query", return_value=fake_fast_res) as mock_fast,
+        patch("RagChatbot.agent.graph.run_agentic_rag") as mock_agentic,
+    ):
+        result = request_module.process_user_request(
+            transcript="What are the admission requirements?",
+            bearer_token=None,
+            device_id="edge-1",
+            session_id=None,
+            db=db,
+            fast_voice=True,
+        )
+
+    assert result["route"] == "UNIVERSITY_INFO"
+    assert result["response_text"] == "Fast spoken answer"
+    assert result["grounded_context"] == "Fast spoken answer"
+    mock_fast.assert_called_once()
+    mock_agentic.assert_not_called()

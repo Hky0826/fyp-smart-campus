@@ -154,8 +154,19 @@ class MapSnapshot:
             return None, ()
 
 
-def get_map_snapshot(db) -> MapSnapshot:
-    """Load lightweight node snapshot with RBAC permissions and precomputed embeddings from database."""
+_MAP_SNAPSHOT_CACHE: MapSnapshot | None = None
+_MAP_SNAPSHOT_TIMESTAMP: float = 0.0
+_MAP_SNAPSHOT_TTL: float = 300.0  # 5 minutes
+_HTTP_CLIENT = httpx.Client(timeout=10.0)
+
+
+def get_map_snapshot(db, force_refresh: bool = False) -> MapSnapshot:
+    """Load lightweight node snapshot with RBAC permissions and precomputed embeddings from database (cached in RAM)."""
+    global _MAP_SNAPSHOT_CACHE, _MAP_SNAPSHOT_TIMESTAMP
+    now = time.monotonic()
+    if not force_refresh and _MAP_SNAPSHOT_CACHE is not None and (now - _MAP_SNAPSHOT_TIMESTAMP < _MAP_SNAPSHOT_TTL):
+        return _MAP_SNAPSHOT_CACHE
+
     if db is None:
         return MapSnapshot(())
     from app.models.models import Node, NodeRBAC
@@ -190,7 +201,9 @@ def get_map_snapshot(db) -> MapSnapshot:
         )
         for n in db_nodes
     )
-    return MapSnapshot(nodes)
+    _MAP_SNAPSHOT_CACHE = MapSnapshot(nodes)
+    _MAP_SNAPSHOT_TIMESTAMP = now
+    return _MAP_SNAPSHOT_CACHE
 
 
 def _normalise_label(value: str) -> str:
@@ -462,14 +475,13 @@ def _call_route_microservice(*, destination_node_id: int, start_node_id: int | N
     }
     for attempt in range(2):
         try:
-            with httpx.Client(timeout=10.0) as client:
-                resp = client.post(
-                    f"{MAPPING_MICROSERVICE_URL.rstrip('/')}/navigate",
-                    json=payload,
-                    headers=headers,
-                )
-                if resp.status_code == 200:
-                    return resp.json()
+            resp = _HTTP_CLIENT.post(
+                f"{MAPPING_MICROSERVICE_URL.rstrip('/')}/navigate",
+                json=payload,
+                headers=headers,
+            )
+            if resp.status_code == 200:
+                return resp.json()
 
                 try:
                     err_data = resp.json()

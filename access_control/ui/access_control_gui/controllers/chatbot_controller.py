@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import json
 import logging
 import math
 import os
@@ -12,185 +14,336 @@ import time
 import wave
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 from PySide6.QtCore import QObject, Property, QThread, Signal, Slot
+import sounddevice as sd
+import websockets
 
 from access_control.audio_io.audio_player import AudioPlayer
 from access_control.audio_io.config import AudioIOConfig
-from access_control.audio_io.recorder import AudioRecorder
 
 from .api_client import KioskApiClient
 
 
 logger = logging.getLogger(__name__)
-PTT_MAX_RECORD_SECONDS = float(os.getenv("EDGE_GUI_PTT_MAX_RECORD_SECONDS", "60.0"))
-VOICE_RECORDING_MS = int(os.getenv("EDGE_GUI_VOICE_RECORDING_MS", "60000"))
-VOICE_RESTART_DELAY_MS = int(os.getenv("EDGE_GUI_VOICE_RESTART_DELAY_MS", "250"))
 TTS_OUTPUT_SAMPLE_RATE = int(os.getenv("EDGE_GUI_TTS_OUTPUT_SAMPLE_RATE", "24000"))
-VOICE_MIN_RECORD_SECONDS = float(os.getenv("EDGE_GUI_VOICE_MIN_RECORD_SECONDS", "0.1"))
-VOICE_SILENCE_SECONDS = float(os.getenv("EDGE_GUI_VOICE_SILENCE_SECONDS", "300.0"))
-VOICE_SILENCE_RMS = float(os.getenv("EDGE_GUI_VOICE_SILENCE_RMS", "0.0"))
 MIN_AUDIO_RMS = float(os.getenv("EDGE_GUI_AUDIO_MIN_RMS", "50.0"))
 MIN_AUDIO_PEAK = float(os.getenv("EDGE_GUI_AUDIO_MIN_PEAK", "100.0"))
 MIN_VOICED_RATIO = float(os.getenv("EDGE_GUI_AUDIO_MIN_VOICED_RATIO", "0.001"))
 VOICE_BLOCK_MS = int(os.getenv("EDGE_GUI_AUDIO_VOICE_BLOCK_MS", "100"))
+def _load_speech_threshold() -> float:
+    env_val = os.getenv("EDGE_LIVE_SPEECH_THRESHOLD")
+    if env_val:
+        try:
+            return float(env_val)
+        except ValueError:
+            pass
+    for candidate in (Path("shitz/vad_config.json"), Path("vad_config.json")):
+        if candidate.exists():
+            try:
+                with open(candidate, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    val = float(cfg.get("speech_threshold_rms", 0.0))
+                    if val > 0:
+                        return val
+            except Exception:
+                pass
+    return 450.0
 
 
-class _PushToTalkWorker(QThread):
+SPEECH_THRESHOLD_RMS = _load_speech_threshold()
+
+
+class _LiveDuplexWorker(QThread):
+    """Continuous bi-directional streaming worker for Gemini Live duplex WebSocket."""
+
     listeningChanged = Signal(bool)
     busyChanged = Signal(bool)
+    speechStateChanged = Signal(bool)
+    userTranscriptReceived = Signal(str)
+    textChunkReceived = Signal(str)
+    ragStatusChanged = Signal(str, str)
+    navigationReceived = Signal(dict)
+    citationsReceived = Signal(list)
+    turnCompleted = Signal()
     responseReceived = Signal(dict)
     errorOccurred = Signal(str)
-    textChunkReceived = Signal(str)
-    transcribedTextReceived = Signal(str)
 
-    def __init__(self, api: KioskApiClient) -> None:
+    def __init__(self, api: KioskApiClient, speech_threshold: float = SPEECH_THRESHOLD_RMS) -> None:
         super().__init__()
         self._api = api
-        self._recording_stop_requested = threading.Event()
-        self._stream_cancel_requested = threading.Event()
-        self._audio_only_stop_requested = threading.Event()
-        self._recording_active = threading.Event()
-        self._player: AudioPlayer | None = None
-        self._player_lock = threading.Lock()
+        self._speech_threshold = speech_threshold
+        self._stop_requested = threading.Event()
+        self._audio_play_queue: asyncio.Queue[bytes | None] | None = None
+        self._ws: Any = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def run(self) -> None:
-        self._recording_stop_requested.clear()
-        self._stream_cancel_requested.clear()
-        self._audio_only_stop_requested.clear()
-        config = AudioIOConfig()
-        config = replace(
-            config,
-            max_record_seconds=max(30.0, PTT_MAX_RECORD_SECONDS),
-            min_record_seconds=0.1,
-            silence_duration_seconds=300.0,
-            silence_rms_threshold=0.0,
-            recording_block_ms=max(20, VOICE_BLOCK_MS),
-        )
-        recorder = AudioRecorder(config)
-        player = AudioPlayer(config, sample_rate=TTS_OUTPUT_SAMPLE_RATE)
-        with self._player_lock:
-            self._player = player
-        recording_path: Path | None = None
-
+        self._stop_requested.clear()
         try:
-            self.listeningChanged.emit(True)
-            self._recording_active.set()
-            result = recorder.record(cancel_requested=self._recording_stop_requested.is_set)
-            self._recording_active.clear()
-            recording_path = result.path
-            self.listeningChanged.emit(False)
-
-            if recording_path and recording_path.exists() and recording_path.stat().st_size >= 512:
-                voice_stats = _wav_voice_stats(recording_path)
-                logger.info("Push-to-Talk recorded stats: %s", voice_stats)
-                if not _has_voice(voice_stats):
-                    self.errorOccurred.emit("No speech detected. Please try speaking again.")
-                    return
-                self.busyChanged.emit(True)
-                audio_queue: queue.Queue[bytes | None] = queue.Queue()
-
-                def receive_stream() -> None:
-                    try:
-                        emitted_text = False
-                        for event_obj in self._api.send_chat_audio_stream_file(
-                            recording_path,
-                            "audio/wav",
-                            cancel_requested=self._stream_cancel_requested.is_set,
-                        ):
-                            if self._stream_cancel_requested.is_set():
-                                break
-                            event = event_obj.get("event")
-                            data = event_obj.get("data", {})
-                            if event == "metadata":
-                                text = data.get("transcribed_input")
-                                if text:
-                                    self.transcribedTextReceived.emit(text)
-                            elif event == "chunk":
-                                text = data.get("text")
-                                if text:
-                                    emitted_text = True
-                                    self.textChunkReceived.emit(str(text))
-                            elif event == "done":
-                                fallback = data.get("text_response")
-                                if fallback and not emitted_text:
-                                    emitted_text = True
-                                    self.textChunkReceived.emit(str(fallback))
-                                self.responseReceived.emit(dict(data))
-                            elif event == "error":
-                                self.errorOccurred.emit(str(data.get("message") or "Audio chat failed."))
-                            elif event == "tts_error":
-                                logger.warning("TTS unavailable for streamed sentence: %s", data.get("message"))
-                            if event == "audio":
-                                chunk = data.get("chunk")
-                                if chunk and not self._audio_only_stop_requested.is_set():
-                                    audio_queue.put(base64.b64decode(chunk))
-                    except Exception as exc:
-                        if not self._stream_cancel_requested.is_set():
-                            self.errorOccurred.emit(str(exc))
-                    finally:
-                        audio_queue.put(None)
-
-                receiver = threading.Thread(target=receive_stream, name="chat-stream-receiver", daemon=True)
-                receiver.start()
-
-                def stream_audio():
-                    while (
-                        not self._stream_cancel_requested.is_set()
-                        and not self._audio_only_stop_requested.is_set()
-                    ):
-                        try:
-                            chunk = audio_queue.get(timeout=0.2)
-                        except queue.Empty:
-                            continue
-                        if chunk is None:
-                            break
-                        yield chunk
-
-                try:
-                    player.play_pcm_stream(stream_audio())
-                finally:
-                    if not self._audio_only_stop_requested.is_set():
-                        self._stream_cancel_requested.set()
-                    player.stop()
-                    # The recording file is still owned by the multipart
-                    # request until this receiver exits. Do not let this
-                    # QThread finish while it can still emit Qt signals.
-                    receiver.join()
+            live_config = self._api.get_live_config()
+            ws_url = live_config.get("ws_url")
+            if not ws_url:
+                raise RuntimeError("No Live Voice WebSocket URL provided by edge API.")
+            asyncio.run(self._duplex_session(ws_url))
         except Exception as exc:
-            logger.error("Push-to-Talk audio processing error: %s", exc)
-            if not self._stream_cancel_requested.is_set() and not self._recording_stop_requested.is_set():
+            if not self._stop_requested.is_set():
+                logger.error("LiveDuplexWorker error: %s", exc)
                 self.errorOccurred.emit(str(exc))
         finally:
-            with self._player_lock:
-                self._player = None
-            self._recording_active.clear()
             self.listeningChanged.emit(False)
             self.busyChanged.emit(False)
-            if recording_path is not None:
-                _remove_recording_file(recording_path)
+            self.speechStateChanged.emit(False)
 
-    def stop_recording(self) -> None:
-        if self._recording_active.is_set():
-            self._recording_stop_requested.set()
-        else:
-            self._stream_cancel_requested.set()
-            with self._player_lock:
-                player = self._player
-            if player is not None:
-                player.stop()
+    async def _duplex_session(self, ws_url: str) -> None:
+        logger.info("Connecting to Gemini Live duplex at %s", ws_url)
+        loop = asyncio.get_running_loop()
+        self._loop = loop
+        mic_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._audio_play_queue = asyncio.Queue()
 
-    def stop_audio_only(self) -> None:
-        """Stop speaker playback while allowing text/final events to finish."""
-        if self._recording_active.is_set():
+        playback_busy_until = 0.0
+        last_user_query = [""]
+        last_assistant_text = [""]
+        last_citations: list[list[Any]] = [[]]
+
+        def mic_callback(indata: bytes, frames: int, time_info: Any, status: Any) -> None:
+            if self._stop_requested.is_set():
+                return
+            loop.call_soon_threadsafe(mic_queue.put_nowait, bytes(indata))
+
+        try:
+            mic_stream = sd.RawInputStream(
+                samplerate=16000,
+                channels=1,
+                dtype="int16",
+                blocksize=1600,
+                callback=mic_callback,
+            )
+            output_stream = sd.RawOutputStream(
+                samplerate=24000,
+                channels=1,
+                dtype="int16",
+                blocksize=2400,
+            )
+        except Exception as exc:
+            logger.error("Failed to initialize audio devices: %s", exc)
+            self.errorOccurred.emit(f"Audio device error: {exc}")
             return
-        self._audio_only_stop_requested.set()
-        with self._player_lock:
-            player = self._player
-        if player is not None:
-            player.stop()
+
+        try:
+            async with websockets.connect(ws_url, ping_interval=20, ping_timeout=20) as ws:
+                self._ws = ws
+                self.listeningChanged.emit(True)
+
+                async def player_loop() -> None:
+                    nonlocal playback_busy_until
+                    with output_stream:
+                        while not self._stop_requested.is_set():
+                            if self._audio_play_queue is None:
+                                break
+                            try:
+                                pcm_bytes = await asyncio.wait_for(self._audio_play_queue.get(), timeout=0.1)
+                            except asyncio.TimeoutError:
+                                if time.monotonic() >= playback_busy_until:
+                                    self.busyChanged.emit(False)
+                                continue
+
+                            if pcm_bytes is None or self._stop_requested.is_set():
+                                break
+
+                            self.busyChanged.emit(True)
+                            duration = len(pcm_bytes) / 48000.0
+                            playback_busy_until = max(playback_busy_until, time.monotonic()) + duration + 0.25
+                            try:
+                                await loop.run_in_executor(None, output_stream.write, pcm_bytes)
+                            except Exception as exc:
+                                logger.warning("Audio playback chunk write error: %s", exc)
+
+                async def receiver_loop() -> None:
+                    try:
+                        async for raw_message in ws:
+                            if self._stop_requested.is_set():
+                                break
+                            if isinstance(raw_message, bytes):
+                                if self._audio_play_queue:
+                                    await self._audio_play_queue.put(raw_message)
+                                continue
+
+                            try:
+                                msg = json.loads(raw_message)
+                            except Exception:
+                                continue
+
+                            event = msg.get("event")
+                            data = msg.get("data") or {}
+
+                            if event in ("session_ready", "ready"):
+                                self.listeningChanged.emit(True)
+                            elif event in ("user_transcript", "transcript"):
+                                text = data.get("text", "")
+                                if text:
+                                    last_user_query[0] = text
+                                    self.userTranscriptReceived.emit(text)
+                            elif event == "rag_status":
+                                st = data.get("status", "")
+                                q = data.get("query", "")
+                                self.ragStatusChanged.emit(st, q)
+                            elif event == "navigation":
+                                self.navigationReceived.emit(data)
+                            elif event == "rag_complete":
+                                cites = data.get("citations") or data.get("sources") or []
+                                last_citations[0] = cites
+                                self.citationsReceived.emit(cites)
+                            elif event == "output_transcript":
+                                tok = data.get("text", "")
+                                if tok:
+                                    last_assistant_text[0] += tok
+                                    self.textChunkReceived.emit(tok)
+                            elif event == "audio":
+                                b64_chunk = data.get("chunk", "")
+                                if b64_chunk:
+                                    pcm = base64.b64decode(b64_chunk)
+                                    if self._audio_play_queue:
+                                        await self._audio_play_queue.put(pcm)
+                            elif event == "turn_complete":
+                                self.turnCompleted.emit()
+                                user_q = last_user_query[0]
+                                bot_a = last_assistant_text[0]
+                                cites = last_citations[0]
+                                last_user_query[0] = ""
+                                last_assistant_text[0] = ""
+                                last_citations[0] = []
+                                if user_q or bot_a:
+                                    self.responseReceived.emit({
+                                        "transcribed_input": user_q,
+                                        "text_response": bot_a,
+                                        "citations": cites,
+                                    })
+                            elif event == "interrupted":
+                                playback_busy_until = 0.0
+                                if self._audio_play_queue:
+                                    while not self._audio_play_queue.empty():
+                                        try:
+                                            self._audio_play_queue.get_nowait()
+                                        except Exception:
+                                            break
+                                self.busyChanged.emit(False)
+                            elif event == "error":
+                                self.errorOccurred.emit(str(data.get("message") or "Unknown error"))
+                    except websockets.ConnectionClosed:
+                        pass
+                    except asyncio.CancelledError:
+                        pass
+
+                async def sender_loop() -> None:
+                    nonlocal playback_busy_until
+                    is_speaking = False
+                    silence_started = 0.0
+                    barge_in_streak = 0
+
+                    with mic_stream:
+                        while not self._stop_requested.is_set():
+                            pcm_chunk = await mic_queue.get()
+                            if pcm_chunk is None or self._stop_requested.is_set():
+                                break
+
+                            # Calculate RMS
+                            samples = np.frombuffer(pcm_chunk, dtype=np.int16).astype(np.float32)
+                            rms = float(np.sqrt(np.mean(samples * samples))) if samples.size > 0 else 0.0
+                            now = time.monotonic()
+                            is_playing = (now < playback_busy_until) or (
+                                self._audio_play_queue is not None and not self._audio_play_queue.empty()
+                            )
+
+                            # Echo suppression & barge-in
+                            if is_playing:
+                                barge_threshold = max(2800.0, self._speech_threshold * 3.5)
+                                if rms >= barge_threshold:
+                                    barge_in_streak += 1
+                                else:
+                                    barge_in_streak = 0
+
+                                if barge_in_streak >= 2:
+                                    barge_in_streak = 0
+                                    playback_busy_until = 0.0
+                                    if self._audio_play_queue:
+                                        while not self._audio_play_queue.empty():
+                                            try:
+                                                self._audio_play_queue.get_nowait()
+                                            except Exception:
+                                                break
+                                    self.busyChanged.emit(False)
+                                    try:
+                                        await ws.send(json.dumps({"event": "client_barge_in"}))
+                                    except Exception:
+                                        pass
+                                else:
+                                    continue
+                            else:
+                                barge_in_streak = 0
+
+                            try:
+                                await ws.send(pcm_chunk)
+                            except Exception:
+                                break
+
+                            # Client VAD: 450ms silence detection
+                            if rms >= self._speech_threshold:
+                                if not is_speaking:
+                                    is_speaking = True
+                                    self.speechStateChanged.emit(True)
+                                silence_started = 0.0
+                            elif is_speaking:
+                                if silence_started == 0.0:
+                                    silence_started = now
+                                elif (now - silence_started) >= 0.45:
+                                    is_speaking = False
+                                    silence_started = 0.0
+                                    self.speechStateChanged.emit(False)
+                                    try:
+                                        await ws.send(json.dumps({"event": "activity_end"}))
+                                    except Exception:
+                                        pass
+
+                player_task = asyncio.create_task(player_loop())
+                receiver_task = asyncio.create_task(receiver_loop())
+                sender_task = asyncio.create_task(sender_loop())
+
+                while not self._stop_requested.is_set():
+                    await asyncio.sleep(0.1)
+
+                player_task.cancel()
+                receiver_task.cancel()
+                sender_task.cancel()
+                await mic_queue.put(None)
+                if self._audio_play_queue:
+                    await self._audio_play_queue.put(None)
+        except Exception as exc:
+            if not self._stop_requested.is_set():
+                logger.error("Duplex session error: %s", exc)
+                self.errorOccurred.emit(str(exc))
+
+    def stop(self) -> None:
+        self._stop_requested.set()
+
+    def stop_audio_playback(self) -> None:
+        if self._audio_play_queue:
+            while not self._audio_play_queue.empty():
+                try:
+                    self._audio_play_queue.get_nowait()
+                except Exception:
+                    break
+        self.busyChanged.emit(False)
+        if self._ws and self._loop:
+            try:
+                self._loop.call_soon_threadsafe(
+                    lambda: asyncio.create_task(self._ws.send(json.dumps({"event": "client_barge_in"})))
+                )
+            except Exception:
+                pass
 
 
 class _GreetingWorker(QThread):
@@ -230,52 +383,102 @@ class _GreetingWorker(QThread):
 class ChatbotController(QObject):
     listeningChanged = Signal()
     busyChanged = Signal()
+    speechStateChanged = Signal()
     errorChanged = Signal()
     mutedChanged = Signal()
     partialTextChanged = Signal()
     transcribedTextChanged = Signal()
+    ragStatusChanged = Signal()
+    currentNavigationChanged = Signal()
+    citationsChanged = Signal()
     responseReceived = Signal(dict)
 
     def __init__(self, api: KioskApiClient) -> None:
         super().__init__()
         self._api = api
-        self._worker: _PushToTalkWorker | None = None
+        self._worker: _LiveDuplexWorker | None = None
         self._listening = False
         self._busy = False
+        self._speaking = False
         self._error = ""
         self._muted = False
         self._partial_text = ""
         self._transcribed_text = ""
-        self._final_response_seen = False
-        
+        self._rag_status = ""
+        self._current_navigation: dict[str, Any] = {}
+        self._citations: list[Any] = []
         self._greeting_worker: _GreetingWorker | None = None
 
     @Slot()
-    def startPushToTalk(self) -> None:
-        if self._busy or self._listening:
+    def startVoiceLoop(self) -> None:
+        if self._muted:
+            return
+        if self._worker and self._worker.isRunning():
             return
         self._error = ""
         self._partial_text = ""
         self._transcribed_text = ""
-        self._final_response_seen = False
+        self._rag_status = ""
         self.errorChanged.emit()
         self.partialTextChanged.emit()
         self.transcribedTextChanged.emit()
-        worker = _PushToTalkWorker(self._api)
+        self.ragStatusChanged.emit()
+
+        worker = _LiveDuplexWorker(self._api)
         worker.listeningChanged.connect(self._set_listening)
         worker.busyChanged.connect(self._set_busy)
-        worker.errorOccurred.connect(self._set_error)
-        worker.responseReceived.connect(self._on_worker_response)
+        worker.speechStateChanged.connect(self._set_speaking)
+        worker.userTranscriptReceived.connect(self._on_transcribed_text)
         worker.textChunkReceived.connect(self._on_text_chunk)
-        worker.transcribedTextReceived.connect(self._on_transcribed_text)
+        worker.ragStatusChanged.connect(self._on_rag_status)
+        worker.navigationReceived.connect(self._on_navigation)
+        worker.citationsReceived.connect(self._on_citations)
+        worker.turnCompleted.connect(self._on_turn_completed)
+        worker.responseReceived.connect(self._on_worker_response)
+        worker.errorOccurred.connect(self._set_error)
         worker.finished.connect(lambda: self._cleanup_worker(worker))
         self._worker = worker
         worker.start()
 
+    @Slot()
+    def stopVoiceLoop(self) -> None:
+        if self._worker:
+            self._worker.stop()
+            self._worker.wait(1000)
+            self._worker = None
+        if self._greeting_worker:
+            self._greeting_worker.stop()
+        self._set_listening(False)
+        self._set_busy(False)
+        self._set_speaking(False)
+
+    @Slot()
+    def stopAudioPlayback(self) -> None:
+        if self._worker:
+            self._worker.stop_audio_playback()
+        if self._greeting_worker:
+            self._greeting_worker.stop()
+
+    @Slot()
+    def startPushToTalk(self) -> None:
+        """Compatibility alias for hands-free voice loop."""
+        self.startVoiceLoop()
+
+    @Slot()
+    def stopPushToTalk(self) -> None:
+        """Compatibility alias for stopping audio playback."""
+        self.stopAudioPlayback()
+
+    @Slot()
+    def togglePushToTalk(self) -> None:
+        """Compatibility alias."""
+        if self._listening:
+            self.stopVoiceLoop()
+        else:
+            self.startVoiceLoop()
+
     @Slot(str)
     def _on_text_chunk(self, chunk: str) -> None:
-        # Render complete received chunks immediately; synthesis/playback is
-        # handled independently by the worker's audio queue.
         self._partial_text += chunk
         self.partialTextChanged.emit()
 
@@ -284,38 +487,33 @@ class ChatbotController(QObject):
         self._transcribed_text = text
         self.transcribedTextChanged.emit()
 
+    @Slot(str, str)
+    def _on_rag_status(self, status: str, query: str) -> None:
+        self._rag_status = f"Searching campus records for '{query}'..." if query else status
+        self.ragStatusChanged.emit()
+
+    @Slot(dict)
+    def _on_navigation(self, payload: dict[str, Any]) -> None:
+        self._current_navigation = payload
+        self.currentNavigationChanged.emit()
+
+    @Slot(list)
+    def _on_citations(self, citations: list[Any]) -> None:
+        self._citations = citations
+        self.citationsChanged.emit()
+
+    @Slot()
+    def _on_turn_completed(self) -> None:
+        self._rag_status = ""
+        self.ragStatusChanged.emit()
+
     @Slot(dict)
     def _on_worker_response(self, payload: dict) -> None:
-        self._final_response_seen = True
+        self._partial_text = ""
+        self._transcribed_text = ""
+        self.partialTextChanged.emit()
+        self.transcribedTextChanged.emit()
         self.responseReceived.emit(payload)
-
-    @Slot()
-    def stopPushToTalk(self) -> None:
-        if self._worker:
-            self._worker.stop_recording()
-
-    @Slot()
-    def stopAudioPlayback(self) -> None:
-        if self._worker:
-            self._worker.stop_audio_only()
-
-    @Slot()
-    def togglePushToTalk(self) -> None:
-        if self._listening:
-            self.stopPushToTalk()
-        elif not self._busy:
-            self.startPushToTalk()
-
-    @Slot()
-    def startVoiceLoop(self) -> None:
-        pass
-
-    @Slot()
-    def stopVoiceLoop(self) -> None:
-        if self._worker:
-            self.stopPushToTalk()
-        if self._greeting_worker:
-            self._greeting_worker.stop()
 
     @Slot()
     def toggleMute(self) -> None:
@@ -328,6 +526,10 @@ class ChatbotController(QObject):
             return
         self._muted = muted
         self.mutedChanged.emit()
+        if self._muted:
+            self.stopVoiceLoop()
+        else:
+            self.startVoiceLoop()
 
     @Slot()
     def playGreeting(self) -> None:
@@ -340,21 +542,14 @@ class ChatbotController(QObject):
         worker.start()
 
     def shutdown(self) -> None:
-        if self._worker:
-            self._worker.stop_recording()
-            self._worker.wait(2000)
+        self.stopVoiceLoop()
         if self._greeting_worker:
             self._greeting_worker.stop()
-            self._greeting_worker.wait(2000)
+            self._greeting_worker.wait(1000)
 
-    def _cleanup_worker(self, worker: _PushToTalkWorker) -> None:
+    def _cleanup_worker(self, worker: _LiveDuplexWorker) -> None:
         if self._worker is worker:
             self._worker = None
-            if self._final_response_seen:
-                self._partial_text = ""
-                self._transcribed_text = ""
-                self.partialTextChanged.emit()
-                self.transcribedTextChanged.emit()
         worker.deleteLater()
 
     def _cleanup_greeting_worker(self, worker: _GreetingWorker) -> None:
@@ -376,6 +571,13 @@ class ChatbotController(QObject):
         self._busy = value
         self.busyChanged.emit()
 
+    @Slot(bool)
+    def _set_speaking(self, value: bool) -> None:
+        if value == self._speaking:
+            return
+        self._speaking = value
+        self.speechStateChanged.emit()
+
     @Slot(str)
     def _set_error(self, message: str) -> None:
         self._error = message
@@ -386,6 +588,9 @@ class ChatbotController(QObject):
 
     def _get_busy(self) -> bool:
         return self._busy
+
+    def _get_speaking(self) -> bool:
+        return self._speaking
 
     def _get_error(self) -> str:
         return self._error
@@ -399,12 +604,25 @@ class ChatbotController(QObject):
     def _get_transcribed_text(self) -> str:
         return self._transcribed_text
 
+    def _get_rag_status(self) -> str:
+        return self._rag_status
+
+    def _get_current_navigation(self) -> dict[str, Any]:
+        return self._current_navigation
+
+    def _get_citations(self) -> list[Any]:
+        return self._citations
+
     listening = Property(bool, _get_listening, notify=listeningChanged)
     busy = Property(bool, _get_busy, notify=busyChanged)
+    speaking = Property(bool, _get_speaking, notify=speechStateChanged)
     error = Property(str, _get_error, notify=errorChanged)
     muted = Property(bool, _get_muted, notify=mutedChanged)
     partialText = Property(str, _get_partial_text, notify=partialTextChanged)
     transcribedText = Property(str, _get_transcribed_text, notify=transcribedTextChanged)
+    ragStatus = Property(str, _get_rag_status, notify=ragStatusChanged)
+    currentNavigation = Property("QVariantMap", _get_current_navigation, notify=currentNavigationChanged)
+    citations = Property("QVariantList", _get_citations, notify=citationsChanged)
 
 
 def _remove_recording_file(path: Path) -> None:

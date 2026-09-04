@@ -661,6 +661,7 @@ async def live_websocket_chat(
                 device_id=device_id,
                 session_id=session_id,
                 db=db,
+                fast_voice=True,
             )
         if active:
             try:
@@ -714,6 +715,13 @@ async def live_websocket_chat(
             except Exception:
                 pass
 
+    async def on_interrupted():
+        if active:
+            try:
+                await websocket.send_json({"event": "interrupted"})
+            except Exception:
+                pass
+
     receiver_task = asyncio.create_task(
         live_session.receive_events(
             on_audio=on_audio,
@@ -721,6 +729,7 @@ async def live_websocket_chat(
             on_tool_call=on_tool_call,
             on_output_transcript=on_output_transcript,
             on_turn_complete=on_turn_complete,
+            on_interrupted=on_interrupted,
         ),
         name="gemini-live-ws-receiver",
     )
@@ -742,8 +751,9 @@ async def live_websocket_chat(
                         if b64_data:
                             await live_session.send_audio(base64.b64decode(b64_data))
                     elif event in ("activity_end", "finish_turn"):
-                        # Optional turn boundary hint; continuous VAD handles turns automatically
-                        pass
+                        await live_session.end_user_turn()
+                    elif event in ("client_barge_in", "interrupt"):
+                        await live_session.cancel_input()
                 except json.JSONDecodeError:
                     pass
     except WebSocketDisconnect:

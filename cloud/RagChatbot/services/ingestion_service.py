@@ -458,8 +458,14 @@ def ingest_document(document_id: int, db: Session, force_reindex: bool = False) 
 
     from RagChatbot.embeddings.google_embedding_service import clear_embedding_cache
     from RagChatbot.services.chat_service import clear_rag_response_cache
+    from RagChatbot.retrieval.vector_store import _CACHE_FILE
     clear_embedding_cache()
     clear_rag_response_cache()
+    if _CACHE_FILE.exists():
+        try:
+            _CACHE_FILE.unlink()
+        except Exception:
+            pass
 
     return IngestionResult(
         document_id=document_id,

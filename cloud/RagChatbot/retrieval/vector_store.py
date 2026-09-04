@@ -13,6 +13,8 @@ import json
 import logging
 import math
 import re
+import time
+from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional, Set
 import numpy as np
 from sqlalchemy.orm import Session
@@ -22,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 _WORD_PATTERN = re.compile(r"[A-Za-z0-9_#\-]+")
 ADMIN_ROLES = {"ADMIN", "SUPER_ADMIN", "SYSTEM_ADMIN", "CONTENT_ADMIN"}
+_CACHE_FILE = Path(__file__).resolve().parent / "vector_cache.npz"
 
 
 def _tokenize(text: str) -> list[str]:
@@ -79,8 +82,33 @@ class InMemoryVectorStore:
         self._initialized = True
         self.is_loaded = False
 
-    def load_from_db(self, db: Session):
-        """Loads all active chunk embeddings, texts, and metadata facets from the database."""
+    def load_from_db(self, db: Session, force_reload: bool = False):
+        """Loads all active chunk embeddings, texts, and metadata facets from disk cache or DB."""
+        if not force_reload and _CACHE_FILE.exists():
+            try:
+                t0 = time.time()
+                data = np.load(_CACHE_FILE, allow_pickle=True)
+                if len(data["chunk_ids"]) > 0:
+                    self.chunk_ids = data["chunk_ids"]
+                    self.access_levels = data["access_levels"]
+                    self.allowed_roles = data["allowed_roles"].tolist()
+                    self.document_ids = data["document_ids"]
+                    self.categories = data["categories"]
+                    self.faculty_codes = data["faculty_codes"]
+                    self.target_audiences = data["target_audiences"]
+                    self.chunk_types = data["chunk_types"]
+                    self.parent_chunk_ids = data["parent_chunk_ids"]
+                    self.section_paths = data["section_paths"].tolist()
+                    self.entity_tags = data["entity_tags"].tolist()
+                    self.chunk_texts = data["chunk_texts"].tolist()
+                    self.tokenized_chunks = data["tokenized_chunks"].tolist()
+                    self.embeddings = data["embeddings"]
+                    self.is_loaded = True
+                    logger.info("Loaded in-memory vector store from disk cache in %.1f ms (%d chunks).", (time.time() - t0) * 1000, len(self.chunk_ids))
+                    return
+            except Exception as e:
+                logger.warning("Could not load vector store from disk cache (%s); querying DB...", e)
+
         logger.info("Loading in-memory vector and lexical store from DB with multi-role RBAC...")
         sql_direct = text("""
             SELECT
@@ -211,6 +239,27 @@ class InMemoryVectorStore:
             self.tokenized_chunks = tokenized_chunks
             self.embeddings = np.array(embeddings, dtype=np.float32)
             logger.info("Successfully loaded %d active document chunk embeddings into memory.", len(embeddings))
+            try:
+                np.savez_compressed(
+                    _CACHE_FILE,
+                    chunk_ids=self.chunk_ids,
+                    access_levels=self.access_levels,
+                    allowed_roles=np.array(self.allowed_roles, dtype=object),
+                    document_ids=self.document_ids,
+                    categories=self.categories,
+                    faculty_codes=self.faculty_codes,
+                    target_audiences=self.target_audiences,
+                    chunk_types=self.chunk_types,
+                    parent_chunk_ids=self.parent_chunk_ids,
+                    section_paths=np.array(self.section_paths, dtype=object),
+                    entity_tags=np.array(self.entity_tags, dtype=object),
+                    chunk_texts=np.array(self.chunk_texts, dtype=object),
+                    tokenized_chunks=np.array(self.tokenized_chunks, dtype=object),
+                    embeddings=self.embeddings,
+                )
+                logger.info("Cached %d vector chunks to %s for fast reloads.", len(self.chunk_ids), _CACHE_FILE.name)
+            except Exception as e:
+                logger.debug("Could not write vector disk cache: %s", e)
         else:
             self._reset_empty()
 
