@@ -281,10 +281,23 @@ class AccessControlConfig(RuntimeConfig):
 
     def validate_security(self) -> None:
         from urllib.parse import urlparse
+        import ipaddress
         parsed = urlparse(self.sync_cloud_url)
         if parsed.scheme != "https":
-            if not (self.allow_insecure_loopback and parsed.hostname in {"127.0.0.1", "localhost", "::1"}):
-                raise ValueError("Cloud URL must use HTTPS; insecure HTTP is allowed only for explicit loopback development")
+            is_allowed = False
+            if self.allow_insecure_loopback and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+                is_allowed = True
+            elif os.getenv("EDGE_ALLOW_INSECURE_HTTP", "false").lower() in {"1", "true", "yes", "on"} or (
+                self.allow_insecure_loopback and os.getenv("APP_ENV", "development").lower() != "production"
+            ):
+                try:
+                    ip = ipaddress.ip_address(parsed.hostname)
+                    if ip.is_private or ip.is_loopback:
+                        is_allowed = True
+                except (ValueError, TypeError):
+                    pass
+            if not is_allowed:
+                raise ValueError("Cloud URL must use HTTPS; insecure HTTP is allowed only for explicit loopback or private LAN development")
         if self.remote_api_enabled and not (self.installation_credential or self.sync_device_secret):
             raise ValueError("A device secret or installation credential is required when remote edge API exposure is enabled")
         if os.getenv("APP_ENV", "development").lower() == "production" and not self.sync_device_secret:

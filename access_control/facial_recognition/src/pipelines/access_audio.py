@@ -217,8 +217,12 @@ class AccessControlAudioCoordinator:
 
     def _run_audio(self) -> None:
         try:
-            from edge.audio_io.config import AudioIOConfig
-            from edge.audio_io.main import AudioInteractionPipeline
+            try:
+                from access_control.audio_io.config import AudioIOConfig
+                from access_control.audio_io.main import AudioInteractionPipeline
+            except ImportError:
+                from edge.audio_io.config import AudioIOConfig
+                from edge.audio_io.main import AudioInteractionPipeline
 
             audio_config = AudioIOConfig(
                 cloud_api_url=f"{self.config.sync_cloud_url.rstrip('/')}/api/chatbot/chat/audio",

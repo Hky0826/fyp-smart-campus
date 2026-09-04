@@ -16,9 +16,11 @@ Item {
     property bool muted: false
     property bool verifying: false
     property string errorText: ""
+    property real outputGain: 0.65
 
     signal closeRequested()
     signal stopAnsweringRequested()
+    signal outputGainChangedRequested(real gain)
 
     onVisibleChanged: {
         if (visible) {
@@ -75,6 +77,32 @@ Item {
                 }
 
                 Item { Layout.fillWidth: true }
+
+                // Assistant Speaker Volume / Gain Control
+                RowLayout {
+                    spacing: 4
+                    Text {
+                        text: "🔊"
+                        font.pixelSize: 13
+                    }
+                    Slider {
+                        id: volumeSlider
+                        from: 0.2
+                        to: 1.0
+                        stepSize: 0.05
+                        value: root.outputGain
+                        implicitWidth: 80
+                        implicitHeight: 28
+                        onMoved: root.outputGainChangedRequested(value)
+                    }
+                    Text {
+                        text: Math.round(volumeSlider.value * 100) + "%"
+                        color: "#64748b"
+                        font.pixelSize: 11
+                        font.bold: true
+                        Layout.preferredWidth: 32
+                    }
+                }
 
                 Button {
                     implicitWidth: 68

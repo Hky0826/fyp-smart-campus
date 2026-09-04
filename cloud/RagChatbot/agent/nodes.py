@@ -281,6 +281,7 @@ def synthesize_answer_node(state: AgentState) -> AgentState:
 
     system_prompt = f"""You are the official Smart Campus AI Assistant.
 Provide a clear, accurate, and concise answer to the user query based ONLY on the verified context below.
+Reply in the user's language (e.g., English, Malay, Chinese, Tamil). If the language is unclear, use English. Keep official names and codes unchanged.
 If tools (like campus navigation or personal data) are included, seamlessly synthesize them into your response.
 Do not invent fees, prerequisite rules, room locations, or requirements not present in the context.
 

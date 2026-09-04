@@ -54,6 +54,9 @@ def _load_speech_threshold() -> float:
 
 
 SPEECH_THRESHOLD_RMS = _load_speech_threshold()
+DEFAULT_OUTPUT_GAIN = float(os.getenv("EDGE_LIVE_OUTPUT_GAIN", "0.65"))
+DEFAULT_MIC_GAIN = float(os.getenv("EDGE_LIVE_MIC_GAIN", "0.80"))
+DEFAULT_BARGE_IN_THRESHOLD = float(os.getenv("EDGE_LIVE_BARGE_IN_THRESHOLD", "1150.0"))
 
 
 class _LiveDuplexWorker(QThread):
@@ -71,10 +74,20 @@ class _LiveDuplexWorker(QThread):
     responseReceived = Signal(dict)
     errorOccurred = Signal(str)
 
-    def __init__(self, api: KioskApiClient, speech_threshold: float = SPEECH_THRESHOLD_RMS) -> None:
+    def __init__(
+        self,
+        api: KioskApiClient,
+        speech_threshold: float = SPEECH_THRESHOLD_RMS,
+        output_gain: float = DEFAULT_OUTPUT_GAIN,
+        mic_gain: float = DEFAULT_MIC_GAIN,
+        barge_threshold: float = DEFAULT_BARGE_IN_THRESHOLD,
+    ) -> None:
         super().__init__()
         self._api = api
         self._speech_threshold = speech_threshold
+        self._output_gain = output_gain
+        self._mic_gain = mic_gain
+        self._barge_threshold = barge_threshold
         self._stop_requested = threading.Event()
         self._audio_play_queue: asyncio.Queue[bytes | None] | None = None
         self._ws: Any = None
@@ -112,7 +125,11 @@ class _LiveDuplexWorker(QThread):
         def mic_callback(indata: bytes, frames: int, time_info: Any, status: Any) -> None:
             if self._stop_requested.is_set():
                 return
-            loop.call_soon_threadsafe(mic_queue.put_nowait, bytes(indata))
+            pcm_bytes = bytes(indata)
+            if abs(self._mic_gain - 1.0) > 1e-3:
+                samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
+                pcm_bytes = (samples * self._mic_gain).clip(-32768, 32767).astype(np.int16).tobytes()
+            loop.call_soon_threadsafe(mic_queue.put_nowait, pcm_bytes)
 
         try:
             mic_stream = sd.RawInputStream(
@@ -155,6 +172,10 @@ class _LiveDuplexWorker(QThread):
                                 break
 
                             self.busyChanged.emit(True)
+                            if abs(self._output_gain - 1.0) > 1e-3:
+                                samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
+                                pcm_bytes = (samples * self._output_gain).clip(-32768, 32767).astype(np.int16).tobytes()
+
                             duration = len(pcm_bytes) / 48000.0
                             playback_busy_until = max(playback_busy_until, time.monotonic()) + duration + 0.25
                             try:
@@ -242,7 +263,6 @@ class _LiveDuplexWorker(QThread):
                     nonlocal playback_busy_until
                     is_speaking = False
                     silence_started = 0.0
-                    barge_in_streak = 0
 
                     with mic_stream:
                         while not self._stop_requested.is_set():
@@ -260,14 +280,7 @@ class _LiveDuplexWorker(QThread):
 
                             # Echo suppression & barge-in
                             if is_playing:
-                                barge_threshold = max(2800.0, self._speech_threshold * 3.5)
-                                if rms >= barge_threshold:
-                                    barge_in_streak += 1
-                                else:
-                                    barge_in_streak = 0
-
-                                if barge_in_streak >= 2:
-                                    barge_in_streak = 0
+                                if rms >= self._barge_threshold:
                                     playback_busy_until = 0.0
                                     if self._audio_play_queue:
                                         while not self._audio_play_queue.empty():
@@ -282,8 +295,6 @@ class _LiveDuplexWorker(QThread):
                                         pass
                                 else:
                                     continue
-                            else:
-                                barge_in_streak = 0
 
                             try:
                                 await ws.send(pcm_chunk)
@@ -391,6 +402,9 @@ class ChatbotController(QObject):
     ragStatusChanged = Signal()
     currentNavigationChanged = Signal()
     citationsChanged = Signal()
+    outputGainChanged = Signal()
+    micGainChanged = Signal()
+    bargeThresholdChanged = Signal()
     responseReceived = Signal(dict)
 
     def __init__(self, api: KioskApiClient) -> None:
@@ -407,6 +421,9 @@ class ChatbotController(QObject):
         self._rag_status = ""
         self._current_navigation: dict[str, Any] = {}
         self._citations: list[Any] = []
+        self._output_gain = DEFAULT_OUTPUT_GAIN
+        self._mic_gain = DEFAULT_MIC_GAIN
+        self._barge_threshold = DEFAULT_BARGE_IN_THRESHOLD
         self._greeting_worker: _GreetingWorker | None = None
 
     @Slot()
@@ -424,7 +441,13 @@ class ChatbotController(QObject):
         self.transcribedTextChanged.emit()
         self.ragStatusChanged.emit()
 
-        worker = _LiveDuplexWorker(self._api)
+        worker = _LiveDuplexWorker(
+            self._api,
+            speech_threshold=self._speech_threshold if hasattr(self, "_speech_threshold") else SPEECH_THRESHOLD_RMS,
+            output_gain=self._output_gain,
+            mic_gain=self._mic_gain,
+            barge_threshold=self._barge_threshold,
+        )
         worker.listeningChanged.connect(self._set_listening)
         worker.busyChanged.connect(self._set_busy)
         worker.speechStateChanged.connect(self._set_speaking)
@@ -613,6 +636,42 @@ class ChatbotController(QObject):
     def _get_citations(self) -> list[Any]:
         return self._citations
 
+    @Slot(float)
+    def setOutputGain(self, gain: float) -> None:
+        val = max(0.1, min(1.0, float(gain)))
+        if abs(val - self._output_gain) > 1e-4:
+            self._output_gain = val
+            if self._worker:
+                self._worker._output_gain = val
+            self.outputGainChanged.emit()
+
+    @Slot(float)
+    def setMicGain(self, gain: float) -> None:
+        val = max(0.1, min(2.0, float(gain)))
+        if abs(val - self._mic_gain) > 1e-4:
+            self._mic_gain = val
+            if self._worker:
+                self._worker._mic_gain = val
+            self.micGainChanged.emit()
+
+    @Slot(float)
+    def setBargeThreshold(self, threshold: float) -> None:
+        val = max(300.0, float(threshold))
+        if abs(val - self._barge_threshold) > 1e-4:
+            self._barge_threshold = val
+            if self._worker:
+                self._worker._barge_threshold = val
+            self.bargeThresholdChanged.emit()
+
+    def _get_output_gain(self) -> float:
+        return self._output_gain
+
+    def _get_mic_gain(self) -> float:
+        return self._mic_gain
+
+    def _get_barge_threshold(self) -> float:
+        return self._barge_threshold
+
     listening = Property(bool, _get_listening, notify=listeningChanged)
     busy = Property(bool, _get_busy, notify=busyChanged)
     speaking = Property(bool, _get_speaking, notify=speechStateChanged)
@@ -623,6 +682,9 @@ class ChatbotController(QObject):
     ragStatus = Property(str, _get_rag_status, notify=ragStatusChanged)
     currentNavigation = Property("QVariantMap", _get_current_navigation, notify=currentNavigationChanged)
     citations = Property("QVariantList", _get_citations, notify=citationsChanged)
+    outputGain = Property(float, _get_output_gain, setOutputGain, notify=outputGainChanged)
+    micGain = Property(float, _get_mic_gain, setMicGain, notify=micGainChanged)
+    bargeThreshold = Property(float, _get_barge_threshold, setBargeThreshold, notify=bargeThresholdChanged)
 
 
 def _remove_recording_file(path: Path) -> None:

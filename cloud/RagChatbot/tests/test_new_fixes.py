@@ -26,7 +26,8 @@ def test_sanitize_text_for_speech_empty():
 def test_system_prompt_rules_exist():
     assert "Responses appear on a 5-inch screen:" in _SYSTEM_PROMPT
     assert "Use only the provided context." in _SYSTEM_PROMPT
-    assert "You are the voice interface for a secure university assistant." in _LIVE_SYSTEM_INSTRUCTION
+    assert "You are the voice interface for" in _LIVE_SYSTEM_INSTRUCTION
+    assert "Language Matching:" in _LIVE_SYSTEM_INSTRUCTION
 
 
 

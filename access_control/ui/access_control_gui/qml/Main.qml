@@ -39,6 +39,8 @@ ApplicationWindow {
         muted: chatbotController.muted
         errorText: accessController.chatError
         verifying: accessController.chatVerificationActive
+        outputGain: chatbotController.outputGain
+        onOutputGainChangedRequested: function(gain) { chatbotController.outputGain = gain }
         onCloseRequested: accessController.exitChat()
         onStopAnsweringRequested: chatbotController.stopAudioPlayback()
     }
@@ -53,6 +55,43 @@ ApplicationWindow {
         enabled: cameraController.ready && !accessController.offline
         mode: accessController.mode
         onClicked: accessController.openChat()
+    }
+
+    Shortcut {
+        sequence: "Esc"
+        onActivated: Qt.quit()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Q"
+        onActivated: Qt.quit()
+    }
+
+    Button {
+        id: exitAppButton
+        text: "✕ Exit"
+        z: 120
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.margins: 14
+        height: 36
+        font.pixelSize: 13
+        font.bold: true
+        contentItem: Text {
+            text: exitAppButton.text
+            font: exitAppButton.font
+            color: "#f87171"
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+        background: Rectangle {
+            color: exitAppButton.down ? "#450a0a" : (exitAppButton.hovered ? "#7f1d1d" : "#1e293b")
+            border.color: "#ef4444"
+            border.width: 1
+            radius: 8
+            opacity: 0.85
+        }
+        onClicked: Qt.quit()
     }
 
     SessionLockedOverlay {

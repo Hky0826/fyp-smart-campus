@@ -17,6 +17,18 @@ def validate_cloud_url(url: str, allow_insecure_loopback: bool = False) -> None:
         return
     if parsed.scheme == "http" and allow_insecure_loopback and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
         return
+    import ipaddress
+    import os
+    if parsed.scheme == "http" and (
+        os.getenv("EDGE_ALLOW_INSECURE_HTTP", "false").lower() in {"1", "true", "yes", "on"}
+        or (allow_insecure_loopback and os.getenv("APP_ENV", "development").lower() != "production")
+    ):
+        try:
+            ip = ipaddress.ip_address(parsed.hostname)
+            if ip.is_private or ip.is_loopback:
+                return
+        except (ValueError, TypeError):
+            pass
     raise ValueError("Cloud URLs must use HTTPS except explicit loopback development mode")
 
 

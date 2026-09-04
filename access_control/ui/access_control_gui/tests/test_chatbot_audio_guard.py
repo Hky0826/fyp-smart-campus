@@ -72,3 +72,21 @@ def test_live_duplex_worker_stop_audio_playback():
     worker._audio_play_queue.put_nowait(b"round_2_pcm")
     assert worker._audio_play_queue.qsize() == 1
 
+
+def test_chatbot_controller_gain_properties():
+    mock_api = MagicMock()
+    controller = ChatbotController(mock_api)
+    assert controller.outputGain == 0.65
+    assert controller.micGain == 0.80
+    assert controller.bargeThreshold == 1150.0
+
+    controller.setOutputGain(0.5)
+    assert controller.outputGain == 0.5
+
+    controller.setMicGain(0.7)
+    assert controller.micGain == 0.7
+
+    controller.setBargeThreshold(1200.0)
+    assert controller.bargeThreshold == 1200.0
+
+
