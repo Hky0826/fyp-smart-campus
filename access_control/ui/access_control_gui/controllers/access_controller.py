@@ -17,6 +17,7 @@ from .presence_controller import PresenceController
 CAMERA_FRAME_INTERVAL_MS = int(os.getenv("EDGE_GUI_CAMERA_FRAME_INTERVAL_MS", "33"))
 ACCESS_RESULT_HOLD_MS = int(os.getenv("EDGE_GUI_ACCESS_RESULT_HOLD_MS", "4000"))
 CHAT_VERIFY_RETRY_MS = int(os.getenv("EDGE_GUI_CHAT_VERIFY_RETRY_MS", "350"))
+CHAT_PRESENCE_INTERVAL_MS = int(os.getenv("EDGE_GUI_CHAT_PRESENCE_INTERVAL_MS", "3000"))
 
 
 class _ApiCallWorker(QThread):
@@ -89,6 +90,7 @@ class AccessController(QObject):
         self._camera_error = ""
         self._chat_error = ""
         self._now_ms = _now_ms()
+        self._last_presence_check_ms = 0
         self._workers: list[QThread] = []
         self._events_worker: _StateEventsWorker | None = None
 
@@ -140,6 +142,7 @@ class AccessController(QObject):
     @Slot()
     def openChat(self) -> None:
         self._set_chat_expanded(True)
+        self._last_presence_check_ms = _now_ms()
         if not self._session and not self._chat_verification_active:
             self.startChatVerification()
 
@@ -191,15 +194,21 @@ class AccessController(QObject):
         if not frame:
             return
 
-        self._frame_in_flight = True
         if self._chat_verification_active:
+            self._frame_in_flight = True
             self._run_worker("chat-verify-frame", lambda: self._api.verify_chat_owner_frame(frame))
             return
 
         if self._session:
+            now = _now_ms()
+            if (now - self._last_presence_check_ms) < CHAT_PRESENCE_INTERVAL_MS:
+                return
+            self._last_presence_check_ms = now
+            self._frame_in_flight = True
             self._run_worker("chat-presence-frame", lambda: self._presence.verify_owner_presence(frame))
             return
 
+        self._frame_in_flight = True
         self._run_worker("access-frame", lambda: self._api.verify_access_frame(frame))
 
     @Slot()
@@ -264,6 +273,7 @@ class AccessController(QObject):
                 self._face_boxes = _coerce_boxes(payload.get("bboxes"))
                 self._set_chat_verification_active(False)
                 self._chat_error = ""
+                self._last_presence_check_ms = _now_ms()
                 session_id = (session or {}).get("session_id")
                 if session_id is not None and session_id != self._greeting_session_id:
                     self._greeting_session_id = session_id
@@ -335,11 +345,6 @@ class AccessController(QObject):
             return False
         if payload.get("session"):
             self._merge_chat_session(payload.get("session"))
-        if not payload.get("owner_present"):
-            frame = self._camera.latest_jpeg()
-            if frame:
-                self._run_worker("access-frame", lambda: self._api.verify_access_frame(frame))
-                return True
         return False
 
     @Slot(dict)

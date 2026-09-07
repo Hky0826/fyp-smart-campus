@@ -78,7 +78,7 @@ def test_chatbot_controller_gain_properties():
     controller = ChatbotController(mock_api)
     assert controller.outputGain == 0.65
     assert controller.micGain == 0.80
-    assert controller.bargeThreshold == 1150.0
+    assert controller.bargeThreshold == 350.0
 
     controller.setOutputGain(0.5)
     assert controller.outputGain == 0.5
@@ -95,9 +95,9 @@ def test_chatbot_controller_dsp_properties():
     mock_api = MagicMock()
     controller = ChatbotController(mock_api)
     assert controller.speechThreshold == SPEECH_THRESHOLD_RMS
-    assert controller.coolingOffMs == 400.0
-    assert controller.silenceHoldSec == 0.70
-    assert controller.bargeRatio == 1.40
+    assert controller.coolingOffMs == 100.0
+    assert controller.silenceHoldSec == 0.45
+    assert controller.bargeRatio == 0.60
 
     controller.setSpeechThreshold(550.0)
     assert controller.speechThreshold == 550.0

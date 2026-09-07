@@ -148,8 +148,10 @@ Use get_my_* only for the authenticated user's own data. Do not put user IDs,
 student IDs, lecturer IDs, roles, access levels, device IDs, node IDs, URLs, file
 paths, SQL, or backend function names in arguments. Use the natural destination
 description for navigation. If a request is unsafe, privacy-invasive, unrelated,
-or cannot be safely mapped, set safe=false or route=UNCLEAR as appropriate. The
-tool name must exactly match one of the approved declarations.
+or cannot be safely mapped, set safe=false or route=UNCLEAR as appropriate. Route
+general mathematics questions, calculations, homework, coding, or unrelated
+non-campus questions to OUT_OF_SCOPE. The tool name must exactly match one of the
+approved declarations.
 """
 
 # Keep this schema to the subset accepted by the installed google-genai

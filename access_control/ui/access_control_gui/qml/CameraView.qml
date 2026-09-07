@@ -8,11 +8,11 @@ Item {
     property int videoHeight: 0
     property var boxes: []
 
-    x: minimized ? 22 : 0
-    y: minimized ? 22 : 0
-    width: minimized ? Math.min(260, root.parent.width - 44) : root.parent.width
-    height: minimized ? Math.min(180, root.parent.height * 0.28) : root.parent.height
-    z: minimized ? 50 : 0
+    x: minimized ? 10 : 0
+    y: minimized ? 10 : 0
+    width: minimized ? 180 : root.parent.width
+    height: minimized ? 115 : root.parent.height
+    z: minimized ? 35 : 0
     clip: true
 
     Behavior on x { NumberAnimation { duration: 180 } }
@@ -25,7 +25,7 @@ Item {
         color: "#020617"
         radius: root.minimized ? 8 : 0
         border.width: root.minimized ? 2 : 0
-        border.color: "#dbeafe"
+        border.color: root.minimized ? "#06b6d4" : "transparent"
     }
 
     Image {
@@ -58,9 +58,9 @@ Item {
             y: mapped.y
             width: mapped.width
             height: mapped.height
-            radius: 6
+            radius: root.minimized ? 4 : 6
             color: "transparent"
-            border.width: 3
+            border.width: root.minimized ? 2 : 3
             border.color: "#5eead4"
             visible: mapped.width > 0 && mapped.height > 0
         }

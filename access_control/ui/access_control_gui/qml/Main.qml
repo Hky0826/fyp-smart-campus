@@ -39,10 +39,11 @@ ApplicationWindow {
         muted: chatbotController.muted
         errorText: accessController.chatError
         verifying: accessController.chatVerificationActive
-        outputGain: chatbotController.outputGain
-        onOutputGainChangedRequested: function(gain) { chatbotController.outputGain = gain }
+        userAudioLevel: chatbotController.userAudioLevel
+        assistantAudioLevel: chatbotController.assistantAudioLevel
         onCloseRequested: accessController.exitChat()
         onStopAnsweringRequested: chatbotController.stopAudioPlayback()
+        onToggleMuteRequested: accessController.toggleMute()
     }
 
     ChatbotButton {
@@ -71,6 +72,7 @@ ApplicationWindow {
         id: exitAppButton
         text: "✕ Exit"
         z: 120
+        visible: !accessController.chatExpanded
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.margins: 14

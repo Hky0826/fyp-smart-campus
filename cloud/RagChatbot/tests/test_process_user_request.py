@@ -138,3 +138,27 @@ def test_process_user_request_fast_voice_routes_to_live_fast_rag():
     assert result["response_text"] == "Fast spoken answer"
     assert result["grounded_context"] == "Fast spoken answer"
     mock_fast.assert_called_once()
+
+
+def test_process_user_request_blocks_math_questions_as_out_of_scope():
+    db = MagicMock()
+    with (
+        patch.object(request_module, "resolve_auth_context", return_value=AuthenticatedChatContext(None, None)),
+        patch.object(request_module.genai, "Client") as mock_client,
+        patch("RagChatbot.generation.live_fast_rag.live_fast_rag.process_voice_query") as mock_fast,
+    ):
+        result = request_module.process_user_request(
+            transcript="what is 2 + 2?",
+            bearer_token=None,
+            device_id="edge-1",
+            session_id=None,
+            db=db,
+            fast_voice=True,
+        )
+
+    assert result["route"] == "OUT_OF_SCOPE"
+    assert result["status"] == "blocked"
+    assert "university information" in result["response_text"].lower()
+    mock_client.assert_not_called()
+    mock_fast.assert_not_called()
+

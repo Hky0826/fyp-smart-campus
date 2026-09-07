@@ -55,7 +55,16 @@ _NAVIGATION_HINT_PATTERN = re.compile(
 )
 
 _BROAD_OVERVIEW_PATTERN = re.compile(
-    r"\b(what\s+(?:programmes?|courses?|degrees?|faculties|schools?|scholarships?)\s+(?:are|do\s+you)\s+(?:offered|available|have)|list\s+all|overview\s+of|all\s+(?:degree|undergraduate|postgraduate|programmes?|faculties)|what\s+can\s+i\s+study)\b",
+    r"\b("
+    r"what\s+(?:are\s+(?:the\s+)?)?(?:programmes?|programs?|courses?|degrees?|faculties|schools?|scholarships?)"
+    r"|what\s+(?:programmes?|programs?|courses?|degrees?|faculties|schools?|scholarships?)\s+(?:are|do\s+you)\s*(?:offered|available|have)?"
+    r"|list\s+(?:all|some|the)?\s*(?:of\s+the\s+)?(?:programmes?|programs?|courses?|degrees?|faculties|schools?|scholarships?)"
+    r"|overview\s+of\s+(?:the\s+)?(?:programmes?|programs?|courses?|degrees?|faculties|schools?)"
+    r"|all\s+(?:degree|undergraduate|postgraduate|programmes?|programs?|faculties|courses?)"
+    r"|what\s+can\s+i\s+study"
+    r"|tell\s+me\s+about\s+(?:the\s+)?(?:programmes?|programs?|courses?|degrees?)"
+    r"|(?:programmes?|programs?)\s+(?:and|or)\s+courses?"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -63,6 +72,41 @@ _CATEGORY_FEES_PATTERN = re.compile(r"\b(fees?|tuition|scholarships?|financial\s
 _CATEGORY_ADMISSIONS_PATTERN = re.compile(r"\b(entry\s+requirements?|requirements?|eligibility|intakes?|apply|admission|deadline|qualifications?)\b", re.IGNORECASE)
 _CATEGORY_POLICIES_PATTERN = re.compile(r"\b(polic(?:y|ies)|plagiarism|appeals?|disciplinary|grading|attendance|deferment|withdrawal)\b", re.IGNORECASE)
 _CATEGORY_FACILITIES_PATTERN = re.compile(r"\b(facilit(?:y|ies)|hostel|accommodation|library|lab|laboratory|parking|bus|transport)\b", re.IGNORECASE)
+_CATEGORY_ACADEMIC_PATTERN = re.compile(r"\b(programmes?|programs?|courses?|degrees?|curriculum|diplomas?|majors?|study|fields?\s+of\s+study|syllabus)\b", re.IGNORECASE)
+
+_MATH_ARITHMETIC_PATTERN = re.compile(
+    r"^\s*(?:what\s+is\s+|calculate\s+|evaluate\s+)?(?:\(?\s*-?\d+(?:\.\d+)?\s*\)?\s*[\+\-\*\/x×÷\^]\s*)+\(?\s*-?\d+(?:\.\d+)?\s*\)?\s*\??\s*$",
+    re.IGNORECASE,
+)
+
+_MATH_KEYWORDS_PATTERN = re.compile(
+    r"\b("
+    r"math(?:s|ematics)?\s+(?:questions?|problems?|homework|equations?)"
+    r"|can\s+you\s+(?:do|answer|solve)\s+(?:my\s+)?math\b"
+    r"|answer\s+(?:a\s+)?math\s+question"
+    r"|solve\s+[-0-9a-z\s\(\)\+\*\/\^\.]*=[^?]*"
+    r"|solve\s+for\s+[a-z]"
+    r"|solve\s+(?:the\s+)?(?:equation|algebra|calculus|trigonometry|quadratic)"
+    r"|calculate\s+(?:the\s+)?(?:square\s+root|derivative|integral|sum|product|difference|logarithm)\s+of"
+    r"|what\s+is\s+(?:the\s+)?(?:square\s+root|derivative|integral)\s+of"
+    r"|\d+\s*(?:plus|minus|times|multiplied\s+by|divided\s+by)\s*\d+"
+    r")",
+    re.IGNORECASE,
+)
+
+_CAMPUS_CONTEXT_PATTERN = re.compile(
+    r"\b("
+    r"admission|admissions|entry|requirement|requirements|eligibility|intake|intakes|deadline"
+    r"|spm|stpm|uec|igcse|o-level|a-level|foundation|matriculation"
+    r"|fee|fees|tuition|cost|scholarship|scholarships|discount|ptptn|financial"
+    r"|course|courses|programme|programmes|degree|degrees|diploma|diplomas|bachelor|master|masters|phd"
+    r"|faculty|faculties|department|school|subject|subjects|credit|credits|grade|grades|grading|gpa|cgpa"
+    r"|mark|marks|passing|exam|examination|assessment|attendance|timetable|schedule|lecture|lecturer|student"
+    r"|campus|university|qiu|quest|hostel|accommodation|library|lab|canteen|toilet|room|building"
+    r"|focs|fohs|fest|fobp"
+    r")\b",
+    re.IGNORECASE,
+)
 
 _FACULTY_PATTERNS = {
     "FOCS": re.compile(r"\b(computer\s+science|computing|software|information\s+technology|it\b|bcs|bit)\b", re.IGNORECASE),
@@ -106,6 +150,8 @@ def _extract_facets_from_query(query: str) -> tuple[Optional[str], Optional[str]
         category_hint = "POLICIES"
     elif _CATEGORY_FACILITIES_PATTERN.search(query):
         category_hint = "FACILITIES"
+    elif _CATEGORY_ACADEMIC_PATTERN.search(query):
+        category_hint = "ACADEMIC"
 
     faculty_hint = None
     for fac_code, pat in _FACULTY_PATTERNS.items():
@@ -232,6 +278,11 @@ def classify_query(query: str, db=None) -> RouteClassification:
     if _CAPABILITY_PATTERN.search(clean_query):
         logger.info("Local Regex Router classified '%s' as CAPABILITY (0 LLM calls)", query)
         return RouteClassification(category="CAPABILITY")
+
+    # 2.5. OUT_OF_SCOPE Fast-Path: Math, Arithmetic, and Non-Campus Calculations (0 LLM calls)
+    if (_MATH_ARITHMETIC_PATTERN.search(clean_query) or _MATH_KEYWORDS_PATTERN.search(clean_query)) and not _CAMPUS_CONTEXT_PATTERN.search(clean_query):
+        logger.info("Local Regex Router classified '%s' as OUT_OF_SCOPE (math/calculation detected)", query)
+        return RouteClassification(category="OUT_OF_SCOPE")
 
     # 3. NAVIGATIONAL Fast-Path
     from RagChatbot.services.map_service import is_navigation_query
