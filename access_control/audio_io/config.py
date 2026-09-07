@@ -110,3 +110,11 @@ class AudioIOConfig:
     speaker_device: str | int | None = _audio_device_env("EDGE_AUDIO_SPEAKER_DEVICE")
     playback_backend: str = os.getenv("EDGE_AUDIO_PLAYBACK_BACKEND", _default_audio_backend()).strip().lower()
     output_sample_rate: int = _int_env("EDGE_AUDIO_OUTPUT_SAMPLE_RATE", 24000)
+
+    # Edge Live duplex DSP audio parameters
+    live_speech_threshold: float = _float_env("EDGE_LIVE_SPEECH_THRESHOLD", 450.0)
+    live_cooling_off_ms: float = _float_env("EDGE_LIVE_COOLING_OFF_MS", 400.0)
+    live_silence_hold_sec: float = _float_env("EDGE_LIVE_SILENCE_HOLD_SEC", 0.70)
+    live_barge_ratio: float = _float_env("EDGE_LIVE_BARGE_RATIO", 1.40)
+    live_barge_min_threshold: float = _float_env("EDGE_LIVE_BARGE_IN_THRESHOLD", 1150.0)
+    live_high_pass_cutoff_hz: float = _float_env("EDGE_LIVE_HIGH_PASS_CUTOFF_HZ", 150.0)

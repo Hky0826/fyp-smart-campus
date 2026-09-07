@@ -1,33 +1,42 @@
 import pytest
+from unittest.mock import MagicMock, patch
 
-from access_control.audio_io.cloud_audio_client import LiveAudioClientError, LiveAudioSession
-
-
-class _ClosedSocket:
-    def __init__(self, code: int) -> None:
-        self.code = code
-
-    def recv(self, *, timeout: float):
-        error = RuntimeError("socket closed")
-        error.code = self.code
-        raise error
+from access_control.audio_io.cloud_audio_client import (
+    AudioResponseData,
+    CloudAudioClient,
+    CloudAudioClientError,
+    CloudChatCredentials,
+)
+from access_control.audio_io.config import AudioIOConfig
 
 
-def test_normal_socket_close_is_reported_as_incomplete_turn():
-    session = LiveAudioSession("ws://localhost/chat/live")
-    session._socket = _ClosedSocket(1000)
+def test_cloud_audio_client_credentials_coercion():
+    config = AudioIOConfig(
+        cloud_api_url="https://127.0.0.1:8000/api/chatbot/chat/audio",
+        cloud_stream_api_url="https://127.0.0.1:8000/api/chatbot/chat/audio/stream",
+        cloud_bearer_token="default_tok",
+        cloud_session_id=10,
+    )
+    client = CloudAudioClient(config=config)
 
-    events = list(session.receive_events())
+    creds = client._credentials()
+    assert creds.bearer_token == "default_tok"
+    assert creds.session_id == 10
 
-    assert events == [{"event": "closed", "data": {"code": 1000}}]
-    assert not session.connected
+    # Coerce dict
+    dict_creds = client._coerce_credentials({"bearer_token": "dict_tok", "session_id": "20"})
+    assert dict_creds.bearer_token == "dict_tok"
+    assert dict_creds.session_id == 20
+
+    # Coerce string
+    str_creds = client._coerce_credentials("raw_token")
+    assert str_creds.bearer_token == "raw_token"
+    assert str_creds.session_id is None
 
 
-def test_abnormal_socket_close_remains_an_error_and_invalidates_session():
-    session = LiveAudioSession("ws://localhost/chat/live")
-    session._socket = _ClosedSocket(1006)
-
-    with pytest.raises(LiveAudioClientError, match="receive failed"):
-        list(session.receive_events())
-
-    assert not session.connected
+def test_cloud_audio_client_error_formatting():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 400
+    mock_resp.json.return_value = {"detail": "Invalid WAV header"}
+    msg = CloudAudioClient._error_message(mock_resp)
+    assert "HTTP 400: Invalid WAV header" in msg

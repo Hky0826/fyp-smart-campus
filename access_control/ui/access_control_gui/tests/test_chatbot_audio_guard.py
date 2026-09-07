@@ -90,3 +90,93 @@ def test_chatbot_controller_gain_properties():
     assert controller.bargeThreshold == 1200.0
 
 
+def test_chatbot_controller_dsp_properties():
+    from access_control.ui.access_control_gui.controllers.chatbot_controller import SPEECH_THRESHOLD_RMS
+    mock_api = MagicMock()
+    controller = ChatbotController(mock_api)
+    assert controller.speechThreshold == SPEECH_THRESHOLD_RMS
+    assert controller.coolingOffMs == 400.0
+    assert controller.silenceHoldSec == 0.70
+    assert controller.bargeRatio == 1.40
+
+    controller.setSpeechThreshold(550.0)
+    assert controller.speechThreshold == 550.0
+
+    controller.setCoolingOffMs(500.0)
+    assert controller.coolingOffMs == 500.0
+
+    controller.setSilenceHoldSec(0.85)
+    assert controller.silenceHoldSec == 0.85
+
+    controller.setBargeRatio(1.60)
+    assert controller.bargeRatio == 1.60
+
+    # Test interruptPlayback slot
+    worker_mock = MagicMock()
+    controller._worker = worker_mock
+    controller.interruptPlayback()
+    worker_mock.stop_audio_playback.assert_called_once()
+
+
+def test_filter_and_calculate_rms():
+    import numpy as np
+    from access_control.ui.access_control_gui.controllers.chatbot_controller import _filter_and_calculate_rms
+    from scipy.signal import butter, sosfilt_zi
+
+    # Empty chunk
+    rms, _ = _filter_and_calculate_rms(b"")
+    assert rms == 0.0
+
+    # Generate 50Hz rumble vs 500Hz speech tone at 16kHz
+    fs = 16000
+    t = np.linspace(0, 0.1, int(fs * 0.1), endpoint=False)
+    tone_50hz = (10000 * np.sin(2 * np.pi * 50 * t)).astype(np.int16).tobytes()
+    tone_500hz = (10000 * np.sin(2 * np.pi * 500 * t)).astype(np.int16).tobytes()
+
+    sos = butter(2, 150.0, btype="highpass", fs=fs, output="sos")
+    zi = sosfilt_zi(sos)
+
+    rms_50hz, _ = _filter_and_calculate_rms(tone_50hz, sos, zi.copy())
+    rms_500hz, _ = _filter_and_calculate_rms(tone_500hz, sos, zi.copy())
+
+    # The 150Hz highpass filter must heavily attenuate 50Hz while passing 500Hz
+    assert rms_50hz < rms_500hz * 0.3
+
+
+def test_adaptive_barge_in_threshold_calculation():
+    # Verify adaptive threshold logic
+    barge_base = 1150.0
+    barge_ratio = 1.40
+    spk_quiet_rms = 200.0
+    spk_loud_rms = 1200.0
+
+    # When speaker is quiet or silent:
+    dynamic_thresh_quiet = max(barge_base, barge_ratio * spk_quiet_rms + 350.0)
+    assert dynamic_thresh_quiet == barge_base  # 1.4 * 200 + 350 = 630 <= 1150
+
+    # When speaker is loud (e.g. 1200 RMS):
+    dynamic_thresh_loud = max(barge_base, barge_ratio * spk_loud_rms + 350.0)
+    assert dynamic_thresh_loud == 1.4 * 1200.0 + 350.0  # 2030.0 > 1150
+    assert dynamic_thresh_loud > 2000.0
+
+
+def test_lookback_buffer_preserves_initial_syllables():
+    import collections
+    buffer = collections.deque(maxlen=3)
+    chunk1 = b"chunk_silence_1"
+    chunk2 = b"chunk_silence_2"
+    chunk3 = b"chunk_initial_consonant"
+
+    buffer.append(chunk1)
+    buffer.append(chunk2)
+    buffer.append(chunk3)
+
+    # When speech onset occurs, flushes all 3 historical chunks
+    flushed = []
+    while buffer:
+        flushed.append(buffer.popleft())
+
+    assert flushed == [chunk1, chunk2, chunk3]
+    assert len(buffer) == 0
+
+

@@ -1,0 +1,10 @@
+{
+  "speech_threshold_rms": 268.0,
+  "barge_in_threshold_rms": 1150.0,
+  "cooling_off_ms": 400.0,
+  "silence_hold_sec": 0.7,
+  "barge_ratio": 1.4,
+  "ambient_noise_mean_rms": 62.3,
+  "ambient_noise_p95_rms": 154.6,
+  "speech_mean_rms": 462.8
+}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import collections
 import json
 import logging
 import math
@@ -20,6 +21,12 @@ import numpy as np
 from PySide6.QtCore import QObject, Property, QThread, Signal, Slot
 import sounddevice as sd
 import websockets
+
+try:
+    from scipy.signal import butter, sosfilt, sosfilt_zi
+    _SCIPY_AVAILABLE = True
+except ImportError:
+    _SCIPY_AVAILABLE = False
 
 from access_control.audio_io.audio_player import AudioPlayer
 from access_control.audio_io.config import AudioIOConfig
@@ -57,6 +64,32 @@ SPEECH_THRESHOLD_RMS = _load_speech_threshold()
 DEFAULT_OUTPUT_GAIN = float(os.getenv("EDGE_LIVE_OUTPUT_GAIN", "0.65"))
 DEFAULT_MIC_GAIN = float(os.getenv("EDGE_LIVE_MIC_GAIN", "0.80"))
 DEFAULT_BARGE_IN_THRESHOLD = float(os.getenv("EDGE_LIVE_BARGE_IN_THRESHOLD", "1150.0"))
+DEFAULT_COOLING_OFF_MS = float(os.getenv("EDGE_LIVE_COOLING_OFF_MS", "400.0"))
+DEFAULT_SILENCE_HOLD_SEC = float(os.getenv("EDGE_LIVE_SILENCE_HOLD_SEC", "0.70"))
+DEFAULT_BARGE_RATIO = float(os.getenv("EDGE_LIVE_BARGE_RATIO", "1.40"))
+DEFAULT_PRE_ROLL_CHUNKS = int(os.getenv("EDGE_LIVE_PRE_ROLL_CHUNKS", "3"))
+
+
+def _filter_and_calculate_rms(
+    pcm_bytes: bytes,
+    sos: np.ndarray | None = None,
+    zi: np.ndarray | None = None,
+) -> tuple[float, np.ndarray | None]:
+    """Apply 2nd-order Butterworth high-pass filter (150Hz) and calculate RMS."""
+    if not pcm_bytes:
+        return 0.0, zi
+    samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
+    if samples.size == 0:
+        return 0.0, zi
+    if _SCIPY_AVAILABLE and sos is not None and zi is not None:
+        try:
+            filtered, zi_new = sosfilt(sos, samples, zi=zi)
+            rms = float(np.sqrt(np.mean(filtered * filtered)))
+            return rms, zi_new
+        except Exception:
+            pass
+    rms = float(np.sqrt(np.mean(samples * samples)))
+    return rms, zi
 
 
 class _LiveDuplexWorker(QThread):
@@ -81,6 +114,10 @@ class _LiveDuplexWorker(QThread):
         output_gain: float = DEFAULT_OUTPUT_GAIN,
         mic_gain: float = DEFAULT_MIC_GAIN,
         barge_threshold: float = DEFAULT_BARGE_IN_THRESHOLD,
+        barge_ratio: float = DEFAULT_BARGE_RATIO,
+        cooling_off_ms: float = DEFAULT_COOLING_OFF_MS,
+        silence_hold_sec: float = DEFAULT_SILENCE_HOLD_SEC,
+        pre_roll_chunks: int = DEFAULT_PRE_ROLL_CHUNKS,
     ) -> None:
         super().__init__()
         self._api = api
@@ -88,6 +125,10 @@ class _LiveDuplexWorker(QThread):
         self._output_gain = output_gain
         self._mic_gain = mic_gain
         self._barge_threshold = barge_threshold
+        self._barge_ratio = barge_ratio
+        self._cooling_off_ms = cooling_off_ms
+        self._silence_hold_sec = silence_hold_sec
+        self._pre_roll_chunks = pre_roll_chunks
         self._stop_requested = threading.Event()
         self._audio_play_queue: asyncio.Queue[bytes | None] | None = None
         self._ws: Any = None
@@ -118,6 +159,7 @@ class _LiveDuplexWorker(QThread):
         self._audio_play_queue = asyncio.Queue()
 
         playback_busy_until = 0.0
+        last_speaker_rms = 0.0
         last_user_query = [""]
         last_assistant_text = [""]
         last_citations: list[list[Any]] = [[]]
@@ -156,7 +198,7 @@ class _LiveDuplexWorker(QThread):
                 self.listeningChanged.emit(True)
 
                 async def player_loop() -> None:
-                    nonlocal playback_busy_until
+                    nonlocal playback_busy_until, last_speaker_rms
                     with output_stream:
                         while not self._stop_requested.is_set():
                             if self._audio_play_queue is None:
@@ -166,6 +208,7 @@ class _LiveDuplexWorker(QThread):
                             except asyncio.TimeoutError:
                                 if time.monotonic() >= playback_busy_until:
                                     self.busyChanged.emit(False)
+                                    last_speaker_rms = 0.0
                                 continue
 
                             if pcm_bytes is None or self._stop_requested.is_set():
@@ -176,14 +219,21 @@ class _LiveDuplexWorker(QThread):
                                 samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
                                 pcm_bytes = (samples * self._output_gain).clip(-32768, 32767).astype(np.int16).tobytes()
 
+                            # Compute outgoing speaker RMS for dynamic echo cancellation / barge threshold
+                            spk_samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
+                            spk_rms = float(np.sqrt(np.mean(spk_samples * spk_samples))) if spk_samples.size > 0 else 0.0
+                            last_speaker_rms = spk_rms
+
                             duration = len(pcm_bytes) / 48000.0
-                            playback_busy_until = max(playback_busy_until, time.monotonic()) + duration + 0.25
+                            hangover_sec = self._cooling_off_ms / 1000.0
+                            playback_busy_until = max(playback_busy_until, time.monotonic()) + duration + hangover_sec
                             try:
                                 await loop.run_in_executor(None, output_stream.write, pcm_bytes)
                             except Exception as exc:
                                 logger.warning("Audio playback chunk write error: %s", exc)
 
                 async def receiver_loop() -> None:
+                    nonlocal playback_busy_until, last_speaker_rms
                     try:
                         async for raw_message in ws:
                             if self._stop_requested.is_set():
@@ -245,6 +295,7 @@ class _LiveDuplexWorker(QThread):
                                     })
                             elif event == "interrupted":
                                 playback_busy_until = 0.0
+                                last_speaker_rms = 0.0
                                 if self._audio_play_queue:
                                     while not self._audio_play_queue.empty():
                                         try:
@@ -260,9 +311,22 @@ class _LiveDuplexWorker(QThread):
                         pass
 
                 async def sender_loop() -> None:
-                    nonlocal playback_busy_until
+                    nonlocal playback_busy_until, last_speaker_rms
                     is_speaking = False
                     silence_started = 0.0
+                    consecutive_barge_count = 0
+                    pre_roll_buffer: collections.deque[bytes] = collections.deque(maxlen=self._pre_roll_chunks)
+
+                    sos = None
+                    zi = None
+                    if _SCIPY_AVAILABLE:
+                        try:
+                            sos = butter(2, 150.0, btype="highpass", fs=16000, output="sos")
+                            zi = sosfilt_zi(sos)
+                        except Exception as exc:
+                            logger.warning("Could not initialize high-pass filter: %s", exc)
+                            sos = None
+                            zi = None
 
                     with mic_stream:
                         while not self._stop_requested.is_set():
@@ -270,18 +334,29 @@ class _LiveDuplexWorker(QThread):
                             if pcm_chunk is None or self._stop_requested.is_set():
                                 break
 
-                            # Calculate RMS
-                            samples = np.frombuffer(pcm_chunk, dtype=np.int16).astype(np.float32)
-                            rms = float(np.sqrt(np.mean(samples * samples))) if samples.size > 0 else 0.0
+                            # High-pass filter (150 Hz) and calculate RMS
+                            rms, zi = _filter_and_calculate_rms(pcm_chunk, sos, zi)
                             now = time.monotonic()
                             is_playing = (now < playback_busy_until) or (
                                 self._audio_play_queue is not None and not self._audio_play_queue.empty()
                             )
 
-                            # Echo suppression & barge-in
+                            # Echo suppression & dynamic adaptive barge-in
                             if is_playing:
-                                if rms >= self._barge_threshold:
+                                dynamic_barge_thresh = max(
+                                    self._barge_threshold,
+                                    self._barge_ratio * last_speaker_rms + 350.0,
+                                )
+                                if rms >= dynamic_barge_thresh:
+                                    consecutive_barge_count += 1
+                                else:
+                                    consecutive_barge_count = 0
+
+                                # Require 2 consecutive frames (~200ms) of firm voice to barge in
+                                if consecutive_barge_count >= 2:
+                                    consecutive_barge_count = 0
                                     playback_busy_until = 0.0
+                                    last_speaker_rms = 0.0
                                     if self._audio_play_queue:
                                         while not self._audio_play_queue.empty():
                                             try:
@@ -293,31 +368,57 @@ class _LiveDuplexWorker(QThread):
                                         await ws.send(json.dumps({"event": "client_barge_in"}))
                                     except Exception:
                                         pass
-                                else:
-                                    continue
-
-                            try:
-                                await ws.send(pcm_chunk)
-                            except Exception:
-                                break
-
-                            # Client VAD: 450ms silence detection
-                            if rms >= self._speech_threshold:
-                                if not is_speaking:
-                                    is_speaking = True
-                                    self.speechStateChanged.emit(True)
-                                silence_started = 0.0
-                            elif is_speaking:
-                                if silence_started == 0.0:
-                                    silence_started = now
-                                elif (now - silence_started) >= 0.45:
-                                    is_speaking = False
+                                    if not is_speaking:
+                                        is_speaking = True
+                                        self.speechStateChanged.emit(True)
                                     silence_started = 0.0
-                                    self.speechStateChanged.emit(False)
                                     try:
-                                        await ws.send(json.dumps({"event": "activity_end"}))
+                                        await ws.send(pcm_chunk)
                                     except Exception:
-                                        pass
+                                        break
+                                else:
+                                    # Drop speaker echo locally: never send to Gemini Live
+                                    continue
+                            else:
+                                consecutive_barge_count = 0
+                                # Proximity gating & lookback buffer
+                                if rms >= self._speech_threshold:
+                                    if not is_speaking:
+                                        is_speaking = True
+                                        self.speechStateChanged.emit(True)
+                                        # Flush lookback buffer first to preserve leading consonants
+                                        while pre_roll_buffer:
+                                            hist_chunk = pre_roll_buffer.popleft()
+                                            try:
+                                                await ws.send(hist_chunk)
+                                            except Exception:
+                                                break
+                                    silence_started = 0.0
+                                    try:
+                                        await ws.send(pcm_chunk)
+                                    except Exception:
+                                        break
+                                elif is_speaking:
+                                    # User was speaking; pause window
+                                    if silence_started == 0.0:
+                                        silence_started = now
+                                    if (now - silence_started) < self._silence_hold_sec:
+                                        try:
+                                            await ws.send(pcm_chunk)
+                                        except Exception:
+                                            break
+                                    else:
+                                        is_speaking = False
+                                        silence_started = 0.0
+                                        self.speechStateChanged.emit(False)
+                                        try:
+                                            await ws.send(json.dumps({"event": "activity_end"}))
+                                        except Exception:
+                                            pass
+                                        pre_roll_buffer.append(pcm_chunk)
+                                else:
+                                    # Background noise or distant passerby: keep in circular lookback buffer only
+                                    pre_roll_buffer.append(pcm_chunk)
 
                 player_task = asyncio.create_task(player_loop())
                 receiver_task = asyncio.create_task(receiver_loop())
@@ -405,6 +506,10 @@ class ChatbotController(QObject):
     outputGainChanged = Signal()
     micGainChanged = Signal()
     bargeThresholdChanged = Signal()
+    speechThresholdChanged = Signal()
+    coolingOffMsChanged = Signal()
+    silenceHoldSecChanged = Signal()
+    bargeRatioChanged = Signal()
     responseReceived = Signal(dict)
 
     def __init__(self, api: KioskApiClient) -> None:
@@ -424,6 +529,10 @@ class ChatbotController(QObject):
         self._output_gain = DEFAULT_OUTPUT_GAIN
         self._mic_gain = DEFAULT_MIC_GAIN
         self._barge_threshold = DEFAULT_BARGE_IN_THRESHOLD
+        self._speech_threshold = SPEECH_THRESHOLD_RMS
+        self._cooling_off_ms = DEFAULT_COOLING_OFF_MS
+        self._silence_hold_sec = DEFAULT_SILENCE_HOLD_SEC
+        self._barge_ratio = DEFAULT_BARGE_RATIO
         self._greeting_worker: _GreetingWorker | None = None
 
     @Slot()
@@ -443,10 +552,13 @@ class ChatbotController(QObject):
 
         worker = _LiveDuplexWorker(
             self._api,
-            speech_threshold=self._speech_threshold if hasattr(self, "_speech_threshold") else SPEECH_THRESHOLD_RMS,
+            speech_threshold=self._speech_threshold,
             output_gain=self._output_gain,
             mic_gain=self._mic_gain,
             barge_threshold=self._barge_threshold,
+            barge_ratio=self._barge_ratio,
+            cooling_off_ms=self._cooling_off_ms,
+            silence_hold_sec=self._silence_hold_sec,
         )
         worker.listeningChanged.connect(self._set_listening)
         worker.busyChanged.connect(self._set_busy)
@@ -481,6 +593,11 @@ class ChatbotController(QObject):
             self._worker.stop_audio_playback()
         if self._greeting_worker:
             self._greeting_worker.stop()
+
+    @Slot()
+    def interruptPlayback(self) -> None:
+        """Explicitly interrupt current audio playback and signal barge-in."""
+        self.stopAudioPlayback()
 
     @Slot()
     def startPushToTalk(self) -> None:
@@ -663,6 +780,42 @@ class ChatbotController(QObject):
                 self._worker._barge_threshold = val
             self.bargeThresholdChanged.emit()
 
+    @Slot(float)
+    def setSpeechThreshold(self, threshold: float) -> None:
+        val = max(50.0, float(threshold))
+        if abs(val - self._speech_threshold) > 1e-4:
+            self._speech_threshold = val
+            if self._worker:
+                self._worker._speech_threshold = val
+            self.speechThresholdChanged.emit()
+
+    @Slot(float)
+    def setCoolingOffMs(self, ms: float) -> None:
+        val = max(50.0, float(ms))
+        if abs(val - self._cooling_off_ms) > 1e-4:
+            self._cooling_off_ms = val
+            if self._worker:
+                self._worker._cooling_off_ms = val
+            self.coolingOffMsChanged.emit()
+
+    @Slot(float)
+    def setSilenceHoldSec(self, sec: float) -> None:
+        val = max(0.1, float(sec))
+        if abs(val - self._silence_hold_sec) > 1e-4:
+            self._silence_hold_sec = val
+            if self._worker:
+                self._worker._silence_hold_sec = val
+            self.silenceHoldSecChanged.emit()
+
+    @Slot(float)
+    def setBargeRatio(self, ratio: float) -> None:
+        val = max(1.0, float(ratio))
+        if abs(val - self._barge_ratio) > 1e-4:
+            self._barge_ratio = val
+            if self._worker:
+                self._worker._barge_ratio = val
+            self.bargeRatioChanged.emit()
+
     def _get_output_gain(self) -> float:
         return self._output_gain
 
@@ -671,6 +824,18 @@ class ChatbotController(QObject):
 
     def _get_barge_threshold(self) -> float:
         return self._barge_threshold
+
+    def _get_speech_threshold(self) -> float:
+        return self._speech_threshold
+
+    def _get_cooling_off_ms(self) -> float:
+        return self._cooling_off_ms
+
+    def _get_silence_hold_sec(self) -> float:
+        return self._silence_hold_sec
+
+    def _get_barge_ratio(self) -> float:
+        return self._barge_ratio
 
     listening = Property(bool, _get_listening, notify=listeningChanged)
     busy = Property(bool, _get_busy, notify=busyChanged)
@@ -685,6 +850,10 @@ class ChatbotController(QObject):
     outputGain = Property(float, _get_output_gain, setOutputGain, notify=outputGainChanged)
     micGain = Property(float, _get_mic_gain, setMicGain, notify=micGainChanged)
     bargeThreshold = Property(float, _get_barge_threshold, setBargeThreshold, notify=bargeThresholdChanged)
+    speechThreshold = Property(float, _get_speech_threshold, setSpeechThreshold, notify=speechThresholdChanged)
+    coolingOffMs = Property(float, _get_cooling_off_ms, setCoolingOffMs, notify=coolingOffMsChanged)
+    silenceHoldSec = Property(float, _get_silence_hold_sec, setSilenceHoldSec, notify=silenceHoldSecChanged)
+    bargeRatio = Property(float, _get_barge_ratio, setBargeRatio, notify=bargeRatioChanged)
 
 
 def _remove_recording_file(path: Path) -> None:
