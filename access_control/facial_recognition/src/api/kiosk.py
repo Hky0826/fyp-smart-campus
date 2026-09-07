@@ -290,6 +290,7 @@ class KioskStateStore:
         full_name: str | None = None,
         given_name: str | None = None,
         owner_embedding: np.ndarray | None = None,
+        owner_face_track_id: str | None = None,
     ) -> ChatSessionView:
         now = self._now().isoformat()
         full_name = full_name or (token.full_name if token else None)
@@ -301,6 +302,7 @@ class KioskStateStore:
             full_name=full_name,
             roles=list(token.roles) if token else [],
             cloud_session_id=token.session_id if token else None,
+            owner_face_track_id=owner_face_track_id,
             owner_absent_since=None,
             last_owner_seen_at=now,
             last_interaction_at=now,
@@ -399,6 +401,20 @@ class KioskStateStore:
             if self._recoverable_chat_session is None:
                 return None
             return _copy_embedding(self._recoverable_chat_session.owner_embedding)
+
+    def current_owner_track_id(self) -> str | None:
+        with self._lock:
+            if self._chat_session is None:
+                return None
+            return self._chat_session.view.owner_face_track_id
+
+    def update_owner_track_id(self, track_id: str | int | None) -> None:
+        with self._lock:
+            tid_str = None if track_id is None else str(track_id)
+            if self._chat_session:
+                self._chat_session.view.owner_face_track_id = tid_str
+            if self._recoverable_chat_session:
+                self._recoverable_chat_session.view.owner_face_track_id = tid_str
 
     def update_owner_presence(self, owner_present: bool, bboxes: list[list[int]] | None = None) -> ChatPresenceResponse:
         now = self._now()
@@ -565,6 +581,7 @@ def create_kiosk_router(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No usable face detected.")
 
         owner_embedding = owner_face["embedding"]
+        owner_track_id = str(owner_face["track_id"]) if owner_face.get("track_id") is not None else None
         token = _try_issue_registered_token(pipeline, owner_embedding, runtime_config())
         return ChatVerifyResponse(
             session=store.start_chat_session(
@@ -572,6 +589,7 @@ def create_kiosk_router(
                 full_name=token.full_name if token else None,
                 given_name=token.given_name if token else None,
                 owner_embedding=owner_embedding,
+                owner_face_track_id=owner_track_id,
             ),
             bboxes=_result_bboxes(result),
         )
@@ -583,8 +601,13 @@ def create_kiosk_router(
             return ChatPresenceResponse(owner_present=False, ended=True)
 
         frame = await _decode_upload(file)
+        owner_track_id = store.current_owner_track_id()
         try:
-            owner_present, bboxes = _detect_owner_presence(access_pipeline(), frame, owner_embedding)
+            owner_present, new_track_id, bboxes = _detect_owner_presence(
+                access_pipeline(), frame, owner_embedding, owner_track_id=owner_track_id
+            )
+            if owner_present and new_track_id is not None and str(new_track_id) != owner_track_id:
+                store.update_owner_track_id(new_track_id)
         except Exception as exc:
             logger.exception("Kiosk chatbot owner presence check failed")
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -599,7 +622,11 @@ def create_kiosk_router(
 
         frame = await _decode_upload(file)
         try:
-            owner_present, bboxes = _detect_owner_presence(access_pipeline(), frame, owner_embedding)
+            owner_present, new_track_id, bboxes = _detect_owner_presence(
+                access_pipeline(), frame, owner_embedding, owner_track_id=None
+            )
+            if owner_present and new_track_id is not None:
+                store.update_owner_track_id(new_track_id)
         except Exception as exc:
             logger.exception("Kiosk chatbot owner recovery check failed")
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -988,10 +1015,23 @@ def _try_issue_registered_token(pipeline: Any, owner_embedding: np.ndarray, conf
         return None
 
 
-def _detect_owner_presence(pipeline: Any, frame: np.ndarray, owner_embedding: np.ndarray) -> tuple[bool, list[list[int]]]:
+def _detect_owner_presence(
+    pipeline: Any,
+    frame: np.ndarray,
+    owner_embedding: np.ndarray,
+    owner_track_id: Optional[str] = None,
+) -> tuple[bool, Optional[int], list[list[int]]]:
+    verify_presence_func = getattr(pipeline, "verify_owner_presence", None)
+    if callable(verify_presence_func):
+        try:
+            return verify_presence_func(frame, owner_track_id=owner_track_id, owner_embedding=owner_embedding)
+        except Exception:
+            logger.exception("pipeline.verify_owner_presence failed, falling back to describe_faces")
+
     result = pipeline.describe_faces(frame, include_embeddings=True)
     threshold = float(getattr(pipeline.config, "recognition_threshold", 0.55))
     owner_present = False
+    matched_track_id = None
     for face in result.get("faces", []):
         if not isinstance(face, dict) or face.get("embedding") is None:
             continue
@@ -999,8 +1039,9 @@ def _detect_owner_presence(pipeline: Any, frame: np.ndarray, owner_embedding: np
         logger.info("Owner presence check: recognition_score=%.4f threshold=%.3f matched=%s", similarity, threshold, similarity >= threshold)
         if similarity >= threshold:
             owner_present = True
+            matched_track_id = face.get("track_id")
             break
-    return owner_present, _result_bboxes(result)
+    return owner_present, matched_track_id, _result_bboxes(result)
 
 
 def _optional_int(value: Any) -> int | None:

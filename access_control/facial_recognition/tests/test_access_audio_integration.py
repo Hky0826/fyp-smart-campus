@@ -4,8 +4,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from edge.audio_io.cloud_audio_client import CloudAudioClient, CloudChatCredentials
-from edge.audio_io.config import _cloud_audio_stream_url, _cloud_audio_url
+try:
+    from access_control.audio_io.cloud_audio_client import CloudAudioClient, CloudChatCredentials
+    from access_control.audio_io.config import _cloud_audio_stream_url, _cloud_audio_url
+except ImportError:
+    from edge.audio_io.cloud_audio_client import CloudAudioClient, CloudChatCredentials
+    from edge.audio_io.config import _cloud_audio_stream_url, _cloud_audio_url
 from access_control.facial_recognition.src.config import AccessControlConfig
 from access_control.facial_recognition.src.pipelines.access_audio import (
     AccessControlAudioCoordinator,

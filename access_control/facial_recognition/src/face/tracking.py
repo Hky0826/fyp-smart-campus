@@ -1,11 +1,13 @@
-"""Lightweight timestamp-aware face tracking for access control."""
+"""ByteTrack-powered face tracking for access control."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import List, Optional
 
 import numpy as np
 
+from .bytetrack import ByteTracker, STrack
 from .types import DetectedFace
 
 
@@ -17,6 +19,11 @@ class FaceTrackerConfig:
     track_timeout_ms: int = 1000
     min_iou_for_match: float = 0.3
     max_landmark_jump_ratio: float = 0.5
+    track_high_thresh: float = 0.5
+    track_low_thresh: float = 0.1
+    new_track_thresh: float = 0.5
+    track_buffer: int = 30
+    match_thresh: float = 0.7
 
 
 @dataclass
@@ -47,89 +54,95 @@ def bbox_iou(a: np.ndarray, b: np.ndarray) -> float:
 
 
 class FaceTracker:
+    """Multi-object face tracker backed by ByteTrack and 8D Kalman filtering."""
+
     def __init__(self, config: FaceTrackerConfig | None = None) -> None:
         self.config = config or FaceTrackerConfig()
+        self._byte_tracker = ByteTracker(
+            track_high_thresh=self.config.track_high_thresh,
+            track_low_thresh=self.config.track_low_thresh,
+            new_track_thresh=self.config.new_track_thresh,
+            track_buffer=self.config.track_buffer,
+            match_thresh=self.config.match_thresh,
+        )
         self._tracks: dict[int, FaceTrack] = {}
-        self._next_track_id = 1
 
-    def update(self, detections: list[DetectedFace], timestamp: float) -> list[FaceTrack]:
-        now = float(timestamp)
-        self._expire(now)
-        for track in self._tracks.values():
-            track.visible = False
-
-        candidates: list[tuple[float, int, int]] = []
-        for track_id, track in self._tracks.items():
-            for detection_index, detection in enumerate(detections):
-                score = self._match_score(track, detection)
-                if score is not None:
-                    candidates.append((score, track_id, detection_index))
-        assigned_tracks: set[int] = set()
-        assigned_detections: set[int] = set()
-        for _, track_id, detection_index in sorted(candidates, reverse=True):
-            if track_id in assigned_tracks or detection_index in assigned_detections:
-                continue
-            self._apply_match(self._tracks[track_id], detections[detection_index], now)
-            assigned_tracks.add(track_id)
-            assigned_detections.add(detection_index)
-
-        for track_id, track in list(self._tracks.items()):
-            if track_id not in assigned_tracks:
-                track.missed_frames += 1
-        for index, detection in enumerate(detections):
-            if index not in assigned_detections:
-                self._create_track(detection, now)
-        self._expire(now)
-        return sorted(self._tracks.values(), key=lambda item: item.track_id)
+    @property
+    def byte_tracker(self) -> ByteTracker:
+        return self._byte_tracker
 
     def reset(self) -> None:
         self._tracks.clear()
+        self._byte_tracker.reset()
 
-    def _match_score(self, track: FaceTrack, detection: DetectedFace) -> float | None:
-        iou = bbox_iou(track.bbox, np.asarray(detection.bbox, dtype=np.float32))
-        if iou < self.config.min_iou_for_match:
-            return None
-        landmark_score = 0.0
-        if track.landmarks is not None and detection.landmarks is not None:
-            current = np.asarray(detection.landmarks, dtype=np.float32)
-            if current.shape != (5, 2) or not np.all(np.isfinite(current)):
-                return None
-            diagonal = max(float(np.linalg.norm(track.bbox[2:] - track.bbox[:2])), 1.0)
-            jump_ratio = float(np.mean(np.linalg.norm(current - track.landmarks, axis=1))) / diagonal
-            if jump_ratio > self.config.max_landmark_jump_ratio:
-                return None
-            landmark_score = 1.0 - jump_ratio
-        return iou + 0.25 * landmark_score
+    def update(self, detections: list[DetectedFace], timestamp: float) -> list[FaceTrack]:
+        now = float(timestamp)
+        if not detections:
+            self._byte_tracker.update([])
+            for track in self._tracks.values():
+                track.visible = False
+                track.missed_frames += 1
+            self._expire(now)
+            return sorted(self._tracks.values(), key=lambda t: t.track_id)
 
-    def _apply_match(self, track: FaceTrack, detection: DetectedFace, now: float) -> None:
-        track.bbox = np.asarray(detection.bbox, dtype=np.float32).copy()
-        track.landmarks = None if detection.landmarks is None else np.asarray(detection.landmarks, dtype=np.float32).copy()
-        track.last_seen_at = now
-        track.matched_frames += 1
-        track.missed_frames = 0
-        track.visible = True
-        duration_ms = (now - track.created_at) * 1000.0
-        track.stable = (
-            track.matched_frames >= self.config.min_stable_frames
-            and duration_ms >= self.config.min_stable_duration_ms
-        )
+        dets_array: list[np.ndarray] = []
+        landmarks_list: list[np.ndarray | None] = []
+        for det in detections:
+            x1, y1, x2, y2 = det.bbox
+            score = float(det.confidence)
+            dets_array.append(np.array([x1, y1, x2, y2, score], dtype=np.float32))
+            landmarks_list.append(det.landmarks)
 
-    def _create_track(self, detection: DetectedFace, now: float) -> None:
-        track = FaceTrack(
-            track_id=self._next_track_id,
-            bbox=np.asarray(detection.bbox, dtype=np.float32).copy(),
-            landmarks=None if detection.landmarks is None else np.asarray(detection.landmarks, dtype=np.float32).copy(),
-            created_at=now,
-            last_seen_at=now,
-        )
-        track.stable = self.config.min_stable_frames <= 1 and self.config.min_stable_duration_ms <= 0
-        self._tracks[track.track_id] = track
-        self._next_track_id += 1
+        active_stracks = self._byte_tracker.update(dets_array, landmarks_list)
+        active_ids = {s.track_id for s in active_stracks}
+
+        # Update tracks not matched in this frame
+        for track_id, track in list(self._tracks.items()):
+            if track_id not in active_ids:
+                track.visible = False
+                track.missed_frames += 1
+
+        for strack in active_stracks:
+            track_id = strack.track_id
+            tlbr = np.asarray(strack.tlbr, dtype=np.float32)
+            landmarks = strack.landmarks
+
+            if track_id in self._tracks:
+                track = self._tracks[track_id]
+                track.bbox = tlbr
+                if landmarks is not None:
+                    track.landmarks = landmarks
+                track.last_seen_at = now
+                track.matched_frames += 1
+                track.missed_frames = 0
+                track.visible = True
+            else:
+                track = FaceTrack(
+                    track_id=track_id,
+                    bbox=tlbr,
+                    landmarks=landmarks,
+                    created_at=now,
+                    last_seen_at=now,
+                    matched_frames=1,
+                    missed_frames=0,
+                    visible=True,
+                )
+                self._tracks[track_id] = track
+
+            duration_ms = (now - track.created_at) * 1000.0
+            track.stable = (
+                track.matched_frames >= self.config.min_stable_frames
+                and duration_ms >= self.config.min_stable_duration_ms
+            )
+
+        self._expire(now)
+        return sorted(self._tracks.values(), key=lambda t: t.track_id)
 
     def _expire(self, now: float) -> None:
         timeout = self.config.track_timeout_ms / 1000.0
+        removed_ids = {s.track_id for s in self._byte_tracker.removed_stracks}
         self._tracks = {
-            track_id: track
-            for track_id, track in self._tracks.items()
-            if track.missed_frames <= self.config.max_missed_frames and now - track.last_seen_at <= timeout
+            tid: tr
+            for tid, tr in self._tracks.items()
+            if tid not in removed_ids and (now - tr.last_seen_at <= timeout)
         }

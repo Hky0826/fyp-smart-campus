@@ -25,6 +25,7 @@ from ..face.matching import TemplateMatcher
 from ..face.quality import FaceQualityChecker, FaceQualityConfig
 from ..face.spoofing import MotionSpoofDetector, SpoofResult
 from ..face.pad import load_pad, PADResult
+from ..face.association import IdentityManager, TrackIdentity
 from ..face.tracking import FaceTracker, FaceTrackerConfig
 from ..face.types import AuthenticationResult, DetectedFace
 from ..utils.logging import configure_logging
@@ -118,6 +119,7 @@ class AccessControlPipeline:
         tracker: FaceTracker | None = None,
         embedding_aggregator: TrackEmbeddingAggregator | None = None,
         pad_detector: Any | None = None,
+        identity_manager: IdentityManager | None = None,
     ) -> None:
         self.config = config or AccessControlConfig()
         self.detector = detector
@@ -125,6 +127,7 @@ class AccessControlPipeline:
         self.repository = repository
         self.aligner = aligner or FaceAligner()
         self.matcher = matcher or TemplateMatcher(self.config.recognition_threshold)
+        self.identity_manager = identity_manager or IdentityManager()
         self.spoof_detector = spoof_detector or MotionSpoofDetector(
             history_size=getattr(self.config, "spoof_history_size", 4)
         )
@@ -201,6 +204,22 @@ class AccessControlPipeline:
                 metrics=timer.metrics, bbox=bbox, bboxes=bboxes,
             )
 
+        active_track_ids = {t.track_id for t in tracks}
+        self.identity_manager.update_active_tracks(active_track_ids, timestamp=timestamp)
+
+        # Fast-Path: Persistent Track Identity Check (Track-then-Recognize)
+        # Avoid repeatedly running face recognition once identity is assigned to this active track
+        if not self.identity_manager.should_recognize(track.track_id):
+            identity_rec = self.identity_manager.get_identity(track.track_id)
+            if identity_rec.cached_payload is not None:
+                result = dict(identity_rec.cached_payload)
+                result["bbox"] = bbox
+                result["bboxes"] = bboxes
+                result["track_id"] = track.track_id
+                timer.total()
+                result["metrics"] = timer.metrics
+                return result
+
         if self._cached_recognition_result is not None and (timestamp - self._last_full_recognition_time) < self._recognition_interval:
             result = dict(self._cached_recognition_result)
             result["bbox"] = bbox
@@ -212,6 +231,27 @@ class AccessControlPipeline:
         def cache_and_return(res: dict) -> dict:
             self._cached_recognition_result = res
             self._last_full_recognition_time = timestamp
+            auth_res = res.get("authentication_result")
+            if auth_res == AuthenticationResult.GRANT.value and res.get("user_id"):
+                self.identity_manager.associate_identity(
+                    track_id=track.track_id,
+                    user_id=str(res["user_id"]),
+                    identity=str(res.get("identity", "unknown")),
+                    similarity=float(res.get("similarity") or 0.0),
+                    matched_template=res.get("matched_template"),
+                    access_decision="GRANTED",
+                    reason=res.get("decision_reason"),
+                    cached_payload=res,
+                    timestamp=timestamp,
+                )
+            elif auth_res in (AuthenticationResult.DENY_NO_MATCH.value, AuthenticationResult.DENY_SPOOF.value):
+                self.identity_manager.associate_denial(
+                    track_id=track.track_id,
+                    reason=str(res.get("reason") or "Access denied"),
+                    similarity=float(res.get("similarity") or 0.0),
+                    cached_payload=res,
+                    timestamp=timestamp,
+                )
             return res
 
         try:
@@ -322,6 +362,7 @@ class AccessControlPipeline:
                 if terminal:
                     image_path = self._save_face_snapshot(frame, face)
                     self._log_event(None, "FAILED", match.similarity, image_path=image_path)
+                    self.embedding_aggregator.reset()
                 result = self._deny(
                     "Candidate identity is not consistent across frames",
                     face_count,
@@ -366,6 +407,7 @@ class AccessControlPipeline:
                 )
                 image_path = self._save_face_snapshot(frame, face)
                 self._log_event(None, "FAILED", match.similarity, image_path=image_path)
+                self.embedding_aggregator.reset()
                 timer.total()
                 return cache_and_return(self._deny(
                     "Unknown face or low-confidence match",
@@ -468,12 +510,16 @@ class AccessControlPipeline:
                 "metrics": timer.metrics,
             }
         timer.mark("detection")
+        timestamp = self._clock()
+        tracks = self.tracker.update(faces, timestamp)
         descriptions: list[dict[str, Any]] = []
 
-        for face in sorted(faces, key=lambda item: item.width() * item.height(), reverse=True):
+        for idx, face in enumerate(sorted(faces, key=lambda item: item.width() * item.height(), reverse=True)):
+            track_id = tracks[idx].track_id if idx < len(tracks) else None
             item: dict[str, Any] = {
                 "bbox": face.xyxy_int(),
                 "confidence": float(face.confidence),
+                "track_id": track_id,
             }
             if include_embeddings:
                 try:
@@ -507,6 +553,64 @@ class AccessControlPipeline:
             "faces": descriptions,
             "metrics": timer.metrics,
         }
+
+    def verify_owner_presence(
+        self,
+        frame: np.ndarray,
+        owner_track_id: Optional[str | int] = None,
+        owner_embedding: Optional[np.ndarray] = None,
+    ) -> tuple[bool, Optional[int], list[list[int]]]:
+        """Fast-path owner presence verification using ByteTrack with embedding fallback."""
+        try:
+            faces = self._detect(frame)
+        except Exception:
+            logger.exception("Face detection failed during presence check")
+            return False, None, []
+
+        if not faces:
+            self.tracker.update([], self._clock())
+            return False, None, []
+
+        bboxes = [f.xyxy_int() for f in faces]
+        timestamp = self._clock()
+        tracks = self.tracker.update(faces, timestamp)
+        visible_tracks = [t for t in tracks if t.visible]
+        self.identity_manager.update_active_tracks({t.track_id for t in tracks}, timestamp=timestamp)
+
+        target_tid: Optional[int] = None
+        if owner_track_id is not None:
+            try:
+                target_tid = int(owner_track_id)
+            except (TypeError, ValueError):
+                target_tid = None
+
+        # Tier 1 (Fast-Path): If owner_track_id is active and tracked, return immediately without embedding
+        if target_tid is not None:
+            for tr in visible_tracks:
+                if tr.track_id == target_tid:
+                    logger.debug("Owner presence FAST-PATH: track %s is active", target_tid)
+                    return True, target_tid, bboxes
+
+        # Tier 2 (Fallback / Re-identification): If track lost or changed, check embedding
+        if owner_embedding is not None and visible_tracks:
+            threshold = float(getattr(self.config, "recognition_threshold", 0.55))
+            for tr in visible_tracks:
+                det = tr.as_detection()
+                alignment = self.aligner.align(frame, det)
+                if alignment.success and alignment.aligned_face is not None:
+                    try:
+                        emb = self.embedder.embed(alignment.aligned_face)
+                        sim = self.matcher.cosine_similarity(owner_embedding, emb)
+                        logger.info(
+                            "Owner presence fallback: track=%s score=%.4f threshold=%.3f matched=%s",
+                            tr.track_id, sim, threshold, sim >= threshold
+                        )
+                        if sim >= threshold:
+                            return True, tr.track_id, bboxes
+                    except Exception:
+                        logger.exception("Embedding extraction failed during presence check")
+
+        return False, None, bboxes
 
     def _wait_for_recognition_delay(self) -> None:
         delay_seconds = self.config.recognition_delay_seconds
