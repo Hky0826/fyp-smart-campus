@@ -7,7 +7,8 @@ from access_control.facial_recognition.src.sync import SQLiteEdgeDB, create_edge
 from access_control.facial_recognition.src.config import AccessControlConfig
 
 
-def test_https_is_default_transport_policy():
+def test_https_is_default_transport_policy(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
     validate_cloud_url("https://cloud.example.test")
     with pytest.raises(ValueError):
         validate_cloud_url("http://192.0.2.10:8000", allow_insecure_loopback=True)

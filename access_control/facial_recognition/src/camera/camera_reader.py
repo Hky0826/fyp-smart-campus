@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_WIDTH = int(os.getenv("EDGE_CAMERA_WIDTH", "1280"))
+DEFAULT_HEIGHT = int(os.getenv("EDGE_CAMERA_HEIGHT", "720"))
 
 try:
     import cv2
@@ -15,7 +19,7 @@ except Exception:  # pragma: no cover
 
 
 class CameraReader:
-    def __init__(self, source: str = "/dev/video4", width: int = 1920, height: int = 1080) -> None:
+    def __init__(self, source: str = "/dev/video4", width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT) -> None:
         self.source = source
         self.width = int(width)
         self.height = int(height)

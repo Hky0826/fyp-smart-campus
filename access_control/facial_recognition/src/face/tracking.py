@@ -11,8 +11,8 @@ from .types import DetectedFace
 
 @dataclass(frozen=True)
 class FaceTrackerConfig:
-    min_stable_frames: int = 5
-    min_stable_duration_ms: int = 250
+    min_stable_frames: int = 2
+    min_stable_duration_ms: int = 100
     max_missed_frames: int = 3
     track_timeout_ms: int = 1000
     min_iou_for_match: float = 0.3

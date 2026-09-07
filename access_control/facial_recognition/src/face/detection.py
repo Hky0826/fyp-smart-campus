@@ -28,6 +28,7 @@ class YuNetDetector:
         max_box_size_ratio: float = 0.95,
         box_expansion_ratio: float = 0.0,
         log_empty_detections: bool = True,
+        max_dim: int = 640,
     ) -> None:
         path = Path(model_path)
         if not path.is_file():
@@ -41,6 +42,7 @@ class YuNetDetector:
         self.max_box_size_ratio = float(max_box_size_ratio)
         self.box_expansion_ratio = float(box_expansion_ratio)
         self.log_empty_detections = log_empty_detections
+        self.max_dim = int(max_dim) if max_dim is not None else 0
         self.last_inference_ms = 0.0
 
         self._detector = cv2.FaceDetectorYN.create(
@@ -63,10 +65,25 @@ class YuNetDetector:
             return []
 
         h, w = frame.shape[:2]
-        self.set_input_size(w, h)
+        if self.max_dim > 0 and max(h, w) > self.max_dim:
+            if w >= h:
+                det_w = self.max_dim
+                det_h = max(1, int(round(h * (self.max_dim / w))))
+            else:
+                det_h = self.max_dim
+                det_w = max(1, int(round(w * (self.max_dim / h))))
+            det_frame = cv2.resize(frame, (det_w, det_h), interpolation=cv2.INTER_LINEAR)
+            scale_x = float(w) / float(det_w)
+            scale_y = float(h) / float(det_h)
+        else:
+            det_frame = frame
+            det_w, det_h = w, h
+            scale_x, scale_y = 1.0, 1.0
+
+        self.set_input_size(det_w, det_h)
 
         started = perf_counter()
-        _, rows = self._detector.detect(frame)
+        _, rows = self._detector.detect(det_frame)
         self.last_inference_ms = (perf_counter() - started) * 1000.0
 
         if rows is None:
@@ -82,6 +99,10 @@ class YuNetDetector:
                 continue
 
             x, y, width, height = map(float, row[:4])
+            x *= scale_x
+            y *= scale_y
+            width *= scale_x
+            height *= scale_y
             if width < self.min_face_size or height < self.min_face_size:
                 continue
 
@@ -96,8 +117,8 @@ class YuNetDetector:
 
             # YuNet landmarks: (x_re, y_re), (x_le, y_le), (x_n, y_n), (x_rm, y_rm), (x_lm, y_lm)
             landmarks = np.asarray(row[4:14], dtype=np.float32).reshape(5, 2)
-            landmarks[:, 0] = np.clip(landmarks[:, 0], 0.0, float(max(0, w - 1)))
-            landmarks[:, 1] = np.clip(landmarks[:, 1], 0.0, float(max(0, h - 1)))
+            landmarks[:, 0] = np.clip(landmarks[:, 0] * scale_x, 0.0, float(max(0, w - 1)))
+            landmarks[:, 1] = np.clip(landmarks[:, 1] * scale_y, 0.0, float(max(0, h - 1)))
 
             faces.append(DetectedFace(
                 bbox=[x1, y1, x2, y2],

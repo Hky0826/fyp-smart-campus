@@ -125,7 +125,9 @@ class AccessControlPipeline:
         self.repository = repository
         self.aligner = aligner or FaceAligner()
         self.matcher = matcher or TemplateMatcher(self.config.recognition_threshold)
-        self.spoof_detector = spoof_detector or MotionSpoofDetector()
+        self.spoof_detector = spoof_detector or MotionSpoofDetector(
+            history_size=getattr(self.config, "spoof_history_size", 4)
+        )
         self.pad_detector = pad_detector or load_pad(self.config)
         self.quality_checker = quality_checker or FaceQualityChecker(
             config=FaceQualityConfig(
@@ -657,6 +659,7 @@ def build_pipeline(config: AccessControlConfig) -> AccessControlPipeline:
         confidence_threshold=config.detection_threshold,
         nms_iou_threshold=config.detector_nms_iou_threshold,
         min_face_size=float(config.min_face_size),
+        max_dim=getattr(config, "detector_max_dim", 640),
     )
     embedder = SFaceEmbedder(
         config.embedding_model_path,

@@ -20,8 +20,8 @@ except Exception:  # pragma: no cover - depends on target image
 DEFAULT_CAMERA = "/dev/video4"
 JPEG_QUALITY = 82
 DEFAULT_CAMERA_FALLBACKS = "/dev/video0,/dev/video1,/dev/video2,/dev/video3,/dev/video4,/dev/video5,0,1"
-DEFAULT_CAMERA_WIDTH = 1920
-DEFAULT_CAMERA_HEIGHT = 1080
+DEFAULT_CAMERA_WIDTH = 1280
+DEFAULT_CAMERA_HEIGHT = 720
 DEFAULT_CAMERA_FOURCC = "MJPG"
 
 

@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -45,6 +46,14 @@ class DeviceUserRepository:
 
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)
+        self._cached_templates: List[FaceTemplate] | None = None
+        self._cache_mtime: float = 0.0
+        self._cache_lock = threading.Lock()
+
+    def invalidate_cache(self) -> None:
+        with self._cache_lock:
+            self._cached_templates = None
+            self._cache_mtime = 0.0
 
     def _connect(self) -> sqlite3.Connection:
         if not self.db_path.exists():
@@ -69,7 +78,22 @@ class DeviceUserRepository:
         finally:
             conn.close()
 
-    def load_templates(self) -> List[FaceTemplate]:
+    def load_templates(self, force_reload: bool = False) -> List[FaceTemplate]:
+        with self._cache_lock:
+            try:
+                current_mtime = self.db_path.stat().st_mtime if self.db_path.exists() else 0.0
+            except OSError:
+                current_mtime = 0.0
+
+            if not force_reload and self._cached_templates is not None and current_mtime != 0.0 and current_mtime == self._cache_mtime:
+                return list(self._cached_templates)
+
+            templates = self._load_templates_from_db()
+            self._cached_templates = list(templates)
+            self._cache_mtime = current_mtime
+            return list(self._cached_templates)
+
+    def _load_templates_from_db(self) -> List[FaceTemplate]:
         conn = self._connect()
         try:
             columns = self._require_device_users(conn)
