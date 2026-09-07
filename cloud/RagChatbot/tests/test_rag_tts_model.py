@@ -42,6 +42,7 @@ class RagTtsModelTests(unittest.TestCase):
         fake_client.synthesize_speech = synthesize_speech
 
         with (
+            patch("RagChatbot.gemini_client.get_gemini_client", side_effect=Exception("Gemini TTS unavailable")),
             patch.object(response_validator.rag_settings, "AUDIO_TTS_VOICE", "en-US-Journey-F"),
             patch.object(response_validator.texttospeech, "TextToSpeechClient", Mock(return_value=fake_client)),
         ):
@@ -69,6 +70,18 @@ class RagTtsModelTests(unittest.TestCase):
         )
         answer = "The library closes at 10 PM."
         generate_audio = Mock(return_value=b"spoken-pcm")
+        fake_fast_res = {
+            "status": "ok",
+            "route": "UNIVERSITY_INFO",
+            "answer": answer,
+            "sources": [{
+                "chunk_id": 1,
+                "document_id": 10,
+                "document_title": "Library Guide",
+                "section_path": "Library Guide",
+                "access_level": "PUBLIC",
+            }],
+        }
 
         with (
             patch.object(audio_chat_service.rag_settings, "AUDIO_TTS_ENABLED", True),
@@ -80,11 +93,7 @@ class RagTtsModelTests(unittest.TestCase):
             ),
             patch.object(audio_chat_service, "embed_text", Mock(return_value=[0.1, 0.2])),
             patch.object(audio_chat_service, "retrieve_chunks", Mock(return_value=[chunk])),
-            patch.object(
-                audio_chat_service,
-                "generate_answer",
-                Mock(return_value=answer),
-            ),
+            patch("RagChatbot.generation.live_fast_rag.live_fast_rag.process_voice_query", return_value=fake_fast_res),
             patch.object(
                 audio_chat_service,
                 "validate_response",

@@ -25,30 +25,28 @@ def _flash_response(route: str = "UNIVERSITY_INFO", intent: str = "ADMISSIONS"):
 
 def test_process_user_request_calls_flash_lite_only_for_structured_routing():
     db = MagicMock()
-    chunk = RankedChunk(
-        chunk_id=1,
-        document_id=2,
-        document_title="Admissions",
-        chunk_index=0,
-        chunk_text="Applications open in September.",
-        access_level="PUBLIC",
-        similarity_score=0.98,
-    )
+    chunk_source = {
+        "chunk_id": 1,
+        "document_id": 2,
+        "document_title": "Admissions",
+        "access_level": "PUBLIC",
+        "similarity_score": 0.98,
+    }
     fake_models = MagicMock()
     fake_models.generate_content.return_value = _flash_response()
     fake_client = SimpleNamespace(models=fake_models)
 
-    fake_agent_res = SimpleNamespace(
-        access_granted=True,
-        citations=[chunk],
-        answer="Admissions context",
-    )
+    fake_fast_res = {
+        "status": "ok",
+        "route": "UNIVERSITY_INFO",
+        "answer": "Admissions context",
+        "sources": [chunk_source],
+    }
 
     with (
         patch.object(request_module.genai, "Client", return_value=fake_client),
         patch.object(request_module, "resolve_auth_context", return_value=AuthenticatedChatContext(None, None)),
-        patch.object(request_module, "embed_text", return_value=[0.1, 0.2]),
-        patch("RagChatbot.agent.graph.run_agentic_rag", return_value=fake_agent_res),
+        patch("RagChatbot.generation.live_fast_rag.live_fast_rag.process_voice_query", return_value=fake_fast_res),
     ):
         result = request_module.process_user_request(
             transcript="What are the admission requirements?",
@@ -126,7 +124,6 @@ def test_process_user_request_fast_voice_routes_to_live_fast_rag():
         patch.object(request_module.genai, "Client", return_value=fake_client),
         patch.object(request_module, "resolve_auth_context", return_value=AuthenticatedChatContext(None, None)),
         patch("RagChatbot.generation.live_fast_rag.live_fast_rag.process_voice_query", return_value=fake_fast_res) as mock_fast,
-        patch("RagChatbot.agent.graph.run_agentic_rag") as mock_agentic,
     ):
         result = request_module.process_user_request(
             transcript="What are the admission requirements?",
@@ -141,4 +138,3 @@ def test_process_user_request_fast_voice_routes_to_live_fast_rag():
     assert result["response_text"] == "Fast spoken answer"
     assert result["grounded_context"] == "Fast spoken answer"
     mock_fast.assert_called_once()
-    mock_agentic.assert_not_called()

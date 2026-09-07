@@ -451,78 +451,75 @@ def process_user_request(
         answer = classification["clarification_question"] or "Could you please clarify what university information you are looking for?"
         return _fixed_response(answer, "UNCLEAR", sanitized, resolved_session_id, user_id, db, intent=intent)
 
-    # Fast voice path for real-time live voice sessions
-    if fast_voice:
-        try:
-            from RagChatbot.generation.live_fast_rag import live_fast_rag
-            fast_res = live_fast_rag.process_voice_query(sanitized, auth_context=context, db=db)
-            return _result(
-                status=fast_res.get("status", "ok"),
-                route="UNIVERSITY_INFO",
-                intent=intent or "UNIVERSITY_INFO",
-                query=sanitized,
-                response_text=fast_res.get("answer", ""),
-                exact_response=False,
-                access_granted=True,
-                citations=fast_res.get("sources", []),
-                grounded_context=fast_res.get("answer", ""),
-            )
-        except Exception as exc:
-            logger.warning("LiveFastRAG fallback to Agentic RAG: %s", exc)
-
-    # UNIVERSITY_INFO routes through the full Agentic RAG graph (CRAG grading, query rewriting, parent hydration)
+    # UNIVERSITY_INFO routes directly through the single-pass Fast RAG engine
     try:
-        from RagChatbot.agent.graph import run_agentic_rag
-        agent_res = run_agentic_rag(query=sanitized, auth_context=context, db=db)
+        from RagChatbot.generation.live_fast_rag import live_fast_rag
+        fast_res = live_fast_rag.process_voice_query(sanitized, auth_context=context, db=db)
     except Exception as exc:
-        logger.warning("Live Agentic RAG execution failed: %s", exc)
-        return _result(status="error", route="UNIVERSITY_INFO", intent=intent, query=sanitized, response_text="The search service is temporarily unavailable. Please try again later.", exact_response=True, error_message="RAG service unavailable.")
-
-    if not agent_res.access_granted and not agent_res.citations:
-        protected = False
-        if not bearer_token:
-            try:
-                q_emb = embed_text(sanitized)
-                protected = bool(retrieve_chunks(query_embedding=q_emb, allowed_access_levels=PROTECTED_ACCESS_LEVELS, db=db, top_k_retrieval=3, top_k_context=1))
-            except Exception:
-                protected = False
-        if protected:
-            return _result(status="auth_required", route="UNIVERSITY_INFO", intent=intent, query=sanitized, response_text=AUTH_REQUIRED_ANSWER, exact_response=True, error_message=AUTH_REQUIRED_STATUS, authentication_required=True)
-        return _result(status="no_access", route="UNIVERSITY_INFO", intent=intent, query=sanitized, response_text="I'm sorry, but I don't have any documents available that match your question based on your current access level. Please contact the campus administrator if you believe you should have access to this information.", exact_response=True, error_message="No authorized RAG sources matched the request.")
-
-    citations = [
-        CitationSchema(
-            chunk_id=c.chunk_id,
-            document_id=c.document_id,
-            document_title=c.document_title,
-            chunk_index=c.chunk_index,
-            access_level=c.access_level,
-            excerpt=getattr(c, "excerpt", getattr(c, "chunk_text", "")),
+        logger.error("Fast RAG execution failed: %s", exc)
+        return _result(
+            status="error",
+            route="UNIVERSITY_INFO",
+            intent=intent,
+            query=sanitized,
+            response_text="The search service is temporarily unavailable. Please try again later.",
+            exact_response=True,
+            error_message="RAG service unavailable.",
         )
-        for c in agent_res.citations
-    ]
+
+    sources = fast_res.get("sources", [])
+    if not sources and not context.authenticated:
+        protected = False
+        try:
+            q_emb = embed_text(sanitized)
+            protected = bool(
+                retrieve_chunks(
+                    query_embedding=q_emb,
+                    allowed_access_levels=PROTECTED_ACCESS_LEVELS,
+                    db=db,
+                    top_k_retrieval=3,
+                    top_k_context=1,
+                )
+            )
+        except Exception:
+            protected = False
+        if protected:
+            return _result(
+                status="auth_required",
+                route="UNIVERSITY_INFO",
+                intent=intent,
+                query=sanitized,
+                response_text=AUTH_REQUIRED_ANSWER,
+                exact_response=True,
+                error_message=AUTH_REQUIRED_STATUS,
+                authentication_required=True,
+            )
+
     if resolved_session_id is not None:
         logged = log_chatbot_interaction(
             db,
             session_id=resolved_session_id,
             user_id=user_id,
             query_text=sanitized,
-            response_text=agent_res.answer or "[LIVE_GROUNDED_RESPONSE]",
-            retrieved_chunk_ids=[c.chunk_id for c in agent_res.citations],
+            response_text=fast_res.get("answer") or "[LIVE_GROUNDED_RESPONSE]",
+            retrieved_chunk_ids=[
+                s["chunk_id"] for s in sources if isinstance(s, dict) and "chunk_id" in s
+            ],
             response_time_ms=int((time.monotonic() - started) * 1000),
         )
         query_id = logged if logged > 0 else None
     else:
         query_id = None
+
     return _result(
-        status="ok",
+        status=fast_res.get("status", "ok"),
         route="UNIVERSITY_INFO",
-        intent=intent,
+        intent=intent or "UNIVERSITY_INFO",
         query=sanitized,
         access_granted=True,
-        citations=[c.model_dump() for c in citations],
-        response_text=agent_res.answer,
-        grounded_context=agent_res.answer,
+        citations=sources,
+        response_text=fast_res.get("answer", ""),
+        grounded_context=fast_res.get("answer", ""),
         query_id=query_id,
     )
 

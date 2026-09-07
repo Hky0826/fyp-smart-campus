@@ -609,7 +609,7 @@ async def live_websocket_chat(
     """
     Bi-directional full-duplex WebSocket connection for real-time Gemini Live.
     Streams continuous 16kHz PCM from microphone directly into Gemini Live,
-    invokes process_user_request for Agentic RAG, and streams 24kHz PCM audio back.
+    invokes process_user_request for Fast-Path RAG, and streams 24kHz PCM audio back.
     """
     device_id = device_id or "ENTRY-A8F3D155"
     await websocket.accept()

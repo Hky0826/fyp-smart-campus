@@ -733,21 +733,31 @@ def process_chat(
     chat_history = _load_recent_chat_history(session_id, db)
     search_query = _condense_query_with_history(sanitized_query, chat_history)
 
-    # Step 4-8: Execute through Agentic RAG graph (Decomposition, Hybrid Retrieval, CRAG Grading, Rewriting, Groundedness Critic)
+    # Step 4-8: Execute through Fast RAG engine
     with StageTimer() as timer:
-        from RagChatbot.agent.graph import run_agentic_rag
-        agent_res = run_agentic_rag(
+        from RagChatbot.generation.live_fast_rag import live_fast_rag
+        fast_res = live_fast_rag.process_voice_query(
             query=sanitized_query,
             auth_context=context,
             db=db,
-            chat_history=chat_history,
         )
     metrics.rag_ms += timer.elapsed_ms
 
-    answer = agent_res.answer
-    access_granted = agent_res.access_granted
-    status_message = agent_res.status_message
-    citations: List[CitationSchema] = agent_res.citations
+    answer = fast_res.get("answer", "")
+    access_granted = True
+    status_message = fast_res.get("status", "ok")
+    citations: List[CitationSchema] = [
+        CitationSchema(
+            chunk_id=s.get("chunk_id", 0),
+            document_id=s.get("document_id", 0),
+            document_title=s.get("document_title", ""),
+            chunk_index=0,
+            access_level=s.get("access_level", "PUBLIC"),
+            excerpt=s.get("section_path", ""),
+        )
+        for s in fast_res.get("sources", [])
+        if isinstance(s, dict)
+    ]
     ranked_chunks = []
 
     total_elapsed = time.monotonic() - start_time

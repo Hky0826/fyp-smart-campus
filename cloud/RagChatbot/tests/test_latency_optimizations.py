@@ -99,25 +99,28 @@ def test_fast_path_capability_bypasses_planner():
 
 
 def test_fast_path_university_info_bypasses_planner():
-    """Verify direct UNIVERSITY_INFO query bypasses planner and goes directly to retrieval."""
+    """Verify direct UNIVERSITY_INFO query bypasses planner and goes directly to fast retrieval."""
     db_mock = MagicMock()
     req = ChatRequest(query="What is the tuition fee for computer science?")
-    
-    mock_chunk = MagicMock()
-    mock_chunk.chunk_id = 1
-    mock_chunk.document_id = 10
-    mock_chunk.document_title = "Fee Schedule"
-    mock_chunk.chunk_index = 0
-    mock_chunk.access_level = "PUBLIC"
-    mock_chunk.chunk_text = "Computer science tuition is RM 18,000 per year."
-    
+
+    fake_fast_res = {
+        "status": "ok",
+        "route": "UNIVERSITY_INFO",
+        "answer": "The tuition fee is RM 18,000 per year.",
+        "sources": [{
+            "chunk_id": 1,
+            "document_id": 10,
+            "document_title": "Fee Schedule",
+            "section_path": "Fee Schedule > Tuition",
+            "access_level": "PUBLIC",
+        }],
+    }
+
     with patch("RagChatbot.generation.llm_planner.execute_planned_turn") as mock_planner, \
-         patch("RagChatbot.embeddings.google_embedding_service.embed_text", return_value=[0.1] * 768), \
-         patch("RagChatbot.services.chat_service.retrieve_chunks", return_value=[mock_chunk]), \
-         patch("RagChatbot.services.chat_service.generate_answer", return_value="The tuition fee is RM 18,000 per year."):
-        
+         patch("RagChatbot.generation.live_fast_rag.live_fast_rag.process_voice_query", return_value=fake_fast_res):
+
         response = chat_service.process_chat(req, bearer_token=None, db=db_mock)
-        
+
         assert response.access_granted is True
         assert "RM 18,000" in response.answer
         assert len(response.citations) == 1

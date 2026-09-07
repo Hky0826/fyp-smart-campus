@@ -530,21 +530,31 @@ def process_audio_chat(
             visualisation=(navigation_data or {}).get("visualisation"),
         )
 
-    # Step 6-12: Execute through Agentic RAG graph (Decomposition, Hybrid Retrieval, CRAG Grading, Rewriting, Groundedness Critic)
+    # Step 6-12: Execute through Fast RAG engine
     with StageTimer() as timer:
-        from RagChatbot.agent.graph import run_agentic_rag
-        agent_res = run_agentic_rag(
+        from RagChatbot.generation.live_fast_rag import live_fast_rag
+        fast_res = live_fast_rag.process_voice_query(
             query=sanitized_query,
             auth_context=context,
             db=db,
-            chat_history=_recent_chat_history(db, resolved_session_id),
         )
     metrics.rag_ms += timer.elapsed_ms
 
-    answer_text = agent_res.answer
-    access_granted = agent_res.access_granted
-    status_str = agent_res.status
-    citations = agent_res.citations
+    answer_text = fast_res.get("answer", "")
+    access_granted = True
+    status_str = fast_res.get("status", "ok")
+    citations = [
+        CitationSchema(
+            chunk_id=s.get("chunk_id", 0),
+            document_id=s.get("document_id", 0),
+            document_title=s.get("document_title", ""),
+            chunk_index=0,
+            access_level=s.get("access_level", "PUBLIC"),
+            excerpt=s.get("section_path", ""),
+        )
+        for s in fast_res.get("sources", [])
+        if isinstance(s, dict)
+    ]
 
     response_time_ms = int(metrics.time_to_first_tts_ms) if metrics.time_to_first_tts_ms > 0 else int((time.monotonic() - start_time) * 1000)
 
@@ -555,7 +565,7 @@ def process_audio_chat(
         user_id=user_id,
         query_text=sanitized_query,
         response_text=answer_text,
-        retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
+        retrieved_chunk_ids=[c.chunk_id for c in citations],
         response_time_ms=response_time_ms,
     )
     audit_query_id: Optional[int] = _safe_query_id(logged_id)
@@ -569,7 +579,7 @@ def process_audio_chat(
         access_granted=True,
         start_time=start_time,
         query_id=audit_query_id,
-        include_audio=include_response_audio,
+        include_audio=include_audio,
         metrics=metrics,
         user_id=user_id,
         session_id=resolved_session_id,
@@ -881,7 +891,6 @@ def process_audio_chat_stream(
 
     # Query routing: classify query intent (navigational, greeting, capability, or university info)
     with StageTimer() as timer:
-        from RagChatbot.generation.query_router import classify_query
         route = classify_query(sanitized_query, db=db)
     metrics.prompt_classification_ms += timer.elapsed_ms
 

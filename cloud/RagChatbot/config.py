@@ -127,14 +127,6 @@ class RagSettings:
     # Multi-turn conversational query rewrite/condensation
     RAG_QUERY_REWRITE_ENABLED: bool = os.getenv("RAG_QUERY_REWRITE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
-    # Agentic RAG settings (All using gemini-3.1-flash-lite)
-    AGENT_GRADER_MODEL: str = os.getenv("RAG_AGENT_GRADER_MODEL", "gemini-3.1-flash-lite")
-    AGENT_DECOMPOSER_MODEL: str = os.getenv("RAG_AGENT_DECOMPOSER_MODEL", "gemini-3.1-flash-lite")
-    AGENT_CRITIC_MODEL: str = os.getenv("RAG_AGENT_CRITIC_MODEL", "gemini-3.1-flash-lite")
-    AGENT_REWRITER_MODEL: str = os.getenv("RAG_AGENT_REWRITER_MODEL", "gemini-3.1-flash-lite")
-    AGENT_MAX_REWRITE_LOOPS: int = int(os.getenv("RAG_AGENT_MAX_REWRITE_LOOPS", "1"))
-    AGENT_GROUNDEDNESS_CHECK_ENABLED: bool = os.getenv("RAG_AGENT_GROUNDEDNESS_CHECK_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
-    AGENT_FAST_PATH_ENABLED: bool = os.getenv("RAG_AGENT_FAST_PATH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
     LIVE_ACOUSTIC_BRIDGE_ENABLED: bool = os.getenv("RAG_LIVE_ACOUSTIC_BRIDGE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
     LIVE_IDLE_TIMEOUT_SECONDS: float = float(os.getenv("RAG_LIVE_IDLE_TIMEOUT_SECONDS", "15.0"))
 
