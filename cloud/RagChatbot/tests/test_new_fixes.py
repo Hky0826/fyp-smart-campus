@@ -141,3 +141,65 @@ def test_authenticated_device_mismatch_is_rejected():
             auth_context.resolve_auth_context("jwt", Db(), requested_device_id="spoofed-kiosk")
 
     assert exc_info.value.status_code == 403
+
+
+def test_language_switch_detection():
+    from RagChatbot.generation.query_router import detect_language_switch, classify_query
+
+    # English / Latin phrases
+    assert detect_language_switch("Can we speak in Japanese?") == ("ja", "Japanese")
+    assert detect_language_switch("Can we speak in Japanese please") == ("ja", "Japanese")
+    assert detect_language_switch("Please converse in Arabic") == ("ar", "Arabic")
+    assert detect_language_switch("Tamil please") == ("ta", "Tamil")
+    assert detect_language_switch("Switch to Chinese") == ("zh", "Chinese")
+    assert detect_language_switch("Let's speak in French") == ("fr", "French")
+
+    # Malay phrases
+    assert detect_language_switch("Boleh cakap bahasa melayu?") == ("ms", "Bahasa Melayu")
+    assert detect_language_switch("Bercakap dalam bahasa melayu") == ("ms", "Bahasa Melayu")
+
+    # Chinese phrases
+    assert detect_language_switch("讲华语") == ("zh", "Chinese")
+    assert detect_language_switch("可以用中文吗") == ("zh", "Chinese")
+    assert detect_language_switch("讲广东话") == ("yue", "Cantonese")
+    assert detect_language_switch("用粤语交流") == ("yue", "Cantonese")
+
+    # Non-switches should return None
+    assert detect_language_switch("What is the fee for computer science?") is None
+    assert detect_language_switch("Fees please") is None
+    assert detect_language_switch("Help please") is None
+    assert detect_language_switch("Where is the reception?") is None
+
+    # Routing
+    r_ja = classify_query("Can we speak in Japanese?")
+    assert r_ja.category == "LANGUAGE_SWITCH"
+    assert r_ja.category_hint == "ja"
+
+    r_ta = classify_query("Tamil please")
+    assert r_ta.category == "LANGUAGE_SWITCH"
+    assert r_ta.category_hint == "ta"
+
+
+def test_live_session_language_rules_and_normalization():
+    from RagChatbot.generation.live_session_manager import (
+        normalize_language_code,
+        _LIVE_SYSTEM_INSTRUCTION,
+        _tool_declaration,
+    )
+
+    # Normalization
+    assert normalize_language_code("Japanese") == "ja"
+    assert normalize_language_code("Bahasa Melayu") == "ms"
+    assert normalize_language_code("cantonese") == "yue"
+    assert normalize_language_code("en") == "en"
+    assert normalize_language_code("zh") == "zh"
+
+    # Prompt rules
+    assert "9. Conversational Language Switching:" in _LIVE_SYSTEM_INSTRUCTION
+    assert "set_session_language" in _LIVE_SYSTEM_INSTRUCTION
+    assert "10. Speech Recognition & Audio Fidelity:" in _LIVE_SYSTEM_INSTRUCTION
+
+    # Tool declaration
+    tools = _tool_declaration()
+    assert any(d.get("name") == "set_session_language" for d in tools.get("function_declarations", []))
+

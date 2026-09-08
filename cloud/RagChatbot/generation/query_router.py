@@ -115,7 +115,117 @@ _FACULTY_PATTERNS = {
     "FOBP": re.compile(r"\b(business|finance|accountancy|accounting|bba|management)\b", re.IGNORECASE),
 }
 
-_ROUTE_CATEGORIES = {"GREETING", "CAPABILITY", "NAVIGATIONAL", "OUT_OF_SCOPE", "UNCLEAR", "UNIVERSITY_INFO"}
+_LANGUAGE_NAME_TO_CODE: dict[str, tuple[str, str]] = {
+    # English names
+    "english": ("en", "English"),
+    "chinese": ("zh", "Chinese"),
+    "mandarin": ("zh", "Mandarin"),
+    "cantonese": ("yue", "Cantonese"),
+    "malay": ("ms", "Malay"),
+    "bahasa melayu": ("ms", "Bahasa Melayu"),
+    "bahasa malaysia": ("ms", "Bahasa Melayu"),
+    "bahasa inggeris": ("en", "English"),
+    "bahasa cina": ("zh", "Chinese"),
+    "bahasa tamil": ("ta", "Tamil"),
+    "bahasa arab": ("ar", "Arabic"),
+    "bahasa jepun": ("ja", "Japanese"),
+    "bahasa korea": ("ko", "Korean"),
+    "tamil": ("ta", "Tamil"),
+    "arabic": ("ar", "Arabic"),
+    "japanese": ("ja", "Japanese"),
+    "korean": ("ko", "Korean"),
+    "french": ("fr", "French"),
+    "german": ("de", "German"),
+    "hindi": ("hi", "Hindi"),
+    "spanish": ("es", "Spanish"),
+    "indonesian": ("id", "Indonesian"),
+    "russian": ("ru", "Russian"),
+    "italian": ("it", "Italian"),
+    "thai": ("th", "Thai"),
+    "vietnamese": ("vi", "Vietnamese"),
+    # Chinese names
+    "华语": ("zh", "Chinese"),
+    "中文": ("zh", "Chinese"),
+    "普通话": ("zh", "Chinese"),
+    "国语": ("zh", "Chinese"),
+    "广东话": ("yue", "Cantonese"),
+    "粤语": ("yue", "Cantonese"),
+    "白话": ("yue", "Cantonese"),
+    "英文": ("en", "English"),
+    "英语": ("en", "English"),
+    "马来语": ("ms", "Malay"),
+    "马来文": ("ms", "Malay"),
+    "日文": ("ja", "Japanese"),
+    "日语": ("ja", "Japanese"),
+    "韩文": ("ko", "Korean"),
+    "韩语": ("ko", "Korean"),
+    "阿拉伯语": ("ar", "Arabic"),
+    "淡米尔语": ("ta", "Tamil"),
+    "泰米尔语": ("ta", "Tamil"),
+    "法语": ("fr", "French"),
+    "德语": ("de", "German"),
+    "西班牙语": ("es", "Spanish"),
+}
+
+_LANG_SWITCH_EN_PATTERN = re.compile(
+    r"^(?:(?:can|could)\s+(?:we|you)\s+|please\s+|let'?s\s+)?(?:speak|converse|talk|switch\s+to)\s+(?:in\s+)?([a-z\s]+?)(?:\s+please)?[.?!]*$",
+    re.IGNORECASE,
+)
+_LANG_SWITCH_PLEASE_PATTERN = re.compile(
+    r"^([a-z\s]+)\s+please[.?!]*$",
+    re.IGNORECASE,
+)
+_LANG_SWITCH_MS_PATTERN = re.compile(
+    r"^(?:boleh\s+)?(?:cakap|guna|tukar\s+(?:ke|kepada)|bercakap)\s+(?:dalam\s+)?bahasa\s+([a-z\s]+?)(?:\s+tak|\s+boleh)?[.?!]*$",
+    re.IGNORECASE,
+)
+_LANG_SWITCH_ZH_PATTERN = re.compile(
+    r"^(?:可以)?(?:用|讲|说|换成|切换(?:成|到)?)\s*(华语|中文|普通话|国语|广东话|粤语|白话|英文|英语|马来语|马来文|日文|日语|韩文|韩语|阿拉伯语|淡米尔语|泰米尔语|法语|德语|西班牙语)\s*(?:交流|沟通|吗|吧|好吗|可以吗)?[.?!]*$",
+)
+
+
+def detect_language_switch(query: str) -> Optional[tuple[str, str]]:
+    """Detect voice or text requests to switch conversation language.
+    Returns (language_code, language_name) if matched, else None.
+    """
+    clean = query.strip()
+    if not clean:
+        return None
+
+    # Check English/Latin patterns
+    m = _LANG_SWITCH_EN_PATTERN.match(clean)
+    if m:
+        target = m.group(1).strip().lower()
+        if target in _LANGUAGE_NAME_TO_CODE:
+            return _LANGUAGE_NAME_TO_CODE[target]
+
+    m_please = _LANG_SWITCH_PLEASE_PATTERN.match(clean)
+    if m_please:
+        target = m_please.group(1).strip().lower()
+        if target in _LANGUAGE_NAME_TO_CODE:
+            return _LANGUAGE_NAME_TO_CODE[target]
+
+    # Check Malay patterns
+    m_ms = _LANG_SWITCH_MS_PATTERN.match(clean)
+    if m_ms:
+        target_sub = f"bahasa {m_ms.group(1).strip().lower()}"
+        if target_sub in _LANGUAGE_NAME_TO_CODE:
+            return _LANGUAGE_NAME_TO_CODE[target_sub]
+        raw_target = m_ms.group(1).strip().lower()
+        if raw_target in _LANGUAGE_NAME_TO_CODE:
+            return _LANGUAGE_NAME_TO_CODE[raw_target]
+
+    # Check Chinese patterns
+    m_zh = _LANG_SWITCH_ZH_PATTERN.match(clean)
+    if m_zh:
+        target_zh = m_zh.group(1).strip()
+        if target_zh in _LANGUAGE_NAME_TO_CODE:
+            return _LANGUAGE_NAME_TO_CODE[target_zh]
+
+    return None
+
+
+_ROUTE_CATEGORIES = {"GREETING", "CAPABILITY", "NAVIGATIONAL", "OUT_OF_SCOPE", "UNCLEAR", "UNIVERSITY_INFO", "LANGUAGE_SWITCH"}
 _ROUTER_SYSTEM_PROMPT = """Classify the user's request into exactly one category.
 
 Use NAVIGATIONAL when the user wants to find, reach, visit, or get directions to a
@@ -273,6 +383,16 @@ def classify_query(query: str, db=None) -> RouteClassification:
     if _GREETING_PATTERN.match(clean_query):
         logger.info("Local Regex Router classified '%s' as GREETING (0 LLM calls)", query)
         return RouteClassification(category="GREETING")
+
+    # 1.5. LANGUAGE_SWITCH Fast-Path
+    lang_switch = detect_language_switch(clean_query)
+    if lang_switch:
+        lang_code, lang_name = lang_switch
+        logger.info("Local Regex Router classified '%s' as LANGUAGE_SWITCH (%s, 0 LLM calls)", query, lang_code)
+        return RouteClassification(
+            category="LANGUAGE_SWITCH",
+            category_hint=lang_code,
+        )
 
     # 2. CAPABILITY Fast-Path
     if _CAPABILITY_PATTERN.search(clean_query):

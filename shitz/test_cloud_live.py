@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import collections
 import json
 import logging
 import math
@@ -225,11 +226,12 @@ async def run_client():
         except asyncio.CancelledError:
             pass
 
-    # Continuous microphone sender loop (mirroring shitz/test_live.py)
+    # Continuous microphone sender loop with pre-roll VAD gating
     async def sender_loop():
         nonlocal playback_busy_until
         speech_active = False
         silence_started = 0.0
+        pre_roll_buffer: collections.deque[bytes] = collections.deque(maxlen=3)
 
         while True:
             pcm_chunk = await mic_queue.get()
@@ -251,33 +253,57 @@ async def run_client():
                         except Exception:
                             break
                     print("\n[Interrupted - Listening to you...]")
-                else:
-                    continue
-
-            # Stream audio frames continuously into Cloud Backend
-            try:
-                await ws.send(pcm_chunk)
-            except Exception:
-                break
-
-            # Visual feedback on speech detection and client VAD turn-end signal
-            if rms >= speech_threshold_rms:
-                if not speech_active:
                     speech_active = True
                     silence_started = 0.0
-                    sys.stdout.write("\n[You]: Speaking... ")
-                    sys.stdout.flush()
-            elif speech_active:
-                if silence_started == 0.0:
-                    silence_started = now
-                elif (now - silence_started) >= 0.45:  # 450ms pause finishes turn
-                    speech_active = False
-                    silence_started = 0.0
-                    print("\n[Speech paused - Waiting for response...]")
+                    while pre_roll_buffer:
+                        try:
+                            await ws.send(pre_roll_buffer.popleft())
+                        except Exception:
+                            break
                     try:
-                        await ws.send(json.dumps({"event": "activity_end"}))
+                        await ws.send(pcm_chunk)
                     except Exception:
-                        pass
+                        break
+                else:
+                    continue
+            else:
+                # Client VAD audio gating with pre-roll lookback: suppress silence & hiss
+                if not speech_active:
+                    if rms >= speech_threshold_rms:
+                        speech_active = True
+                        silence_started = 0.0
+                        sys.stdout.write("\n[You]: Speaking... ")
+                        sys.stdout.flush()
+                        while pre_roll_buffer:
+                            try:
+                                await ws.send(pre_roll_buffer.popleft())
+                            except Exception:
+                                break
+                        try:
+                            await ws.send(pcm_chunk)
+                        except Exception:
+                            break
+                    else:
+                        pre_roll_buffer.append(pcm_chunk)
+                else:
+                    try:
+                        await ws.send(pcm_chunk)
+                    except Exception:
+                        break
+
+                    if rms >= speech_threshold_rms:
+                        silence_started = 0.0
+                    else:
+                        if silence_started == 0.0:
+                            silence_started = now
+                        elif (now - silence_started) >= 0.45:  # 450ms pause finishes turn
+                            speech_active = False
+                            silence_started = 0.0
+                            print("\n[Speech paused - Waiting for response...]")
+                            try:
+                                await ws.send(json.dumps({"event": "activity_end"}))
+                            except Exception:
+                                pass
 
     tasks = [
         asyncio.create_task(player_loop()),

@@ -454,6 +454,39 @@ class ChatbotQueryResponse(ChatbotQueryBase):
     query_id: int
     timestamp: datetime.datetime
 
+# ── Speech Adaptation & Supported Languages Schemas ───────────────────────
+class SpeechLanguageBase(BaseSchema):
+    language_code: str
+    language_name: str
+    is_default: bool = False
+    is_active: bool = True
+
+class SpeechLanguageCreate(SpeechLanguageBase):
+    pass
+
+class SpeechLanguageResponse(SpeechLanguageBase):
+    created_at: Optional[datetime.datetime] = None
+
+class SpeechAdaptationPhraseBase(BaseSchema):
+    phrase: str
+    language_category: str = "GENERAL"
+    description: Optional[str] = None
+    is_active: bool = True
+
+class SpeechAdaptationPhraseCreate(SpeechAdaptationPhraseBase):
+    pass
+
+class SpeechAdaptationPhraseUpdate(BaseSchema):
+    phrase: Optional[str] = None
+    language_category: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class SpeechAdaptationPhraseResponse(SpeechAdaptationPhraseBase):
+    phrase_id: int
+    created_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
+
 # ==========================================
 # Category 3: Infrastructure Schemas
 # ==========================================

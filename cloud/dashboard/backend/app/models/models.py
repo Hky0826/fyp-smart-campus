@@ -487,6 +487,26 @@ class ChatbotQuery(Base):
     user = relationship("User", back_populates="chatbot_queries")
     session = relationship("JWTSession")
 
+class SpeechLanguage(Base):
+    __tablename__ = "speech_languages"
+
+    language_code = Column(String(10), primary_key=True)
+    language_name = Column(String(100), nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False, index=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class SpeechAdaptationPhrase(Base):
+    __tablename__ = "speech_adaptation_phrases"
+
+    phrase_id = Column(Integer, primary_key=True, autoincrement=True)
+    phrase = Column(String(255), nullable=False, unique=True, index=True)
+    language_category = Column(String(50), nullable=False, default="GENERAL", index=True)
+    description = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
 # ==========================================
 # Category 3: Infrastructure & Security Management
 # ==========================================

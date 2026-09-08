@@ -50,6 +50,83 @@ async def _maybe_await(func: Any, *args: Any) -> Any:
     return res
 
 
+_LANGUAGE_CODE_MAP: dict[str, str] = {
+    "english": "en",
+    "en": "en",
+    "chinese": "zh",
+    "mandarin": "zh",
+    "zh": "zh",
+    "cantonese": "yue",
+    "yue": "yue",
+    "malay": "ms",
+    "bahasa melayu": "ms",
+    "bahasa malaysia": "ms",
+    "ms": "ms",
+    "tamil": "ta",
+    "ta": "ta",
+    "arabic": "ar",
+    "ar": "ar",
+    "japanese": "ja",
+    "ja": "ja",
+    "korean": "ko",
+    "ko": "ko",
+    "french": "fr",
+    "fr": "fr",
+    "german": "de",
+    "de": "de",
+    "hindi": "hi",
+    "hi": "hi",
+    "spanish": "es",
+    "es": "es",
+    "indonesian": "id",
+    "id": "id",
+}
+
+
+def normalize_language_code(lang_str: str) -> str:
+    """Normalize language name or code to BCP-47 standard."""
+    key = str(lang_str or "").strip().lower()
+    return _LANGUAGE_CODE_MAP.get(key, key if len(key) in (2, 3) else "en")
+
+
+def _load_active_speech_languages() -> list[str]:
+    """Query default active language codes from database, with fallback."""
+    try:
+        from app.core.database import SessionLocal
+        from app.models.models import SpeechLanguage
+        with SessionLocal() as db:
+            langs = db.query(SpeechLanguage.language_code).filter(SpeechLanguage.is_default == True).all()
+            if langs:
+                codes = [r[0].lower().strip() for r in langs if r[0]]
+                if codes:
+                    return codes
+    except Exception as exc:
+        logger.debug("Could not load speech languages from db: %s", exc)
+    return ["en", "zh", "yue", "ms"]
+
+
+def _load_speech_adaptation_phrases() -> list[str]:
+    """Query active adaptation phrases from database, with fallback."""
+    try:
+        from app.core.database import SessionLocal
+        from app.models.models import SpeechAdaptationPhrase
+        with SessionLocal() as db:
+            phrases = db.query(SpeechAdaptationPhrase.phrase).filter(SpeechAdaptationPhrase.is_active == True).all()
+            if phrases:
+                res = [r[0].strip() for r in phrases if r[0]]
+                if res:
+                    return res
+    except Exception as exc:
+        logger.debug("Could not load speech adaptation phrases from db: %s", exc)
+    return [
+        "Quest International University", "QIU", "Perak", "Ipoh", "Faculty of Pharmacy",
+        "Faculty of Medicine", "Faculty of Business", "Faculty of Computing", "Bachelor",
+        "Diploma", "Master", "Foundation", "Admissions", "Tuition fee", "Perpustakaan",
+        "Fakulti", "Yuran", "Pendaftaran", "Peperiksaan", "大学", "课程", "学费", "图书馆",
+        "报名", "收費", "邊度",
+    ]
+
+
 _LIVE_SYSTEM_INSTRUCTION = """
 You are the voice interface for Quest International University (QIU) Smart Campus.
 
@@ -62,6 +139,8 @@ Core Rules:
 6. Language Matching: ALWAYS reply and speak in the exact language the user is speaking (e.g., English, Malay, Chinese, Tamil, etc.). If the user speaks in Chinese, converse in Chinese. If the user speaks in Malay, converse in Malay. When presenting the backend answer or directional navigation turns, speak and translate them naturally into the user's spoken language while keeping official proper names, course codes, and room numbers unchanged.
 7. Professional Accent, Pronunciation, and Tone: Whenever speaking, ALWAYS speak in a polished, articulate, and professional standard accent for that language (e.g., Standard Broadcast English, Standard Bahasa Melayu Baku, Standard Mandarin Chinese / Putonghua, Standard Tamil). NEVER mirror, mimic, or adopt the user's colloquial accent, regional dialect, local slang (such as Manglish/Singlish particles or informal colloquialisms), or emotional/casual tone.
 8. Maintain an articulate, polite, calm, and professional campus presenter persona with clear diction at all times.
+9. Conversational Language Switching: If the user explicitly asks to speak or switch to another language (e.g. 'Can we speak in Japanese?', 'Please converse in Arabic', 'Tamil please', 'Boleh cakap Melayu?'), you MUST immediately call the tool set_session_language with target_language set to that requested language.
+10. Speech Recognition & Audio Fidelity: Strictly transcribe actual speech in the speaker's true language without hallucinating words from background noise, microphone static, room reverberation, breathing, or silence. Support Malaysian code-switching naturally without mistaking it for foreign languages.
 """.strip()
 
 
@@ -101,6 +180,33 @@ def _tool_declaration() -> dict[str, Any]:
                     "required": ["transcript"],
                 },
             },
+            {
+                "name": "set_session_language",
+                "description": (
+                    "Switches the active conversation and speech recognition language when the user "
+                    "explicitly requests to speak or switch to a specific language (e.g., Japanese, Arabic, "
+                    "Tamil, French, German, Korean, Mandarin, Malay, English, etc.)."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "target_language": {
+                            "type": "STRING",
+                            "description": (
+                                "The requested language name or BCP-47 code (e.g. 'Japanese', 'ja', "
+                                "'Arabic', 'ar', 'Tamil', 'ta', 'French', 'fr', 'Korean', 'ko', 'de')."
+                            ),
+                        },
+                        "acknowledgment_message": {
+                            "type": "STRING",
+                            "description": (
+                                "Polite greeting or confirmation in that target language acknowledging the switch."
+                            ),
+                        },
+                    },
+                    "required": ["target_language"],
+                },
+            },
         ]
     }
 
@@ -121,6 +227,8 @@ class GeminiLiveSession:
         self._resumption_handle: str | None = None
         self._renew_requested = False
         self._input_activity_open = False
+        self._active_language_codes: list[str] | None = None
+        self._session_switched_language: str | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -142,6 +250,9 @@ class GeminiLiveSession:
         else:
             await self._discard_pending_events()
 
+        active_lang_codes = self._active_language_codes or _load_active_speech_languages()
+        adaptation_phrases = _load_speech_adaptation_phrases()
+
         config = {
             "response_modalities": ["AUDIO"],
             "speech_config": {
@@ -152,7 +263,12 @@ class GeminiLiveSession:
                 }
             },
             "system_instruction": _LIVE_SYSTEM_INSTRUCTION,
-            "input_audio_transcription": {},
+            "input_audio_transcription": {
+                "language_hints": {
+                    "language_codes": active_lang_codes,
+                },
+                "adaptation_phrases": adaptation_phrases,
+            },
             "output_audio_transcription": {},
             "tools": [_tool_declaration()],
         }
@@ -173,10 +289,38 @@ class GeminiLiveSession:
         self._connected_at = time.monotonic()
         self._reader_task = asyncio.create_task(self._reader(), name="gemini-live-reader")
         logger.info(
-            "Gemini Live session connected model=%s resumed=%s",
+            "Gemini Live session connected model=%s resumed=%s languages=%s",
             rag_settings.LIVE_MODEL,
             bool(self._resumption_handle),
+            active_lang_codes,
         )
+
+    async def switch_language(
+        self,
+        target_language: str,
+        acknowledgment_message: str | None = None,
+    ) -> dict[str, Any]:
+        """Dynamically prioritize a new target language for this session."""
+        code = normalize_language_code(target_language)
+        new_codes = [code]
+        if code != "en":
+            new_codes.append("en")
+        self._active_language_codes = new_codes
+        self._session_switched_language = code
+        self._renew_requested = True
+        logger.info(
+            "Switched session language hints to %s (requested: %s)",
+            new_codes,
+            target_language,
+        )
+        ack = acknowledgment_message or f"Understood, switching conversation to {target_language}."
+        return {
+            "status": "success",
+            "language_code": code,
+            "target_language": target_language,
+            "answer": ack,
+            "response_text": ack,
+        }
 
     async def send_audio(self, audio_bytes: bytes) -> None:
         if not audio_bytes:
@@ -237,36 +381,50 @@ class GeminiLiveSession:
 
                 elif event_type == "tool_call":
                     calls = event.get("calls") or []
-                    if calls and on_tool_call:
+                    if calls:
                         call = dict(calls[0])
                         call_name = call.get("name") or "process_campus_request"
                         args = call.get("args") or {}
-                        raw_query = args.get("query") or args.get("transcript") or self._transcript.strip()
-                        call["transcript"] = str(raw_query or "").strip()
-                        call["query"] = call["transcript"]
-                        result = await on_tool_call(call)
-                        answer_text = (
-                            result.get("answer")
-                            or result.get("response_text")
-                            or result.get("grounded_context")
-                            or ""
-                        )
-                        sources = result.get("sources") or result.get("citations") or []
-                        func_response = types.FunctionResponse(
-                            name=call_name,
-                            id=call.get("id"),
-                            response={
-                                "answer": answer_text,
-                                "response_text": answer_text,
-                                "status": result.get("status", "ok"),
-                                "sources": sources,
-                                "route": result.get("route", "UNIVERSITY_INFO"),
-                            },
-                        )
-                        async with self._send_lock:
-                            await self._session.send_tool_response(
-                                function_responses=[func_response]
+                        if call_name == "set_session_language":
+                            target = args.get("target_language") or "en"
+                            ack = args.get("acknowledgment_message")
+                            result = await self.switch_language(target, ack)
+                            func_response = types.FunctionResponse(
+                                name=call_name,
+                                id=call.get("id"),
+                                response=result,
                             )
+                            async with self._send_lock:
+                                await self._session.send_tool_response(
+                                    function_responses=[func_response]
+                                )
+                        elif on_tool_call:
+                            raw_query = args.get("query") or args.get("transcript") or self._transcript.strip()
+                            call["transcript"] = str(raw_query or "").strip()
+                            call["query"] = call["transcript"]
+                            result = await on_tool_call(call)
+                            answer_text = (
+                                result.get("answer")
+                                or result.get("response_text")
+                                or result.get("grounded_context")
+                                or ""
+                            )
+                            sources = result.get("sources") or result.get("citations") or []
+                            func_response = types.FunctionResponse(
+                                name=call_name,
+                                id=call.get("id"),
+                                response={
+                                    "answer": answer_text,
+                                    "response_text": answer_text,
+                                    "status": result.get("status", "ok"),
+                                    "sources": sources,
+                                    "route": result.get("route", "UNIVERSITY_INFO"),
+                                },
+                            )
+                            async with self._send_lock:
+                                await self._session.send_tool_response(
+                                    function_responses=[func_response]
+                                )
 
                 elif event_type == "audio":
                     data = event.get("data")
@@ -342,8 +500,6 @@ class GeminiLiveSession:
                     if self._transcript:
                         await _maybe_await(on_transcript, self._transcript)
                 elif event_type == "tool_call":
-                    if on_tool_call is None:
-                        raise GeminiLiveSessionError("Live requested a tool without a backend handler")
                     calls = event.get("calls") or []
                     if tool_called or not calls:
                         raise GeminiLiveSessionError("Live issued an invalid or duplicate backend tool call")
@@ -351,25 +507,33 @@ class GeminiLiveSession:
                     call = dict(calls[0])
                     call_name = call.get("name") or "process_campus_request"
                     args = call.get("args") or {}
-                    raw_query = args.get("query") or args.get("transcript") or self._transcript.strip()
-                    call["transcript"] = str(raw_query or "").strip()
-                    call["query"] = call["transcript"]
-                    result = await on_tool_call(call)
 
-                    answer_text = (
-                        result.get("answer")
-                        or result.get("response_text")
-                        or result.get("grounded_context")
-                        or ""
-                    )
-                    sources = result.get("sources") or result.get("citations") or []
-                    tool_response_payload = {
-                        "answer": answer_text,
-                        "response_text": answer_text,
-                        "status": result.get("status", "ok"),
-                        "sources": sources,
-                        "route": result.get("route", "UNIVERSITY_INFO"),
-                    }
+                    if call_name == "set_session_language":
+                        target = args.get("target_language") or "en"
+                        ack = args.get("acknowledgment_message")
+                        tool_response_payload = await self.switch_language(target, ack)
+                    else:
+                        if on_tool_call is None:
+                            raise GeminiLiveSessionError("Live requested a tool without a backend handler")
+                        raw_query = args.get("query") or args.get("transcript") or self._transcript.strip()
+                        call["transcript"] = str(raw_query or "").strip()
+                        call["query"] = call["transcript"]
+                        result = await on_tool_call(call)
+
+                        answer_text = (
+                            result.get("answer")
+                            or result.get("response_text")
+                            or result.get("grounded_context")
+                            or ""
+                        )
+                        sources = result.get("sources") or result.get("citations") or []
+                        tool_response_payload = {
+                            "answer": answer_text,
+                            "response_text": answer_text,
+                            "status": result.get("status", "ok"),
+                            "sources": sources,
+                            "route": result.get("route", "UNIVERSITY_INFO"),
+                        }
                     response = types.FunctionResponse(
                         name=call_name,
                         id=call.get("id"),

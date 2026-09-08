@@ -2,7 +2,7 @@ const { useState, useEffect, useRef, useMemo } = React;
 
 const DASHBOARD_SUB_TABS = {
     iam: ["users", "roles", "facial-recognition"],
-    rag: ["documents", "chatbot-queries"],
+    rag: ["documents", "chatbot-queries", "adaptation-phrases"],
     infra: ["devices", "node-rbac", "edge-rbac", "auth-logs", "jwt-sessions"],
     academics: ["courses", "enrollments", "timetables", "appointments", "notifications", "faculties", "departments", "programmes"]
 };
@@ -126,8 +126,11 @@ function CampusMapTab() {
             const [roleFilter, setRoleFilter] = useState("ALL");
             const [statusFilter, setStatusFilter] = useState("ALL");
             const [accessLevelFilter, setAccessLevelFilter] = useState("ALL");
+            const [categoryFilter, setCategoryFilter] = useState("ALL");
             const [faceStatusFilter, setFaceStatusFilter] = useState("ALL");
             const [faceRoleFilter, setFaceRoleFilter] = useState("ALL");
+            const [speechLanguages, setSpeechLanguages] = useState([]);
+            const [adaptationCategories, setAdaptationCategories] = useState([]);
 
             // ── Face enrollment modal ─────────────────────────
             const [showFaceModal, setShowFaceModal] = useState(false);
@@ -188,6 +191,7 @@ function CampusMapTab() {
                 'documents': 'Documents',
                 'chunks': 'Content Chunks',
                 'chatbot-queries': 'Chatbot Logs',
+                'adaptation-phrases': 'Speech Adaptation',
                 'devices': 'Devices',
                 'node-rbac': 'Room Access',
                 'edge-rbac': 'Path Access',
@@ -226,7 +230,7 @@ function CampusMapTab() {
                 if (!item) return "";
                 const keyMap = {
                     iam: { users: "user_id", roles: "role_id", "facial-recognition": "user_id" },
-                    rag: { documents: "document_id", "chatbot-queries": "query_id" },
+                    rag: { documents: "document_id", "chatbot-queries": "query_id", "adaptation-phrases": "phrase_id" },
                     infra: { devices: "device_id", "auth-logs": "log_id", "jwt-sessions": "session_id" },
                     academics: {
                         courses: "course_id", enrollments: "enrollment_id", timetables: "timetable_id",
@@ -451,7 +455,7 @@ function CampusMapTab() {
                     const headers = { "Authorization": `Bearer ${token}` };
                     const endpointMap = {
                         iam: { users: "/api/iam/users", roles: "/api/iam/roles", "facial-recognition": "/api/iam/users" },
-                        rag: { documents: "/api/rag/documents", "chatbot-queries": "/api/rag/chatbot-queries" },
+                        rag: { documents: "/api/rag/documents", "chatbot-queries": "/api/rag/chatbot-queries", "adaptation-phrases": "/api/rag/adaptation-phrases" },
                         infra: { devices: "/api/infra/devices", "node-rbac": "/api/infra/node-rbac", "edge-rbac": "/api/infra/edge-rbac", "auth-logs": "/api/infra/auth-logs", "jwt-sessions": "/api/infra/jwt-sessions" },
                         academics: { courses: "/api/academics/courses", enrollments: "/api/academics/enrollments", timetables: "/api/academics/timetables", appointments: "/api/academics/appointments", notifications: "/api/academics/notifications", faculties: "/api/refs/faculties", departments: "/api/refs/departments", programmes: "/api/refs/programmes" }
                     };
@@ -471,12 +475,79 @@ function CampusMapTab() {
                 }
             };
 
+            // ── Fetch speech languages & categories ──────────
+            const fetchSpeechLanguages = async () => {
+                if (!token) return;
+                try {
+                    const res = await fetch("/api/rag/speech-languages", { headers: { "Authorization": `Bearer ${token}` } });
+                    if (res.ok) {
+                        const data = await res.json();
+                        setSpeechLanguages(Array.isArray(data) ? data : []);
+                    }
+                } catch (e) {
+                    console.error("Failed to load speech languages", e);
+                }
+            };
+
+            const fetchAdaptationCategories = async () => {
+                if (!token) return;
+                try {
+                    const res = await fetch("/api/rag/adaptation-phrases/categories", { headers: { "Authorization": `Bearer ${token}` } });
+                    if (res.ok) {
+                        const data = await res.json();
+                        setAdaptationCategories(Array.isArray(data) ? data : []);
+                    }
+                } catch (e) {
+                    console.error("Failed to load adaptation categories", e);
+                }
+            };
+
+            const handleToggleLanguageDefault = async (code) => {
+                try {
+                    const res = await fetch(`/api/rag/speech-languages/${code}/toggle-default`, {
+                        method: "POST",
+                        headers: { "Authorization": `Bearer ${token}` }
+                    });
+                    if (!res.ok) {
+                        const d = await res.json();
+                        throw new Error(d.detail || "Failed to toggle default language status.");
+                    }
+                    showSuccessToast("Default language status updated.");
+                    await fetchSpeechLanguages();
+                } catch (err) {
+                    showErrorToast(err.message);
+                }
+            };
+
+            const handleToggleLanguageActive = async (code) => {
+                try {
+                    const res = await fetch(`/api/rag/speech-languages/${code}/toggle-active`, {
+                        method: "POST",
+                        headers: { "Authorization": `Bearer ${token}` }
+                    });
+                    if (!res.ok) {
+                        const d = await res.json();
+                        throw new Error(d.detail || "Failed to toggle language active status.");
+                    }
+                    showSuccessToast("Language active status updated.");
+                    await fetchSpeechLanguages();
+                } catch (err) {
+                    showErrorToast(err.message);
+                }
+            };
+
             // ── Effects: data loading ─────────────────────────
             useEffect(() => {
                 if (token) {
                     fetchReferences();
                     if (currentTab === "overview") fetchOverviewStats();
-                    else if (subTab || !DASHBOARD_DEFAULT_SUB_TAB[currentTab]) fetchTabData();
+                    else if (subTab || !DASHBOARD_DEFAULT_SUB_TAB[currentTab]) {
+                        fetchTabData();
+                        if (currentTab === "rag" && subTab === "adaptation-phrases") {
+                            fetchSpeechLanguages();
+                            fetchAdaptationCategories();
+                        }
+                    }
                 }
             }, [token, currentTab, subTab]);
 
@@ -493,11 +564,11 @@ function CampusMapTab() {
             // ── Reset filters on tab change ───────────────────
             useEffect(() => {
                 setSearchQuery(""); setRoleFilter("ALL"); setStatusFilter("ALL");
-                setAccessLevelFilter("ALL"); setFaceStatusFilter("ALL"); setFaceRoleFilter("ALL");
+                setAccessLevelFilter("ALL"); setCategoryFilter("ALL"); setFaceStatusFilter("ALL"); setFaceRoleFilter("ALL");
             }, [currentTab, subTab]);
 
             // ── Reset pagination on filter change ─────────────
-            useEffect(() => { setCurrentPage(1); }, [searchQuery, currentTab, subTab, roleFilter, statusFilter, faceStatusFilter, faceRoleFilter]);
+            useEffect(() => { setCurrentPage(1); }, [searchQuery, currentTab, subTab, roleFilter, statusFilter, accessLevelFilter, categoryFilter, faceStatusFilter, faceRoleFilter]);
 
             // ── Form submit ───────────────────────────────────
             const handleFormSubmit = async (e, payload) => {
@@ -547,9 +618,14 @@ function CampusMapTab() {
                             method = modalType === "create" ? "POST" : "PUT";
                             finalBody = payload;
                         }
-                    } else if (currentTab === "rag" && subTab === "documents") {
-                        endpoint = modalType === "create" ? "/api/rag/documents" : `/api/rag/documents/${selectedItem.document_id}`;
-                        method = modalType === "create" ? "POST" : "PUT"; finalBody = payload;
+                    } else if (currentTab === "rag") {
+                        if (subTab === "documents") {
+                            endpoint = modalType === "create" ? "/api/rag/documents" : `/api/rag/documents/${selectedItem.document_id}`;
+                            method = modalType === "create" ? "POST" : "PUT"; finalBody = payload;
+                        } else if (subTab === "adaptation-phrases") {
+                            endpoint = modalType === "create" ? "/api/rag/adaptation-phrases" : `/api/rag/adaptation-phrases/${selectedItem.phrase_id}`;
+                            method = modalType === "create" ? "POST" : "PUT"; finalBody = payload;
+                        }
                     } else if (currentTab === "infra") {
                         if (subTab === "devices") {
                             endpoint = modalType === "create" ? "/api/infra/devices" : `/api/infra/devices/${selectedItem.device_id}`;
@@ -637,7 +713,7 @@ function CampusMapTab() {
                     const headers = { "Authorization": `Bearer ${token}` };
                     const epMap = {
                         iam: { users: `/api/iam/users/${item.user_id}`, roles: `/api/iam/roles/${item.role_id}` },
-                        rag: { documents: `/api/rag/documents/${item.document_id}` },
+                        rag: { documents: `/api/rag/documents/${item.document_id}`, "adaptation-phrases": `/api/rag/adaptation-phrases/${item.phrase_id}` },
                         infra: { devices: `/api/infra/devices/${item.device_id}`, "node-rbac": `/api/infra/node-rbac/${item.node_id}/${item.role_id}`, "edge-rbac": `/api/infra/edge-rbac/${item.edge_id}/${item.role_id}` },
                         academics: { courses: `/api/academics/courses/${item.course_id}`, enrollments: `/api/academics/enrollments/${item.enrollment_id}`, timetables: `/api/academics/timetables/${item.timetable_id}`, appointments: `/api/academics/appointments/${item.appointment_id}`, faculties: `/api/refs/faculties/${item.faculty_id}`, departments: `/api/refs/departments/${item.department_id}`, programmes: `/api/refs/programmes/${item.programme_id}` }
                     };
@@ -664,7 +740,13 @@ function CampusMapTab() {
                 setPendingActionKey(actionKey);
                 try {
                     const headers = { "Authorization": `Bearer ${token}` };
-                    const epMap = { iam: { users: `/api/iam/users/${item.user_id}/toggle-active` }, rag: { documents: `/api/rag/documents/${item.document_id}/toggle-active` } };
+                    const epMap = {
+                        iam: { users: `/api/iam/users/${item.user_id}/toggle-active` },
+                        rag: {
+                            documents: `/api/rag/documents/${item.document_id}/toggle-active`,
+                            "adaptation-phrases": `/api/rag/adaptation-phrases/${item.phrase_id}/toggle-active`
+                        }
+                    };
                     const endpoint = epMap[currentTab]?.[subTab];
                     if (!endpoint) return;
                     const response = await fetch(endpoint, { method: "POST", headers });
@@ -999,6 +1081,15 @@ function CampusMapTab() {
                                 || (accessLevelFilter === "INFO" && !item.is_navigational);
                             return matchesQuery && matchesRole && matchesNav;
                         }
+                        if (subTab === "adaptation-phrases") {
+                            const matchesQuery = q === "" 
+                                || item.phrase?.toLowerCase().includes(q)
+                                || item.language_category?.toLowerCase().includes(q)
+                                || item.description?.toLowerCase().includes(q);
+                            const matchesCat = categoryFilter === "ALL"
+                                || (item.language_category?.toUpperCase() === categoryFilter.toUpperCase());
+                            return matchesQuery && matchesCat;
+                        }
                     }
                     if (currentTab === "infra") {
                         if (subTab === "devices") return q === "" || item.device_name?.toLowerCase().includes(q) || item.device_id?.toLowerCase().includes(q);
@@ -1182,6 +1273,7 @@ function CampusMapTab() {
                 if (subTab === "users") return <UserForm item={selectedItem} roles={refs.roles} nodes={refs.nodes} programmes={refs.programmes} faculties={refs.faculties} departments={refs.departments} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (subTab === "roles") return <RoleForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "rag" && subTab === "documents") return <DocumentForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
+                if (currentTab === "rag" && subTab === "adaptation-phrases") return <SpeechAdaptationPhraseForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "infra" && subTab === "devices") return <DeviceForm item={selectedItem} nodes={refs.nodes} roles={refs.roles} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "courses") return <CourseForm item={selectedItem} programmes={refs.programmes} faculties={refs.faculties} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "enrollments") return <EnrollmentForm item={selectedItem} courses={refs.courses} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
@@ -1831,15 +1923,16 @@ function CampusMapTab() {
                                 </div>
 
                                 <SectionHeader
-                                    title={subTab === 'documents' ? "Uploaded Documents" : "Chatbot Conversations"}
+                                    title={subTab === 'documents' ? "Uploaded Documents" : subTab === 'adaptation-phrases' ? "Speech Adaptation & Language Hints" : "Chatbot Conversations"}
                                     description={
                                         subTab === 'documents' ? "Upload and manage documents that the campus chatbot uses to answer questions." :
+                                        subTab === 'adaptation-phrases' ? "Manage speech recognition language hints, dynamic multilingual support, and campus vocabulary phrases for Gemini Live ASR." :
                                         "Review and analyze user queries submitted to the chatbot, response quality, and latency."
                                     }
                                     searchVal={searchQuery}
                                     onSearchChange={setSearchQuery}
-                                    onCreateClick={subTab === 'documents' ? () => { setSelectedItem(null); setModalType("create"); setShowModal(true); } : null}
-                                    createLabel="Upload Document"
+                                    onCreateClick={['documents', 'adaptation-phrases'].includes(subTab) ? () => { setSelectedItem(null); setModalType("create"); setShowModal(true); } : null}
+                                    createLabel={subTab === 'adaptation-phrases' ? "Add Adaptation Phrase" : "Upload Document"}
                                     customAction={subTab === 'documents' ? (
                                         <select value={accessLevelFilter} onChange={e => setAccessLevelFilter(e.target.value)}
                                             className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer">
@@ -1868,8 +1961,81 @@ function CampusMapTab() {
                                                 <option value="NAV">Navigation</option>
                                             </select>
                                         </div>
+                                    ) : subTab === 'adaptation-phrases' ? (
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
+                                                className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer">
+                                                <option value="ALL">All Categories</option>
+                                                {adaptationCategories.map(cat => (
+                                                    <option key={cat} value={cat}>{cat}</option>
+                                                ))}
+                                            </select>
+                                        </div>
                                     ) : null}
                                 />
+
+                                {subTab === 'adaptation-phrases' && (
+                                    <div className="mb-6 bg-slate-900/60 border border-slate-800 rounded-2xl p-5 backdrop-blur-sm">
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                                            <div>
+                                                <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                                                    <Icon name="languages" className="w-4 h-4 text-indigo-400" />
+                                                    Speech Recognition Language Whitelist (Live ASR Hints)
+                                                </h4>
+                                                <p className="text-xs text-slate-400 mt-0.5">
+                                                    Restricts Gemini Live ASR hypothesis space to active languages, preventing acoustic hallucinations. Toggle default languages or enable voice switching.
+                                                </p>
+                                            </div>
+                                            <span className="text-[11px] font-mono text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-lg">
+                                                {speechLanguages.filter(l => l.is_default).length} Active Defaults
+                                            </span>
+                                        </div>
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                                            {speechLanguages.map((lang) => (
+                                                <div key={lang.language_code} className={`p-3 rounded-xl border transition-all ${
+                                                    lang.is_default 
+                                                        ? 'bg-indigo-950/40 border-indigo-500/30 text-slate-200' 
+                                                        : lang.is_active 
+                                                            ? 'bg-slate-900 border-slate-800 text-slate-300' 
+                                                            : 'bg-slate-950/50 border-slate-900 text-slate-600 opacity-60'
+                                                }`}>
+                                                    <div className="flex items-center justify-between gap-1 mb-1">
+                                                        <span className="font-bold text-xs">{lang.language_name}</span>
+                                                        <span className="text-[10px] font-mono uppercase bg-slate-800 px-1.5 py-0.2 rounded text-slate-400">
+                                                            {lang.language_code}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/60">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleToggleLanguageDefault(lang.language_code)}
+                                                            title="Toggle whether this language is loaded by default in Live ASR"
+                                                            className={`text-[10px] font-semibold px-2 py-0.5 rounded transition-all ${
+                                                                lang.is_default 
+                                                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                                                                    : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                                                            }`}
+                                                        >
+                                                            {lang.is_default ? '● Default' : '○ Standby'}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleToggleLanguageActive(lang.language_code)}
+                                                            title="Toggle whether voice-driven switching to this language is enabled"
+                                                            className={`text-[10px] font-semibold px-2 py-0.5 rounded transition-all ${
+                                                                lang.is_active 
+                                                                    ? 'text-indigo-400 hover:text-indigo-300' 
+                                                                    : 'text-slate-500 hover:text-slate-400'
+                                                            }`}
+                                                        >
+                                                            {lang.is_active ? 'Enabled' : 'Disabled'}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {listLoading ? (
                                     <div className="flex flex-col items-center justify-center py-24 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800">
@@ -2056,6 +2222,71 @@ function CampusMapTab() {
                                                                     >
                                                                         <Icon name="eye" className="w-3.5 h-3.5" />
                                                                     </button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            )}
+
+                                            {subTab === 'adaptation-phrases' && (
+                                                <table className="w-full text-left text-sm">
+                                                    <thead>
+                                                        <tr className="bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80">
+                                                            <th className="p-4 pl-6 font-semibold">Adaptation Phrase</th>
+                                                            <th className="p-4 font-semibold">Category</th>
+                                                            <th className="p-4 font-semibold">Description</th>
+                                                            <th className="p-4 font-semibold">Status</th>
+                                                            <th className="p-4 pr-6 text-right font-semibold">Actions</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-800/50">
+                                                        {paginatedData.map((item, idx) => (
+                                                            <tr key={idx} className="hover:bg-slate-800/40 transition-colors group">
+                                                                <td className="p-4 pl-6">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <div className="w-9 h-9 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+                                                                            <Icon name="volume-2" className="w-4 h-4" />
+                                                                        </div>
+                                                                        <div>
+                                                                            <p className="font-bold text-slate-200 text-sm">{item.phrase}</p>
+                                                                            <span className="text-[10px] text-slate-500 font-mono">ID #{item.phrase_id}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="p-4">
+                                                                    <span className={`inline-block px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase border ${
+                                                                        item.language_category === 'CAMPUS' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' :
+                                                                        item.language_category === 'ACADEMIC' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                                                        item.language_category === 'MALAY' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                                                        item.language_category === 'CHINESE' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' :
+                                                                        item.language_category === 'CANTONESE' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
+                                                                        'bg-slate-800 text-slate-400 border-slate-700/50'
+                                                                    }`}>
+                                                                        {item.language_category || "GENERAL"}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="p-4 text-xs text-slate-400 max-w-sm">
+                                                                    <p className="line-clamp-2">{item.description || "—"}</p>
+                                                                </td>
+                                                                <td className="p-4">
+                                                                    <button onClick={() => handleToggleStatus(item)}
+                                                                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-all ${item.is_active ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500 hover:text-white hover:border-emerald-500' : 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500 hover:text-white'}`}>
+                                                                        <span className={`w-1.5 h-1.5 rounded-full ${item.is_active ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
+                                                                        {item.is_active ? 'Active' : 'Disabled'}
+                                                                    </button>
+                                                                </td>
+                                                                <td className="p-4 pr-6 text-right">
+                                                                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                        <button onClick={() => { setSelectedItem(item); setModalType("edit"); setShowModal(true); }} title="Edit Phrase"
+                                                                            className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white">
+                                                                            <Icon name="edit-3" className="w-4 h-4" />
+                                                                        </button>
+                                                                        <button onClick={() => handleDeleteItem(item)} title="Remove Phrase"
+                                                                            className="p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all">
+                                                                            <Icon name="trash-2" className="w-4 h-4" />
+                                                                        </button>
+                                                                    </div>
                                                                 </td>
                                                             </tr>
                                                         ))}

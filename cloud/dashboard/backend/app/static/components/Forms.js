@@ -2744,6 +2744,96 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
             );
         }
 
+        // 18. Speech Adaptation Phrase Form
+        function SpeechAdaptationPhraseForm({ item, onSubmit, onCancel }) {
+            const isEdit = !!item;
+            const [phrase, setPhrase] = useState(item?.phrase || "");
+            const [category, setCategory] = useState(item?.language_category || "CAMPUS");
+            const [description, setDescription] = useState(item?.description || "");
+            const [isActive, setIsActive] = useState(item?.is_active ?? true);
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                onSubmit(e, {
+                    phrase: phrase.trim(),
+                    language_category: category.trim().toUpperCase(),
+                    description: description.trim() || null,
+                    is_active: isActive
+                });
+            };
+
+            return (
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Adaptation Phrase</label>
+                        <input
+                            type="text"
+                            required
+                            value={phrase}
+                            onChange={e => setPhrase(e.target.value)}
+                            placeholder="e.g. Quest International University, FOCS, PTPTN"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-medium"
+                        />
+                        <p className="text-[11px] text-slate-500 mt-1">Specialized terminology, campus jargon, or pronunciation-sensitive name.</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Category</label>
+                            <input
+                                type="text"
+                                list="adaptation-categories"
+                                required
+                                value={category}
+                                onChange={e => setCategory(e.target.value.toUpperCase())}
+                                placeholder="CAMPUS, MALAY, CHINESE..."
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-mono uppercase"
+                            />
+                            <datalist id="adaptation-categories">
+                                <option value="CAMPUS" />
+                                <option value="ACADEMIC" />
+                                <option value="MALAY" />
+                                <option value="CHINESE" />
+                                <option value="CANTONESE" />
+                                <option value="TAMIL" />
+                                <option value="ARABIC" />
+                                <option value="GENERAL" />
+                            </datalist>
+                        </div>
+                        <div>
+                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Active Status</label>
+                            <select
+                                value={isActive ? "true" : "false"}
+                                onChange={e => setIsActive(e.target.value === "true")}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                            >
+                                <option value="true">Active (Include in Live ASR)</option>
+                                <option value="false">Inactive</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Description / Context (Optional)</label>
+                        <textarea
+                            value={description}
+                            onChange={e => setDescription(e.target.value)}
+                            rows={2}
+                            placeholder="Optional notes or phonetics explanation..."
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 resize-none"
+                        />
+                    </div>
+
+                    <div className="flex justify-end gap-3 mt-6">
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
+                        <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all duration-300">
+                            {isEdit ? "Update Phrase" : "Add Phrase"}
+                        </button>
+                    </div>
+                </form>
+            );
+        }
+
 window.UserForm = UserForm;
 window.StudentForm = StudentForm;
 window.LecturerForm = LecturerForm;
@@ -2761,3 +2851,4 @@ window.RoleForm = RoleForm;
 window.FacultyForm = FacultyForm;
 window.DepartmentForm = DepartmentForm;
 window.ProgrammeForm = ProgrammeForm;
+window.SpeechAdaptationPhraseForm = SpeechAdaptationPhraseForm;

@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
-from app.models.models import Role, User, Admin, Building, Floorplan, Node, Edge, Department, Faculty, Programme, Staff, UserRole, Device, DeviceRBAC, NodeRBAC
+from app.models.models import Role, User, Admin, Building, Floorplan, Node, Edge, Department, Faculty, Programme, Staff, UserRole, Device, DeviceRBAC, NodeRBAC, SpeechLanguage, SpeechAdaptationPhrase
 from app.core.security import get_password_hash, validate_strong_password
 
 def create_database():
@@ -231,6 +231,97 @@ def seed_data():
     finally:
         db.close()
 
+def ensure_speech_tables_and_seed(db=None) -> None:
+    """Ensure speech_languages and speech_adaptation_phrases tables and default seeds exist."""
+    try:
+        # Idempotently create tables via SQLAlchemy Base metadata
+        Base.metadata.create_all(bind=engine, tables=[
+            SpeechLanguage.__table__,
+            SpeechAdaptationPhrase.__table__
+        ])
+    except Exception as exc:
+        print(f"Note: speech table creation check: {exc}")
+
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+
+    try:
+        # Seed default languages
+        default_languages = [
+            {"code": "en", "name": "English", "is_default": True, "is_active": True},
+            {"code": "zh", "name": "Chinese (Mandarin)", "is_default": True, "is_active": True},
+            {"code": "yue", "name": "Cantonese", "is_default": True, "is_active": True},
+            {"code": "ms", "name": "Bahasa Melayu", "is_default": True, "is_active": True},
+            {"code": "ta", "name": "Tamil", "is_default": False, "is_active": True},
+            {"code": "ar", "name": "Arabic", "is_default": False, "is_active": True},
+            {"code": "ja", "name": "Japanese", "is_default": False, "is_active": True},
+            {"code": "ko", "name": "Korean", "is_default": False, "is_active": True},
+            {"code": "fr", "name": "French", "is_default": False, "is_active": True},
+            {"code": "de", "name": "German", "is_default": False, "is_active": True},
+        ]
+        for lang in default_languages:
+            existing = db.query(SpeechLanguage).filter_by(language_code=lang["code"]).first()
+            if not existing:
+                db.add(SpeechLanguage(
+                    language_code=lang["code"],
+                    language_name=lang["name"],
+                    is_default=lang["is_default"],
+                    is_active=lang["is_active"],
+                ))
+
+        # Seed campus adaptation phrases across categories
+        default_phrases = [
+            ("Quest International University", "CAMPUS", "University full title"),
+            ("QIU", "CAMPUS", "University acronym"),
+            ("Perak", "CAMPUS", "Malaysian state"),
+            ("Ipoh", "CAMPUS", "City of QIU campus"),
+            ("Plaza", "CAMPUS", "Campus plaza"),
+            ("Faculty of Pharmacy", "ACADEMIC", "Pharmacy faculty"),
+            ("Faculty of Medicine", "ACADEMIC", "Medicine faculty"),
+            ("Faculty of Business", "ACADEMIC", "Business faculty"),
+            ("Faculty of Computing", "ACADEMIC", "Computing faculty"),
+            ("Bachelor", "ACADEMIC", "Undergraduate degree"),
+            ("Diploma", "ACADEMIC", "Diploma programme"),
+            ("Master", "ACADEMIC", "Postgraduate degree"),
+            ("Foundation", "ACADEMIC", "Foundation programme"),
+            ("Admissions and Records", "ACADEMIC", "Admissions department"),
+            ("Tuition fee", "ACADEMIC", "Programme fees"),
+            ("Perpustakaan", "MALAY", "Library"),
+            ("Fakulti", "MALAY", "Faculty"),
+            ("Yuran pengajian", "MALAY", "Tuition fee"),
+            ("Pendaftaran", "MALAY", "Registration/enrollment"),
+            ("Peperiksaan", "MALAY", "Examinations"),
+            ("Hal ehwal pelajar", "MALAY", "Student affairs"),
+            ("大学", "CHINESE", "University"),
+            ("课程", "CHINESE", "Programmes/courses"),
+            ("学费", "CHINESE", "Tuition fee"),
+            ("图书馆", "CHINESE", "Library"),
+            ("报名", "CHINESE", "Registration/admission"),
+            ("药剂", "CHINESE", "Pharmacy"),
+            ("医学", "CHINESE", "Medicine"),
+            ("收費", "CANTONESE", "Fees"),
+            ("邊度", "CANTONESE", "Where"),
+            ("報名", "CANTONESE", "Apply/register"),
+        ]
+        for phrase_text, cat, desc in default_phrases:
+            existing = db.query(SpeechAdaptationPhrase).filter_by(phrase=phrase_text).first()
+            if not existing:
+                db.add(SpeechAdaptationPhrase(
+                    phrase=phrase_text,
+                    language_category=cat,
+                    description=desc,
+                    is_active=True,
+                ))
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        print(f"Note: Speech table seeding: {exc}")
+    finally:
+        if close_db:
+            db.close()
+
 def run_migrations():
     """
     Applies safe, idempotent schema migrations.
@@ -238,6 +329,7 @@ def run_migrations():
     then backfills existing rows from `enrolled_at`.
     """
     print("Running schema migrations...")
+    ensure_speech_tables_and_seed()
     try:
         with engine.connect() as conn:
             # Check if updated_at column already exists

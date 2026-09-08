@@ -302,6 +302,16 @@ def process_user_request(
             "reason": "math_or_unrelated_detected",
             "clarification_question": None,
         }
+    elif local_route.category == "LANGUAGE_SWITCH":
+        classification = {
+            "safe": True,
+            "scope": "IN_SCOPE",
+            "route": "LANGUAGE_SWITCH",
+            "intent": "LANGUAGE_SWITCH",
+            "reason": None,
+            "clarification_question": None,
+            "category_hint": local_route.category_hint,
+        }
     elif is_navigation_query(sanitized, db=db):
         classification = {
             "safe": True,
@@ -428,6 +438,25 @@ def process_user_request(
         name = _greeting_name(context) if context.authenticated else ""
         answer = f"Hi {name}, how may I help you today?" if name else "Hi, how may I help you today?"
         return _fixed_response(answer, "GREETING", sanitized, resolved_session_id, user_id, db)
+
+    if route == "LANGUAGE_SWITCH":
+        target_code = classification.get("category_hint") or local_route.category_hint or "en"
+        confirmations = {
+            "en": "Certainly! We can speak in English now. How can I assist you?",
+            "zh": "好的，我们可以用中文交流。请问有什么我可以帮您的？",
+            "yue": "好嘅，我哋可以用廣東話傾。請問有咩可以幫到你？",
+            "ms": "Tentu sekali, kita boleh berbual dalam Bahasa Melayu. Ada apa yang boleh saya bantu?",
+            "ta": "நிச்சயமாக, நாம் தமிழில் பேசலாம். நான் உங்களுக்கு எப்படி உதவ முடியும்?",
+            "ar": "بالتأكيد، يمكننا التحدث باللغة العربية. كيف يمكنني مساعدتك؟",
+            "ja": "かしこまりました。日本語でお話ししましょう。何かお手伝いできることはありますか？",
+            "ko": "네, 한국어로 말씀하셔도 됩니다. 무엇을 도와드릴까요?",
+            "fr": "Bien sûr, nous pouvons parler en français. Comment puis-je vous aider ?",
+            "de": "Natürlich, wir können uns auf Deutsch unterhalten. Wie kann ich Ihnen helfen?",
+            "es": "¡Claro! Podemos hablar en español. ¿Cómo puedo ayudarte?",
+            "hi": "ज़रूर, हम हिंदी में बात कर सकते हैं। मैं आपकी क्या मदद कर सकता हूँ?",
+        }
+        answer = confirmations.get(target_code, "Certainly! We will continue in our conversation. How can I assist you?")
+        return _fixed_response(answer, "LANGUAGE_SWITCH", sanitized, resolved_session_id, user_id, db, intent="LANGUAGE_SWITCH")
 
     if route == "CAPABILITY":
         answer = get_capabilities_summary(authenticated=context.authenticated, personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED)

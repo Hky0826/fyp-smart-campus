@@ -387,29 +387,47 @@ class _LiveDuplexWorker(QThread):
                                     continue
                             else:
                                 consecutive_barge_count = 0
-                                try:
-                                    await ws.send(pcm_chunk)
-                                except Exception:
-                                    break
-
-                                # Client VAD turn-end detection for instant response
-                                if rms >= self._speech_threshold:
-                                    if not is_speaking:
+                                # Client VAD audio gating with pre-roll lookback buffer:
+                                # Silence and ambient hiss are suppressed locally to prevent ASR hallucinations.
+                                if not is_speaking:
+                                    if rms >= self._speech_threshold:
+                                        # Voice onset detected! Flush pre-roll buffer to preserve initial syllables
                                         is_speaking = True
                                         self.speechStateChanged.emit(True)
-                                    silence_started = 0.0
-                                elif is_speaking:
-                                    if silence_started == 0.0:
-                                        silence_started = now
-                                    elif (now - silence_started) >= self._silence_hold_sec:
-                                        is_speaking = False
                                         silence_started = 0.0
-                                        self.speechStateChanged.emit(False)
-                                        self.userAudioLevelChanged.emit(0.0)
+                                        while pre_roll_buffer:
+                                            try:
+                                                await ws.send(pre_roll_buffer.popleft())
+                                            except Exception:
+                                                break
                                         try:
-                                            await ws.send(json.dumps({"event": "activity_end"}))
+                                            await ws.send(pcm_chunk)
                                         except Exception:
-                                            pass
+                                            break
+                                    else:
+                                        # Ambient silence/room hiss: keep rolling buffer, do not stream to WebSocket
+                                        pre_roll_buffer.append(pcm_chunk)
+                                else:
+                                    # Currently in active speech: stream chunk to Gemini Live
+                                    try:
+                                        await ws.send(pcm_chunk)
+                                    except Exception:
+                                        break
+
+                                    if rms >= self._speech_threshold:
+                                        silence_started = 0.0
+                                    else:
+                                        if silence_started == 0.0:
+                                            silence_started = now
+                                        elif (now - silence_started) >= self._silence_hold_sec:
+                                            is_speaking = False
+                                            silence_started = 0.0
+                                            self.speechStateChanged.emit(False)
+                                            self.userAudioLevelChanged.emit(0.0)
+                                            try:
+                                                await ws.send(json.dumps({"event": "activity_end"}))
+                                            except Exception:
+                                                pass
 
                 player_task = asyncio.create_task(player_loop())
                 receiver_task = asyncio.create_task(receiver_loop())
