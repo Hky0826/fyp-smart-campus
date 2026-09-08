@@ -26,6 +26,7 @@ from ..face.quality import FaceQualityChecker, FaceQualityConfig
 from ..face.spoofing import MotionSpoofDetector, SpoofResult
 from ..face.pad import load_pad, PADResult
 from ..face.association import IdentityManager, TrackIdentity
+from ..face.presence import PresenceConfig, PresenceDetector, PresenceStatus
 from ..face.tracking import FaceTracker, FaceTrackerConfig
 from ..face.types import AuthenticationResult, DetectedFace
 from ..utils.logging import configure_logging
@@ -120,6 +121,7 @@ class AccessControlPipeline:
         embedding_aggregator: TrackEmbeddingAggregator | None = None,
         pad_detector: Any | None = None,
         identity_manager: IdentityManager | None = None,
+        presence_detector: PresenceDetector | None = None,
     ) -> None:
         self.config = config or AccessControlConfig()
         self.detector = detector
@@ -162,11 +164,32 @@ class AccessControlPipeline:
         self._cached_recognition_result: dict | None = None
         self._recognition_interval = 0.25
 
+        presence_cfg = PresenceConfig(
+            enabled=getattr(self.config, "presence_activation_enabled", True),
+            dwell_seconds=getattr(self.config, "presence_dwell_seconds", 3.0),
+            grace_period_seconds=getattr(self.config, "presence_detection_grace_ms", 400) / 1000.0,
+            cooldown_seconds=getattr(self.config, "presence_activation_cooldown_seconds", 5.0),
+            interaction_zone=(
+                getattr(self.config, "interaction_zone_x", 0.15),
+                getattr(self.config, "interaction_zone_y", 0.10),
+                getattr(self.config, "interaction_zone_x", 0.15) + getattr(self.config, "interaction_zone_width", 0.70),
+                getattr(self.config, "interaction_zone_y", 0.10) + getattr(self.config, "interaction_zone_height", 0.80),
+            ),
+            min_face_size_ratio=getattr(self.config, "minimum_face_size_ratio", 0.15),
+            max_yaw_degrees=getattr(self.config, "frontal_face_threshold", 25.0),
+            max_pitch_degrees=getattr(self.config, "frontal_pitch_threshold", 20.0),
+        )
+        self.presence_detector = presence_detector or PresenceDetector(
+            config=presence_cfg,
+            clock=self._clock,
+        )
+
     def process_frame(self, frame: np.ndarray, target_user_id: Optional[str] = None) -> dict:
         timer = StageTimer()
         timestamp = self._clock()
         try:
-            faces = self._detect(frame)
+            all_faces = self._detect(frame, return_all=True)
+            faces = [max(all_faces, key=lambda face: face.width() * face.height())] if all_faces else []
         except Exception:
             logger.exception("Face detection failed")
             timer.total()
@@ -180,16 +203,28 @@ class AccessControlPipeline:
         face_count = len(visible_tracks)
         bboxes = [face.xyxy_int() for face in faces]
 
+        # Update presence detector on every frame
+        presence_status = self.presence_detector.update(
+            faces=all_faces,
+            tracks=visible_tracks,
+            frame_shape=frame.shape[:2],
+            timestamp=timestamp,
+        )
+
+        def with_presence(res: dict) -> dict:
+            res["presence"] = presence_status.as_dict()
+            return res
+
         if face_count == 0:
             if self._active_track_id is not None and not any(
                 track.track_id == self._active_track_id for track in tracks
             ):
                 self._reset_active_track()
             timer.total()
-            return self._deny(
+            return with_presence(self._deny(
                 "No face detected", 0, AuthenticationResult.RETRY_NO_FACE,
                 metrics=timer.metrics, bboxes=bboxes,
-            )
+            ))
 
         track = visible_tracks[0]
         if self._active_track_id != track.track_id:
@@ -199,10 +234,10 @@ class AccessControlPipeline:
         bbox = face.xyxy_int()
         if not track.stable:
             timer.total()
-            return self._deny(
+            return with_presence(self._deny(
                 "Face track is not stable yet", face_count, AuthenticationResult.RETRY_UNSTABLE_TRACK,
                 metrics=timer.metrics, bbox=bbox, bboxes=bboxes,
-            )
+            ))
 
         active_track_ids = {t.track_id for t in tracks}
         self.identity_manager.update_active_tracks(active_track_ids, timestamp=timestamp)
@@ -218,7 +253,7 @@ class AccessControlPipeline:
                 result["track_id"] = track.track_id
                 timer.total()
                 result["metrics"] = timer.metrics
-                return result
+                return with_presence(result)
 
         if self._cached_recognition_result is not None and (timestamp - self._last_full_recognition_time) < self._recognition_interval:
             result = dict(self._cached_recognition_result)
@@ -226,13 +261,14 @@ class AccessControlPipeline:
             result["bboxes"] = bboxes
             timer.total()
             result["metrics"] = timer.metrics
-            return result
+            return with_presence(result)
 
         def cache_and_return(res: dict) -> dict:
             self._cached_recognition_result = res
             self._last_full_recognition_time = timestamp
             auth_res = res.get("authentication_result")
             if auth_res == AuthenticationResult.GRANT.value and res.get("user_id"):
+                self.presence_detector.update([], is_auth_transition=True, timestamp=timestamp)
                 self.identity_manager.associate_identity(
                     track_id=track.track_id,
                     user_id=str(res["user_id"]),
@@ -252,7 +288,7 @@ class AccessControlPipeline:
                     cached_payload=res,
                     timestamp=timestamp,
                 )
-            return res
+            return with_presence(res)
 
         try:
             quality = self.quality_checker.check(frame, face)
@@ -343,7 +379,7 @@ class AccessControlPipeline:
             if not self.embedding_aggregator.has_enough_samples():
                 timer.mark("database_matching")
                 timer.total()
-                return self._deny(
+                return with_presence(self._deny(
                     "Collecting valid face samples",
                     face_count,
                     AuthenticationResult.RETRY_INSUFFICIENT_SAMPLES,
@@ -352,7 +388,7 @@ class AccessControlPipeline:
                     bboxes=bboxes,
                     sample_count=self.embedding_aggregator.sample_count,
                     quality=self._quality_payload(quality),
-                )
+                ))
 
             consistent_candidate = self.embedding_aggregator.consistent_candidate()
             if consistent_candidate is None:
@@ -373,7 +409,7 @@ class AccessControlPipeline:
                     bboxes=bboxes,
                     sample_count=self.embedding_aggregator.sample_count,
                 )
-                return cache_and_return(result) if terminal else result
+                return cache_and_return(result) if terminal else with_presence(result)
 
             aggregated_embedding = self.embedding_aggregator.get_aggregated_embedding()
             if target_user_id is not None:
@@ -487,10 +523,11 @@ class AccessControlPipeline:
         except Exception:
             logger.exception("Access-control frame processing failed")
             timer.total()
-            return self._deny(
+            denial = self._deny(
                 "Access-control processing error", face_count, AuthenticationResult.SYSTEM_ERROR,
                 metrics=timer.metrics, bbox=bbox, bboxes=bboxes,
             )
+            return with_presence(denial) if "with_presence" in locals() else denial
         finally:
             self._mark_recognition_finished()
 
@@ -560,9 +597,9 @@ class AccessControlPipeline:
         owner_track_id: Optional[str | int] = None,
         owner_embedding: Optional[np.ndarray] = None,
     ) -> tuple[bool, Optional[int], list[list[int]]]:
-        """Fast-path owner presence verification using ByteTrack with embedding fallback."""
+        """Verify the owner identity; a recycled spatial track alone is not identity evidence."""
         try:
-            faces = self._detect(frame)
+            faces = self._detect(frame, return_all=True)
         except Exception:
             logger.exception("Face detection failed during presence check")
             return False, None, []
@@ -585,7 +622,7 @@ class AccessControlPipeline:
                 target_tid = None
 
         # Tier 1 (Fast-Path): If owner_track_id is active and tracked, return immediately without embedding
-        if target_tid is not None:
+        if target_tid is not None and owner_embedding is None:
             for tr in visible_tracks:
                 if tr.track_id == target_tid:
                     logger.debug("Owner presence FAST-PATH: track %s is active", target_tid)
@@ -624,14 +661,32 @@ class AccessControlPipeline:
     def _mark_recognition_finished(self) -> None:
         self._last_recognition_finished_at = self._clock()
 
-    def _detect(self, frame: np.ndarray) -> List[DetectedFace]:
-        raw_faces = self.detector.detect(frame)
+    def _detect(self, frame: np.ndarray, return_all: bool = False) -> List[DetectedFace]:
+        if hasattr(self.detector, "detect_all") and return_all:
+            raw_faces = self.detector.detect_all(frame)
+        elif hasattr(self.detector, "detect"):
+            try:
+                raw_faces = self.detector.detect(frame, return_all=return_all)
+            except TypeError:
+                raw_faces = self.detector.detect(frame)
+        else:
+            raw_faces = []
         faces = [self._coerce_face(face) for face in raw_faces]
         if not faces:
             return []
+        if return_all:
+            return faces
         # Keep only the face closest to the camera (largest bounding box area)
         closest_face = max(faces, key=lambda face: face.width() * face.height())
         return [closest_face]
+
+    def notify_chat_started(self) -> None:
+        """Notify the presence detector that a chatbot session is active."""
+        self.presence_detector.notify_chat_started()
+
+    def notify_chat_ended(self) -> None:
+        """Notify the presence detector that a chatbot session has closed."""
+        self.presence_detector.notify_chat_ended()
 
     @staticmethod
     def _coerce_face(face: Any) -> DetectedFace:

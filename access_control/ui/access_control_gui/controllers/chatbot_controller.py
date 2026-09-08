@@ -585,6 +585,13 @@ class ChatbotController(QObject):
         self._set_speaking(False)
         self._set_user_audio_level(0.0)
         self._set_assistant_audio_level(0.0)
+        self._partial_text = ""
+        self._transcribed_text = ""
+        self._rag_status = ""
+        self.partialTextChanged.emit()
+        self.transcribedTextChanged.emit()
+        self.busyChanged.emit()
+        self.ragStatusChanged.emit()
 
     @Slot()
     def stopAudioPlayback(self) -> None:
@@ -624,11 +631,12 @@ class ChatbotController(QObject):
     @Slot(str)
     def _on_transcribed_text(self, text: str) -> None:
         self._transcribed_text = text
+        self._set_busy(True)
         self.transcribedTextChanged.emit()
 
     @Slot(str, str)
     def _on_rag_status(self, status: str, query: str) -> None:
-        self._rag_status = f"Searching campus records for '{query}'..." if query else status
+        self._rag_status = "Searching database..." if status or query else ""
         self.ragStatusChanged.emit()
 
     @Slot(dict)
@@ -648,10 +656,12 @@ class ChatbotController(QObject):
 
     @Slot(dict)
     def _on_worker_response(self, payload: dict) -> None:
+        self._set_busy(self._speaking)
         self._partial_text = ""
         self._transcribed_text = ""
         self.partialTextChanged.emit()
         self.transcribedTextChanged.emit()
+        self.busyChanged.emit()
         self.responseReceived.emit(payload)
 
     @Slot()
@@ -746,7 +756,7 @@ class ChatbotController(QObject):
         return self._listening
 
     def _get_busy(self) -> bool:
-        return self._busy
+        return self._busy or bool(self._transcribed_text)
 
     def _get_speaking(self) -> bool:
         return self._speaking

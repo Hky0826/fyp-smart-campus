@@ -10,8 +10,8 @@ Item {
 
     x: minimized ? 10 : 0
     y: minimized ? 10 : 0
-    width: minimized ? 180 : root.parent.width
-    height: minimized ? 115 : root.parent.height
+    width: minimized ? Math.max(0, Math.min(200, root.parent.width * 0.25) - 20) : root.parent.width
+    height: minimized ? root.parent.height * 0.24 : root.parent.height
     z: minimized ? 35 : 0
     clip: true
 

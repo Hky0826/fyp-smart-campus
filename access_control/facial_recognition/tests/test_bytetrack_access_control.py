@@ -318,7 +318,7 @@ class KioskChatbotPresenceTests(unittest.TestCase):
         )
         self.store = KioskStateStore(RuntimeConfig(sync_device_id="door-1", sync_device_name="Door 1"))
 
-    def test_chatbot_presence_fast_path_uses_no_embeddings(self):
+    def test_chatbot_presence_verifies_identity_even_with_same_track(self):
         embedder = CountingEmbedder(self.owner_embedding)
         face_det = make_face(20, 20, 80, 80)
         detector = MockDetector([face_det])
@@ -357,8 +357,13 @@ class KioskChatbotPresenceTests(unittest.TestCase):
             self.assertTrue(present)
             self.assertEqual(new_tid, owner_track_id)
 
-        # FAST-PATH VERIFICATION: Zero new calls to embedder during all 5 presence checks!
-        self.assertEqual(embedder.call_count, embedder_calls_after_init)
+        # A spatial track can be reused by another person; verify identity each check.
+        self.assertEqual(embedder.call_count, embedder_calls_after_init + 5)
+        embedder.vectors = [self.other_embedding]
+        present, _, _ = _detect_owner_presence(
+            pipeline, frame, self.owner_embedding, owner_track_id=owner_track_id
+        )
+        self.assertFalse(present)
 
     def test_chatbot_presence_fallback_reacquires_owner_with_new_track(self):
         embedder = CountingEmbedder(self.owner_embedding)
@@ -397,15 +402,15 @@ class KioskChatbotPresenceTests(unittest.TestCase):
         self.store.update_owner_track_id(new_tid)
         self.assertEqual(self.store.current_owner_track_id(), str(new_tid))
 
-        # Subsequent presence checks now use Fast-Path with the new track ID
+        # Subsequent checks still verify the owner identity
         embed_calls = embedder.call_count
         present2, tid2, _ = _detect_owner_presence(
             pipeline, frame, self.owner_embedding, owner_track_id=self.store.current_owner_track_id()
         )
         self.assertTrue(present2)
         self.assertEqual(tid2, new_tid)
-        # Fast path was used; embedder was not called again
-        self.assertEqual(embedder.call_count, embed_calls)
+        # Spatial tracking does not replace identity verification.
+        self.assertEqual(embedder.call_count, embed_calls + 1)
 
     def test_chatbot_presence_fails_for_different_person(self):
         # Embedder returns another person's embedding

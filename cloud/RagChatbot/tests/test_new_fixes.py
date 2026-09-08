@@ -6,6 +6,7 @@ from RagChatbot.generation.response_validator import sanitize_text_for_speech
 from RagChatbot.generation.prompt_builder import _SYSTEM_PROMPT, build_prompt
 from RagChatbot.retrieval.ranking import RankedChunk
 from RagChatbot.generation.live_session_manager import _LIVE_SYSTEM_INSTRUCTION
+from RagChatbot.generation.live_fast_rag import _VOICE_SYSTEM_PROMPT
 from RagChatbot.personalisation.schemas import AuthenticatedChatContext
 
 
@@ -28,6 +29,9 @@ def test_system_prompt_rules_exist():
     assert "Use only the provided context." in _SYSTEM_PROMPT
     assert "You are the voice interface for" in _LIVE_SYSTEM_INSTRUCTION
     assert "Language Matching:" in _LIVE_SYSTEM_INSTRUCTION
+    assert "Professional Accent, Pronunciation, and Tone:" in _LIVE_SYSTEM_INSTRUCTION
+    assert "Tone and Professional Accent:" in _VOICE_SYSTEM_PROMPT
+    assert "never mirror informal colloquialisms, regional slang" in _SYSTEM_PROMPT
 
 
 

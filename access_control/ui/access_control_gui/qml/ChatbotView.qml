@@ -6,10 +6,12 @@ Item {
     id: root
     width: 800
     height: 480
+    clip: true
 
     property var messages: []
-    property string sessionName: "Alex Tan"
-    property string presenceState: "In Frame"
+    property string sessionName: "Visitor"
+    property string presenceState: "UNKNOWN"
+    readonly property bool ownerPresent: presenceState === "OWNER_PRESENT"
     property bool listening: false
     property bool busy: false
     property bool speaking: false
@@ -47,7 +49,7 @@ Item {
         id: leftDock
         x: 0
         y: 0
-        width: 200
+        width: Math.min(200, root.width * 0.25)
         height: root.height
         color: "#e2e8f0" // Preview: bg-slate-200
         border.width: 1
@@ -59,8 +61,8 @@ Item {
             id: cameraSlot
             x: 10
             y: 10
-            width: 180
-            height: 118
+            width: leftDock.width - 20
+            height: root.height * 0.24 + 3
             radius: 8
             color: "#020617" // Preview: bg-slate-950
             border.width: 2
@@ -96,7 +98,7 @@ Item {
                     }
 
                     Text {
-                        text: "Verified"
+                        text: root.verifying ? "Verifying" : (root.ownerPresent ? "Verified" : "Out of frame")
                         color: "#ffffff"
                         font.pixelSize: 9
                         font.bold: true
@@ -129,8 +131,8 @@ Item {
         Rectangle {
             id: userCard
             x: 10
-            y: 136
-            width: 180
+            y: cameraSlot.y + cameraSlot.height + 8
+            width: leftDock.width - 20
             height: 84
             radius: 8
             color: "#ffffff" // Preview: bg-white
@@ -218,226 +220,14 @@ Item {
                             width: 6
                             height: 6
                             radius: 3
-                            color: "#10b981" // emerald-500
+                            color: root.ownerPresent ? "#10b981" : "#f59e0b"
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         Text {
-                            text: "In Frame"
-                            color: "#059669" // emerald-600
+                            text: root.verifying ? "Verifying" : (root.ownerPresent ? "In Frame" : "Out of Frame")
+                            color: root.ownerPresent ? "#059669" : "#d97706" // emerald-600
                             font.pixelSize: 9
                             font.bold: true
-                        }
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // DUAL REACTIVE VOICE CHANNELS CARD
-        // (Replaces Speaker Volume - Reacts to Live User Voice & Chatbot Voice)
-        // ==========================================
-        Rectangle {
-            id: voiceChannelsCard
-            x: 10
-            y: 228
-            width: 180
-            height: 172
-            radius: 8
-            color: "#ffffff"
-            border.width: 1
-            border.color: "#e2e8f0"
-
-            Column {
-                anchors.fill: parent
-                anchors.margins: 8
-                spacing: 6
-
-                // Header
-                RowLayout {
-                    width: parent.width
-                    Text {
-                        text: "VOICE CHANNELS"
-                        color: "#64748b"
-                        font.pixelSize: 9
-                        font.bold: true
-                        font.letterSpacing: 0.5
-                    }
-                    Item { Layout.fillWidth: true }
-                    Rectangle {
-                        radius: 3
-                        color: "#eef2ff"
-                        border.width: 1
-                        border.color: "#c7d2fe"
-                        implicitWidth: duplexBadgeText.implicitWidth + 6
-                        implicitHeight: 15
-
-                        Text {
-                            id: duplexBadgeText
-                            anchors.centerIn: parent
-                            text: "LIVE"
-                            color: "#4338ca"
-                            font.pixelSize: 8
-                            font.bold: true
-                        }
-                    }
-                }
-
-                // Channel 1: YOUR LIVE VOICE (MIC IN)
-                Column {
-                    width: parent.width
-                    spacing: 4
-
-                    RowLayout {
-                        width: parent.width
-                        Row {
-                            spacing: 4
-                            Text {
-                                text: "🎙️"
-                                font.pixelSize: 11
-                            }
-                            Text {
-                                text: "You (Mic)"
-                                color: "#0f172a"
-                                font.pixelSize: 11
-                                font.bold: true
-                            }
-                        }
-                        Item { Layout.fillWidth: true }
-                        Rectangle {
-                            radius: 10
-                            color: root.speaking ? "#dcfce7" : (root.listening && !root.muted ? "#e0f2fe" : "#fee2e2")
-                            implicitWidth: userVoiceTag.implicitWidth + 8
-                            implicitHeight: 16
-
-                            Text {
-                                id: userVoiceTag
-                                anchors.centerIn: parent
-                                text: root.speaking ? "Speaking" : (root.listening && !root.muted ? "Listening" : "Muted")
-                                color: root.speaking ? "#166534" : (root.listening && !root.muted ? "#0369a1" : "#dc2626")
-                                font.pixelSize: 8
-                                font.bold: true
-                            }
-                        }
-                    }
-
-                    // 8-Bar Reactive Waveform (Reacts to user's live voice)
-                    Row {
-                        spacing: 3
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        height: 24
-
-                        Repeater {
-                            model: [
-                                { "color": "#06b6d4", "maxH": 16, "dur": 260 },
-                                { "color": "#0891b2", "maxH": 22, "dur": 210 },
-                                { "color": "#0284c7", "maxH": 26, "dur": 280 },
-                                { "color": "#2563eb", "maxH": 24, "dur": 230 },
-                                { "color": "#3b82f6", "maxH": 20, "dur": 250 },
-                                { "color": "#4f46e5", "maxH": 26, "dur": 220 },
-                                { "color": "#6366f1", "maxH": 18, "dur": 270 },
-                                { "color": "#06b6d4", "maxH": 14, "dur": 240 }
-                            ]
-                            Rectangle {
-                                width: 3
-                                radius: 2
-                                color: modelData.color
-                                anchors.verticalCenter: parent.verticalCenter
-                                height: root.speaking ? Math.max(6, modelData.maxH * Math.max(0.35, root.userAudioLevel)) : 3
-
-                                Behavior on height {
-                                    NumberAnimation { duration: 80 }
-                                }
-
-                                SequentialAnimation on height {
-                                    running: root.speaking
-                                    loops: Animation.Infinite
-                                    NumberAnimation { to: Math.max(8, modelData.maxH * Math.max(0.4, root.userAudioLevel)); duration: modelData.dur }
-                                    NumberAnimation { to: 4; duration: modelData.dur }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    width: parent.width
-                    height: 1
-                    color: "#f1f5f9"
-                }
-
-                // Channel 2: CHATBOT VOICE (AI RESPONSE OUT)
-                Column {
-                    width: parent.width
-                    spacing: 4
-
-                    RowLayout {
-                        width: parent.width
-                        Row {
-                            spacing: 4
-                            Text {
-                                text: "🤖"
-                                font.pixelSize: 11
-                            }
-                            Text {
-                                text: "Campus AI"
-                                color: "#0f172a"
-                                font.pixelSize: 11
-                                font.bold: true
-                            }
-                        }
-                        Item { Layout.fillWidth: true }
-                        Rectangle {
-                            radius: 10
-                            color: root.busy ? "#f3e8ff" : "#f1f5f9"
-                            implicitWidth: aiVoiceTag.implicitWidth + 8
-                            implicitHeight: 16
-
-                            Text {
-                                id: aiVoiceTag
-                                anchors.centerIn: parent
-                                text: root.busy ? "Responding" : "Standby"
-                                color: root.busy ? "#6b21a8" : "#64748b"
-                                font.pixelSize: 8
-                                font.bold: true
-                            }
-                        }
-                    }
-
-                    // 8-Bar Reactive Waveform (Reacts to chatbot response audio)
-                    Row {
-                        spacing: 3
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        height: 24
-
-                        Repeater {
-                            model: [
-                                { "color": "#6366f1", "maxH": 16, "dur": 240 },
-                                { "color": "#8b5cf6", "maxH": 22, "dur": 190 },
-                                { "color": "#a855f7", "maxH": 26, "dur": 270 },
-                                { "color": "#c084fc", "maxH": 24, "dur": 210 },
-                                { "color": "#d946ef", "maxH": 26, "dur": 260 },
-                                { "color": "#ec4899", "maxH": 20, "dur": 220 },
-                                { "color": "#8b5cf6", "maxH": 18, "dur": 280 },
-                                { "color": "#6366f1", "maxH": 14, "dur": 230 }
-                            ]
-                            Rectangle {
-                                width: 3
-                                radius: 2
-                                color: modelData.color
-                                anchors.verticalCenter: parent.verticalCenter
-                                height: root.busy ? Math.max(6, modelData.maxH * Math.max(0.4, root.assistantAudioLevel)) : 3
-
-                                Behavior on height {
-                                    NumberAnimation { duration: 80 }
-                                }
-
-                                SequentialAnimation on height {
-                                    running: root.busy
-                                    loops: Animation.Infinite
-                                    NumberAnimation { to: Math.max(8, modelData.maxH * Math.max(0.45, root.assistantAudioLevel)); duration: modelData.dur }
-                                    NumberAnimation { to: 4; duration: modelData.dur }
-                                }
-                            }
                         }
                     }
                 }
@@ -447,10 +237,11 @@ Item {
         // Auto-lock on exit caption
         Text {
             x: 10
-            y: 408
-            width: 180
+            y: root.height - 72
+            width: leftDock.width - 20
             horizontalAlignment: Text.AlignHCenter
-            text: "Auto-lock on exit (10s)"
+            text: root.ownerPresent ? "Session closes after 10s away" : "Out of frame — return within 10s"
+            wrapMode: Text.Wrap
             color: "#64748b" // Preview: text-slate-600
             font.pixelSize: 8
         }
@@ -459,8 +250,8 @@ Item {
         Button {
             id: exitSessionBtn
             x: 10
-            y: 424
-            width: 180
+            y: root.height - 56
+            width: leftDock.width - 20
             height: 42
             text: "✕ Exit Session"
             onClicked: root.closeRequested()
@@ -490,7 +281,7 @@ Item {
     // ==========================================
     Rectangle {
         id: gradientDivider
-        x: 200
+        x: leftDock.width
         y: 0
         width: 3
         height: root.height
@@ -508,9 +299,9 @@ Item {
     // ==========================================
     Rectangle {
         id: rightPanel
-        x: 203
+        x: gradientDivider.x + gradientDivider.width
         y: 0
-        width: root.width - 203
+        width: root.width - x
         height: root.height
         color: "#f8fafc" // Preview: bg-slate-50
 
@@ -554,6 +345,9 @@ Item {
                     }
 
                     Text {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        elide: Text.ElideRight
                         text: "Campus Voice Assistant"
                         color: "#1e293b" // Preview: text-slate-800
                         font.pixelSize: 12
@@ -580,8 +374,9 @@ Item {
 
                     Item { Layout.fillWidth: true }
 
-                    // Status: Edge Audio Connected
+                    // Show optional connection text only when the header has room.
                     Row {
+                        visible: rightPanel.width >= 720
                         spacing: 5
                         Rectangle {
                             width: 6
@@ -601,7 +396,7 @@ Item {
                     // Interrupt Button (only visible while assistant is answering)
                     Button {
                         id: interruptBtn
-                        visible: root.busy
+                        visible: root.speaking
                         implicitWidth: 78
                         implicitHeight: 26
                         text: "■ Interrupt"
@@ -657,6 +452,15 @@ Item {
                 model: root.messages || []
 
                 property bool userScrolledUp: false
+                property real savedScrollOffset: 0
+                onMovementStarted: userScrolledUp = true
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                    onPressedChanged: {
+                        history.userScrolledUp = pressed || !history.atYEnd
+                        if (!pressed) history.savedScrollOffset = history.contentY - history.originY
+                    }
+                }
 
                 function scrollToBottom() {
                     Qt.callLater(function() {
@@ -665,6 +469,7 @@ Item {
                 }
 
                 onMovementEnded: {
+                    savedScrollOffset = contentY - originY;
                     if (history.atYEnd || history.contentY >= history.contentHeight - history.height - 30) {
                         userScrolledUp = false
                     } else {
@@ -673,6 +478,7 @@ Item {
                 }
 
                 onFlickEnded: {
+                    savedScrollOffset = contentY - originY;
                     if (history.atYEnd || history.contentY >= history.contentHeight - history.height - 30) {
                         userScrolledUp = false
                     } else {
@@ -681,13 +487,14 @@ Item {
                 }
 
                 onCountChanged: {
-                    userScrolledUp = false
-                    scrollToBottom()
+                    if (!userScrolledUp) scrollToBottom()
                 }
 
                 onModelChanged: {
                     if (!userScrolledUp) {
                         scrollToBottom()
+                    } else {
+                        Qt.callLater(function() { history.contentY = history.originY + history.savedScrollOffset })
                     }
                 }
 
@@ -701,141 +508,30 @@ Item {
                     scrollToBottom()
                 }
 
-                delegate: Item {
+                footer: ColumnLayout {
                     width: history.width
-                    height: Math.max(1, bubble.implicitHeight)
-
-                    Rectangle {
-                        id: bubble
-                        width: Math.min(parent.width * 0.86, 500)
-                        x: modelData.role === "user" ? parent.width - width : 0
-                        implicitHeight: messageColumn.implicitHeight + 16
-                        height: implicitHeight
-                        radius: 12
-
-                        // User: Vibrant Royal Blue to Indigo Gradient (matches preview)
-                        // Assistant: Elevated White Card with border (matches preview)
-                        gradient: modelData.role === "user" ? userGrad : null
-                        color: modelData.role === "user" ? "transparent" : (modelData.role === "system" ? "#f1f5f9" : "#ffffff")
-                        border.width: modelData.role === "user" ? 0 : 1
-                        border.color: modelData.role === "system" ? "#e2e8f0" : "#e2e8f0"
-
-                        Gradient {
-                            id: userGrad
-                            orientation: Gradient.Horizontal
-                            GradientStop { position: 0.0; color: "#2563eb" } // blue-600
-                            GradientStop { position: 1.0; color: "#4f46e5" } // indigo-600
-                        }
-
-                        Column {
-                            id: messageColumn
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.margins: 10
-                            spacing: 4
-
-                            // Header inside bubble
-                            RowLayout {
-                                width: parent.width
-                                spacing: 4
-
-                                Text {
-                                    visible: modelData.role === "user"
-                                    text: "🎙️ You asked:"
-                                    color: "#dbeafe" // blue-100
-                                    font.pixelSize: 9
-                                    font.bold: true
-                                }
-
-                                Row {
-                                    visible: modelData.role !== "user" && modelData.role !== "system"
-                                    spacing: 4
-                                    Rectangle {
-                                        width: 7
-                                        height: 7
-                                        radius: 4
-                                        gradient: Gradient {
-                                            orientation: Gradient.Horizontal
-                                            GradientStop { position: 0.0; color: "#06b6d4" }
-                                            GradientStop { position: 1.0; color: "#6366f1" }
-                                        }
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    Text {
-                                        text: "Assistant"
-                                        color: "#4f46e5" // indigo-600
-                                        font.pixelSize: 9
-                                        font.bold: true
-                                    }
-                                }
-                            }
-
-                            // Message Body
-                            Text {
-                                width: parent.width
-                                text: String(modelData.content || "").replace(/\n/g, "\n\n")
-                                color: modelData.role === "user" ? "#ffffff" : (modelData.role === "system" ? "#334155" : "#1e293b")
-                                font.pixelSize: 12
-                                textFormat: Text.MarkdownText
-                                wrapMode: Text.WordWrap
-                            }
-
-                            // Verified Source Citation Badge
-                            Rectangle {
-                                visible: modelData.citations && modelData.citations.length > 0 && modelData.role !== "user"
-                                radius: 3
-                                color: "#eff6ff" // bg-blue-50
-                                border.width: 1
-                                border.color: "#bfdbfe" // border-blue-200
-                                implicitWidth: citeText.implicitWidth + 10
-                                implicitHeight: 18
-
-                                Text {
-                                    id: citeText
-                                    anchors.centerIn: parent
-                                    text: "📄 " + root.citationText(modelData.citations) + " [VERIFIED]"
-                                    color: "#1d4ed8" // text-blue-700
-                                    font.pixelSize: 8
-                                    font.bold: true
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Error display if present
-            Text {
-                Layout.fillWidth: true
-                text: root.errorText
-                visible: root.errorText.length > 0
-                color: "#dc2626"
-                font.pixelSize: 11
-                elide: Text.ElideRight
-                horizontalAlignment: Text.AlignHCenter
-            }
-
+                    spacing: 8
             // RAG Status Banner (searching indicator)
             Rectangle {
                 Layout.fillWidth: true
                 Layout.margins: 8
-                height: 26
+                implicitHeight: 34
                 radius: 6
                 color: "#e0f2fe"
                 border.width: 1
                 border.color: "#38bdf8"
-                visible: root.ragStatus.length > 0
+                visible: root.busy || root.ragStatus.length > 0
 
                 RowLayout {
                     anchors.centerIn: parent
                     spacing: 6
-                    Text {
-                        text: "🔍"
-                        font.pixelSize: 11
+                    BusyIndicator {
+                        Layout.preferredWidth: 22
+                        Layout.preferredHeight: 22
+                        running: root.busy || root.ragStatus.length > 0
                     }
                     Text {
-                        text: root.ragStatus
+                        text: root.ragStatus.length > 0 ? "Searching database…" : (root.speaking ? "Replying…" : "Heard you. Thinking…")
                         color: "#0369a1"
                         font.pixelSize: 11
                         font.bold: true
@@ -895,6 +591,8 @@ Item {
                         }
 
                         Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
                             text: {
                                 var sum = root.currentNavigation ? (root.currentNavigation.route_summary || {}) : {}
                                 var target = root.currentNavigation ? (root.currentNavigation.navigation_target || {}) : {}
@@ -959,12 +657,111 @@ Item {
                                     text: modelData.instruction || ""
                                     font.pixelSize: 11
                                     color: "#334155"
-                                    wrapMode: Text.WordWrap
+                                    wrapMode: Text.Wrap
                                 }
                             }
                         }
                     }
                 }
+            }
+
+                }
+
+                delegate: Item {
+                    width: history.width
+                    height: Math.max(1, bubble.implicitHeight)
+
+                    Rectangle {
+                        id: bubble
+                        width: Math.min(parent.width * 0.86, 500)
+                        x: modelData.role === "user" ? parent.width - width : 0
+                        implicitHeight: messageColumn.implicitHeight + 20
+                        height: implicitHeight
+                        radius: 12
+
+                        // User: Vibrant Royal Blue to Indigo Gradient (matches preview)
+                        // Assistant: Elevated White Card with border (matches preview)
+                        gradient: modelData.role === "user" ? userGrad : null
+                        color: modelData.role === "user" ? "transparent" : (modelData.role === "system" ? "#f1f5f9" : "#ffffff")
+                        border.width: modelData.role === "user" ? 0 : 1
+                        border.color: modelData.role === "system" ? "#e2e8f0" : "#e2e8f0"
+
+                        Gradient {
+                            id: userGrad
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0.0; color: "#2563eb" } // blue-600
+                            GradientStop { position: 1.0; color: "#4f46e5" } // indigo-600
+                        }
+
+                        Column {
+                            id: messageColumn
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 10
+                            spacing: 4
+
+                            // Header inside bubble
+                            RowLayout {
+                                width: parent.width
+                                spacing: 4
+
+                                Text {
+                                    visible: modelData.role === "user"
+                                    text: "🎙️ You asked:"
+                                    color: "#dbeafe" // blue-100
+                                    font.pixelSize: 9
+                                    font.bold: true
+                                }
+
+                                Row {
+                                    visible: modelData.role !== "user" && modelData.role !== "system"
+                                    spacing: 4
+                                    Rectangle {
+                                        width: 7
+                                        height: 7
+                                        radius: 4
+                                        gradient: Gradient {
+                                            orientation: Gradient.Horizontal
+                                            GradientStop { position: 0.0; color: "#06b6d4" }
+                                            GradientStop { position: 1.0; color: "#6366f1" }
+                                        }
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        text: "Assistant"
+                                        color: "#4f46e5" // indigo-600
+                                        font.pixelSize: 9
+                                        font.bold: true
+                                    }
+                                }
+                            }
+
+                            // Message Body
+                            Text {
+                                width: parent.width
+                                text: root.displayText(modelData)
+                                color: modelData.role === "user" ? "#ffffff" : (modelData.role === "system" ? "#334155" : "#1e293b")
+                                font.pixelSize: 12
+                                textFormat: Text.MarkdownText
+                                wrapMode: Text.Wrap
+                            }
+
+
+                        }
+                    }
+                }
+            }
+
+            // Error display if present
+            Text {
+                Layout.fillWidth: true
+                text: root.errorText
+                visible: root.errorText.length > 0
+                color: "#dc2626"
+                font.pixelSize: 11
+                elide: Text.ElideRight
+                horizontalAlignment: Text.AlignHCenter
             }
 
             // ==========================================
@@ -1034,10 +831,10 @@ Item {
                             Text {
                                 text: root.muted
                                       ? "Mic Muted"
-                                      : (root.busy
+                                      : (root.speaking
                                          ? "Assistant speaking..."
-                                         : (root.speaking
-                                            ? "Listening to you..."
+                                         : (root.busy
+                                            ? "Thinking..."
                                             : "Listening..."))
                                 color: root.muted
                                        ? "#991b1b"
@@ -1126,6 +923,9 @@ Item {
 
                     // Right: Audio Guidance
                     Text {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        elide: Text.ElideRight
                         text: "Speak naturally to query or interrupt"
                         color: "#64748b" // slate-500
                         font.pixelSize: 10
@@ -1136,15 +936,11 @@ Item {
         }
     }
 
-    function citationText(citations) {
-        if (!citations || citations.length === 0) {
-            return "Campus Handbook"
-        }
-        var labels = []
-        for (var i = 0; i < Math.min(citations.length, 2); i++) {
-            var citation = citations[i]
-            labels.push(citation.document_title || citation.title || citation.chunk_id || ("Doc " + (i + 1)))
-        }
-        return labels.join(", ")
+    function displayText(message) {
+        var text = String(message.content || "")
+        if (message.role === "user") return text
+        return text.replace(/\[(?:\d+(?:[,–-]\s*\d+)*|(?:source|doc)\s*\d+)\]/gi, "")
+                   .replace(/【[^】]*】/g, "")
+                   .replace(/\[Sources?:[^\]]*\]/gi, "")
     }
 }

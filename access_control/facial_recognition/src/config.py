@@ -275,6 +275,17 @@ class AccessControlConfig(RuntimeConfig):
     pad_model_path: Path = Path(_env_str("EDGE_ACCESS_PAD_MODEL_PATH", None, ""))
     pad_model_version: str = _env_str("EDGE_ACCESS_PAD_MODEL_VERSION", None, "")
     pad_required: bool = _bool_env("EDGE_ACCESS_PAD_REQUIRED", os.getenv("APP_ENV", "development").lower() == "production")
+    presence_activation_enabled: bool = _bool_env("EDGE_PRESENCE_ACTIVATION_ENABLED", True, "PRESENCE_ACTIVATION_ENABLED")
+    presence_dwell_seconds: float = _float_env("EDGE_PRESENCE_DWELL_SECONDS", 3.0, "PRESENCE_DWELL_SECONDS")
+    presence_detection_grace_ms: int = _int_env("EDGE_PRESENCE_DETECTION_GRACE_MS", 400, "PRESENCE_DETECTION_GRACE_MS")
+    presence_activation_cooldown_seconds: float = _float_env("EDGE_PRESENCE_ACTIVATION_COOLDOWN_SECONDS", 5.0, "PRESENCE_ACTIVATION_COOLDOWN_SECONDS")
+    interaction_zone_x: float = _float_env("EDGE_INTERACTION_ZONE_X", 0.15)
+    interaction_zone_y: float = _float_env("EDGE_INTERACTION_ZONE_Y", 0.10)
+    interaction_zone_width: float = _float_env("EDGE_INTERACTION_ZONE_WIDTH", 0.70)
+    interaction_zone_height: float = _float_env("EDGE_INTERACTION_ZONE_HEIGHT", 0.80)
+    minimum_face_size_ratio: float = _float_env("EDGE_MINIMUM_FACE_SIZE_RATIO", 0.15)
+    frontal_face_threshold: float = _float_env("EDGE_FRONTAL_FACE_THRESHOLD", 25.0)
+    frontal_pitch_threshold: float = _float_env("EDGE_FRONTAL_PITCH_THRESHOLD", 20.0)
 
     @property
     def setup_marker_path(self) -> Path:

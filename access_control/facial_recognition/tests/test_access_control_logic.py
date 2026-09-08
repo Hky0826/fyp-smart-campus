@@ -128,6 +128,7 @@ class AccessControlLogicTests(unittest.TestCase):
         result = pipeline.process_frame(self.frame)
         self.assertEqual(result["face_count"], 1)
         self.assertEqual(result["bbox"], [20, 20, 100, 100])
+        self.assertEqual(result["bboxes"], [[20, 20, 100, 100]])
         self.assertEqual(result["authentication_result"], AuthenticationResult.GRANT.value)
 
     def test_unstable_track_retries_before_liveness(self):

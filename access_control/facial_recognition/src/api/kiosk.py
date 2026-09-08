@@ -112,8 +112,19 @@ class KioskStateResponse(BaseModel):
     chat_recoverable: bool = False
 
 
+class PresenceStatusView(BaseModel):
+    state: str = "IDLE"
+    dwell_progress: float = 0.0
+    dwell_seconds: float = 0.0
+    candidate_bbox: Optional[list[int]] = None
+    candidate_track_id: Optional[str] = None
+    attention_valid: bool = False
+    intent_detected: bool = False
+
+
 class AccessRequestResponse(BaseModel):
     attempt: AccessAttemptView
+    presence: Optional[PresenceStatusView] = None
 
 
 class ChatVerifyResponse(BaseModel):
@@ -421,11 +432,11 @@ class KioskStateStore:
         now_text = now.isoformat()
         frame_bboxes = bboxes or []
         with self._lock:
+            self._safe_chat_view_locked()
             if self._chat_session is None:
                 if self._recoverable_chat_session is not None and not owner_present:
                     absent_since = self._recoverable_chat_session.owner_absent_since
-                    lock_after = self.timings.owner_missing_grace_seconds + self.timings.owner_absent_lock_seconds
-                    terminate_after = lock_after + self.timings.owner_absent_terminate_seconds
+                    terminate_after = self.timings.owner_absent_terminate_seconds
                     if absent_since is not None and (now - absent_since).total_seconds() >= terminate_after:
                         self._recoverable_chat_session = None
                         return ChatPresenceResponse(owner_present=False, ended=True, bboxes=frame_bboxes)
@@ -451,7 +462,7 @@ class KioskStateStore:
 
             elapsed = (now - self._chat_session.owner_absent_since).total_seconds()
             lock_after = self.timings.owner_missing_grace_seconds + self.timings.owner_absent_lock_seconds
-            terminate_after = lock_after + self.timings.owner_absent_terminate_seconds
+            terminate_after = self.timings.owner_absent_terminate_seconds
             if elapsed >= terminate_after:
                 self._recoverable_chat_session = None
                 self._chat_session.view.owner_absent_since = now_text
@@ -484,8 +495,7 @@ class KioskStateStore:
                 return ChatPresenceResponse(owner_present=False, ended=True, bboxes=bboxes or [])
 
             absent_since = self._recoverable_chat_session.owner_absent_since
-            lock_after = self.timings.owner_missing_grace_seconds + self.timings.owner_absent_lock_seconds
-            terminate_after = lock_after + self.timings.owner_absent_terminate_seconds
+            terminate_after = self.timings.owner_absent_terminate_seconds
             if absent_since is not None and (now - absent_since).total_seconds() >= terminate_after:
                 self._recoverable_chat_session = None
                 return ChatPresenceResponse(owner_present=False, ended=True, bboxes=bboxes or [])
@@ -505,6 +515,11 @@ class KioskStateStore:
             )
 
     def _safe_chat_view_locked(self) -> ChatSessionView | None:
+        for attribute in ("_chat_session", "_recoverable_chat_session"):
+            session = getattr(self, attribute)
+            if session is not None and session.owner_absent_since is not None:
+                if (self._now() - session.owner_absent_since).total_seconds() >= self.timings.owner_absent_terminate_seconds:
+                    setattr(self, attribute, None)
         if self._chat_session is None:
             return None
         view = self._chat_session.view.model_copy(deep=True)
@@ -557,7 +572,19 @@ def create_kiosk_router(
         except Exception as exc:
             logger.exception("Kiosk access verification failed")
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-        return AccessRequestResponse(attempt=store.complete_access_attempt(result))
+        presence_payload = result.get("presence")
+        presence_view = None
+        if presence_payload:
+            presence_view = PresenceStatusView(
+                state=str(presence_payload.get("state", "IDLE")),
+                dwell_progress=float(presence_payload.get("dwell_progress", 0.0)),
+                dwell_seconds=float(presence_payload.get("dwell_seconds", 0.0)),
+                candidate_bbox=presence_payload.get("candidate_bbox"),
+                candidate_track_id=str(presence_payload.get("candidate_track_id")) if presence_payload.get("candidate_track_id") is not None else None,
+                attention_valid=bool(presence_payload.get("attention_valid", False)),
+                intent_detected=bool(presence_payload.get("intent_detected", False)),
+            )
+        return AccessRequestResponse(attempt=store.complete_access_attempt(result), presence=presence_view)
 
     @router.post("/chat/verify/frame", response_model=ChatVerifyResponse)
     async def verify_chat_owner(file: UploadFile = File(...)) -> ChatVerifyResponse:
@@ -583,6 +610,10 @@ def create_kiosk_router(
         owner_embedding = owner_face["embedding"]
         owner_track_id = str(owner_face["track_id"]) if owner_face.get("track_id") is not None else None
         token = _try_issue_registered_token(pipeline, owner_embedding, runtime_config())
+        try:
+            pipeline.notify_chat_started()
+        except Exception:
+            pass
         return ChatVerifyResponse(
             session=store.start_chat_session(
                 token=token,
@@ -884,6 +915,10 @@ def create_kiosk_router(
     @router.post("/chat/end")
     def end_chat() -> dict[str, bool]:
         store.end_chat_session()
+        try:
+            access_pipeline().notify_chat_ended()
+        except Exception:
+            pass
         return {"success": True}
 
     @router.post("/chat/audio/stop")

@@ -26,7 +26,7 @@ def test_chatbot_controller_hands_free_properties():
 
     # Test slots for RAG status, navigation, citations
     controller._on_rag_status("searching", "where is the lift")
-    assert "where is the lift" in controller.ragStatus
+    assert controller.ragStatus == "Searching database..."
 
     controller._on_navigation({"instructions": [{"instruction": "Turn left"}]})
     assert len(controller.currentNavigation.get("instructions", [])) == 1

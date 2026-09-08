@@ -255,6 +255,12 @@ def generate_audio_from_text(text: str, language_code: Optional[str] = None) -> 
                     model=tts_model,
                     contents=clean_speech_text,
                     config=types.GenerateContentConfig(
+                        system_instruction=(
+                            "You are a professional university campus voice assistant. "
+                            "Speak clearly and articulately using a professional standard accent for the language. "
+                            "Do not use informal slang, regional dialect, colloquial accent, or casual tone. "
+                            "Maintain an articulate, polite, and professional broadcast presenter tone."
+                        ),
                         response_modalities=["AUDIO"],
                         speech_config=types.SpeechConfig(
                             voice_config=types.VoiceConfig(

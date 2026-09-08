@@ -6,7 +6,12 @@ ApplicationWindow {
     width: 800
     height: 480
     visible: true
-    visibility: Window.FullScreen
+    // Temporary laptop preview: keep the content area at the kiosk resolution.
+    visibility: Window.Windowed
+    minimumWidth: 800
+    maximumWidth: 800
+    minimumHeight: 480
+    maximumHeight: 480
     color: "#020617"
     title: "Edge Access Control"
     readonly property bool showAccessGlow: !accessController.chatExpanded
@@ -55,6 +60,7 @@ ApplicationWindow {
         visible: !accessController.chatExpanded
         enabled: cameraController.ready && !accessController.offline
         mode: accessController.mode
+        dwellProgress: accessController.dwellProgress
         onClicked: accessController.openChat()
     }
 

@@ -17,7 +17,7 @@ from .presence_controller import PresenceController
 CAMERA_FRAME_INTERVAL_MS = int(os.getenv("EDGE_GUI_CAMERA_FRAME_INTERVAL_MS", "33"))
 ACCESS_RESULT_HOLD_MS = int(os.getenv("EDGE_GUI_ACCESS_RESULT_HOLD_MS", "4000"))
 CHAT_VERIFY_RETRY_MS = int(os.getenv("EDGE_GUI_CHAT_VERIFY_RETRY_MS", "350"))
-CHAT_PRESENCE_INTERVAL_MS = int(os.getenv("EDGE_GUI_CHAT_PRESENCE_INTERVAL_MS", "3000"))
+CHAT_PRESENCE_INTERVAL_MS = int(os.getenv("EDGE_GUI_CHAT_PRESENCE_INTERVAL_MS", "500"))
 
 
 class _ApiCallWorker(QThread):
@@ -67,6 +67,9 @@ class AccessController(QObject):
     uiChanged = Signal()
     statusChanged = Signal()
     messagesChanged = Signal()
+    dwellProgressChanged = Signal()
+    presenceDetectionChanged = Signal()
+    interactionIntentDetected = Signal()
 
     def __init__(
         self,
@@ -80,6 +83,10 @@ class AccessController(QObject):
         self._chatbot = chatbot
         self._presence = PresenceController(api)
         self._state: dict[str, Any] | None = None
+        self._history_session_id = None
+        self._live_history: list[dict[str, Any]] = []
+        self._transcribed_text = ""
+        self._partial_text = ""
         self._mode = "offline"
         self._offline = False
         self._chat_expanded = False
@@ -87,6 +94,9 @@ class AccessController(QObject):
         self._greeting_session_id: Any = None
         self._frame_in_flight = False
         self._face_boxes: list[list[int]] = []
+        self._dwell_progress: float = 0.0
+        self._presence_detected: bool = False
+        self._presence_state: str = "IDLE"
         self._camera_error = ""
         self._chat_error = ""
         self._now_ms = _now_ms()
@@ -214,6 +224,10 @@ class AccessController(QObject):
     @Slot()
     def _on_tick(self) -> None:
         self._now_ms = _now_ms()
+        absent_since = _parse_datetime((self._session or {}).get("owner_absent_since"))
+        timeout = float(self._timings.get("owner_absent_terminate_seconds", 10))
+        if self._chat_expanded and absent_since and self._now_ms - int(absent_since.timestamp() * 1000) >= timeout * 1000:
+            self.exitChat()
         self._update_mode()
 
     def _start_events(self) -> None:
@@ -237,7 +251,7 @@ class AccessController(QObject):
     @Slot(dict)
     def _on_state_event(self, state: dict[str, Any]) -> None:
         self._offline = False
-        self._state = state
+        self._apply_state(state)
         self._emit_all()
         self._sync_voice_loop()
 
@@ -263,10 +277,11 @@ class AccessController(QObject):
         try:
             self._offline = False
             if name == "state":
-                self._state = payload
+                self._apply_state(payload)
             elif name in {"access-frame"}:
                 self._merge_access_attempt(payload.get("attempt"))
                 self._face_boxes = _boxes_from_attempt(payload.get("attempt"))
+                self._handle_access_presence_payload(payload.get("presence"))
             elif name == "chat-verify-frame":
                 session = payload.get("session")
                 self._merge_chat_session(session)
@@ -288,12 +303,13 @@ class AccessController(QObject):
                     user_text = payload.get("transcribed_input")
                     bot_text = payload.get("text_response")
                     citations = payload.get("citations", [])
-                    history = list(self._session.get("conversation_history") or [])
+                    history = list(self._live_history or self._session.get("conversation_history") or [])
                     now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
                     if user_text:
                         history.append({"role": "user", "content": user_text, "created_at": now_iso, "citations": []})
                     if bot_text:
                         history.append({"role": "assistant", "content": bot_text, "created_at": now_iso, "citations": citations})
+                    self._live_history = history
                     self._merge_chat_session({**self._session, "conversation_history": history})
                 self._chat_error = ""
             elif name == "lock-chat":
@@ -334,14 +350,49 @@ class AccessController(QObject):
         if retry_chat_verification:
             self._schedule_frame(CHAT_VERIFY_RETRY_MS)
 
+    def _handle_access_presence_payload(self, presence: dict[str, Any] | None) -> None:
+        if not presence:
+            if self._dwell_progress != 0.0 or self._presence_detected:
+                self._dwell_progress = 0.0
+                self._presence_detected = False
+                self._presence_state = "IDLE"
+                self.dwellProgressChanged.emit()
+                self.presenceDetectionChanged.emit()
+                self.uiChanged.emit()
+            return
+
+        state = str(presence.get("state", "IDLE"))
+        progress = float(presence.get("dwell_progress", 0.0))
+        intent_detected = bool(presence.get("intent_detected", False))
+
+        changed = False
+        if abs(self._dwell_progress - progress) > 0.005:
+            self._dwell_progress = progress
+            changed = True
+            self.dwellProgressChanged.emit()
+
+        presence_detected = state in {"PRESENCE_DETECTED", "DWELLING", "TRIGGERED"}
+        if self._presence_detected != presence_detected or self._presence_state != state:
+            self._presence_detected = presence_detected
+            self._presence_state = state
+            changed = True
+            self.presenceDetectionChanged.emit()
+
+        if changed:
+            self.uiChanged.emit()
+
+        if intent_detected:
+            self.interactionIntentDetected.emit()
+            if not self._chat_expanded and not self._session and not self._chat_verification_active:
+                self.openChat()
+
     def _handle_presence_payload(self, payload: dict[str, Any]) -> bool:
         self._face_boxes = _coerce_boxes(payload.get("bboxes"))
         if payload.get("ended"):
             if self._state:
                 self._state = {**self._state, "active_chat_session": None, "chat_recoverable": False}
-            self._set_chat_expanded(False)
             self._chat_error = ""
-            self._chatbot.stopVoiceLoop()
+            self.exitChat()
             return False
         if payload.get("session"):
             self._merge_chat_session(payload.get("session"))
@@ -349,6 +400,10 @@ class AccessController(QObject):
 
     @Slot(dict)
     def _on_audio_response(self, payload: dict[str, Any]) -> None:
+        if not self._chat_expanded or not self._session:
+            return
+        self._transcribed_text = ""
+        self._partial_text = ""
         self._on_worker_success("chat-audio", payload)
 
     @Slot()
@@ -362,9 +417,34 @@ class AccessController(QObject):
             return
         self._state = {**self._state, "active_access_attempt": attempt}
 
+    def _apply_state(self, state: dict[str, Any]) -> None:
+        previous_session = self._session
+        self._state = state
+        session = self._session
+        session_id = (session or {}).get("session_id")
+        if session_id != self._history_session_id:
+            self._history_session_id = session_id
+            self._live_history = []
+            self._transcribed_text = ""
+            self._partial_text = ""
+        if session:
+            self._merge_chat_session(session)
+        elif previous_session and self._chat_expanded and not self._chat_verification_active:
+            self.exitChat()
+
     def _merge_chat_session(self, session: dict[str, Any] | None) -> None:
         if not self._state or not session:
             return
+        session_id = session.get("session_id")
+        if session_id != self._history_session_id:
+            self._history_session_id = session_id
+            self._live_history = []
+            self._transcribed_text = ""
+            self._partial_text = ""
+        incoming = list(session.get("conversation_history") or [])
+        if len(incoming) >= len(self._live_history):
+            self._live_history = incoming
+        session = {**session, "conversation_history": list(self._live_history)}
         self._state = {**self._state, "active_chat_session": session, "chat_recoverable": False}
 
     def _sync_voice_loop(self) -> None:
@@ -492,20 +572,10 @@ class AccessController(QObject):
         has_temp_user = bool(getattr(self, "_transcribed_text", ""))
         has_temp_bot = bool(getattr(self, "_partial_text", ""))
         
-        # Deduplicate: if the permanent message has already arrived from the server,
-        # it will be the last items in the history array.
-        # We identify the permanent exchange by matching the transcribed text.
-        if has_temp_user and len(history) >= 2:
-            last_user = history[-2]
-            if last_user.get("role") == "user" and last_user.get("content") == self._transcribed_text:
-                # The permanent exchange has already synced! Hide it while we type.
-                history.pop() # remove the permanent chatbot message
-                history.pop() # remove the permanent user message
-
         if has_temp_user:
             history.append({"role": "user", "content": self._transcribed_text})
         if has_temp_bot:
-            history.append({"role": "chatbot", "content": self._partial_text})
+            history.append({"role": "assistant", "content": self._partial_text})
             
         return history
 
@@ -532,14 +602,16 @@ class AccessController(QObject):
         attempt = self._attempt or {}
         if self._mode == "access-granted":
             return "Door access has priority over chatbot interaction."
-        if self._mode == "access-denied":
-            return str(attempt.get("reason") or "Access was denied.")
         if self._mode == "chat-verifying":
             return "Keep your face inside the guide to start a private chatbot session."
         if self._mode == "access-verifying":
             return "Checking identity and RBAC permissions."
         if self._mode == "chat-active":
             return f"Chat session: {self._get_session_name()}"
+        if self._dwell_progress > 0.0:
+            return "Ready when you are…"
+        if self._mode == "access-denied":
+            return str(attempt.get("reason") or "Access was denied.")
         return "Stand centered for access verification."
 
     def _get_camera_error(self) -> str:
@@ -560,6 +632,15 @@ class AccessController(QObject):
     def _get_cloud_chatbot(self) -> str:
         return str(self._device.get("cloud_chatbot") or "unknown")
 
+    def _get_dwell_progress(self) -> float:
+        return self._dwell_progress
+
+    def _get_presence_detected(self) -> bool:
+        return self._presence_detected
+
+    def _get_presence_detection_state(self) -> str:
+        return self._presence_state
+
     mode = Property(str, _get_mode, notify=modeChanged)
     offline = Property(bool, _get_offline, notify=statusChanged)
     chatExpanded = Property(bool, _get_chat_expanded, notify=uiChanged)
@@ -577,6 +658,9 @@ class AccessController(QObject):
     deviceName = Property(str, _get_device_name, notify=statusChanged)
     cloudSync = Property(str, _get_cloud_sync, notify=statusChanged)
     cloudChatbot = Property(str, _get_cloud_chatbot, notify=statusChanged)
+    dwellProgress = Property(float, _get_dwell_progress, notify=dwellProgressChanged)
+    presenceDetected = Property(bool, _get_presence_detected, notify=presenceDetectionChanged)
+    presenceDetectionState = Property(str, _get_presence_detection_state, notify=presenceDetectionChanged)
 
 
 def _now_ms() -> int:

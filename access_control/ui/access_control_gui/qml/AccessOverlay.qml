@@ -7,6 +7,7 @@ Item {
     property string subtitleText: ""
     property string mode: "idle"
     property string cameraError: ""
+    property real dwellProgress: 0.0
 
     width: Math.min(560, parent.width - 36)
     height: panel.implicitHeight
@@ -50,9 +51,16 @@ Item {
                 height: 190
                 radius: 76
                 color: "transparent"
-                border.width: 2
-                border.color: "#88ffffff"
+                border.width: root.dwellProgress > 0.0 ? 3 : 2
+                border.color: root.dwellProgress > 0.0 ? "#38bdf8" : "#88ffffff"
                 visible: root.mode === "idle" || root.mode === "chat-verifying" || root.mode === "access-verifying"
+
+                Behavior on border.color {
+                    ColorAnimation { duration: 250 }
+                }
+                Behavior on border.width {
+                    NumberAnimation { duration: 250 }
+                }
             }
         }
     }

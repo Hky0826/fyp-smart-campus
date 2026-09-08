@@ -60,7 +60,7 @@ class YuNetDetector:
             self._detector.setInputSize(size)
             self._input_size = size
 
-    def detect(self, frame: np.ndarray) -> List[DetectedFace]:
+    def detect(self, frame: np.ndarray, return_all: bool = False) -> List[DetectedFace]:
         if frame is None or frame.size == 0:
             return []
 
@@ -129,6 +129,13 @@ class YuNetDetector:
         if not faces:
             return []
 
+        if return_all:
+            return faces
+
         # Select only the single face closest to the camera (largest bounding box area)
         closest_face = max(faces, key=lambda f: f.width() * f.height())
         return [closest_face]
+
+    def detect_all(self, frame: np.ndarray) -> List[DetectedFace]:
+        """Detect and return all candidate faces in the frame."""
+        return self.detect(frame, return_all=True)

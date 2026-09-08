@@ -144,6 +144,29 @@ class KioskStateTests(unittest.TestCase):
         self.assertIsNone(store.state("ok").active_chat_session)
         self.assertFalse(store.state("ok").chat_recoverable)
 
+    def test_default_absence_deadline_expires_on_state_refresh(self):
+        now = dt.datetime(2026, 9, 8, tzinfo=dt.timezone.utc)
+        store = KioskStateStore(RuntimeConfig(), clock=lambda: now)
+        store.start_chat_session(owner_embedding=np.array([1.0, 0.0]))
+        missing = store.update_owner_presence(False)
+        self.assertEqual(missing.session.presence_state, "OWNER_TEMPORARILY_MISSING")
+        now += dt.timedelta(seconds=9.9)
+        self.assertIsNotNone(store.state("ok").active_chat_session)
+        now += dt.timedelta(seconds=0.1)
+        self.assertIsNone(store.state("ok").active_chat_session)
+        self.assertFalse(store.state("ok").chat_recoverable)
+
+    def test_returning_owner_resets_absence_deadline(self):
+        now = dt.datetime(2026, 9, 8, tzinfo=dt.timezone.utc)
+        store = KioskStateStore(RuntimeConfig(), clock=lambda: now)
+        store.start_chat_session(owner_embedding=np.array([1.0, 0.0]))
+        store.update_owner_presence(False)
+        now += dt.timedelta(seconds=9)
+        store.update_owner_presence(True)
+        now += dt.timedelta(seconds=2)
+        self.assertIsNotNone(store.state("ok").active_chat_session)
+        self.assertIsNone(store.current_chat_session().owner_absent_since)
+
     def test_chat_live_config_endpoint(self):
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
