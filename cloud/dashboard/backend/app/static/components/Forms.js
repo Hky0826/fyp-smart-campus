@@ -2061,12 +2061,19 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
         }
 
         // 8. Device Configuration Form
-        function DeviceForm({ item, nodes, onSubmit, onCancel }) {
+        function DeviceForm({ item, nodes, roles = [], onSubmit, onCancel }) {
             const [deviceId, setDeviceId] = useState(item?.device_id || "");
             const [deviceName, setDeviceName] = useState(item?.device_name || "");
             const [nodeId, setNodeId] = useState(item?.node_id || "");
             const [deviceType, setDeviceType] = useState(item?.device_type || "KIOSK");
             const [ipAddress, setIpAddress] = useState(item?.ip_address || "");
+            const [allowedRoleIds, setAllowedRoleIds] = useState(item?.allowed_role_ids || []);
+
+            const toggleRole = (roleId) => {
+                setAllowedRoleIds(prev =>
+                    prev.includes(roleId) ? prev.filter(id => id !== roleId) : [...prev, roleId]
+                );
+            };
 
             const handleSubmit = (e) => {
                 onSubmit(e, {
@@ -2075,7 +2082,8 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     node_id: parseInt(nodeId),
                     device_type: deviceType,
                     ip_address: ipAddress || null,
-                    is_active: true
+                    is_active: true,
+                    allowed_role_ids: allowedRoleIds
                 });
             };
 
@@ -2116,6 +2124,34 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                 <option value="OFFICE">OFFICE</option>
                                 <option value="OTHER">OTHER</option>
                             </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Authorized Roles (Device RBAC)</label>
+                        <p className="text-[11px] text-slate-500 mb-2">Select which roles are permitted access on this physical device. If none selected, access will be denied.</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                            {roles && roles.length > 0 ? (
+                                roles.map(r => {
+                                    const isChecked = allowedRoleIds.includes(r.role_id);
+                                    return (
+                                        <label key={r.role_id} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer border transition-all text-xs select-none ${
+                                            isChecked 
+                                                ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 font-medium' 
+                                                : 'border-slate-800 text-slate-400 hover:bg-slate-900/50 hover:text-slate-300'
+                                        }`}>
+                                            <input
+                                                type="checkbox"
+                                                checked={isChecked}
+                                                onChange={() => toggleRole(r.role_id)}
+                                                className="rounded border-slate-700 text-emerald-500 focus:ring-emerald-500/20 bg-slate-900"
+                                            />
+                                            <span>{r.role_name}</span>
+                                        </label>
+                                    );
+                                })
+                            ) : (
+                                <p className="text-xs text-slate-500 col-span-full">No roles loaded.</p>
+                            )}
                         </div>
                     </div>
                     <div>

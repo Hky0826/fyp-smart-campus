@@ -405,12 +405,37 @@ class SQLiteEdgeDB:
             finally:
                 conn.close()
 
-    def save_policy_metadata(self, *, node_id: int | None, policy_version: str | None, synced_at: str | None) -> None:
+    def save_device_rbac_delta(self, rbac: List[Dict[str, Any]]) -> None:
+        with self.lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            try:
+                cursor.execute("DELETE FROM device_rbac")
+                for entry in rbac:
+                    cursor.execute(
+                        """
+                        INSERT INTO device_rbac (device_id, role_id, last_synced_at)
+                        VALUES (?, ?, CURRENT_TIMESTAMP)
+                        """,
+                        (entry["device_id"], entry["role_id"]),
+                    )
+                conn.commit()
+                logger.info("Processed delta update for %s Device RBAC entries", len(rbac))
+            except Exception:
+                conn.rollback()
+                logger.exception("Failed to commit Device RBAC delta")
+                raise
+            finally:
+                conn.close()
+
+    def save_policy_metadata(self, *, node_id: int | None, policy_version: str | None, synced_at: str | None, device_id: str | None = None) -> None:
         with self.lock:
             conn = self._get_connection()
             try:
                 values = {"cloud_node_id": node_id, "policy_version": policy_version, "policy_synced_at": synced_at}
-                if any(value is None for value in values.values()):
+                if device_id:
+                    values["cloud_device_id"] = device_id
+                if any(value is None for k, value in values.items() if k != "cloud_device_id"):
                     conn.execute("DELETE FROM sync_metadata WHERE key IN ('cloud_node_id', 'policy_version', 'policy_synced_at')")
                 else:
                     for key, value in values.items():
@@ -905,7 +930,14 @@ class DownstreamSyncWorker:
                 data.get("user_roles", data.get("device_user_roles", [])),
             )
             self.db.save_rbac_delta(data.get("node_rbac", []))
-            self.db.save_policy_metadata(node_id=data.get("node_id"), policy_version=data.get("policy_version"), synced_at=data.get("policy_synced_at") or data.get("timestamp"))
+            if "device_rbac" in data:
+                self.db.save_device_rbac_delta(data.get("device_rbac", []))
+            self.db.save_policy_metadata(
+                node_id=data.get("node_id"),
+                policy_version=data.get("policy_version"),
+                synced_at=data.get("policy_synced_at") or data.get("timestamp"),
+                device_id=self.device_id,
+            )
 
             deleted_ids = data.get("deleted_user_ids", [])
             if deleted_ids:

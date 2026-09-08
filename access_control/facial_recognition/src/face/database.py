@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import sqlite3
 import threading
 from pathlib import Path
@@ -138,7 +139,7 @@ class DeviceUserRepository:
             logger.info("Loaded %s templates for user %s", count, user_id)
         return templates
 
-    def evaluate_access(self, user_id: int | str, node_id: int | None, now=None) -> AccessDecision:
+    def evaluate_access(self, user_id: int | str, node_id: int | None = None, now=None, device_id: Optional[str] = None) -> AccessDecision:
         """Evaluate the complete, locally cached authorization snapshot."""
         try:
             conn = self._connect()
@@ -154,9 +155,37 @@ class DeviceUserRepository:
             meta = {r[0]: r[1] for r in conn.execute("SELECT key, val FROM sync_metadata").fetchall()}
             configured_node = meta.get("cloud_node_id")
             effective_node = int(configured_node) if configured_node is not None else node_id
-            allowed_roles = [r[0] for r in conn.execute(
-                "SELECT role_id FROM device_node_rbac WHERE node_id = ?", (effective_node,)
-            ).fetchall()]
+
+            # Device RBAC check (primary)
+            configured_device = meta.get("cloud_device_id") or meta.get("device_id")
+            effective_device = device_id or configured_device or os.getenv("EDGE_SYNC_DEVICE_ID") or os.getenv("ACCESS_DEVICE_ID")
+            allowed_roles = None
+
+            try:
+                # Check if device_rbac table exists and has entries
+                rbac_count = conn.execute("SELECT COUNT(*) FROM device_rbac").fetchone()[0]
+                if rbac_count > 0:
+                    if effective_device:
+                        allowed_roles = [r[0] for r in conn.execute(
+                            "SELECT role_id FROM device_rbac WHERE device_id = ?", (str(effective_device),)
+                        ).fetchall()]
+                    else:
+                        dev_rows = conn.execute("SELECT DISTINCT device_id FROM device_rbac").fetchall()
+                        if len(dev_rows) == 1:
+                            allowed_roles = [r[0] for r in conn.execute(
+                                "SELECT role_id FROM device_rbac WHERE device_id = ?", (dev_rows[0][0],)
+                            ).fetchall()]
+                        else:
+                            allowed_roles = [r[0] for r in conn.execute("SELECT DISTINCT role_id FROM device_rbac").fetchall()]
+            except (sqlite3.OperationalError, sqlite3.DatabaseError):
+                pass
+
+            # Fallback to node_rbac for backwards compatibility if device_rbac is not populated
+            if allowed_roles is None:
+                allowed_roles = [r[0] for r in conn.execute(
+                    "SELECT role_id FROM device_node_rbac WHERE node_id = ?", (effective_node,)
+                ).fetchall()]
+
             policy_version = meta.get("policy_version")
             synced_at = meta.get("policy_synced_at")
             def parse(value):

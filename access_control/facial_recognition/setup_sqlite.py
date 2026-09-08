@@ -102,6 +102,24 @@ def migrate_legacy_schema(cursor: sqlite3.Cursor) -> None:
         """
     )
 
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS device_rbac (
+            device_id TEXT NOT NULL,
+            role_id INTEGER NOT NULL,
+            last_synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (device_id, role_id),
+            FOREIGN KEY (role_id) REFERENCES device_roles(role_id) ON DELETE CASCADE ON UPDATE CASCADE
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_device_rbac_role_id
+        ON device_rbac(role_id)
+        """
+    )
+
     user_columns = table_columns(cursor, "device_users")
     if "face_vector" in user_columns:
         template_expr = "COALESCE(NULLIF(template_name, ''), 'front')" if "template_name" in user_columns else "'front'"

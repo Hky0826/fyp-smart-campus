@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
-from app.models.models import Role, User, Admin, Building, Floorplan, Node, Edge, Department, Faculty, Programme, Staff, UserRole
+from app.models.models import Role, User, Admin, Building, Floorplan, Node, Edge, Department, Faculty, Programme, Staff, UserRole, Device, DeviceRBAC, NodeRBAC
 from app.core.security import get_password_hash, validate_strong_password
 
 def create_database():
@@ -264,6 +264,37 @@ def run_migrations():
                 print("Migration: 'updated_at' column added and backfilled successfully.")
             else:
                 print("Migration: 'updated_at' column already exists, skipping.")
+
+            # Check if device_rbac table exists
+            result = conn.execute(text(
+                "SELECT COUNT(*) FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'device_rbac'"
+            ))
+            table_exists = result.scalar() > 0
+
+            if not table_exists:
+                print("Migration: Creating 'device_rbac' table...")
+                conn.execute(text(
+                    "CREATE TABLE IF NOT EXISTS `device_rbac` ("
+                    "  `device_id` VARCHAR(100) NOT NULL,"
+                    "  `role_id` INT NOT NULL,"
+                    "  PRIMARY KEY (`device_id`, `role_id`),"
+                    "  KEY `role_id` (`role_id`),"
+                    "  CONSTRAINT `fk_device_rbac_device` FOREIGN KEY (`device_id`) REFERENCES `devices` (`device_id`) ON DELETE CASCADE,"
+                    "  CONSTRAINT `fk_device_rbac_role` FOREIGN KEY (`role_id`) REFERENCES `roles` (`role_id`) ON DELETE CASCADE"
+                    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;"
+                ))
+                conn.execute(text(
+                    "INSERT IGNORE INTO `device_rbac` (`device_id`, `role_id`) "
+                    "SELECT d.`device_id`, nr.`role_id` "
+                    "FROM `devices` d "
+                    "JOIN `node_rbac` nr ON d.`node_id` = nr.`node_id`;"
+                ))
+                conn.commit()
+                print("Migration: 'device_rbac' created and backfilled successfully.")
+            else:
+                print("Migration: 'device_rbac' table already exists, skipping.")
     except Exception as e:
         print(f"Migration error: {e}")
 

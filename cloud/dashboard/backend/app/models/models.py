@@ -115,6 +115,7 @@ class Role(Base):
     users = relationship("User", secondary="user_roles", back_populates="roles")
     node_rbac = relationship("NodeRBAC", back_populates="role", cascade="all, delete-orphan")
     edge_rbac = relationship("EdgeRBAC", back_populates="role", cascade="all, delete-orphan")
+    device_rbac = relationship("DeviceRBAC", back_populates="role", cascade="all, delete-orphan")
 
 class User(Base):
     __tablename__ = "users"
@@ -506,6 +507,16 @@ class Device(Base):
     credential_rotated_at = Column(DateTime, nullable=True)
     
     node = relationship("Node")
+    device_rbac = relationship("DeviceRBAC", back_populates="device", cascade="all, delete-orphan")
+
+class DeviceRBAC(Base):
+    __tablename__ = "device_rbac"
+    
+    device_id = Column(String(100), ForeignKey("devices.device_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    role_id = Column(Integer, ForeignKey("roles.role_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    
+    device = relationship("Device", back_populates="device_rbac")
+    role = relationship("Role", back_populates="device_rbac")
 
 class NodeRBAC(Base):
     __tablename__ = "node_rbac"

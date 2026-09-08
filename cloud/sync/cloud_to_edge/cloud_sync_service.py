@@ -25,7 +25,7 @@ import requests
 
 from app.core.database import get_db, Base, engine
 from app.core.security import verify_super_admin
-from app.models.models import User, Role, NodeRBAC, Device, UserRole, DeletedUser
+from app.models.models import User, Role, NodeRBAC, Device, DeviceRBAC, UserRole, DeletedUser
 from app.core.device_auth import decrypt_device_secret, require_signed_device_request, bind_device_id, sign_request
 from sync.callback_security import validate_callback_url
 
@@ -66,6 +66,11 @@ class RoleSyncResponse(BaseModel):
     role_name: str
     last_synced_at: str
 
+class DeviceRbacSyncResponse(BaseModel):
+    device_id: str
+    role_id: int
+    last_synced_at: str
+
 class NodeRbacSyncResponse(BaseModel):
     node_id: int
     role_id: int
@@ -81,6 +86,7 @@ class DeltaSyncResponse(BaseModel):
     roles: List[RoleSyncResponse]
     user_roles: List[UserRoleSyncResponse]
     node_rbac: List[NodeRbacSyncResponse]
+    device_rbac: List[DeviceRbacSyncResponse] = Field(default_factory=list)
     deleted_user_ids: List[int] = Field(default_factory=list)
     timestamp: str
     node_id: Optional[int] = None
@@ -354,6 +360,16 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
             ) for rb in rbac_list
         ]
 
+        # Fetching Device RBAC Rules
+        device_rbac_list = db.query(DeviceRBAC).all()
+        sync_device_rbac = [
+            DeviceRbacSyncResponse(
+                device_id=dr.device_id,
+                role_id=dr.role_id,
+                last_synced_at=datetime.datetime.utcnow().isoformat()
+            ) for dr in device_rbac_list
+        ]
+
         # Assignment mappings are also a complete snapshot, independent of the
         # user delta.  This captures role-only edits and assignment removals.
         user_roles_list = db.query(UserRole).all()
@@ -377,6 +393,7 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
             "roles": sync_roles,
             "user_roles": sync_user_roles,
             "node_rbac": sync_rbac,
+            "device_rbac": sync_device_rbac,
             "deleted_user_ids": deleted_user_ids,
             "timestamp": policy_synced_at,
             "node_id": None,

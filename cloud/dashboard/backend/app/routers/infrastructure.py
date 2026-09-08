@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
@@ -15,8 +15,16 @@ from app.core.config import settings
 from app.core.device_auth import generate_device_secret, encrypt_device_secret, require_signed_device_request, bind_device_id
 from app.core.private_storage import safe_existing_path
 from app.core.security import verify_super_admin, get_current_admin
-from app.models.models import Device, NodeRBAC, EdgeRBAC, JWTSession, AuthenticationLog, SurveillanceLog, Node, Role, Edge, User, Admin, Floorplan, Course, UploadedDocument
+from app.models.models import Device, DeviceRBAC, NodeRBAC, EdgeRBAC, JWTSession, AuthenticationLog, SurveillanceLog, Node, Role, Edge, User, Admin, Floorplan, Course, UploadedDocument
 from app.schemas import schemas
+
+try:
+    from sync.cloud_to_edge.cloud_sync_service import push_sync_to_all_edges
+except ImportError:
+    try:
+        from cloud_sync_service import push_sync_to_all_edges
+    except ImportError:
+        push_sync_to_all_edges = None
 
 router = APIRouter(prefix="/infra", tags=["Infrastructure & Access Control"])
 
@@ -95,10 +103,16 @@ def _generate_device_id(db: Session, device_type: schemas.DeviceTypeEnum) -> str
 
 @router.get("/devices", response_model=List[schemas.DeviceResponse])
 def list_devices(db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
-    return db.query(Device).all()
+    devices = db.query(Device).options(joinedload(Device.device_rbac)).all()
+    results = []
+    for d in devices:
+        resp = schemas.DeviceResponse.model_validate(d)
+        resp.allowed_role_ids = [r.role_id for r in d.device_rbac]
+        results.append(resp)
+    return results
 
 @router.post("/devices", response_model=schemas.DeviceResponse)
-def create_device(device_in: schemas.DeviceCreate, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def create_device(device_in: schemas.DeviceCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
     device_id = device_in.device_id or _generate_device_id(db, device_in.device_type)
     existing = db.query(Device).filter_by(device_id=device_id).first()
     if existing:
@@ -121,9 +135,22 @@ def create_device(device_in: schemas.DeviceCreate, db: Session = Depends(get_db)
         credential_rotated_at=datetime.utcnow(),
     )
     db.add(device)
+    db.flush()
+
+    if device_in.allowed_role_ids:
+        for r_id in device_in.allowed_role_ids:
+            role = db.query(Role).filter_by(role_id=r_id).first()
+            if role:
+                db.add(DeviceRBAC(device_id=device.device_id, role_id=r_id))
+
     db.commit()
     db.refresh(device)
-    return {**schemas.DeviceResponse.model_validate(device).model_dump(), "provisioned_secret": provisioned_secret}
+    resp = schemas.DeviceResponse.model_validate(device)
+    resp.allowed_role_ids = [r.role_id for r in device.device_rbac]
+    resp.provisioned_secret = provisioned_secret
+    if push_sync_to_all_edges and background_tasks:
+        background_tasks.add_task(push_sync_to_all_edges, db)
+    return resp
 
 
 @router.post("/devices/{device_id}/rotate-credential")
@@ -138,7 +165,7 @@ def rotate_device_credential(device_id: str, db: Session = Depends(get_db), curr
     return {"device_id": device.device_id, "provisioned_secret": secret, "warning": "Store this secret in deployment secret storage; it will not be shown again."}
 
 @router.put("/devices/{device_id}", response_model=schemas.DeviceResponse)
-def update_device(device_id: str, device_in: schemas.DeviceUpdate, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def update_device(device_id: str, device_in: schemas.DeviceUpdate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
     device = db.query(Device).filter_by(device_id=device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -149,12 +176,23 @@ def update_device(device_id: str, device_in: schemas.DeviceUpdate, db: Session =
         if not node:
             raise HTTPException(status_code=400, detail="Node ID does not exist")
             
-    for field, val in device_in.model_dump(exclude_unset=True).items():
+    for field, val in device_in.model_dump(exclude_unset=True, exclude={"allowed_role_ids"}).items():
         setattr(device, field, val)
+
+    if device_in.allowed_role_ids is not None:
+        db.query(DeviceRBAC).filter_by(device_id=device_id).delete()
+        for r_id in device_in.allowed_role_ids:
+            role = db.query(Role).filter_by(role_id=r_id).first()
+            if role:
+                db.add(DeviceRBAC(device_id=device_id, role_id=r_id))
         
     db.commit()
     db.refresh(device)
-    return device
+    resp = schemas.DeviceResponse.model_validate(device)
+    resp.allowed_role_ids = [r.role_id for r in device.device_rbac]
+    if push_sync_to_all_edges and background_tasks:
+        background_tasks.add_task(push_sync_to_all_edges, db)
+    return resp
 
 @router.post("/devices/{device_id}/heartbeat")
 def record_heartbeat(device_id: str, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
@@ -212,6 +250,62 @@ def delete_device(device_id: str, db: Session = Depends(get_db), current_admin=D
             detail="Device cannot be deleted because another record references it. Deactivate it instead.",
         ) from exc
     return {"detail": "Device deleted successfully"}
+
+# ==========================================
+# DEVICE RBAC CLEARANCE MATRIX CRUD
+# ==========================================
+@router.get("/device-rbac", response_model=List[schemas.DeviceRBACBase])
+def list_device_rbac(device_id: Optional[str] = None, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+    query = db.query(DeviceRBAC)
+    if device_id:
+        query = query.filter_by(device_id=device_id)
+    return query.all()
+
+@router.post("/device-rbac", response_model=schemas.DeviceRBACBase)
+def grant_device_clearance(rbac_in: schemas.DeviceRBACBase, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+    device = db.query(Device).filter_by(device_id=rbac_in.device_id).first()
+    if not device:
+        raise HTTPException(status_code=400, detail="Device not found")
+    role = db.query(Role).filter_by(role_id=rbac_in.role_id).first()
+    if not role:
+        raise HTTPException(status_code=400, detail="Role not found")
+        
+    existing = db.query(DeviceRBAC).filter_by(device_id=rbac_in.device_id, role_id=rbac_in.role_id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Device clearance rule already exists")
+        
+    rbac = DeviceRBAC(device_id=rbac_in.device_id, role_id=rbac_in.role_id)
+    db.add(rbac)
+    db.commit()
+    if push_sync_to_all_edges and background_tasks:
+        background_tasks.add_task(push_sync_to_all_edges, db)
+    return rbac
+
+@router.delete("/device-rbac/{device_id}/{role_id}")
+def revoke_device_clearance(device_id: str, role_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+    rbac = db.query(DeviceRBAC).filter_by(device_id=device_id, role_id=role_id).first()
+    if not rbac:
+        raise HTTPException(status_code=404, detail="Device clearance rule not found")
+    db.delete(rbac)
+    db.commit()
+    if push_sync_to_all_edges and background_tasks:
+        background_tasks.add_task(push_sync_to_all_edges, db)
+    return {"detail": "Device clearance rule revoked successfully"}
+
+@router.put("/devices/{device_id}/rbac", response_model=List[int])
+def set_device_clearance(device_id: str, role_ids: List[int], background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+    device = db.query(Device).filter_by(device_id=device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    db.query(DeviceRBAC).filter_by(device_id=device_id).delete()
+    for r_id in role_ids:
+        role = db.query(Role).filter_by(role_id=r_id).first()
+        if role:
+            db.add(DeviceRBAC(device_id=device_id, role_id=r_id))
+    db.commit()
+    if push_sync_to_all_edges and background_tasks:
+        background_tasks.add_task(push_sync_to_all_edges, db)
+    return role_ids
 
 # ==========================================
 # NODE RBAC CLEARANCE MATRIX CRUD

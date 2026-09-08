@@ -1182,7 +1182,7 @@ function CampusMapTab() {
                 if (subTab === "users") return <UserForm item={selectedItem} roles={refs.roles} nodes={refs.nodes} programmes={refs.programmes} faculties={refs.faculties} departments={refs.departments} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (subTab === "roles") return <RoleForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "rag" && subTab === "documents") return <DocumentForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
-                if (currentTab === "infra" && subTab === "devices") return <DeviceForm item={selectedItem} nodes={refs.nodes} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
+                if (currentTab === "infra" && subTab === "devices") return <DeviceForm item={selectedItem} nodes={refs.nodes} roles={refs.roles} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "courses") return <CourseForm item={selectedItem} programmes={refs.programmes} faculties={refs.faculties} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "enrollments") return <EnrollmentForm item={selectedItem} courses={refs.courses} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "timetables") return <TimetableForm item={selectedItem} nodes={refs.nodes} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
@@ -2117,6 +2117,7 @@ function CampusMapTab() {
                                                             <th className="p-4 pl-6 font-semibold">Device</th>
                                                             <th className="p-4 font-semibold">IP Address</th>
                                                             <th className="p-4 font-semibold">Type</th>
+                                                            <th className="p-4 font-semibold">Authorized Roles</th>
                                                             <th className="p-4 font-semibold">Last Seen</th>
                                                             <th className="p-4 pr-6 text-right font-semibold">Actions</th>
                                                         </tr>
@@ -2136,6 +2137,23 @@ function CampusMapTab() {
                                                                 <td className="p-4 text-xs font-mono text-slate-400">{item.ip_address || 'N/A'}</td>
                                                                 <td className="p-4">
                                                                     <span className="px-2.5 py-1 bg-slate-800 border border-slate-700/50 text-slate-300 rounded-md font-bold text-[10px] tracking-wider uppercase">{item.device_type}</span>
+                                                                </td>
+                                                                <td className="p-4">
+                                                                    <div className="flex flex-wrap gap-1 max-w-xs">
+                                                                        {item.allowed_role_ids && item.allowed_role_ids.length > 0 ? (
+                                                                            item.allowed_role_ids.map(roleId => {
+                                                                                const roleObj = refs.roles?.find(r => r.role_id === roleId);
+                                                                                const roleName = roleObj ? roleObj.role_name : `Role ${roleId}`;
+                                                                                return (
+                                                                                    <span key={roleId} className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded text-[11px] font-medium">
+                                                                                        {roleName}
+                                                                                    </span>
+                                                                                );
+                                                                            })
+                                                                        ) : (
+                                                                            <span className="text-xs text-rose-400/80 italic font-mono">None (Deny-All)</span>
+                                                                        )}
+                                                                    </div>
                                                                 </td>
                                                                 <td className="p-4">
                                                                     {(() => {
