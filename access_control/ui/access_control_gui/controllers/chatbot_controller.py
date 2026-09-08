@@ -475,7 +475,7 @@ class _GreetingWorker(QThread):
         except Exception as exc:
             if self.isInterruptionRequested():
                 return
-            self.errorOccurred.emit(str(exc))
+            logger.warning("Greeting audio playback failed: %s", exc)
 
     def stop(self) -> None:
         self.requestInterruption()
@@ -652,15 +652,21 @@ class ChatbotController(QObject):
     @Slot()
     def _on_turn_completed(self) -> None:
         self._rag_status = ""
+        self._partial_text = ""
+        self._transcribed_text = ""
         self.ragStatusChanged.emit()
+        self.partialTextChanged.emit()
+        self.transcribedTextChanged.emit()
 
     @Slot(dict)
     def _on_worker_response(self, payload: dict) -> None:
         self._set_busy(self._speaking)
         self._partial_text = ""
         self._transcribed_text = ""
+        self._rag_status = ""
         self.partialTextChanged.emit()
         self.transcribedTextChanged.emit()
+        self.ragStatusChanged.emit()
         self.busyChanged.emit()
         self.responseReceived.emit(payload)
 

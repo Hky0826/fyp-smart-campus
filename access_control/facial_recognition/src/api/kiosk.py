@@ -761,6 +761,8 @@ def create_kiosk_router(
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    @router.post("/chat/greeting/audio", response_model=ChatGreetingAudioResponse)
     def chat_greeting_audio() -> ChatGreetingAudioResponse:
         token = store.current_token()
         try:

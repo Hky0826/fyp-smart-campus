@@ -35,6 +35,20 @@ Item {
         }
     }
 
+    onSpeakingChanged: {
+        if (speaking) {
+            history.userScrolledUp = false
+            history.scrollToBottom()
+        }
+    }
+
+    onBusyChanged: {
+        if (busy) {
+            history.userScrolledUp = false
+            history.scrollToBottom()
+        }
+    }
+
     function getInitials(name) {
         if (!name || name === "Visitor") return "AT"
         var parts = name.trim().split(" ")
@@ -66,7 +80,8 @@ Item {
             radius: 8
             color: "#020617" // Preview: bg-slate-950
             border.width: 2
-            border.color: "#22d3ee" // Preview: border-cyan-400
+            border.color: root.verifying ? "#38bdf8" : (root.ownerPresent ? "#22d3ee" : "#f59e0b")
+            Behavior on border.color { ColorAnimation { duration: 250 } }
 
             // Live Verification Pill (Bottom Left)
             Rectangle {
@@ -452,15 +467,6 @@ Item {
                 model: root.messages || []
 
                 property bool userScrolledUp: false
-                property real savedScrollOffset: 0
-                onMovementStarted: userScrolledUp = true
-                ScrollBar.vertical: ScrollBar {
-                    policy: ScrollBar.AsNeeded
-                    onPressedChanged: {
-                        history.userScrolledUp = pressed || !history.atYEnd
-                        if (!pressed) history.savedScrollOffset = history.contentY - history.originY
-                    }
-                }
 
                 function scrollToBottom() {
                     Qt.callLater(function() {
@@ -468,9 +474,18 @@ Item {
                     })
                 }
 
+                onMovementStarted: userScrolledUp = true
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                    onPressedChanged: {
+                        if (!pressed && (history.atYEnd || history.contentY >= history.contentHeight - history.height - 60)) {
+                            history.userScrolledUp = false
+                        }
+                    }
+                }
+
                 onMovementEnded: {
-                    savedScrollOffset = contentY - originY;
-                    if (history.atYEnd || history.contentY >= history.contentHeight - history.height - 30) {
+                    if (history.atYEnd || history.contentY >= history.contentHeight - history.height - 60) {
                         userScrolledUp = false
                     } else {
                         userScrolledUp = true
@@ -478,8 +493,7 @@ Item {
                 }
 
                 onFlickEnded: {
-                    savedScrollOffset = contentY - originY;
-                    if (history.atYEnd || history.contentY >= history.contentHeight - history.height - 30) {
+                    if (history.atYEnd || history.contentY >= history.contentHeight - history.height - 60) {
                         userScrolledUp = false
                     } else {
                         userScrolledUp = true
@@ -491,11 +505,7 @@ Item {
                 }
 
                 onModelChanged: {
-                    if (!userScrolledUp) {
-                        scrollToBottom()
-                    } else {
-                        Qt.callLater(function() { history.contentY = history.originY + history.savedScrollOffset })
-                    }
+                    if (!userScrolledUp) scrollToBottom()
                 }
 
                 onContentHeightChanged: {
@@ -511,33 +521,65 @@ Item {
                 footer: ColumnLayout {
                     width: history.width
                     spacing: 8
-            // RAG Status Banner (searching indicator)
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.margins: 8
-                implicitHeight: 34
-                radius: 6
-                color: "#e0f2fe"
-                border.width: 1
-                border.color: "#38bdf8"
-                visible: root.busy || root.ragStatus.length > 0
 
-                RowLayout {
-                    anchors.centerIn: parent
-                    spacing: 6
-                    BusyIndicator {
-                        Layout.preferredWidth: 22
-                        Layout.preferredHeight: 22
-                        running: root.busy || root.ragStatus.length > 0
+                    // Inline Organic Assistant Thinking / RAG Indicator
+                    Rectangle {
+                        id: inlineThinkingBubble
+                        visible: root.busy || root.ragStatus.length > 0
+                        width: Math.min(history.width * 0.75, 320)
+                        implicitHeight: 36
+                        radius: 10
+                        color: "#f0fdf4" // soft emerald-50
+                        border.width: 1
+                        border.color: "#86efac" // emerald-300
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            spacing: 8
+
+                            // 3 Animated Bouncing Dots
+                            Row {
+                                spacing: 4
+                                Layout.alignment: Qt.AlignVCenter
+
+                                Repeater {
+                                    model: 3
+                                    Rectangle {
+                                        width: 6
+                                        height: 6
+                                        radius: 3
+                                        color: "#059669" // emerald-600
+                                        anchors.verticalCenter: parent.verticalCenter
+
+                                        SequentialAnimation on opacity {
+                                            loops: Animation.Infinite
+                                            PauseAnimation { duration: index * 160 }
+                                            NumberAnimation { to: 0.3; duration: 350; easing.type: Easing.InOutQuad }
+                                            NumberAnimation { to: 1.0; duration: 350; easing.type: Easing.InOutQuad }
+                                        }
+
+                                        SequentialAnimation on scale {
+                                            loops: Animation.Infinite
+                                            PauseAnimation { duration: index * 160 }
+                                            NumberAnimation { to: 0.7; duration: 350; easing.type: Easing.InOutQuad }
+                                            NumberAnimation { to: 1.2; duration: 350; easing.type: Easing.InOutQuad }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.ragStatus.length > 0 ? "Searching campus database…" : (root.speaking ? "Generating response…" : "Thinking…")
+                                color: "#065f46" // emerald-800
+                                font.pixelSize: 11
+                                font.bold: true
+                                elide: Text.ElideRight
+                            }
+                        }
                     }
-                    Text {
-                        text: root.ragStatus.length > 0 ? "Searching database…" : (root.speaking ? "Replying…" : "Heard you. Thinking…")
-                        color: "#0369a1"
-                        font.pixelSize: 11
-                        font.bold: true
-                    }
-                }
-            }
 
             // Campus Navigation Card (Matches Preview turn-by-turn route)
             Rectangle {
@@ -753,11 +795,11 @@ Item {
                 }
             }
 
-            // Error display if present
+            // Error display if present (suppress 404/Not Found technical codes)
             Text {
                 Layout.fillWidth: true
                 text: root.errorText
-                visible: root.errorText.length > 0
+                visible: root.errorText.length > 0 && root.errorText !== "Not Found" && !root.errorText.includes("404")
                 color: "#dc2626"
                 font.pixelSize: 11
                 elide: Text.ElideRight
@@ -931,6 +973,55 @@ Item {
                         font.pixelSize: 10
                         font.weight: Font.Medium
                     }
+                }
+            }
+        }
+
+        // Floating "Jump to Latest" Button (appears when user manually scrolls up)
+        Rectangle {
+            id: jumpToBottomBtn
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            anchors.bottomMargin: 54
+            anchors.rightMargin: 16
+            implicitWidth: jumpRow.implicitWidth + 24
+            implicitHeight: 32
+            radius: 16
+            color: "#ffffff"
+            border.width: 1
+            border.color: "#c7d2fe" // indigo-200
+            visible: history.userScrolledUp && history.contentHeight > history.height
+            z: 40
+
+            opacity: visible ? 1.0 : 0.0
+            Behavior on opacity { NumberAnimation { duration: 150 } }
+
+            Row {
+                id: jumpRow
+                anchors.centerIn: parent
+                spacing: 6
+
+                Text {
+                    text: "↓"
+                    color: "#4f46e5"
+                    font.pixelSize: 12
+                    font.bold: true
+                }
+
+                Text {
+                    text: "Jump to latest"
+                    color: "#3730a3"
+                    font.pixelSize: 11
+                    font.bold: true
+                }
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    history.userScrolledUp = false
+                    history.scrollToBottom()
                 }
             }
         }

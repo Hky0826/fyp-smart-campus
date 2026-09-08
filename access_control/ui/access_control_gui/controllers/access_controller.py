@@ -160,9 +160,11 @@ class AccessController(QObject):
     def startChatVerification(self) -> None:
         self._chat_error = ""
         self._camera_error = ""
+        self._transcribed_text = ""
+        self._partial_text = ""
         self._set_chat_verification_active(True)
         self._chatbot.stopVoiceLoop()
-        self._run_worker("stop-chat-audio", self._api.stop_chat_audio)
+        self._chatbot.stopAudioPlayback()
         self._emit_all()
         self._schedule_frame(0)
 
@@ -311,6 +313,8 @@ class AccessController(QObject):
                         history.append({"role": "assistant", "content": bot_text, "created_at": now_iso, "citations": citations})
                     self._live_history = history
                     self._merge_chat_session({**self._session, "conversation_history": history})
+                self._transcribed_text = ""
+                self._partial_text = ""
                 self._chat_error = ""
             elif name == "lock-chat":
                 self._merge_chat_session(payload.get("session"))
@@ -568,15 +572,32 @@ class AccessController(QObject):
         if not session or session.get("locked"):
             return []
         history = list(session.get("conversation_history") or [])
-        
-        has_temp_user = bool(getattr(self, "_transcribed_text", ""))
-        has_temp_bot = bool(getattr(self, "_partial_text", ""))
-        
-        if has_temp_user:
-            history.append({"role": "user", "content": self._transcribed_text})
-        if has_temp_bot:
-            history.append({"role": "assistant", "content": self._partial_text})
-            
+
+        temp_user = str(getattr(self, "_transcribed_text", "") or "").strip()
+        temp_bot = str(getattr(self, "_partial_text", "") or "").strip()
+
+        # Deduplicate user transcript if already committed to permanent history
+        if temp_user:
+            already_committed = False
+            for item in reversed(history[-2:]):
+                if item.get("role") == "user":
+                    existing = str(item.get("content") or "").strip()
+                    if existing == temp_user or temp_user in existing or existing in temp_user:
+                        already_committed = True
+                        break
+            if not already_committed:
+                history.append({"role": "user", "content": temp_user})
+
+        # Deduplicate assistant streaming text if already committed
+        if temp_bot:
+            already_committed = False
+            if history and history[-1].get("role") == "assistant":
+                existing_bot = str(history[-1].get("content") or "").strip()
+                if existing_bot == temp_bot or temp_bot in existing_bot:
+                    already_committed = True
+            if not already_committed:
+                history.append({"role": "assistant", "content": temp_bot})
+
         return history
 
     def _get_session_name(self) -> str:
