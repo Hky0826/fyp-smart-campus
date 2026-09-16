@@ -367,28 +367,58 @@ class KioskStateStore:
     ) -> ChatSessionView:
         now = self._now().isoformat()
         with self._lock:
-            if self._chat_session is None:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No active chatbot session.")
-            if self._chat_session.view.locked or self._chat_session.view.presence_state != "OWNER_PRESENT":
-                raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Chatbot session is locked.")
-            self._chat_session.history.append(ChatMessage(role="user", content=user_text, created_at=now))
-            self._chat_session.history.append(
+            target_session = self._chat_session
+            if target_session is None:
+                target_session = self._recoverable_chat_session
+            if target_session is None:
+                self._chat_session = _StoredChatSession(
+                    view=ChatSessionView(
+                        session_id=str(uuid.uuid4()),
+                        authenticated_user_id=None,
+                        email=None,
+                        full_name="Visitor",
+                        roles=[],
+                        cloud_session_id=None,
+                        owner_face_track_id=None,
+                        owner_absent_since=None,
+                        last_owner_seen_at=now,
+                        last_interaction_at=now,
+                        presence_state="OWNER_PRESENT",
+                        expires_at=None,
+                        locked=False,
+                    ),
+                    token=None,
+                    owner_embedding=None,
+                    history=[],
+                )
+                target_session = self._chat_session
+
+            target_session.history.append(ChatMessage(role="user", content=user_text, created_at=now))
+            target_session.history.append(
                 ChatMessage(role="assistant", content=answer, created_at=now, citations=citations)
             )
-            self._chat_session.view.last_interaction_at = now
-            self._chat_session.owner_absent_since = None
-            self._chat_session.view.owner_absent_since = None
-            self._chat_session.view.presence_state = "OWNER_PRESENT"
-            self._chat_session.view.last_owner_seen_at = now
-            return self._safe_chat_view_locked() or self._chat_session.view
+            target_session.view.last_interaction_at = now
+            if target_session.view.presence_state == "OWNER_PRESENT":
+                target_session.owner_absent_since = None
+                target_session.view.owner_absent_since = None
+                target_session.view.last_owner_seen_at = now
+            return self._safe_chat_view_locked() or target_session.view
 
     def current_token(self) -> EdgeAuthToken | None:
         with self._lock:
-            if self._chat_session is None:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No active chatbot session.")
-            if self._chat_session.view.locked or self._chat_session.view.presence_state != "OWNER_PRESENT":
-                raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Chatbot session is locked.")
-            return self._chat_session.token
+            if self._chat_session is not None:
+                return self._chat_session.token
+            if self._recoverable_chat_session is not None:
+                return self._recoverable_chat_session.token
+            return None
+
+    def recoverable_chat_session_view(self) -> ChatSessionView | None:
+        with self._lock:
+            if self._recoverable_chat_session is None:
+                return None
+            view = self._recoverable_chat_session.view.model_copy(deep=True)
+            view.conversation_history = list(self._recoverable_chat_session.history)
+            return view
 
     def current_chat_session(self) -> ChatSessionView | None:
         """Return a snapshot of the active chat session for API responses."""
@@ -772,7 +802,9 @@ def create_kiosk_router(
             raise HTTPException(status_code=status_code, detail=str(exc)) from exc
         session = store.current_chat_session()
         if session is None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No active chatbot session.")
+            session = store.recoverable_chat_session_view()
+        if session is None:
+            session = store.start_chat_session(None)
         return ChatGreetingAudioResponse(
             session=session,
             text=str(response.get("text_response") or "Hi, how may I help you today?"),

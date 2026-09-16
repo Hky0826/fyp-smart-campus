@@ -223,7 +223,9 @@ def plan_turn(text: str, *, context: AuthenticatedChatContext, db, confirmation_
             # Clamp operator-provided values as well as the default.
             http_options=types.HttpOptions(timeout=max(10000, int(rag_settings.PLANNER_TIMEOUT_SECONDS * 1000))),
         )
-        response = client.models.generate_content(
+        from RagChatbot.gemini_client import generate_content_with_retry
+        response = generate_content_with_retry(
+            client=client,
             model=rag_settings.PLANNER_MODEL,
             contents=json.dumps(payload, ensure_ascii=False),
             config=types.GenerateContentConfig(

@@ -65,7 +65,9 @@ def extract_query_from_audio(
     )
 
     try:
-        response = client.models.generate_content(
+        from RagChatbot.gemini_client import generate_content_with_retry
+        response = generate_content_with_retry(
+            client=client,
             model=rag_settings.AUDIO_EXTRACTION_MODEL,
             contents=[audio_part],
             config=types.GenerateContentConfig(

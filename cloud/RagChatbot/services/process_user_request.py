@@ -174,7 +174,9 @@ def _classify_with_flash_lite(query: str) -> dict[str, Any]:
             timeout=max(1000, int(rag_settings.LIVE_BACKEND_TIMEOUT_SECONDS * 1000)),
         ),
     )
-    response = client.models.generate_content(
+    from RagChatbot.gemini_client import generate_content_with_retry
+    response = generate_content_with_retry(
+        client=client,
         model=rag_settings.LIVE_ROUTING_MODEL,
         contents=query,
         config=types.GenerateContentConfig(

@@ -236,7 +236,7 @@ def generate_audio_from_text(text: str, language_code: Optional[str] = None) -> 
 
     # 1. Primary path: Gemini Live Voice Speech Output
     try:
-        from RagChatbot.gemini_client import get_gemini_client
+        from RagChatbot.gemini_client import get_gemini_client, generate_content_with_retry
         from google.genai import types
 
         client = get_gemini_client()
@@ -251,7 +251,8 @@ def generate_audio_from_text(text: str, language_code: Optional[str] = None) -> 
         ]
         for tts_model in tts_models:
             try:
-                response = client.models.generate_content(
+                response = generate_content_with_retry(
+                    client=client,
                     model=tts_model,
                     contents=clean_speech_text,
                     config=types.GenerateContentConfig(

@@ -349,7 +349,7 @@ def _condense_query_with_history(query: str, history: list[dict[str, str]]) -> s
         return query
 
     try:
-        from RagChatbot.gemini_client import get_gemini_client
+        from RagChatbot.gemini_client import get_gemini_client, generate_content_with_retry
         client = get_gemini_client()
         history_lines = [f"User: {h.get('user', '')}\nAssistant: {h.get('assistant', '')}" for h in history[-2:]]
         prompt = (
@@ -359,7 +359,8 @@ def _condense_query_with_history(query: str, history: list[dict[str, str]]) -> s
             f"Follow-up: {query}\n"
             f"Standalone query:"
         )
-        response = client.models.generate_content(
+        response = generate_content_with_retry(
+            client=client,
             model=rag_settings.PLANNER_MODEL,
             contents=prompt,
             config={"temperature": 0.0, "max_output_tokens": 48},
@@ -736,10 +737,15 @@ def process_chat(
     # Step 4-8: Execute through Fast RAG engine
     with StageTimer() as timer:
         from RagChatbot.generation.live_fast_rag import live_fast_rag
-        fast_res = live_fast_rag.process_voice_query(
-            query=sanitized_query,
-            auth_context=context,
-            db=db,
+        from RagChatbot.gemini_client import in_flight_deduplicator
+        dedup_key = f"fast_rag:{tuple(sorted(allowed_levels))}:{sanitized_query.strip().lower()}"
+        fast_res = in_flight_deduplicator.execute(
+            dedup_key,
+            lambda: live_fast_rag.process_voice_query(
+                query=sanitized_query,
+                auth_context=context,
+                db=db,
+            ),
         )
     metrics.rag_ms += timer.elapsed_ms
 

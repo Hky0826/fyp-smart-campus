@@ -20,6 +20,7 @@ from google.genai import types
 
 from RagChatbot.config import rag_settings
 from RagChatbot.embeddings.google_embedding_service import embed_text
+from RagChatbot.gemini_client import generate_content_with_retry, get_gemini_client
 from RagChatbot.generation.query_router import _extract_facets_from_query
 from RagChatbot.personalisation.schemas import AuthenticatedChatContext
 from RagChatbot.retrieval.vector_store import vector_store
@@ -52,10 +53,7 @@ class LiveFastRAG:
     @property
     def client(self) -> genai.Client:
         if self._client is None:
-            api_key = rag_settings.GOOGLE_API_KEY
-            if not api_key:
-                raise RuntimeError("GOOGLE_API_KEY is not configured for LiveFastRAG")
-            self._client = genai.Client(api_key=api_key)
+            self._client = get_gemini_client()
         return self._client
 
     def process_voice_query(
@@ -149,7 +147,8 @@ Role: {role_label}
 """
         model_name = getattr(rag_settings, "LIVE_ROUTING_MODEL", "gemini-3.1-flash-lite")
         try:
-            response = self.client.models.generate_content(
+            response = generate_content_with_retry(
+                client=self.client,
                 model=model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(

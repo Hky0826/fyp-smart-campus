@@ -314,11 +314,13 @@ def _llm_navigation_fallback(query: str, destinations: list[tuple[str, str]]) ->
         return None
 
     try:
-        client = get_gemini_client()
+        from RagChatbot.gemini_client import generate_content_with_retry
+        client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
         destination_context = "\n".join(
             f"- {label} ({node_type})" for label, node_type in destinations
         ) or "- No destination catalog is available"
-        response = client.models.generate_content(
+        response = generate_content_with_retry(
+            client=client,
             model=rag_settings.LLM_MODEL,
             contents=(
                 f"Known navigable destinations from the nodes table:\n{destination_context}\n\n"

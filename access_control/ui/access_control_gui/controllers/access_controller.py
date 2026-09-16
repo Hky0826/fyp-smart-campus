@@ -93,6 +93,7 @@ class AccessController(QObject):
         self._chat_verification_active = False
         self._greeting_session_id: Any = None
         self._frame_in_flight = False
+        self._chat_in_flight = False
         self._face_boxes: list[list[int]] = []
         self._dwell_progress: float = 0.0
         self._presence_detected: bool = False
@@ -184,6 +185,10 @@ class AccessController(QObject):
         cleaned = query.strip()
         if not cleaned:
             return
+        if self._chat_in_flight:
+            logger.debug("Chat message already in flight, ignoring duplicate send: %s", cleaned)
+            return
+        self._chat_in_flight = True
         self._chat_error = ""
         self.uiChanged.emit()
         self._run_worker("chat-message", lambda: self._api.send_chat_message(cleaned))
@@ -325,6 +330,8 @@ class AccessController(QObject):
         finally:
             if name.endswith("frame") and not launched_followup_frame:
                 self._frame_in_flight = False
+            if name in {"chat-message", "chat-audio"}:
+                self._chat_in_flight = False
             self._emit_all()
             self._sync_voice_loop()
             if name == "access-frame" and self._chat_verification_active:
@@ -345,6 +352,8 @@ class AccessController(QObject):
                 self._set_chat_verification_active(False)
         elif name in {"chat-message", "chat-audio", "lock-chat"}:
             self._chat_error = message or "Chatbot request failed."
+        if name in {"chat-message", "chat-audio"}:
+            self._chat_in_flight = False
         elif name.endswith("frame"):
             self._camera_error = message or "Frame processing failed."
         if name.endswith("frame"):

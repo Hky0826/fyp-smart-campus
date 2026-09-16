@@ -16,7 +16,11 @@ from collections.abc import Iterator
 from google.genai import types
 
 from RagChatbot.config import rag_settings
-from RagChatbot.gemini_client import get_gemini_client
+from RagChatbot.gemini_client import (
+    get_gemini_client,
+    generate_content_with_retry,
+    generate_content_stream_with_retry,
+)
 from RagChatbot.generation.prompt_builder import build_prompt
 from RagChatbot.retrieval.ranking import RankedChunk
 
@@ -53,7 +57,8 @@ def generate_answer(
     try:
         client = get_gemini_client()
 
-        response = client.models.generate_content(
+        response = generate_content_with_retry(
+            client=client,
             model=rag_settings.LLM_MODEL,
             contents=user_message,
             config=types.GenerateContentConfig(
@@ -106,7 +111,8 @@ def generate_answer_stream(
     try:
         client = get_gemini_client()
 
-        response_stream = client.models.generate_content_stream(
+        response_stream = generate_content_stream_with_retry(
+            client=client,
             model=rag_settings.LLM_MODEL,
             contents=user_message,
             config=types.GenerateContentConfig(

@@ -75,8 +75,10 @@ def validate_live_request(query: str) -> RequestValidation:
         )
 
     try:
+        from RagChatbot.gemini_client import generate_content_with_retry
         client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
-        response = client.models.generate_content(
+        response = generate_content_with_retry(
+            client=client,
             model=rag_settings.LLM_MODEL,
             contents=sanitized,
             config=types.GenerateContentConfig(
