@@ -51,3 +51,55 @@ def test_received_transcript_activates_processing_feedback():
 
     chat._on_worker_response({"transcribed_input": "Hello", "text_response": "Hi"})
     assert not chat.busy
+
+
+def test_interrupted_response_commits_and_persists_in_history():
+    access, chat = controller()
+
+    # User speaks, assistant streams partial response
+    chat._on_transcribed_text("Where is the lab?")
+    chat._on_text_chunk("The lab is located on ")
+    chat._on_text_chunk("the second floor.")
+
+    assert chat.assistantSpeaking is True
+    # Before interrupt, partial text is visible in messages
+    msgs = access.messages
+    assert len(msgs) == 2
+    assert msgs[0]["content"] == "Where is the lab?"
+    assert msgs[1]["content"] == "The lab is located on the second floor."
+
+    # User clicks Interrupt button (calls stopAudioPlayback)
+    chat.stopAudioPlayback()
+
+    assert chat.assistantSpeaking is False
+    # After interrupt, messages must STILL contain both user query and partial response
+    msgs_after = access.messages
+    assert len(msgs_after) == 2
+    assert msgs_after[0]["content"] == "Where is the lab?"
+    assert msgs_after[1]["content"] == "The lab is located on the second floor."
+
+    # Subsequent background state sync or presence frame must NOT wipe the interrupted bubble
+    access._on_state_event({"active_chat_session": {"session_id": "a", "presence_state": "OWNER_PRESENT", "conversation_history": []}})
+    assert len(access.messages) == 2
+    assert access.messages[1]["content"] == "The lab is located on the second floor."
+
+
+def test_barge_in_preserves_previous_interrupted_assistant_response():
+    access, chat = controller()
+
+    # Turn 1 begins and streams partially
+    chat._on_transcribed_text("First question")
+    chat._on_text_chunk("Partial answer 1...")
+
+    # User barges in by speaking Turn 2 without waiting
+    chat._on_transcribed_text("Second question")
+    chat._on_text_chunk("Complete answer 2")
+    chat._on_worker_response({"transcribed_input": "Second question", "text_response": "Complete answer 2"})
+
+    msgs = access.messages
+    # Both turns must be present: 4 messages in total
+    assert len(msgs) == 4
+    assert msgs[0]["content"] == "First question"
+    assert msgs[1]["content"] == "Partial answer 1..."
+    assert msgs[2]["content"] == "Second question"
+    assert msgs[3]["content"] == "Complete answer 2"

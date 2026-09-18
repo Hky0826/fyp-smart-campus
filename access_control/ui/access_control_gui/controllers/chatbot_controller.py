@@ -181,6 +181,23 @@ class _LiveDuplexWorker(QThread):
         first_audio_chunk_received = [False]
         first_audio_playback_started = [False]
 
+        def commit_in_flight() -> None:
+            user_q = last_user_query[0]
+            bot_a = last_assistant_text[0]
+            cites = last_citations[0]
+            last_user_query[0] = ""
+            last_assistant_text[0] = ""
+            last_citations[0] = []
+            if user_q or bot_a:
+                self.turnCompleted.emit()
+                self.responseReceived.emit({
+                    "transcribed_input": user_q,
+                    "text_response": bot_a,
+                    "citations": cites,
+                })
+
+        self._commit_in_flight_fn = commit_in_flight
+
         def mic_callback(indata: bytes, frames: int, time_info: Any, status: Any) -> None:
             if self._stop_requested.is_set():
                 return
@@ -214,6 +231,14 @@ class _LiveDuplexWorker(QThread):
                 self._ws = ws
                 self.listeningChanged.emit(True)
 
+                is_busy_playing = False
+
+                def set_busy(val: bool) -> None:
+                    nonlocal is_busy_playing
+                    if is_busy_playing != val:
+                        is_busy_playing = val
+                        self.busyChanged.emit(val)
+
                 async def player_loop() -> None:
                     nonlocal playback_busy_until, last_speaker_rms
                     with output_stream:
@@ -224,7 +249,7 @@ class _LiveDuplexWorker(QThread):
                                 pcm_bytes = await asyncio.wait_for(self._audio_play_queue.get(), timeout=0.1)
                             except asyncio.TimeoutError:
                                 if time.monotonic() >= playback_busy_until:
-                                    self.busyChanged.emit(False)
+                                    set_busy(False)
                                     self.assistantAudioLevelChanged.emit(0.0)
                                     last_speaker_rms = 0.0
                                 continue
@@ -232,7 +257,7 @@ class _LiveDuplexWorker(QThread):
                             if pcm_bytes is None or self._stop_requested.is_set():
                                 break
 
-                            self.busyChanged.emit(True)
+                            set_busy(True)
                             if not first_audio_playback_started[0]:
                                 first_audio_playback_started[0] = True
                                 time_since_speech_end = (
@@ -257,7 +282,7 @@ class _LiveDuplexWorker(QThread):
                             self.assistantAudioLevelChanged.emit(min(1.0, max(0.0, spk_rms / 2500.0)))
 
                             duration = len(pcm_bytes) / 48000.0
-                            hangover_sec = self._cooling_off_ms / 1000.0
+                            hangover_sec = max(0.35, self._cooling_off_ms / 1000.0)
                             playback_busy_until = max(playback_busy_until, time.monotonic()) + duration + hangover_sec
                             try:
                                 await loop.run_in_executor(None, output_stream.write, pcm_bytes)
@@ -297,6 +322,7 @@ class _LiveDuplexWorker(QThread):
                             elif event in ("user_transcript", "transcript"):
                                 text = data.get("text", "")
                                 if text:
+                                    commit_in_flight()
                                     last_user_query[0] = text
                                     last_assistant_text[0] = ""
                                     self.userTranscriptReceived.emit(text)
@@ -308,7 +334,6 @@ class _LiveDuplexWorker(QThread):
                                         text=text[:60],
                                     )
                             elif event == "rag_status":
-                                last_assistant_text[0] = ""
                                 st = data.get("status", "")
                                 q = data.get("query", "")
                                 self.ragStatusChanged.emit(st, q)
@@ -320,7 +345,6 @@ class _LiveDuplexWorker(QThread):
                                     status=st,
                                 )
                             elif event == "acoustic_bridge":
-                                last_assistant_text[0] = ""
                                 edge_timing.log_receive(
                                     "ACOUSTIC_BRIDGE",
                                     turn_id=msg_turn_id,
@@ -374,19 +398,7 @@ class _LiveDuplexWorker(QThread):
                                     duration_ms=total_round_trip,
                                     time_since_speech_end_ms=total_round_trip,
                                 )
-                                self.turnCompleted.emit()
-                                user_q = last_user_query[0]
-                                bot_a = last_assistant_text[0]
-                                cites = last_citations[0]
-                                last_user_query[0] = ""
-                                last_assistant_text[0] = ""
-                                last_citations[0] = []
-                                if user_q or bot_a:
-                                    self.responseReceived.emit({
-                                        "transcribed_input": user_q,
-                                        "text_response": bot_a,
-                                        "citations": cites,
-                                    })
+                                commit_in_flight()
                             elif event == "interrupted":
                                 edge_timing.log_receive("INTERRUPTED", turn_id=msg_turn_id)
                                 playback_busy_until = 0.0
@@ -397,8 +409,9 @@ class _LiveDuplexWorker(QThread):
                                             self._audio_play_queue.get_nowait()
                                         except Exception:
                                             break
-                                self.busyChanged.emit(False)
+                                set_busy(False)
                                 self.assistantAudioLevelChanged.emit(0.0)
+                                commit_in_flight()
                             elif event == "error":
                                 err_msg = str(data.get("message") or "Unknown error")
                                 edge_timing.log_receive("ERROR", turn_id=msg_turn_id, error=err_msg)
@@ -456,14 +469,14 @@ class _LiveDuplexWorker(QThread):
                                     consecutive_barge_count = 0
                                     playback_busy_until = 0.0
                                     last_speaker_rms = 0.0
-                                    last_assistant_text[0] = ""
+                                    commit_in_flight()
                                     if self._audio_play_queue:
                                         while not self._audio_play_queue.empty():
                                             try:
                                                 self._audio_play_queue.get_nowait()
                                             except Exception:
                                                 break
-                                    self.busyChanged.emit(False)
+                                    set_busy(False)
                                     self.assistantAudioLevelChanged.emit(0.0)
                                     edge_timing.log_send("CLIENT_BARGE_IN", turn_id=turn_id[0], rms=round(rms, 1))
                                     try:
@@ -497,6 +510,7 @@ class _LiveDuplexWorker(QThread):
                                 if rms >= self._speech_threshold:
                                     if not is_speaking:
                                         is_speaking = True
+                                        commit_in_flight()
                                         turn_speech_onset_mono[0] = time.monotonic()
                                         turn_id[0] = f"turn_{int(time.time() * 1000)}"
                                         turn_audio_bytes_sent[0] = len(pcm_chunk)
@@ -508,7 +522,6 @@ class _LiveDuplexWorker(QThread):
                                             rms=round(rms, 1),
                                             threshold=self._speech_threshold,
                                         )
-                                        last_assistant_text[0] = ""
                                         self.speechStateChanged.emit(True)
                                     silence_started = 0.0
                                 elif is_speaking:
@@ -569,6 +582,15 @@ class _LiveDuplexWorker(QThread):
                 except Exception:
                     break
         self.busyChanged.emit(False)
+        commit_fn = getattr(self, "_commit_in_flight_fn", None)
+        if callable(commit_fn):
+            if self._loop:
+                self._loop.call_soon_threadsafe(commit_fn)
+            else:
+                try:
+                    commit_fn()
+                except Exception:
+                    pass
         if self._ws and self._loop:
             try:
                 self._loop.call_soon_threadsafe(
@@ -592,6 +614,7 @@ class ChatbotController(QObject):
     listeningChanged = Signal()
     busyChanged = Signal()
     speechStateChanged = Signal()
+    assistantSpeakingChanged = Signal()
     userAudioLevelChanged = Signal()
     assistantAudioLevelChanged = Signal()
     errorChanged = Signal()
@@ -617,6 +640,7 @@ class ChatbotController(QObject):
         self._listening = False
         self._busy = False
         self._speaking = False
+        self._last_assistant_speaking = False
         self._user_audio_level = 0.0
         self._assistant_audio_level = 0.0
         self._error = ""
@@ -719,10 +743,38 @@ class ChatbotController(QObject):
         self.currentNavigationChanged.emit()
         self.citationsChanged.emit()
 
+    def _get_assistant_speaking(self) -> bool:
+        return bool(self._busy or self._partial_text)
+
+    def _update_assistant_speaking(self) -> None:
+        curr = self._get_assistant_speaking()
+        if getattr(self, "_last_assistant_speaking", None) != curr:
+            self._last_assistant_speaking = curr
+            self.assistantSpeakingChanged.emit()
+
+    def _commit_partial_response(self) -> None:
+        user_q = self._transcribed_text
+        bot_a = self._partial_text
+        cites = list(self._citations)
+        if user_q or bot_a:
+            self._partial_text = ""
+            self._transcribed_text = ""
+            self._set_busy(False)
+            self.partialTextChanged.emit()
+            self.transcribedTextChanged.emit()
+            self._update_assistant_speaking()
+            self.responseReceived.emit({
+                "transcribed_input": user_q,
+                "text_response": bot_a,
+                "citations": cites,
+            })
+
     @Slot()
     def stopAudioPlayback(self) -> None:
         if self._worker:
             self._worker.stop_audio_playback()
+        self._set_busy(False)
+        self._commit_partial_response()
 
     @Slot()
     def interruptPlayback(self) -> None:
@@ -751,20 +803,25 @@ class ChatbotController(QObject):
     def _on_text_chunk(self, chunk: str) -> None:
         self._partial_text += chunk
         self.partialTextChanged.emit()
+        self._update_assistant_speaking()
 
     @Slot(str)
     def _on_transcribed_text(self, text: str) -> None:
+        if self._partial_text:
+            self._commit_partial_response()
         self._partial_text = ""
         self._transcribed_text = text
         self._set_busy(True)
         self.partialTextChanged.emit()
         self.transcribedTextChanged.emit()
+        self._update_assistant_speaking()
 
     @Slot(str, str)
     def _on_rag_status(self, status: str, query: str) -> None:
         if status or query:
             self._partial_text = ""
             self.partialTextChanged.emit()
+            self._update_assistant_speaking()
         self._rag_status = "Searching database..." if status or query else ""
         self.ragStatusChanged.emit()
 
@@ -786,6 +843,7 @@ class ChatbotController(QObject):
         self.ragStatusChanged.emit()
         self.partialTextChanged.emit()
         self.transcribedTextChanged.emit()
+        self._update_assistant_speaking()
 
     @Slot(dict)
     def _on_worker_response(self, payload: dict) -> None:
@@ -797,6 +855,7 @@ class ChatbotController(QObject):
         self.transcribedTextChanged.emit()
         self.ragStatusChanged.emit()
         self.busyChanged.emit()
+        self._update_assistant_speaking()
         self.responseReceived.emit(payload)
 
     @Slot()
@@ -850,6 +909,7 @@ class ChatbotController(QObject):
             return
         self._busy = value
         self.busyChanged.emit()
+        self._update_assistant_speaking()
 
     @Slot(bool)
     def _set_speaking(self, value: bool) -> None:
@@ -1000,6 +1060,7 @@ class ChatbotController(QObject):
     listening = Property(bool, _get_listening, notify=listeningChanged)
     busy = Property(bool, _get_busy, notify=busyChanged)
     speaking = Property(bool, _get_speaking, notify=speechStateChanged)
+    assistantSpeaking = Property(bool, _get_assistant_speaking, notify=assistantSpeakingChanged)
     userAudioLevel = Property(float, _get_user_audio_level, notify=userAudioLevelChanged)
     assistantAudioLevel = Property(float, _get_assistant_audio_level, notify=assistantAudioLevelChanged)
     error = Property(str, _get_error, notify=errorChanged)

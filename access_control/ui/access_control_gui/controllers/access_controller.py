@@ -333,7 +333,13 @@ class AccessController(QObject):
                     history = list(self._live_history or self._session.get("conversation_history") or [])
                     now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
                     if user_text:
-                        history.append({"role": "user", "content": user_text, "created_at": now_iso, "citations": []})
+                        already_has_user = bool(
+                            history
+                            and history[-1].get("role") == "user"
+                            and str(history[-1].get("content") or "").strip() == str(user_text).strip()
+                        )
+                        if not already_has_user:
+                            history.append({"role": "user", "content": user_text, "created_at": now_iso, "citations": []})
                     if bot_text:
                         history.append({"role": "assistant", "content": bot_text, "created_at": now_iso, "citations": citations})
                     self._live_history = history

@@ -38,6 +38,7 @@ ApplicationWindow {
         listening: chatbotController.listening
         busy: chatbotController.busy
         speaking: chatbotController.speaking
+        assistantSpeaking: chatbotController.assistantSpeaking
         ragStatus: chatbotController.ragStatus
         currentNavigation: chatbotController.currentNavigation
         citations: chatbotController.citations

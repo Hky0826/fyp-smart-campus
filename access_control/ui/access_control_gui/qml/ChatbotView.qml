@@ -15,6 +15,7 @@ Item {
     property bool listening: false
     property bool busy: false
     property bool speaking: false
+    property bool assistantSpeaking: false
     property real userAudioLevel: 0.0
     property real assistantAudioLevel: 0.0
     property string ragStatus: ""
@@ -24,6 +25,12 @@ Item {
     property bool verifying: false
     property string errorText: ""
 
+    readonly property bool hasAssistantMessageInFlight: {
+        if (!messages || messages.length === 0) return false
+        var last = messages[messages.length - 1]
+        return last && last.role === "assistant"
+    }
+
     signal closeRequested()
     signal stopAnsweringRequested()
     signal toggleMuteRequested()
@@ -31,20 +38,6 @@ Item {
 
     onVisibleChanged: {
         if (visible) {
-            history.userScrolledUp = false
-            history.scrollToBottom()
-        }
-    }
-
-    onSpeakingChanged: {
-        if (speaking) {
-            history.userScrolledUp = false
-            history.scrollToBottom()
-        }
-    }
-
-    onBusyChanged: {
-        if (busy) {
             history.userScrolledUp = false
             history.scrollToBottom()
         }
@@ -412,7 +405,7 @@ Item {
                     // Interrupt Button (only visible while assistant is answering)
                     Button {
                         id: interruptBtn
-                        visible: root.speaking
+                        visible: root.assistantSpeaking || root.busy
                         implicitWidth: 78
                         implicitHeight: 26
                         text: "■ Interrupt"
@@ -468,9 +461,13 @@ Item {
                 model: root.messages || []
 
                 property bool userScrolledUp: false
+                property bool scrollPending: false
 
                 function scrollToBottom() {
+                    if (scrollPending) return
+                    scrollPending = true
                     Qt.callLater(function() {
+                        scrollPending = false
                         history.positionViewAtEnd()
                     })
                 }
@@ -505,12 +502,8 @@ Item {
                     if (!userScrolledUp) scrollToBottom()
                 }
 
-                onModelChanged: {
-                    if (!userScrolledUp) scrollToBottom()
-                }
-
                 onContentHeightChanged: {
-                    if (!userScrolledUp || history.contentHeight <= history.height) {
+                    if (!userScrolledUp && (history.atYEnd || history.contentY >= history.contentHeight - history.height - 60 || history.contentHeight <= history.height)) {
                         scrollToBottom()
                     }
                 }
@@ -526,7 +519,7 @@ Item {
                     // Inline Organic Assistant Thinking / RAG Indicator
                     Rectangle {
                         id: inlineThinkingBubble
-                        visible: root.busy || root.ragStatus.length > 0
+                        visible: (root.ragStatus.length > 0 || (root.busy && !root.hasAssistantMessageInFlight)) && !root.hasAssistantMessageInFlight
                         width: Math.min(history.width * 0.75, 320)
                         implicitHeight: 36
                         radius: 10
@@ -573,7 +566,7 @@ Item {
 
                             Text {
                                 Layout.fillWidth: true
-                                text: root.ragStatus.length > 0 ? "Searching campus database…" : (root.speaking ? "Generating response…" : "Thinking…")
+                                text: root.ragStatus.length > 0 ? "Searching campus database…" : "Thinking…"
                                 color: "#065f46" // emerald-800
                                 font.pixelSize: 11
                                 font.bold: true
@@ -891,7 +884,7 @@ Item {
                                 width: 7
                                 height: 7
                                 radius: 4
-                                color: root.muted ? "#ef4444" : (root.busy ? "#a855f7" : (root.speaking ? "#10b981" : "#06b6d4"))
+                                color: root.muted ? "#ef4444" : (root.assistantSpeaking ? "#10b981" : (root.ragStatus.length > 0 || root.busy ? "#a855f7" : (root.speaking ? "#06b6d4" : "#3b82f6")))
                                 anchors.verticalCenter: parent.verticalCenter
 
                                 SequentialAnimation on opacity {
@@ -904,17 +897,19 @@ Item {
                             Text {
                                 text: root.muted
                                       ? "Mic Muted"
-                                      : (root.speaking
+                                      : (root.assistantSpeaking
                                          ? "Assistant speaking..."
-                                         : (root.busy
-                                            ? "Thinking..."
-                                            : "Listening..."))
+                                         : (root.ragStatus.length > 0
+                                            ? "Searching database..."
+                                            : (root.busy
+                                               ? "Thinking..."
+                                               : (root.speaking ? "Listening to you..." : "Listening..."))))
                                 color: root.muted
                                        ? "#991b1b"
-                                       : (root.busy
-                                          ? "#4338ca"
-                                          : (root.speaking
-                                             ? "#1e3a8a"
+                                       : (root.assistantSpeaking
+                                          ? "#1e3a8a"
+                                          : (root.busy || root.ragStatus.length > 0
+                                             ? "#4338ca"
                                              : "#312e81"))
                                 font.pixelSize: 11
                                 font.bold: true
@@ -978,12 +973,12 @@ Item {
                                 radius: 1
                                 color: modelData.color
                                 anchors.verticalCenter: parent.verticalCenter
-                                height: root.busy ? Math.max(4, modelData.maxH * Math.max(0.35, root.assistantAudioLevel)) : 2
+                                height: (root.assistantSpeaking || root.busy) ? Math.max(4, modelData.maxH * Math.max(0.35, root.assistantAudioLevel)) : 2
 
                                 Behavior on height { NumberAnimation { duration: 70 } }
 
                                 SequentialAnimation on height {
-                                    running: root.busy
+                                    running: root.assistantSpeaking || root.busy
                                     loops: Animation.Infinite
                                     NumberAnimation { to: Math.max(6, modelData.maxH * Math.max(0.45, root.assistantAudioLevel)); duration: 240 }
                                     NumberAnimation { to: 3; duration: 240 }
