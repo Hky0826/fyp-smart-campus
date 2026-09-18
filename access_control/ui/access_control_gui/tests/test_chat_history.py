@@ -103,3 +103,49 @@ def test_barge_in_preserves_previous_interrupted_assistant_response():
     assert msgs[1]["content"] == "Partial answer 1..."
     assert msgs[2]["content"] == "Second question"
     assert msgs[3]["content"] == "Complete answer 2"
+
+
+def test_committed_messages_decoupled_from_streaming_and_camera_frames():
+    access, chat = controller()
+
+    committed_emits = 0
+    messages_emits = 0
+    access.committedMessagesChanged.connect(lambda: nonlocal_inc_c())
+    access.messagesChanged.connect(lambda: nonlocal_inc_m())
+
+    def nonlocal_inc_c():
+        nonlocal committed_emits
+        committed_emits += 1
+
+    def nonlocal_inc_m():
+        nonlocal messages_emits
+        messages_emits += 1
+
+    # Camera frames must NOT emit committedMessagesChanged or messagesChanged
+    access._on_worker_success("access-frame", {"attempt": {"bboxes": []}})
+    access._on_worker_success("chat-presence-frame", {"bboxes": []})
+    assert committed_emits == 0
+    assert messages_emits == 0
+
+    # User speaks and assistant streams tokens
+    chat._on_transcribed_text("Hello campus")
+    chat._on_text_chunk("Welcome ")
+    chat._on_text_chunk("to the campus.")
+
+    # During streaming, committedMessages must remain empty (no resets)
+    assert access.committedMessages == []
+    assert committed_emits == 0
+    assert messages_emits == 0
+
+    # Python access.messages property continues to return in-flight bubbles
+    assert len(access.messages) == 2
+    assert access.messages[1]["content"] == "Welcome to the campus."
+
+    # When response completes, committedMessages updates and emits
+    chat._on_worker_response({"transcribed_input": "Hello campus", "text_response": "Welcome to the campus."})
+    assert committed_emits >= 1
+    assert messages_emits >= 1
+    assert len(access.committedMessages) == 2
+    assert access.committedMessages[0]["content"] == "Hello campus"
+    assert access.committedMessages[1]["content"] == "Welcome to the campus."
+

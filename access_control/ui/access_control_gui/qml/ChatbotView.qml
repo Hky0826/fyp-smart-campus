@@ -9,6 +9,8 @@ Item {
     clip: true
 
     property var messages: []
+    property string partialText: ""
+    property string transcribedText: ""
     property string sessionName: "Visitor"
     property string presenceState: "UNKNOWN"
     readonly property bool ownerPresent: presenceState === "OWNER_PRESENT"
@@ -25,7 +27,28 @@ Item {
     property bool verifying: false
     property string errorText: ""
 
+    function isUserTextCommitted(text) {
+        if (!text || !messages || messages.length === 0) return false
+        var trimmed = text.trim()
+        if (!trimmed) return false
+        for (var i = messages.length - 1; i >= Math.max(0, messages.length - 2); i--) {
+            if (messages[i].role === "user" && String(messages[i].content || "").trim() === trimmed) {
+                return true
+            }
+        }
+        return false
+    }
+
+    function isAssistantTextCommitted(text) {
+        if (!text || !messages || messages.length === 0) return false
+        var trimmed = text.trim()
+        if (!trimmed) return false
+        var last = messages[messages.length - 1]
+        return Boolean(last && last.role === "assistant" && String(last.content || "").trim() === trimmed)
+    }
+
     readonly property bool hasAssistantMessageInFlight: {
+        if (partialText && partialText.trim().length > 0) return true
         if (!messages || messages.length === 0) return false
         var last = messages[messages.length - 1]
         return last && last.role === "assistant"
@@ -405,7 +428,7 @@ Item {
                     // Interrupt Button (only visible while assistant is answering)
                     Button {
                         id: interruptBtn
-                        visible: root.assistantSpeaking || root.busy
+                        visible: root.assistantSpeaking || root.busy || (root.partialText && root.partialText.trim().length > 0)
                         implicitWidth: 78
                         implicitHeight: 26
                         text: "■ Interrupt"
@@ -452,6 +475,7 @@ Item {
             // Message History Area (fills expansive viewport)
             ListView {
                 id: history
+                objectName: "historyListView"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.margins: 12
@@ -461,15 +485,11 @@ Item {
                 model: root.messages || []
 
                 property bool userScrolledUp: false
-                property bool scrollPending: false
 
                 function scrollToBottom() {
-                    if (scrollPending) return
-                    scrollPending = true
-                    Qt.callLater(function() {
-                        scrollPending = false
+                    if (!userScrolledUp) {
                         history.positionViewAtEnd()
-                    })
+                    }
                 }
 
                 onMovementStarted: userScrolledUp = true
@@ -499,7 +519,11 @@ Item {
                 }
 
                 onCountChanged: {
-                    if (!userScrolledUp) scrollToBottom()
+                    scrollToBottom()
+                }
+
+                onModelChanged: {
+                    scrollToBottom()
                 }
 
                 onContentHeightChanged: {
@@ -516,10 +540,49 @@ Item {
                     width: history.width
                     spacing: 8
 
+                    // In-flight User Message Bubble (voice query while being spoken/processed)
+                    Rectangle {
+                        id: inFlightUserBubble
+                        visible: root.transcribedText.trim().length > 0 && !root.isUserTextCommitted(root.transcribedText)
+                        Layout.alignment: Qt.AlignRight
+                        width: Math.min(history.width * 0.86, 500)
+                        implicitHeight: userInFlightCol.implicitHeight + 20
+                        radius: 12
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0.0; color: "#2563eb" } // blue-600
+                            GradientStop { position: 1.0; color: "#4f46e5" } // indigo-600
+                        }
+
+                        Column {
+                            id: userInFlightCol
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 10
+                            spacing: 4
+
+                            Text {
+                                text: "🎙️ You asked:"
+                                color: "#dbeafe" // blue-100
+                                font.pixelSize: 9
+                                font.bold: true
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: root.transcribedText
+                                color: "#ffffff"
+                                font.pixelSize: 12
+                                wrapMode: Text.Wrap
+                            }
+                        }
+                    }
+
                     // Inline Organic Assistant Thinking / RAG Indicator
                     Rectangle {
                         id: inlineThinkingBubble
-                        visible: (root.ragStatus.length > 0 || (root.busy && !root.hasAssistantMessageInFlight)) && !root.hasAssistantMessageInFlight
+                        visible: (root.ragStatus.length > 0 || (root.busy && root.partialText.trim().length === 0)) && root.partialText.trim().length === 0
                         width: Math.min(history.width * 0.75, 320)
                         implicitHeight: 36
                         radius: 10
@@ -571,6 +634,58 @@ Item {
                                 font.pixelSize: 11
                                 font.bold: true
                                 elide: Text.ElideRight
+                            }
+                        }
+                    }
+
+                    // In-flight Assistant Streaming Bubble
+                    Rectangle {
+                        id: inFlightAssistantBubble
+                        visible: root.partialText.trim().length > 0 && !root.isAssistantTextCommitted(root.partialText)
+                        Layout.alignment: Qt.AlignLeft
+                        width: Math.min(history.width * 0.86, 500)
+                        implicitHeight: botInFlightCol.implicitHeight + 20
+                        radius: 12
+                        color: "#ffffff"
+                        border.width: 1
+                        border.color: "#e2e8f0"
+
+                        Column {
+                            id: botInFlightCol
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 10
+                            spacing: 4
+
+                            Row {
+                                spacing: 4
+                                Rectangle {
+                                    width: 7
+                                    height: 7
+                                    radius: 4
+                                    gradient: Gradient {
+                                        orientation: Gradient.Horizontal
+                                        GradientStop { position: 0.0; color: "#06b6d4" }
+                                        GradientStop { position: 1.0; color: "#6366f1" }
+                                    }
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    text: "Assistant"
+                                    color: "#4f46e5" // indigo-600
+                                    font.pixelSize: 9
+                                    font.bold: true
+                                }
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: root.displayText({ content: root.partialText, role: "assistant" })
+                                color: "#1e293b"
+                                font.pixelSize: 12
+                                textFormat: Text.MarkdownText
+                                wrapMode: Text.Wrap
                             }
                         }
                     }

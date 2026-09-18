@@ -32,7 +32,9 @@ ApplicationWindow {
         anchors.fill: parent
         z: 20
         visible: accessController.chatExpanded
-        messages: accessController.messages
+        messages: accessController.committedMessages
+        partialText: chatbotController.partialText
+        transcribedText: chatbotController.transcribedText
         sessionName: accessController.sessionName
         presenceState: accessController.presenceState
         listening: chatbotController.listening

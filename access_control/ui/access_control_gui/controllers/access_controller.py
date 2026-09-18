@@ -73,6 +73,7 @@ class AccessController(QObject):
     uiChanged = Signal()
     statusChanged = Signal()
     messagesChanged = Signal()
+    committedMessagesChanged = Signal()
     dwellProgressChanged = Signal()
     presenceDetectionChanged = Signal()
     interactionIntentDetected = Signal()
@@ -288,12 +289,10 @@ class AccessController(QObject):
     @Slot()
     def _on_chatbot_transcribed_text(self) -> None:
         self._transcribed_text = self._chatbot.transcribedText
-        self.messagesChanged.emit()
 
     @Slot()
     def _on_chatbot_partial_text(self) -> None:
         self._partial_text = self._chatbot.partialText
-        self.messagesChanged.emit()
 
     @Slot(str, dict)
     def _on_worker_success(self, name: str, payload: dict[str, Any]) -> None:
@@ -318,6 +317,8 @@ class AccessController(QObject):
                     self._greeting_session_id = session_id
                     user_name = (session or {}).get("given_name") or (session or {}).get("display_name")
                     self._chatbot.triggerLiveGreeting(user_name)
+                self.messagesChanged.emit()
+                self.committedMessagesChanged.emit()
             elif name == "chat-presence-frame":
                 launched_followup_frame = self._handle_presence_payload(payload)
             elif name in {"chat-message", "chat-audio"}:
@@ -358,7 +359,11 @@ class AccessController(QObject):
                 self._frame_in_flight = False
             if name in {"chat-message", "chat-audio"}:
                 self._chat_in_flight = False
-            self._emit_all()
+            if name.endswith("frame"):
+                self.uiChanged.emit()
+                self._update_mode()
+            else:
+                self._emit_all()
             self._sync_voice_loop()
             if name == "access-frame" and self._chat_verification_active:
                 self._schedule_frame(0)
@@ -387,7 +392,10 @@ class AccessController(QObject):
             self._camera_error = message or "Frame processing failed."
         if name.endswith("frame"):
             self._frame_in_flight = False
-        self._emit_all()
+            self.uiChanged.emit()
+            self._update_mode()
+        else:
+            self._emit_all()
         self._sync_voice_loop()
         if retry_chat_verification:
             self._schedule_frame(CHAT_VERIFY_RETRY_MS)
@@ -527,6 +535,7 @@ class AccessController(QObject):
         self.uiChanged.emit()
         self.statusChanged.emit()
         self.messagesChanged.emit()
+        self.committedMessagesChanged.emit()
         self._update_mode()
 
     def _update_mode(self) -> None:
@@ -638,6 +647,12 @@ class AccessController(QObject):
 
         return history
 
+    def _get_committed_messages(self) -> list:
+        session = self._session
+        if not session or session.get("locked"):
+            return []
+        return list(session.get("conversation_history") or [])
+
     def _get_session_name(self) -> str:
         session = self._session or {}
         return str(session.get("full_name") or session.get("email") or "Visitor")
@@ -707,6 +722,7 @@ class AccessController(QObject):
     chatCameraMinimized = Property(bool, _get_chat_camera_minimized, notify=uiChanged)
     faceBoxes = Property("QVariantList", _get_face_boxes, notify=uiChanged)
     messages = Property("QVariantList", _get_messages, notify=messagesChanged)
+    committedMessages = Property("QVariantList", _get_committed_messages, notify=committedMessagesChanged)
     sessionName = Property(str, _get_session_name, notify=stateChanged)
     presenceState = Property(str, _get_presence_state, notify=stateChanged)
     accessTitle = Property(str, _get_access_title, notify=modeChanged)
