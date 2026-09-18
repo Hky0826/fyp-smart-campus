@@ -152,6 +152,9 @@ or cannot be safely mapped, set safe=false or route=UNCLEAR as appropriate. Rout
 general mathematics questions, calculations, homework, coding, or unrelated
 non-campus questions to OUT_OF_SCOPE. The tool name must exactly match one of the
 approved declarations.
+Use recent conversation history to resolve pronouns or contextual references (e.g. if the
+user says "Take me there" or "Where is that?" and the previous turn mentioned a place,
+navigate to that destination).
 """
 
 # Keep this schema to the subset accepted by the installed google-genai
@@ -182,7 +185,14 @@ _PLANNER_RESPONSE_SCHEMA = {
 }
 
 
-def plan_turn(text: str, *, context: AuthenticatedChatContext, db, confirmation_context: str | None = None) -> PlannerResult:
+def plan_turn(
+    text: str,
+    *,
+    context: AuthenticatedChatContext,
+    db,
+    confirmation_context: str | None = None,
+    chat_history: list[dict[str, Any]] | None = None,
+) -> PlannerResult:
     """Make the one planner call for one active text/audio turn."""
     query = " ".join(str(text or "").split())
     if not query:
@@ -208,6 +218,30 @@ def plan_turn(text: str, *, context: AuthenticatedChatContext, db, confirmation_
             planner_context = replace(context, roles=())
 
     candidates = _catalog_candidates(query, planner_context, db)
+    formatted_history = []
+    if chat_history:
+        for turn in chat_history[-3:]:
+            if isinstance(turn, dict):
+                u = turn.get("user")
+                a = turn.get("assistant")
+                if not u and not a and "role" in turn:
+                    role = str(turn.get("role", "")).lower()
+                    content = str(turn.get("content", "")).strip()
+                    if role in ("user", "human"):
+                        u = content
+                    elif role in ("assistant", "model", "bot"):
+                        a = content
+            else:
+                u = getattr(turn, "user", None)
+                a = getattr(turn, "assistant", None)
+            item = {}
+            if u:
+                item["user"] = str(u).strip()
+            if a:
+                item["assistant"] = str(a).strip()
+            if item:
+                formatted_history.append(item)
+
     payload = {
         "user_text": query,
         "authenticated": bool(planner_context.authenticated),
@@ -215,6 +249,7 @@ def plan_turn(text: str, *, context: AuthenticatedChatContext, db, confirmation_
         "capabilities": [tool["name"] for tool in tool_declarations(planner_context)],
         "navigation_candidates": candidates,
         "confirmation_context": confirmation_context or None,
+        "recent_chat_history": formatted_history or None,
     }
     try:
         client = genai.Client(
@@ -330,10 +365,23 @@ def _fixed_operation(result: PlannerResult, *, context: AuthenticatedChatContext
     return PlannedOperation(kind="fixed", answer=result.clarification_question or get_translated("unclear_general", detected_lang), intent="UNCLEAR")
 
 
-def execute_planned_turn(query: str, *, context: AuthenticatedChatContext, db, confirmation_context: str | None = None) -> PlannedOperation:
+def execute_planned_turn(
+    query: str,
+    *,
+    context: AuthenticatedChatContext,
+    db,
+    confirmation_context: str | None = None,
+    chat_history: list[dict[str, Any]] | None = None,
+) -> PlannedOperation:
     """Plan and dispatch one turn; return ``kind=rag`` for authorized RAG."""
     try:
-        planned = plan_turn(query, context=context, db=db, confirmation_context=confirmation_context)
+        planned = plan_turn(
+            query,
+            context=context,
+            db=db,
+            confirmation_context=confirmation_context,
+            chat_history=chat_history,
+        )
     except (PlannerUnavailable, PlannerInvalid) as exc:
         logger.warning("Shared planner unavailable; using safe deterministic fallback: %s: %s", type(exc).__name__, str(exc)[:240])
         planned = _fallback_plan(query, context, db)
@@ -383,8 +431,22 @@ def execute_planned_turn(query: str, *, context: AuthenticatedChatContext, db, c
 class LLMPlanner:
     """Small object wrapper for callers that prefer dependency injection."""
 
-    def plan(self, text: str, *, context: AuthenticatedChatContext, db, confirmation_context: str | None = None) -> PlannerResult:
-        return plan_turn(text, context=context, db=db, confirmation_context=confirmation_context)
+    def plan(
+        self,
+        text: str,
+        *,
+        context: AuthenticatedChatContext,
+        db,
+        confirmation_context: str | None = None,
+        chat_history: list[dict[str, Any]] | None = None,
+    ) -> PlannerResult:
+        return plan_turn(
+            text,
+            context=context,
+            db=db,
+            confirmation_context=confirmation_context,
+            chat_history=chat_history,
+        )
 
     __call__ = plan
 

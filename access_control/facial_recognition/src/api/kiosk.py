@@ -11,6 +11,7 @@ import asyncio
 import datetime as dt
 import logging
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional
@@ -24,6 +25,11 @@ from ..config import RuntimeConfig
 from ..face.types import AuthenticationResult
 from ..pipelines.access_audio import EdgeAuthToken, EdgeAuthTokenClient
 from .chatbot_client import ChatbotClient, ChatbotClientError
+
+try:
+    from access_control.timing_logger import edge_timing
+except ImportError:
+    from timing_logger import edge_timing
 
 try:
     import cv2
@@ -412,6 +418,28 @@ class KioskStateStore:
                 return self._recoverable_chat_session.token
             return None
 
+    def recent_chat_history(self, limit: int = 3) -> list[dict[str, str]]:
+        """Extract recent conversation turns as [{'user': '...', 'assistant': '...'}] from active session history."""
+        with self._lock:
+            target = self._chat_session or self._recoverable_chat_session
+            if not target or not target.history:
+                return []
+            turns: list[dict[str, str]] = []
+            current_turn: dict[str, str] = {}
+            for msg in target.history:
+                if msg.role == "user":
+                    if "user" in current_turn:
+                        turns.append(current_turn)
+                        current_turn = {}
+                    current_turn["user"] = msg.content
+                elif msg.role == "assistant":
+                    current_turn["assistant"] = msg.content
+                    turns.append(current_turn)
+                    current_turn = {}
+            if current_turn:
+                turns.append(current_turn)
+            return turns[-limit:]
+
     def recoverable_chat_session_view(self) -> ChatSessionView | None:
         with self._lock:
             if self._recoverable_chat_session is None:
@@ -698,15 +726,28 @@ def create_kiosk_router(
 
     @router.post("/chat/message", response_model=ChatMessageResponse)
     def send_chat_message(body: ChatMessageRequest) -> ChatMessageResponse:
+        t0 = time.monotonic()
+        edge_timing.log_send("REST_PROXY_MESSAGE_SEND", query=(body.query or "")[:60])
         token = store.current_token()
+        chat_history = store.recent_chat_history(limit=3)
         try:
             response = chatbot_client().chat(
                 query=body.query,
                 jwt_token=token.access_token if token else None,
                 device_id=runtime_config().sync_device_id,
                 session_id=token.session_id if token else None,
+                chat_history=chat_history or None,
+            )
+            round_trip_ms = (time.monotonic() - t0) * 1000.0
+            edge_timing.log_receive(
+                "REST_PROXY_MESSAGE_RECEIVE",
+                duration_ms=round_trip_ms,
+                response_time_ms=response.get("response_time_ms"),
+                answer_len=len(str(response.get("answer") or "")),
             )
         except ChatbotClientError as exc:
+            round_trip_ms = (time.monotonic() - t0) * 1000.0
+            edge_timing.log_receive("REST_PROXY_MESSAGE_ERROR", duration_ms=round_trip_ms, error=str(exc))
             status_code = exc.status_code or status.HTTP_502_BAD_GATEWAY
             raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
@@ -732,6 +773,7 @@ def create_kiosk_router(
     @router.post("/chat/stream")
     async def send_chat_stream(body: ChatMessageRequest):
         token = store.current_token()
+        chat_history = store.recent_chat_history(limit=3)
         headers = {"Accept": "text/event-stream", "Content-Type": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token.access_token}"
@@ -742,6 +784,8 @@ def create_kiosk_router(
         }
         if token and token.session_id is not None:
             payload["session_id"] = token.session_id
+        if chat_history:
+            payload["chat_history"] = chat_history
 
         async def stream_generator():
             cloud_url = f"{runtime_config().sync_cloud_url.rstrip('/')}/api/chatbot/chat/stream"
@@ -828,6 +872,8 @@ def create_kiosk_router(
                 detail="Uploaded audio file is empty.",
             )
 
+        t0 = time.monotonic()
+        edge_timing.log_send("REST_PROXY_AUDIO_SEND", audio_bytes=len(audio_bytes))
         try:
             response = chatbot_client().audio_chat(
                 audio_bytes=audio_bytes,
@@ -836,7 +882,16 @@ def create_kiosk_router(
                 device_id=runtime_config().sync_device_id,
                 session_id=token.session_id if token else None,
             )
+            round_trip_ms = (time.monotonic() - t0) * 1000.0
+            edge_timing.log_receive(
+                "REST_PROXY_AUDIO_RECEIVE",
+                duration_ms=round_trip_ms,
+                status=response.get("status"),
+                response_time_ms=response.get("response_time_ms"),
+            )
         except ChatbotClientError as exc:
+            round_trip_ms = (time.monotonic() - t0) * 1000.0
+            edge_timing.log_receive("REST_PROXY_AUDIO_ERROR", duration_ms=round_trip_ms, error=str(exc))
             status_code = exc.status_code or status.HTTP_502_BAD_GATEWAY
             raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 

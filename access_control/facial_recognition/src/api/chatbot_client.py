@@ -14,7 +14,7 @@ edge device. All LLM calls happen on the cloud backend.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -86,6 +86,7 @@ class ChatbotClient:
         jwt_token: Optional[str] = None,
         device_id: Optional[str] = None,
         session_id: Optional[int] = None,
+        chat_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Send a user query to the cloud RAG chatbot and return the response.
@@ -95,6 +96,7 @@ class ChatbotClient:
             jwt_token: The face-recognition JWT issued after authentication.
             device_id: Optional edge device identifier for audit logging.
             session_id: Optional session ID from the JWT session record.
+            chat_history: Optional list of recent turns [{'user': '...', 'assistant': '...'}] in active session.
 
         Returns:
             Dict matching the cloud ChatResponse schema:
@@ -119,6 +121,8 @@ class ChatbotClient:
             payload["device_id"] = device_id
         if session_id is not None:
             payload["session_id"] = session_id
+        if chat_history is not None:
+            payload["chat_history"] = chat_history
 
         try:
             resp = requests.post(

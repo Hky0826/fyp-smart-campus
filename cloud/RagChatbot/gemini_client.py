@@ -75,8 +75,10 @@ def is_retryable_gemini_error(exc: Exception) -> bool:
 
     try:
         from google.genai import errors
-        if isinstance(exc, errors.APIError):
-            return True
+        if isinstance(exc, (errors.APIError, errors.ClientError, errors.ServerError)):
+            err_code = getattr(exc, "code", None)
+            if err_code in (409, 429, 500, 502, 503, 504):
+                return True
     except ImportError:
         pass
 
@@ -99,6 +101,7 @@ def is_retryable_gemini_error(exc: Exception) -> bool:
         "429", "resource_exhausted", "resource exhausted", "resourceexhausted", "too many requests", "rate limit",
         "500", "502", "503", "504", "service unavailable", "unavailable",
         "concurrent", "already exists", "race condition",
+        "failed to connect", "stream error", "connection reset", "transport error", "connection closed",
     )
     return any(marker in err_str for marker in retry_markers)
 
@@ -106,8 +109,8 @@ def is_retryable_gemini_error(exc: Exception) -> bool:
 def call_with_retry(
     fn: Callable[..., Any],
     *args: Any,
-    max_retries: int = 3,
-    initial_delay: float = 0.3,
+    max_retries: int = 4,
+    initial_delay: float = 0.4,
     backoff_factor: float = 2.0,
     **kwargs: Any,
 ) -> Any:
@@ -130,8 +133,8 @@ def call_with_retry(
         except Exception as exc:
             last_exc = exc
             if attempt < max_retries and is_retryable_gemini_error(exc):
-                # Add +-25% random jitter to avoid thundering herd on re-collision
-                jitter = delay * 0.25 * (random.random() * 2 - 1)
+                # Add +-35% random jitter to avoid thundering herd on re-collision
+                jitter = delay * 0.35 * (random.random() * 2 - 1)
                 sleep_time = max(0.01, delay + jitter)
                 logger.warning(
                     "Google AI Studio call encountered transient error (%s); retrying in %.2fs (retry %d/%d)",
@@ -141,6 +144,48 @@ def call_with_retry(
                     max_retries,
                 )
                 time.sleep(sleep_time)
+                delay *= backoff_factor
+            else:
+                raise last_exc
+
+    if last_exc is not None:
+        raise last_exc
+
+
+async def acall_with_retry(
+    fn: Callable[..., Any],
+    *args: Any,
+    max_retries: int = 4,
+    initial_delay: float = 0.4,
+    backoff_factor: float = 2.0,
+    **kwargs: Any,
+) -> Any:
+    """Async variant of call_with_retry for coroutines or async methods."""
+    import asyncio
+    import random
+
+    delay = initial_delay
+    last_exc: Exception | None = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            res = fn(*args, **kwargs)
+            if asyncio.iscoroutine(res):
+                return await res
+            return res
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries and is_retryable_gemini_error(exc):
+                jitter = delay * 0.35 * (random.random() * 2 - 1)
+                sleep_time = max(0.01, delay + jitter)
+                logger.warning(
+                    "Async Google AI Studio call encountered transient error (%s); retrying in %.2fs (retry %d/%d)",
+                    exc,
+                    sleep_time,
+                    attempt + 1,
+                    max_retries,
+                )
+                await asyncio.sleep(sleep_time)
                 delay *= backoff_factor
             else:
                 raise last_exc

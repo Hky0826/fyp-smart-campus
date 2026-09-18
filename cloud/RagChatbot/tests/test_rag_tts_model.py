@@ -29,36 +29,14 @@ from RagChatbot.services import audio_chat_service
 
 class RagTtsModelTests(unittest.TestCase):
     def test_generate_audio_from_text_uses_configured_tts_model(self):
-        """The TTS helper should call Google Cloud TTS with the configured voice."""
-        calls: list[dict[str, object]] = []
-
-        def synthesize_speech(*, input, voice, audio_config):
-            calls.append({"input": input, "voice": voice, "audio_config": audio_config})
-            response = Mock()
-            response.audio_content = b"pcm-bytes"
-            return response
-
-        fake_client = Mock()
-        fake_client.synthesize_speech = synthesize_speech
-
-        with (
-            patch("RagChatbot.gemini_client.get_gemini_client", side_effect=Exception("Gemini TTS unavailable")),
-            patch.object(response_validator.rag_settings, "AUDIO_TTS_VOICE", "en-US-Journey-F"),
-            patch.object(response_validator.texttospeech, "TextToSpeechClient", Mock(return_value=fake_client)),
-        ):
-            audio = response_validator.generate_audio_from_text(
-                "The library closes at 10 PM."
-            )
-
-        self.assertEqual(audio, b"pcm-bytes")
-        self.assertEqual(calls[0]["input"].text, "The library closes at 10 PM.")
-        self.assertEqual(calls[0]["voice"].name, "en-US-Journey-F")
-        self.assertEqual(calls[0]["voice"].language_code, "en-US")
-        self.assertEqual(calls[0]["audio_config"].audio_encoding, response_validator.texttospeech.AudioEncoding.LINEAR16)
-        self.assertEqual(calls[0]["audio_config"].sample_rate_hertz, 24000)
+        """The deprecated TTS helper should return None as audio is handled by Gemini Live."""
+        audio = response_validator.generate_audio_from_text(
+            "The library closes at 10 PM."
+        )
+        self.assertIsNone(audio)
 
     def test_process_audio_chat_returns_base64_tts_after_validated_rag_answer(self):
-        """A successful audio RAG answer should include base64-encoded TTS audio."""
+        """A successful audio RAG answer returns validated text, while audio is emitted by Gemini Live."""
         chunk = RankedChunk(
             chunk_id=1,
             document_id=10,
@@ -69,7 +47,6 @@ class RagTtsModelTests(unittest.TestCase):
             similarity_score=0.99,
         )
         answer = "The library closes at 10 PM."
-        generate_audio = Mock(return_value=b"spoken-pcm")
         fake_fast_res = {
             "status": "ok",
             "route": "UNIVERSITY_INFO",
@@ -84,8 +61,6 @@ class RagTtsModelTests(unittest.TestCase):
         }
 
         with (
-            patch.object(audio_chat_service.rag_settings, "AUDIO_TTS_ENABLED", True),
-            patch.object(audio_chat_service.rag_settings, "AUDIO_TTS_TIMEOUT_SECONDS", 0),
             patch.object(
                 audio_chat_service,
                 "extract_query_from_audio",
@@ -99,7 +74,6 @@ class RagTtsModelTests(unittest.TestCase):
                 "validate_response",
                 Mock(return_value=audio_chat_service.ValidationResult(valid=True)),
             ),
-            patch.object(audio_chat_service, "generate_audio_from_text", generate_audio),
         ):
             response = audio_chat_service.process_audio_chat(
                 audio_bytes=b"wav-bytes",
@@ -112,12 +86,8 @@ class RagTtsModelTests(unittest.TestCase):
 
         self.assertEqual(response.status, "ok")
         self.assertEqual(response.text_response, answer)
-        self.assertEqual(
-            response.audio_response,
-            base64.b64encode(b"spoken-pcm").decode("ascii"),
-        )
+        self.assertIsNone(response.audio_response)
         self.assertEqual(response.sources[0].document_title, "Library Guide")
-        generate_audio.assert_called_once_with(answer)
 
     def test_process_audio_chat_stream_handles_personal_result_status(self):
         """The streaming personal path should map PersonalResult to an audio status."""
@@ -163,33 +133,16 @@ class RagTtsModelTests(unittest.TestCase):
         self.assertTrue(events[1]["data"]["access_granted"])
 
     def test_tts_wrapper_return_time_for_100_300_700_characters(self):
-        """Measure app wrapper return time without making slow external TTS calls."""
-        generate_audio = Mock(return_value=b"spoken-pcm")
-        timings: list[tuple[int, float]] = []
+        """Deprecated _tts_base64 returns None cleanly without delay."""
+        for char_count in (100, 300, 700):
+            text = _sample_text(char_count)
+            started_at = time.perf_counter()
+            audio_base64 = audio_chat_service._tts_base64(text)
+            elapsed_seconds = time.perf_counter() - started_at
 
-        with (
-            patch.object(audio_chat_service.rag_settings, "AUDIO_TTS_ENABLED", True),
-            patch.object(audio_chat_service.rag_settings, "AUDIO_TTS_TIMEOUT_SECONDS", 0),
-            patch.object(audio_chat_service, "generate_audio_from_text", generate_audio),
-        ):
-            for char_count in (100, 300, 700):
-                text = _sample_text(char_count)
-                started_at = time.perf_counter()
-                audio_base64 = audio_chat_service._tts_base64(text)
-                elapsed_seconds = time.perf_counter() - started_at
-
-                self.assertEqual(len(text), char_count)
-                self.assertEqual(
-                    audio_base64,
-                    base64.b64encode(b"spoken-pcm").decode("ascii"),
-                )
-                self.assertLess(elapsed_seconds, 1.0)
-                timings.append((char_count, elapsed_seconds))
-
-        self.assertEqual(generate_audio.call_count, 3)
-        print("\nMocked TTS wrapper return time results:")
-        for char_count, elapsed_seconds in timings:
-            print(f"  {char_count:>3} chars -> {elapsed_seconds:.4f}s")
+            self.assertEqual(len(text), char_count)
+            self.assertIsNone(audio_base64)
+            self.assertLess(elapsed_seconds, 0.1)
 
     def test_real_tts_return_time_for_100_300_700_characters(self):
         """Measure real Gemini TTS return time for common response lengths."""

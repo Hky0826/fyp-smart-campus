@@ -27,6 +27,7 @@ Item {
     signal closeRequested()
     signal stopAnsweringRequested()
     signal toggleMuteRequested()
+    signal dismissNavigationRequested()
 
     onVisibleChanged: {
         if (visible) {
@@ -666,6 +667,36 @@ Item {
                                 font.pixelSize: 9
                                 font.bold: true
                                 color: "#3730a3"
+                            }
+                        }
+
+                        // Dismiss Navigation Button
+                        Rectangle {
+                            id: dismissNavBtn
+                            width: 18
+                            height: 18
+                            radius: 9
+                            color: dismissNavMouse.pressed ? "#cbd5e1" : (dismissNavMouse.containsMouse ? "#e2e8f0" : "#f1f5f9")
+                            border.width: 1
+                            border.color: "#cbd5e1"
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "✕"
+                                font.pixelSize: 10
+                                font.bold: true
+                                color: "#64748b"
+                            }
+
+                            MouseArea {
+                                id: dismissNavMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    root.currentNavigation = null
+                                    root.dismissNavigationRequested()
+                                }
                             }
                         }
                     }

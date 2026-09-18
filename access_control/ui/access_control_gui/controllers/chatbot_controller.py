@@ -33,6 +33,11 @@ from access_control.audio_io.config import AudioIOConfig
 
 from .api_client import KioskApiClient
 
+try:
+    from access_control.timing_logger import edge_timing
+except ImportError:
+    from timing_logger import edge_timing
+
 
 logger = logging.getLogger(__name__)
 TTS_OUTPUT_SAMPLE_RATE = int(os.getenv("EDGE_GUI_TTS_OUTPUT_SAMPLE_RATE", "24000"))
@@ -167,6 +172,14 @@ class _LiveDuplexWorker(QThread):
         last_user_query = [""]
         last_assistant_text = [""]
         last_citations: list[list[Any]] = [[]]
+        session_ready = [False]
+
+        turn_id = [""]
+        turn_speech_onset_mono = [0.0]
+        turn_speech_end_mono = [0.0]
+        turn_audio_bytes_sent = [0]
+        first_audio_chunk_received = [False]
+        first_audio_playback_started = [False]
 
         def mic_callback(indata: bytes, frames: int, time_info: Any, status: Any) -> None:
             if self._stop_requested.is_set():
@@ -220,6 +233,19 @@ class _LiveDuplexWorker(QThread):
                                 break
 
                             self.busyChanged.emit(True)
+                            if not first_audio_playback_started[0]:
+                                first_audio_playback_started[0] = True
+                                time_since_speech_end = (
+                                    (time.monotonic() - turn_speech_end_mono[0]) * 1000.0
+                                    if turn_speech_end_mono[0] > 0
+                                    else None
+                                )
+                                edge_timing.log_internal(
+                                    "AUDIO_PLAYBACK_START",
+                                    turn_id=turn_id[0],
+                                    time_since_speech_end_ms=time_since_speech_end,
+                                    pcm_bytes=len(pcm_bytes),
+                                )
                             if abs(self._output_gain - 1.0) > 1e-3:
                                 samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
                                 pcm_bytes = (samples * self._output_gain).clip(-32768, 32767).astype(np.int16).tobytes()
@@ -256,24 +282,65 @@ class _LiveDuplexWorker(QThread):
 
                             event = msg.get("event")
                             data = msg.get("data") or {}
+                            msg_turn_id = data.get("turn_id") or msg.get("turn_id") or turn_id[0]
+                            server_sent_at = data.get("server_sent_at") or msg.get("server_sent_at")
+                            time_since_speech_end = (
+                                (time.monotonic() - turn_speech_end_mono[0]) * 1000.0
+                                if turn_speech_end_mono[0] > 0
+                                else None
+                            )
 
                             if event in ("session_ready", "ready"):
+                                session_ready[0] = True
                                 self.listeningChanged.emit(True)
+                                edge_timing.log_receive("WS_READY", turn_id=msg_turn_id, server_sent_at=server_sent_at)
                             elif event in ("user_transcript", "transcript"):
                                 text = data.get("text", "")
                                 if text:
                                     last_user_query[0] = text
+                                    last_assistant_text[0] = ""
                                     self.userTranscriptReceived.emit(text)
+                                    edge_timing.log_receive(
+                                        "TRANSCRIPT",
+                                        turn_id=msg_turn_id,
+                                        server_sent_at=server_sent_at,
+                                        time_since_speech_end_ms=time_since_speech_end,
+                                        text=text[:60],
+                                    )
                             elif event == "rag_status":
+                                last_assistant_text[0] = ""
                                 st = data.get("status", "")
                                 q = data.get("query", "")
                                 self.ragStatusChanged.emit(st, q)
+                                edge_timing.log_receive(
+                                    "RAG_STATUS",
+                                    turn_id=msg_turn_id,
+                                    server_sent_at=server_sent_at,
+                                    time_since_speech_end_ms=time_since_speech_end,
+                                    status=st,
+                                )
+                            elif event == "acoustic_bridge":
+                                last_assistant_text[0] = ""
+                                edge_timing.log_receive(
+                                    "ACOUSTIC_BRIDGE",
+                                    turn_id=msg_turn_id,
+                                    server_sent_at=server_sent_at,
+                                    time_since_speech_end_ms=time_since_speech_end,
+                                )
                             elif event == "navigation":
                                 self.navigationReceived.emit(data)
+                                edge_timing.log_receive("NAVIGATION", turn_id=msg_turn_id, server_sent_at=server_sent_at)
                             elif event == "rag_complete":
                                 cites = data.get("citations") or data.get("sources") or []
                                 last_citations[0] = cites
                                 self.citationsReceived.emit(cites)
+                                edge_timing.log_receive(
+                                    "RAG_COMPLETE",
+                                    turn_id=msg_turn_id,
+                                    server_sent_at=server_sent_at,
+                                    time_since_speech_end_ms=time_since_speech_end,
+                                    citations_count=len(cites),
+                                )
                             elif event == "output_transcript":
                                 tok = data.get("text", "")
                                 if tok:
@@ -283,9 +350,30 @@ class _LiveDuplexWorker(QThread):
                                 b64_chunk = data.get("chunk", "")
                                 if b64_chunk:
                                     pcm = base64.b64decode(b64_chunk)
+                                    if not first_audio_chunk_received[0]:
+                                        first_audio_chunk_received[0] = True
+                                        edge_timing.log_receive(
+                                            "FIRST_AUDIO_CHUNK",
+                                            turn_id=msg_turn_id,
+                                            server_sent_at=server_sent_at,
+                                            time_since_speech_end_ms=time_since_speech_end,
+                                            chunk_bytes=len(pcm),
+                                        )
                                     if self._audio_play_queue:
                                         await self._audio_play_queue.put(pcm)
                             elif event == "turn_complete":
+                                total_round_trip = (
+                                    (time.monotonic() - turn_speech_end_mono[0]) * 1000.0
+                                    if turn_speech_end_mono[0] > 0
+                                    else None
+                                )
+                                edge_timing.log_receive(
+                                    "TURN_COMPLETE",
+                                    turn_id=msg_turn_id,
+                                    server_sent_at=server_sent_at,
+                                    duration_ms=total_round_trip,
+                                    time_since_speech_end_ms=total_round_trip,
+                                )
                                 self.turnCompleted.emit()
                                 user_q = last_user_query[0]
                                 bot_a = last_assistant_text[0]
@@ -300,6 +388,7 @@ class _LiveDuplexWorker(QThread):
                                         "citations": cites,
                                     })
                             elif event == "interrupted":
+                                edge_timing.log_receive("INTERRUPTED", turn_id=msg_turn_id)
                                 playback_busy_until = 0.0
                                 last_speaker_rms = 0.0
                                 if self._audio_play_queue:
@@ -311,7 +400,9 @@ class _LiveDuplexWorker(QThread):
                                 self.busyChanged.emit(False)
                                 self.assistantAudioLevelChanged.emit(0.0)
                             elif event == "error":
-                                self.errorOccurred.emit(str(data.get("message") or "Unknown error"))
+                                err_msg = str(data.get("message") or "Unknown error")
+                                edge_timing.log_receive("ERROR", turn_id=msg_turn_id, error=err_msg)
+                                self.errorOccurred.emit(err_msg)
                     except websockets.ConnectionClosed:
                         pass
                     except asyncio.CancelledError:
@@ -341,6 +432,10 @@ class _LiveDuplexWorker(QThread):
                             if pcm_chunk is None or self._stop_requested.is_set():
                                 break
 
+                            if not session_ready[0]:
+                                # Drop microphone chunks until backend emits ready event
+                                continue
+
                             # High-pass filter (150 Hz) and calculate RMS
                             rms, zi = _filter_and_calculate_rms(pcm_chunk, sos, zi)
                             now = time.monotonic()
@@ -362,6 +457,7 @@ class _LiveDuplexWorker(QThread):
                                     consecutive_barge_count = 0
                                     playback_busy_until = 0.0
                                     last_speaker_rms = 0.0
+                                    last_assistant_text[0] = ""
                                     if self._audio_play_queue:
                                         while not self._audio_play_queue.empty():
                                             try:
@@ -370,6 +466,7 @@ class _LiveDuplexWorker(QThread):
                                                 break
                                     self.busyChanged.emit(False)
                                     self.assistantAudioLevelChanged.emit(0.0)
+                                    edge_timing.log_send("CLIENT_BARGE_IN", turn_id=turn_id[0], rms=round(rms, 1))
                                     try:
                                         await ws.send(json.dumps({"event": "client_barge_in"}))
                                     except Exception:
@@ -379,6 +476,7 @@ class _LiveDuplexWorker(QThread):
                                         self.speechStateChanged.emit(True)
                                     silence_started = 0.0
                                     try:
+                                        turn_audio_bytes_sent[0] += len(pcm_chunk)
                                         await ws.send(pcm_chunk)
                                     except Exception:
                                         break
@@ -393,14 +491,29 @@ class _LiveDuplexWorker(QThread):
                                     if rms >= self._speech_threshold:
                                         # Voice onset detected! Flush pre-roll buffer to preserve initial syllables
                                         is_speaking = True
+                                        turn_speech_onset_mono[0] = time.monotonic()
+                                        turn_id[0] = f"turn_{int(time.time() * 1000)}"
+                                        turn_audio_bytes_sent[0] = 0
+                                        first_audio_chunk_received[0] = False
+                                        first_audio_playback_started[0] = False
+                                        edge_timing.log_internal(
+                                            "SPEECH_ONSET",
+                                            turn_id=turn_id[0],
+                                            rms=round(rms, 1),
+                                            threshold=self._speech_threshold,
+                                        )
+                                        last_assistant_text[0] = ""
                                         self.speechStateChanged.emit(True)
                                         silence_started = 0.0
                                         while pre_roll_buffer:
                                             try:
-                                                await ws.send(pre_roll_buffer.popleft())
+                                                chunk = pre_roll_buffer.popleft()
+                                                turn_audio_bytes_sent[0] += len(chunk)
+                                                await ws.send(chunk)
                                             except Exception:
                                                 break
                                         try:
+                                            turn_audio_bytes_sent[0] += len(pcm_chunk)
                                             await ws.send(pcm_chunk)
                                         except Exception:
                                             break
@@ -410,6 +523,7 @@ class _LiveDuplexWorker(QThread):
                                 else:
                                     # Currently in active speech: stream chunk to Gemini Live
                                     try:
+                                        turn_audio_bytes_sent[0] += len(pcm_chunk)
                                         await ws.send(pcm_chunk)
                                     except Exception:
                                         break
@@ -422,10 +536,26 @@ class _LiveDuplexWorker(QThread):
                                         elif (now - silence_started) >= self._silence_hold_sec:
                                             is_speaking = False
                                             silence_started = 0.0
+                                            turn_speech_end_mono[0] = time.monotonic()
+                                            speech_duration_ms = (turn_speech_end_mono[0] - turn_speech_onset_mono[0]) * 1000.0
+                                            client_sent_at = edge_timing.log_send(
+                                                "ACTIVITY_END",
+                                                turn_id=turn_id[0],
+                                                duration_ms=speech_duration_ms,
+                                                audio_bytes=turn_audio_bytes_sent[0],
+                                            )
                                             self.speechStateChanged.emit(False)
                                             self.userAudioLevelChanged.emit(0.0)
                                             try:
-                                                await ws.send(json.dumps({"event": "activity_end"}))
+                                                await ws.send(json.dumps({
+                                                    "event": "activity_end",
+                                                    "data": {
+                                                        "turn_id": turn_id[0],
+                                                        "client_sent_at": client_sent_at,
+                                                        "speech_duration_ms": round(speech_duration_ms, 2),
+                                                        "total_audio_bytes": turn_audio_bytes_sent[0],
+                                                    },
+                                                }))
                                             except Exception:
                                                 pass
 
@@ -466,39 +596,15 @@ class _LiveDuplexWorker(QThread):
             except Exception:
                 pass
 
-
-class _GreetingWorker(QThread):
-    errorOccurred = Signal(str)
-
-    def __init__(self, api: KioskApiClient) -> None:
-        super().__init__()
-        self._api = api
-        self._player: AudioPlayer | None = None
-
-    def run(self) -> None:
-        try:
-            payload = self._api.request_greeting_audio()
-            if self.isInterruptionRequested():
-                return
-            encoded = payload.get("audio_response")
-            if not encoded:
-                return
-            config = AudioIOConfig()
-            player = AudioPlayer(config, sample_rate=int(payload.get("sample_rate") or TTS_OUTPUT_SAMPLE_RATE))
-            self._player = player
-            if self.isInterruptionRequested():
-                player.stop()
-                return
-            player.play_pcm_stream(iter((base64.b64decode(encoded),)))
-        except Exception as exc:
-            if self.isInterruptionRequested():
-                return
-            logger.warning("Greeting audio playback failed: %s", exc)
-
-    def stop(self) -> None:
-        self.requestInterruption()
-        if self._player is not None:
-            self._player.stop()
+    def send_greeting(self, user_name: str | None = None) -> None:
+        if self._ws and self._loop:
+            try:
+                payload = json.dumps({"event": "greet", "data": {"user_name": user_name}})
+                self._loop.call_soon_threadsafe(
+                    lambda: asyncio.create_task(self._ws.send(payload))
+                )
+            except Exception as exc:
+                logger.debug("Failed to send greet event over WebSocket: %s", exc)
 
 
 class ChatbotController(QObject):
@@ -546,7 +652,6 @@ class ChatbotController(QObject):
         self._cooling_off_ms = DEFAULT_COOLING_OFF_MS
         self._silence_hold_sec = DEFAULT_SILENCE_HOLD_SEC
         self._barge_ratio = DEFAULT_BARGE_RATIO
-        self._greeting_worker: _GreetingWorker | None = None
 
     @Slot()
     def startVoiceLoop(self) -> None:
@@ -591,13 +696,31 @@ class ChatbotController(QObject):
         worker.start()
 
     @Slot()
+    def clearNavigation(self) -> None:
+        """Clear current navigation directions."""
+        self._current_navigation = {}
+        self.currentNavigationChanged.emit()
+
+    @Slot()
+    def resetSessionState(self) -> None:
+        """Reset all ephemeral session state (navigation, citations, transcripts)."""
+        self._current_navigation = {}
+        self._citations = []
+        self._partial_text = ""
+        self._transcribed_text = ""
+        self._rag_status = ""
+        self.currentNavigationChanged.emit()
+        self.citationsChanged.emit()
+        self.partialTextChanged.emit()
+        self.transcribedTextChanged.emit()
+        self.ragStatusChanged.emit()
+
+    @Slot()
     def stopVoiceLoop(self) -> None:
         if self._worker:
             self._worker.stop()
             self._worker.wait(1000)
             self._worker = None
-        if self._greeting_worker:
-            self._greeting_worker.stop()
         self._set_listening(False)
         self._set_busy(False)
         self._set_speaking(False)
@@ -606,17 +729,19 @@ class ChatbotController(QObject):
         self._partial_text = ""
         self._transcribed_text = ""
         self._rag_status = ""
+        self._current_navigation = {}
+        self._citations = []
         self.partialTextChanged.emit()
         self.transcribedTextChanged.emit()
         self.busyChanged.emit()
         self.ragStatusChanged.emit()
+        self.currentNavigationChanged.emit()
+        self.citationsChanged.emit()
 
     @Slot()
     def stopAudioPlayback(self) -> None:
         if self._worker:
             self._worker.stop_audio_playback()
-        if self._greeting_worker:
-            self._greeting_worker.stop()
 
     @Slot()
     def interruptPlayback(self) -> None:
@@ -648,12 +773,17 @@ class ChatbotController(QObject):
 
     @Slot(str)
     def _on_transcribed_text(self, text: str) -> None:
+        self._partial_text = ""
         self._transcribed_text = text
         self._set_busy(True)
+        self.partialTextChanged.emit()
         self.transcribedTextChanged.emit()
 
     @Slot(str, str)
     def _on_rag_status(self, status: str, query: str) -> None:
+        if status or query:
+            self._partial_text = ""
+            self.partialTextChanged.emit()
         self._rag_status = "Searching database..." if status or query else ""
         self.ragStatusChanged.emit()
 
@@ -704,30 +834,26 @@ class ChatbotController(QObject):
         else:
             self.startVoiceLoop()
 
+    @Slot(str)
+    @Slot()
+    def triggerLiveGreeting(self, user_name: str | None = None) -> None:
+        """Trigger Gemini Live to speak the welcome greeting over the live duplex session."""
+        if not self._worker or not self._worker.isRunning():
+            self.startVoiceLoop()
+        if self._worker:
+            self._worker.send_greeting(user_name)
+
     @Slot()
     def playGreeting(self) -> None:
-        if self._greeting_worker and self._greeting_worker.isRunning():
-            return
-        worker = _GreetingWorker(self._api)
-        worker.errorOccurred.connect(self._set_error)
-        worker.finished.connect(lambda: self._cleanup_greeting_worker(worker))
-        self._greeting_worker = worker
-        worker.start()
+        """Deprecated alias; triggers Gemini Live spoken greeting."""
+        self.triggerLiveGreeting()
 
     def shutdown(self) -> None:
         self.stopVoiceLoop()
-        if self._greeting_worker:
-            self._greeting_worker.stop()
-            self._greeting_worker.wait(1000)
 
     def _cleanup_worker(self, worker: _LiveDuplexWorker) -> None:
         if self._worker is worker:
             self._worker = None
-        worker.deleteLater()
-
-    def _cleanup_greeting_worker(self, worker: _GreetingWorker) -> None:
-        if self._greeting_worker is worker:
-            self._greeting_worker = None
         worker.deleteLater()
 
     @Slot(bool)

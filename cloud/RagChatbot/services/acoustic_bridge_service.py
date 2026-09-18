@@ -8,38 +8,8 @@ import threading
 from typing import Optional, Tuple
 
 from RagChatbot.config import rag_settings
-from RagChatbot.generation.response_validator import generate_audio_from_text
-
-logger = logging.getLogger(__name__)
-
-# Pre-synthesized memory cache for standard bridge phrases (0ms latency on repeated queries)
-_BRIDGE_CACHE: dict[str, bytes] = {}
-_BRIDGE_LOCK = threading.Lock()
-
-_DEFAULT_BRIDGES = [
-    "Checking university records for you...",
-    "Let me look that up across campus documents...",
-    "Searching university information for you...",
-    "Checking the admissions and degree guidelines...",
-    "Let me check that for you right away...",
-]
-
-
 def _get_or_synthesize_bridge(text: str) -> Optional[bytes]:
-    """Retrieve pre-synthesized PCM or synthesize once and cache in memory."""
-    with _BRIDGE_LOCK:
-        if text in _BRIDGE_CACHE:
-            return _BRIDGE_CACHE[text]
-
-    try:
-        audio_pcm = generate_audio_from_text(text)
-        if audio_pcm:
-            with _BRIDGE_LOCK:
-                _BRIDGE_CACHE[text] = audio_pcm
-            return audio_pcm
-    except Exception as exc:
-        logger.debug("Acoustic bridge synthesis fallback: %s", exc)
-
+    """Deprecated. All audio output is handled exclusively by Gemini Live."""
     return None
 
 

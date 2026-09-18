@@ -88,51 +88,13 @@ def _safe_query_id(val: Any) -> Optional[int]:
     return None
 
 def _tts_base64(text: str, language_code: Optional[str] = None) -> Optional[str]:
-    """Generate base64 PCM audio for safe response text."""
-    if not rag_settings.AUDIO_TTS_ENABLED or not text.strip():
-        return None
-    timeout_seconds = max(0.0, float(getattr(rag_settings, "AUDIO_TTS_TIMEOUT_SECONDS", 6)))
-    use_language = bool(language_code and str(language_code).lower() not in {"en", "en-us"})
-    tts_args = (text, language_code) if use_language else (text,)
-    try:
-        if timeout_seconds:
-            future = _TTS_EXECUTOR.submit(generate_audio_from_text, *tts_args)
-            try:
-                audio_pcm = future.result(timeout=timeout_seconds)
-            except concurrent.futures.TimeoutError:
-                future.cancel()
-                logger.warning(
-                    "Audio chat: TTS timed out after %.1fs, returning text only.",
-                    timeout_seconds,
-                )
-                return None
-        else:
-            audio_pcm = generate_audio_from_text(*tts_args)
-    except Exception as exc:
-        logger.warning("Audio chat: TTS failed, returning text only: %s", exc)
-        return None
-    if audio_pcm is None:
-        return None
-    audio_base64 = base64.b64encode(audio_pcm).decode("ascii")
-    logger.info(
-        "Audio chat: TTS payload ready. pcm_bytes=%d base64_chars=%d",
-        len(audio_pcm),
-        len(audio_base64),
-    )
-    return audio_base64
+    """Deprecated. All spoken audio output is handled exclusively by Gemini Live."""
+    return None
 
 
 def _tts_job(text: str, language_code: Optional[str] = None) -> tuple[Optional[bytes], float, Optional[str]]:
-    """Run one synthesis request off the response-generation path."""
-    started = time.monotonic()
-    try:
-        if language_code and str(language_code).lower() not in {"en", "en-us"}:
-            audio = generate_audio_from_text(text, language_code)
-        else:
-            audio = generate_audio_from_text(text)
-        return audio, (time.monotonic() - started) * 1000.0, None
-    except Exception as exc:  # TTS is best-effort; text must still complete.
-        return None, (time.monotonic() - started) * 1000.0, str(exc)
+    """Deprecated. All spoken audio output is handled exclusively by Gemini Live."""
+    return None, 0.0, None
 
 
 def _drain_tts_queue(pending: list[tuple[str, concurrent.futures.Future]], metrics: InferenceMetrics,
@@ -471,12 +433,15 @@ def process_audio_chat(
                 intent="OUT_OF_SCOPE",
             )
         else:
+            from RagChatbot.services.chat_service import _load_recent_chat_history, _condense_query_with_history
+            chat_history = _load_recent_chat_history(resolved_session_id, db)
             with StageTimer() as timer:
                 planned = llm_planner.execute_planned_turn(
                     sanitized_query,
                     context=context,
                     db=db,
                     confirmation_context=confirmation_context,
+                    chat_history=chat_history,
                 )
             metrics.prompt_classification_ms += timer.elapsed_ms
 
@@ -531,12 +496,17 @@ def process_audio_chat(
         )
 
     # Step 6-12: Execute through Fast RAG engine
+    from RagChatbot.services.chat_service import _load_recent_chat_history, _condense_query_with_history
+    chat_history = _load_recent_chat_history(resolved_session_id, db)
+    search_query = _condense_query_with_history(sanitized_query, chat_history)
     with StageTimer() as timer:
         from RagChatbot.generation.live_fast_rag import live_fast_rag
         fast_res = live_fast_rag.process_voice_query(
             query=sanitized_query,
             auth_context=context,
             db=db,
+            chat_history=chat_history,
+            search_query=search_query,
         )
     metrics.rag_ms += timer.elapsed_ms
 

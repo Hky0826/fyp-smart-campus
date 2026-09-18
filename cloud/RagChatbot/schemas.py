@@ -37,6 +37,13 @@ class ChatRequest(BaseModel):
             "Used to associate the query with an existing session."
         ),
     )
+    chat_history: Optional[List[dict[str, Any]]] = Field(
+        default=None,
+        description=(
+            "Recent turns in the active session: [{'user': '...', 'assistant': '...'}]. "
+            "Used for in-session pronoun resolution and multi-turn context retention."
+        ),
+    )
 
 
 class CitationSchema(BaseModel):

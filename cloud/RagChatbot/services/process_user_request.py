@@ -168,36 +168,40 @@ def _classify_with_flash_lite(query: str) -> dict[str, Any]:
     if not rag_settings.GOOGLE_API_KEY:
         raise RuntimeError("Live request validator is not configured")
 
-    client = genai.Client(
-        api_key=rag_settings.GOOGLE_API_KEY,
-        http_options=types.HttpOptions(
-            timeout=max(1000, int(rag_settings.LIVE_BACKEND_TIMEOUT_SECONDS * 1000)),
-        ),
+    from RagChatbot.gemini_client import (
+        generate_content_with_retry,
+        get_gemini_client,
+        in_flight_deduplicator,
     )
-    from RagChatbot.gemini_client import generate_content_with_retry
-    response = generate_content_with_retry(
-        client=client,
-        model=rag_settings.LIVE_ROUTING_MODEL,
-        contents=query,
-        config=types.GenerateContentConfig(
-            system_instruction=_FLASH_LITE_ROUTER_INSTRUCTION,
-            temperature=0.0,
-            max_output_tokens=256,
-            response_mime_type="application/json",
-            response_schema={
-                "type": "OBJECT",
-                "properties": {
-                    "safe": {"type": "BOOLEAN"},
-                    "scope": {"type": "STRING", "enum": sorted(_VALID_SCOPES)},
-                    "route": {"type": "STRING", "enum": sorted(_VALID_ROUTES)},
-                    "intent": {"type": "STRING"},
-                    "reason": {"type": "STRING", "nullable": True},
-                    "clarification_question": {"type": "STRING", "nullable": True},
+
+    client = get_gemini_client(timeout_seconds=rag_settings.LIVE_BACKEND_TIMEOUT_SECONDS)
+
+    def _call():
+        return generate_content_with_retry(
+            client=client,
+            model=rag_settings.LIVE_ROUTING_MODEL,
+            contents=query,
+            config=types.GenerateContentConfig(
+                system_instruction=_FLASH_LITE_ROUTER_INSTRUCTION,
+                temperature=0.0,
+                max_output_tokens=256,
+                response_mime_type="application/json",
+                response_schema={
+                    "type": "OBJECT",
+                    "properties": {
+                        "safe": {"type": "BOOLEAN"},
+                        "scope": {"type": "STRING", "enum": sorted(_VALID_SCOPES)},
+                        "route": {"type": "STRING", "enum": sorted(_VALID_ROUTES)},
+                        "intent": {"type": "STRING"},
+                        "reason": {"type": "STRING", "nullable": True},
+                        "clarification_question": {"type": "STRING", "nullable": True},
+                    },
+                    "required": ["safe", "scope", "route", "intent"],
                 },
-                "required": ["safe", "scope", "route", "intent"],
-            },
-        ),
-    )
+            ),
+        )
+
+    response = in_flight_deduplicator.execute(f"classify:{query}", _call)
     payload = json.loads((response.text or "").strip())
     safe = payload.get("safe") is True
     scope = str(payload.get("scope") or "OUT_OF_SCOPE").upper()
@@ -230,6 +234,7 @@ def process_user_request(
     db: Session,
     turn_id: str | None = None,
     fast_voice: bool = False,
+    chat_history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Validate and route one completed Live user turn.
 
@@ -496,7 +501,16 @@ def process_user_request(
     # UNIVERSITY_INFO routes directly through the single-pass Fast RAG engine
     try:
         from RagChatbot.generation.live_fast_rag import live_fast_rag
-        fast_res = live_fast_rag.process_voice_query(sanitized, auth_context=context, db=db)
+        from RagChatbot.services.chat_service import _load_recent_chat_history, _condense_query_with_history
+        history = chat_history or _load_recent_chat_history(resolved_session_id, db)
+        search_query = _condense_query_with_history(sanitized, history)
+        fast_res = live_fast_rag.process_voice_query(
+            sanitized,
+            auth_context=context,
+            db=db,
+            chat_history=history,
+            search_query=search_query,
+        )
     except Exception as exc:
         logger.error("Fast RAG execution failed: %s", exc)
         return _result(

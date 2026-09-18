@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Campus - AI Chatbot Dictionary & Glossary (Industry Standard Design)</title>
+  <style>
+    /* ============================================================
+       RESET & MODERN DESIGN TOKENS (STRIPE / LINEAR / DIALOGFLOW)
+       ============================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background-color: #0b0f19;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+    a, button { cursor: pointer; border: none; outline: none; font-family: inherit; }
+    input, textarea, select { font-family: inherit; }
+
+    /* SCROLLBAR */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0b0f19; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #4f46e5; }
+
+    /* LAYOUT */
+    .app-root { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+    /* TOP NAVIGATION */
+    .top-nav {
+      height: 60px;
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      flex-shrink: 0;
+      z-index: 30;
+    }
+    .nav-brand { display: flex; align-items: center; gap: 12px; }
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 15px;
+      box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+    }
+    .brand-titles { line-height: 1.2; }
+    .brand-title { font-size: 14px; font-weight: 800; color: #f8fafc; letter-spacing: -0.01em; }
+    .brand-sub { font-size: 10px; font-weight: 700; color: #818cf8; text-transform: uppercase; letter-spacing: 0.08em; }
+
+    .nav-tabs { display: flex; align-items: center; gap: 4px; background: #070b14; padding: 4px; border-radius: 10px; border: 1px solid #1e293b; }
+    .nav-tab-btn {
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #94a3b8;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .nav-tab-btn:hover { color: #f1f5f9; }
+    .nav-tab-btn.active { background: #4f46e5; color: #fff; box-shadow: 0 2px 8px rgba(79, 70, 229, 0.4); }
+
+    .nav-right { display: flex; align-items: center; gap: 12px; font-size: 12px; }
+    .live-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.12);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.25);
+    }
+    .pulse-dot { width: 6px; height: 6px; border-radius: 999px; background: #34d399; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25); }
+
+    /* WORKSPACE BODY (TWO COLUMN: MAIN GLOSSARY + RIGHT TEST SANDBOX) */
+    .workspace-body {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    .glossary-column {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .sandbox-column {
+      width: 380px;
+      min-width: 380px;
+      background: #0f172a;
+      border-left: 1px solid #1e293b;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    /* INDUSTRY STANDARD: "WHY THIS EXISTS" INTRO BANNER */
+    .concept-explainer {
+      background: linear-gradient(180deg, #131d36 0%, #0d1527 100%);
+      border: 1px solid #202d4f;
+      border-radius: 16px;
+      padding: 20px 24px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    }
+    .explainer-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
+    .explainer-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: rgba(99, 102, 241, 0.2);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      margin-bottom: 6px;
+    }
+    .explainer-title { font-size: 20px; font-weight: 800; color: #f8fafc; letter-spacing: -0.02em; }
+    .explainer-desc { font-size: 13px; color: #94a3b8; max-width: 680px; margin-top: 4px; line-height: 1.5; }
+
+    /* REAL-WORLD VISUAL EXAMPLE (STUDENT SAYS -> BOT UNDERSTANDS) */
+    .visual-example-box {
+      background: #070b14;
+      border: 1px solid #1a2540;
+      border-radius: 12px;
+      padding: 12px 18px;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      align-items: center;
+      gap: 12px;
+      font-size: 12px;
+    }
+    .flow-card {
+      background: #0d1527;
+      border: 1px solid #202d4f;
+      border-radius: 8px;
+      padding: 8px 12px;
+    }
+    .flow-label { font-size: 10px; text-transform: uppercase; font-weight: 700; color: #64748b; margin-bottom: 2px; }
+    .flow-val { font-weight: 600; color: #e2e8f0; }
+    .flow-val mark { background: rgba(239, 68, 68, 0.2); color: #fca5a5; padding: 1px 4px; border-radius: 4px; }
+    .flow-val.matched { color: #34d399; }
+    .flow-val.matched mark { background: rgba(16, 185, 129, 0.2); color: #86efac; }
+    .flow-arrow { color: #475569; font-size: 16px; font-weight: bold; text-align: center; }
+
+    /* SMART DETECT RECOMMENDATIONS */
+    .smart-detect-bar {
+      background: #11192e;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 12px;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 12px;
+    }
+    .smart-left { display: flex; align-items: center; gap: 10px; }
+    .smart-icon { color: #f59e0b; font-size: 16px; }
+    .smart-text strong { color: #f8fafc; font-weight: 700; }
+    .smart-text span { color: #94a3b8; }
+    .smart-chips { display: flex; align-items: center; gap: 8px; }
+    .smart-chip-btn {
+      background: #0d1527;
+      border: 1px solid #202d4f;
+      color: #cbd5e1;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s;
+    }
+    .smart-chip-btn:hover { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+
+    /* CONTROLS ROW */
+    .glossary-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .category-filter-group { display: flex; align-items: center; gap: 6px; }
+    .filter-btn {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      color: #94a3b8;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .filter-btn:hover { background: #1e293b; color: #fff; }
+    .filter-btn.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+    .filter-count { font-size: 10px; opacity: 0.8; font-family: monospace; }
+
+    .search-add-group { display: flex; align-items: center; gap: 10px; }
+    .search-box { position: relative; width: 220px; }
+    .search-input {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 7px 12px 7px 32px;
+      font-size: 12px;
+      color: #f1f5f9;
+      outline: none;
+    }
+    .search-input:focus { border-color: #4f46e5; }
+    .search-svg {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #64748b;
+      pointer-events: none;
+    }
+    .btn-add {
+      background: #4f46e5;
+      color: #fff;
+      padding: 7px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+      transition: all 0.2s;
+    }
+    .btn-add:hover { background: #4338ca; }
+
+    /* DIALOGFLOW / BOTPRESS STYLE TABLE */
+    .glossary-card {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    }
+    .table-root { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+    .table-root th {
+      background: #090e1c;
+      padding: 12px 18px;
+      color: #64748b;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border-bottom: 1px solid #1e293b;
+    }
+    .table-root td {
+      padding: 14px 18px;
+      border-bottom: 1px solid #141d33;
+      color: #cbd5e1;
+      vertical-align: middle;
+    }
+    .table-root tr:hover { background: #111a33; }
+
+    .term-cell strong { font-size: 13px; color: #f8fafc; display: block; font-weight: 700; }
+    .term-cell span { font-size: 11px; color: #64748b; font-family: monospace; }
+    
+    .badge-cat {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+    .badge-cat.campus { background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); }
+    .badge-cat.academic { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-cat.malay { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-cat.chinese { background: rgba(244, 63, 94, 0.15); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.3); }
+
+    /* SYNONYMS TAG CHIPS */
+    .synonym-chips-list { display: flex; flex-wrap: wrap; gap: 4px; max-width: 320px; }
+    .syn-chip {
+      background: #090e1c;
+      border: 1px solid #1e293b;
+      color: #94a3b8;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-family: monospace;
+    }
+    .syn-chip.highlight { color: #818cf8; border-color: rgba(99, 102, 241, 0.4); background: rgba(99, 102, 241, 0.1); }
+
+    /* TOGGLE SWITCH */
+    .toggle-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+    .toggle-switch.on { background: rgba(16, 185, 129, 0.12); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .toggle-switch.off { background: #1e293b; color: #64748b; border: 1px solid #334155; }
+    .toggle-dot { width: 6px; height: 6px; border-radius: 999px; }
+    .toggle-dot.on { background: #34d399; }
+    .toggle-dot.off { background: #64748b; }
+
+    .action-icons { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+    .act-btn {
+      background: transparent;
+      color: #64748b;
+      padding: 5px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      transition: all 0.15s;
+    }
+    .act-btn:hover { background: #1e293b; color: #f8fafc; }
+    .act-btn.del:hover { color: #f87171; }
+
+    /* ============================================================
+       RIGHT COLUMN: LIVE CHAT & RECOGNITION SANDBOX (LIKE VOICEFLOW)
+       ============================================================ */
+    .sandbox-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #1e293b;
+      background: #090e1c;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .sandbox-title-group { display: flex; align-items: center; gap: 8px; }
+    .sandbox-title { font-size: 13px; font-weight: 700; color: #f8fafc; }
+    .sandbox-sub { font-size: 11px; color: #64748b; }
+    .sandbox-badge { font-size: 10px; font-family: monospace; color: #818cf8; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.2); padding: 2px 6px; border-radius: 4px; }
+
+    .sandbox-chat-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .chat-bubble {
+      max-width: 90%;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .chat-bubble.user {
+      align-self: flex-end;
+      background: #3730a3;
+      color: #ffffff;
+      border-bottom-right-radius: 3px;
+    }
+    .chat-bubble.bot {
+      align-self: flex-start;
+      background: #11192e;
+      border: 1px solid #1e293b;
+      color: #cbd5e1;
+      border-bottom-left-radius: 3px;
+    }
+    .recognized-inspector {
+      background: #070b14;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin-top: 6px;
+      font-size: 11px;
+    }
+    .recog-header { color: #818cf8; font-weight: 700; font-size: 10px; text-transform: uppercase; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; }
+    .recog-tag {
+      background: rgba(99, 102, 241, 0.2);
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      color: #c7d2fe;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .sandbox-footer {
+      padding: 14px 16px;
+      border-top: 1px solid #1e293b;
+      background: #090e1c;
+    }
+    .sandbox-input-row { display: flex; gap: 8px; }
+    .sandbox-input {
+      flex: 1;
+      background: #070b14;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: #f8fafc;
+      outline: none;
+    }
+    .sandbox-input:focus { border-color: #4f46e5; }
+    .sandbox-send-btn {
+      background: #4f46e5;
+      color: #fff;
+      padding: 0 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .sandbox-quick-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+    .quick-chip {
+      background: #11192e;
+      border: 1px solid #1e293b;
+      color: #94a3b8;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 10px;
+      transition: all 0.15s;
+    }
+    .quick-chip:hover { color: #f1f5f9; border-color: #4f46e5; }
+
+    /* MODAL */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 20px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-card {
+      width: 100%;
+      max-width: 520px;
+      background: #0f172a;
+      border: 1px solid #283556;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+    }
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 14px;
+      border-bottom: 1px solid #1e293b;
+      margin-bottom: 16px;
+    }
+    .modal-head h3 { font-size: 15px; font-weight: 800; color: #f8fafc; }
+    .modal-head p { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+    .field-group { margin-bottom: 14px; }
+    .field-label { display: block; font-size: 11px; font-weight: 700; color: #cbd5e1; text-transform: uppercase; margin-bottom: 6px; }
+    .field-input {
+      width: 100%;
+      background: #070b14;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-size: 13px;
+      color: #f8fafc;
+      outline: none;
+    }
+    .field-input:focus { border-color: #4f46e5; }
+    .field-hint { font-size: 11px; color: #64748b; margin-top: 4px; }
+
+    .cat-selector-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .cat-select-btn {
+      background: #070b14;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      text-align: left;
+    }
+    .cat-select-btn.active { background: rgba(99, 102, 241, 0.15); border-color: #4f46e5; color: #c7d2fe; }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding-top: 14px;
+      border-top: 1px solid #1e293b;
+      margin-top: 16px;
+    }
+    .btn-cancel { background: transparent; color: #94a3b8; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; }
+    .btn-cancel:hover { color: #fff; }
+
+    /* TOAST */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: #11192e;
+      border: 1px solid #4f46e5;
+      color: #f8fafc;
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      opacity: 0;
+      transition: all 0.25s ease;
+      z-index: 200;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  </style>
+</head>
+<body>
+
+<div class="app-root">
+
+  <!-- ================= TOP NAVIGATION ================= -->
+  <header class="top-nav">
+    <div class="nav-brand">
+      <div class="brand-logo">Q</div>
+      <div class="brand-titles">
+        <div class="brand-title">Smart Campus AI</div>
+        <div class="brand-sub">Kiosk Admin Console</div>
+      </div>
+    </div>
+
+    <!-- 3 Core Navigation Tabs -->
+    <div class="nav-tabs">
+      <button class="nav-tab-btn active" onclick="switchMainTab('glossary')">
+        📖 Campus Dictionary & Glossary
+      </button>
+      <button class="nav-tab-btn" onclick="switchMainTab('docs')">
+        📄 Knowledge Docs (RAG)
+      </button>
+      <button class="nav-tab-btn" onclick="switchMainTab('analytics')">
+        📊 Query Logs & Analytics
+      </button>
+    </div>
+
+    <div class="nav-right">
+      <span class="live-status">
+        <span class="pulse-dot"></span>
+        Voice AI Connected
+      </span>
+      <span style="color:#64748b; font-family:monospace;">QIU Campus</span>
+    </div>
+  </header>
+
+  <!-- ================= MAIN WORKSPACE (TWO-COLUMN) ================= -->
+  <div class="workspace-body">
+    
+    <!-- ─── COLUMN 1: GLOSSARY MANAGEMENT ─── -->
+    <main class="glossary-column">
+
+      <!-- CONCEPT EXPLAINER HERO -->
+      <div class="concept-explainer">
+        <div class="explainer-top">
+          <div>
+            <span class="explainer-badge">
+              ⚡ Industry-Standard Entity & Voice Dictionary
+            </span>
+            <h1 class="explainer-title">Campus Dictionary & Synonyms</h1>
+            <p class="explainer-desc">
+              Students and visitors use campus slang, local dialects, and abbreviations when speaking to the kiosk.
+              This dictionary defines what these terms mean and how students say them, ensuring the AI answers with 100% accuracy.
+            </p>
+          </div>
+          <button class="btn-add" onclick="openAddWordModal()">
+            <span>+</span> Add Campus Term
+          </button>
+        </div>
+
+        <!-- BEFORE & AFTER VISUAL MENTAL MODEL -->
+        <div class="visual-example-box">
+          <div class="flow-card">
+            <div class="flow-label">What Student Speaks</div>
+            <div class="flow-val">"Where is the <mark>fox</mark> building?"</div>
+          </div>
+          <div class="flow-arrow">➔</div>
+          <div class="flow-card" style="border-color:#3730a3; background:#11192e;">
+            <div class="flow-label">Dictionary Resolution</div>
+            <div class="flow-val" style="color:#818cf8;">"fox" ➔ <strong>FOCS</strong> (Faculty of Computing)</div>
+          </div>
+          <div class="flow-arrow">➔</div>
+          <div class="flow-card" style="border-color:#065f46; background:#06281e;">
+            <div class="flow-label">AI Accurate Action</div>
+            <div class="flow-val matched">Navigates to <strong>Block B, Level 3</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SMART SUGGESTIONS (FROM CAMPUS MAP & COURSES) -->
+      <div class="smart-detect-bar">
+        <div class="smart-left">
+          <span class="smart-icon">💡</span>
+          <div class="smart-text">
+            <strong>Found 3 unmapped places in your Campus Map:</strong>
+            <span>Add them to your dictionary with 1 click so students can ask for directions.</span>
+          </div>
+        </div>
+        <div class="smart-chips">
+          <button class="smart-chip-btn" onclick="quickAdd('Dewan Gemilang', 'CAMPUS', 'Great Hall, Auditorium', 'Main university auditorium in Block A')">
+            + Dewan Gemilang
+          </button>
+          <button class="smart-chip-btn" onclick="quickAdd('Surau Level 2', 'CAMPUS', 'Musolla, Prayer Room', 'Muslim prayer room, Student Center')">
+            + Surau Level 2
+          </button>
+          <button class="smart-chip-btn" onclick="quickAdd('FOCS Lab 3', 'ACADEMIC', 'Computer Lab, CS Lab', 'Computing lab in Block B')">
+            + FOCS Lab 3
+          </button>
+        </div>
+      </div>
+
+      <!-- FILTER CONTROLS & SEARCH -->
+      <div class="glossary-controls">
+        <div class="category-filter-group" id="filterGroup">
+          <button class="filter-btn active" onclick="setCategoryFilter('ALL')">All Terms (24)</button>
+          <button class="filter-btn" onclick="setCategoryFilter('CAMPUS')">🏛️ Campus Places <span class="filter-count" id="count-CAMPUS">7</span></button>
+          <button class="filter-btn" onclick="setCategoryFilter('ACADEMIC')">🎓 Academic & Acronyms <span class="filter-count" id="count-ACADEMIC">8</span></button>
+          <button class="filter-btn" onclick="setCategoryFilter('MALAY')">🇲🇾 Bahasa Melayu <span class="filter-count" id="count-MALAY">5</span></button>
+          <button class="filter-btn" onclick="setCategoryFilter('CHINESE')">🇨🇳 Chinese / Other <span class="filter-count" id="count-CHINESE">4</span></button>
+        </div>
+
+        <div class="search-add-group">
+          <div class="search-box">
+            <svg class="search-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="termSearchInput" class="search-input" placeholder="Search dictionary..." oninput="onSearch(this.value)">
+          </div>
+        </div>
+      </div>
+
+      <!-- THE DICTIONARY TABLE -->
+      <div class="glossary-card">
+        <table class="table-root">
+          <thead>
+            <tr>
+              <th style="width:25%;">Canonical Term</th>
+              <th style="width:16%;">Category</th>
+              <th style="width:30%;">Spoken Synonyms / How Students Say It</th>
+              <th style="width:17%;">Meaning / Notes</th>
+              <th style="width:12%; text-align:right;">Status</th>
+            </tr>
+          </thead>
+          <tbody id="glossaryTableBody">
+            <!-- Rendered by JavaScript -->
+          </tbody>
+        </table>
+      </div>
+
+    </main>
+
+    <!-- ─── COLUMN 2: LIVE TEST SANDBOX (LIKE DIALOGFLOW / VOICEFLOW) ─── -->
+    <aside class="sandbox-column">
+      <div class="sandbox-header">
+        <div class="sandbox-title-group">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <div>
+            <div class="sandbox-title">Dictionary Test Sandbox</div>
+            <div class="sandbox-sub">Simulate student questions</div>
+          </div>
+        </div>
+        <span class="sandbox-badge">Real-Time</span>
+      </div>
+
+      <div class="sandbox-chat-area" id="chatArea">
+        <!-- Initial messages -->
+        <div class="chat-bubble bot">
+          👋 <strong>Hello!</strong> I am the Smart Campus Kiosk Assistant. Try asking me a question with campus slang, abbreviations, or building names!
+        </div>
+
+        <div class="chat-bubble user">
+          "Where is the surau near Dewan Gemilang in Block B?"
+        </div>
+
+        <div class="chat-bubble bot">
+          The <strong>Surau</strong> (Prayer Hall) is on <strong>Level 2 of Block B</strong>, directly adjacent to Dewan Gemilang.
+          
+          <!-- Recognized Inspector -->
+          <div class="recognized-inspector">
+            <div class="recog-header">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+              Recognized 3 Dictionary Entities:
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
+              <span class="recog-tag">Surau (Location)</span>
+              <span class="recog-tag">Dewan Gemilang (Location)</span>
+              <span class="recog-tag">Block B (Building)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sandbox-footer">
+        <form onsubmit="handleSendChat(event)" class="sandbox-input-row">
+          <input type="text" id="sandboxInput" class="sandbox-input" placeholder="Type a campus question...">
+          <button type="submit" class="sandbox-send-btn">Test</button>
+        </form>
+
+        <div class="sandbox-quick-chips">
+          <span style="font-size:10px; color:#64748b; align-self:center;">Try clicking:</span>
+          <button class="quick-chip" onclick="testPhrase('Where is FOCS?')">"Where is FOCS?"</button>
+          <button class="quick-chip" onclick="testPhrase('Berapa yuran pengajian?')">"Berapa yuran pengajian?"</button>
+          <button class="quick-chip" onclick="testPhrase('Where is the perpustakaan?')">"Where is the perpustakaan?"</button>
+          <button class="quick-chip" onclick="testPhrase('How to contact PTPTN officer?')">"How to contact PTPTN officer?"</button>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- ================= ADD / EDIT TERM MODAL ================= -->
+  <div id="termModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3 id="modalTitle">Add Campus Dictionary Term</h3>
+          <p>Define a canonical campus term and the synonyms students use.</p>
+        </div>
+        <button onclick="closeModal()" style="background:transparent; color:#64748b; font-size:18px; padding:4px;">✕</button>
+      </div>
+
+      <form onsubmit="handleSaveTerm(event)">
+        <input type="hidden" id="editTermId">
+
+        <div class="field-group">
+          <label class="field-label">Canonical Term / Name <span style="color:#818cf8;">*</span></label>
+          <input type="text" id="inputTerm" class="field-input" required placeholder="e.g. FOCS, Dewan Gemilang, Surau, PTPTN">
+          <div class="field-hint">The official university name or acronym.</div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">Category <span style="color:#818cf8;">*</span></label>
+          <div class="cat-selector-grid">
+            <button type="button" class="cat-select-btn active" data-cat="CAMPUS" onclick="selectCat('CAMPUS')">
+              <span>🏛️</span> Campus Place
+            </button>
+            <button type="button" class="cat-select-btn" data-cat="ACADEMIC" onclick="selectCat('ACADEMIC')">
+              <span>🎓</span> Academic Acronym
+            </button>
+            <button type="button" class="cat-select-btn" data-cat="MALAY" onclick="selectCat('MALAY')">
+              <span>🇲🇾</span> Bahasa Melayu Term
+            </button>
+            <button type="button" class="cat-select-btn" data-cat="CHINESE" onclick="selectCat('CHINESE')">
+              <span>🇨🇳</span> Chinese / Other
+            </button>
+          </div>
+          <input type="hidden" id="inputCat" value="CAMPUS">
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">Synonyms & Spoken Variations (Comma-Separated)</label>
+          <input type="text" id="inputSynonyms" class="field-input" placeholder="e.g. fox, computing faculty, IT building">
+          <div class="field-hint">How students might say or mispronounce this word.</div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">Definition / Meaning</label>
+          <input type="text" id="inputMeaning" class="field-input" placeholder="e.g. Faculty of Computing and Information Technology">
+          <div class="field-hint">What this word actually means in campus records.</div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-cancel" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn-add">Save to Dictionary</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toast" class="toast">Action completed</div>
+
+</div>
+
+<!-- ================= SCRIPT & DATA LOGIC ================= -->
+<script>
+  // Industry-Standard Dictionary Dataset (Entity + Synonyms + Meaning)
+  let dictionaryData = [
+    { 
+      id: 1, 
+      term: "FOCS", 
+      category: "ACADEMIC", 
+      synonyms: ["fox", "computing", "IT faculty", "computer science"], 
+      meaning: "Faculty of Computing and Science",
+      active: true 
+    },
+    { 
+      id: 2, 
+      term: "Dewan Gemilang", 
+      category: "CAMPUS", 
+      synonyms: ["main hall", "auditorium", "great hall", "multipurpose hall"], 
+      meaning: "Main auditorium located in Block A",
+      active: true 
+    },
+    { 
+      id: 3, 
+      term: "Surau", 
+      category: "MALAY", 
+      synonyms: ["musolla", "prayer room", "solat room"], 
+      meaning: "Muslim prayer room in Block B Level 2",
+      active: true 
+    },
+    { 
+      id: 4, 
+      term: "QIU", 
+      category: "CAMPUS", 
+      synonyms: ["quest", "university", "campus"], 
+      meaning: "Quest International University main acronym",
+      active: true 
+    },
+    { 
+      id: 5, 
+      term: "PTPTN", 
+      category: "ACADEMIC", 
+      synonyms: ["study loan", "pinjaman", "government loan"], 
+      meaning: "National Higher Education Fund Corporation loan",
+      active: true 
+    },
+    { 
+      id: 6, 
+      term: "Perpustakaan", 
+      category: "MALAY", 
+      synonyms: ["library", "study room", "resource center"], 
+      meaning: "Main campus library in Student Center",
+      active: true 
+    },
+    { 
+      id: 7, 
+      term: "Yuran pengajian", 
+      category: "MALAY", 
+      synonyms: ["tuition fee", "course fee", "bayaran yuran"], 
+      meaning: "Semester academic and tuition payment",
+      active: true 
+    },
+    { 
+      id: 8, 
+      term: "Block B", 
+      category: "CAMPUS", 
+      synonyms: ["academic block", "building B", "level 2 block b"], 
+      meaning: "Main faculty office building",
+      active: true 
+    },
+    { 
+      id: 9, 
+      term: "Faculty of Pharmacy", 
+      category: "ACADEMIC", 
+      synonyms: ["pharmacy school", "med lab", "clinical building"], 
+      meaning: "Faculty of Pharmacy, Block C",
+      active: true 
+    },
+    { 
+      id: 10, 
+      term: "Peperiksaan", 
+      category: "MALAY", 
+      synonyms: ["exam", "final exam", "ujian"], 
+      meaning: "Semester examinations and exam halls",
+      active: true 
+    },
+    { 
+      id: 11, 
+      term: "图书馆", 
+      category: "CHINESE", 
+      synonyms: ["túshūguǎn", "library", "chinese library"], 
+      meaning: "Chinese word for Library",
+      active: true 
+    },
+    { 
+      id: 12, 
+      term: "学费", 
+      category: "CHINESE", 
+      synonyms: ["xuéfèi", "tuition", "fees"], 
+      meaning: "Chinese word for Tuition Fee",
+      active: true 
+    }
+  ];
+
+  let currentCategory = "ALL";
+  let searchQuery = "";
+
+  function getCatBadge(cat) {
+    if (cat === 'CAMPUS') return '<span class="badge-cat campus">🏛️ Campus Place</span>';
+    if (cat === 'ACADEMIC') return '<span class="badge-cat academic">🎓 Academic</span>';
+    if (cat === 'MALAY') return '<span class="badge-cat malay">🇲🇾 Bahasa Melayu</span>';
+    if (cat === 'CHINESE') return '<span class="badge-cat chinese">🇨🇳 Chinese / Other</span>';
+    return '<span class="badge-cat">General</span>';
+  }
+
+  function renderTable() {
+    const filtered = dictionaryData.filter(item => {
+      const matchCat = currentCategory === 'ALL' || item.category === currentCategory;
+      const q = searchQuery.toLowerCase();
+      const matchSearch = !q || 
+        item.term.toLowerCase().includes(q) || 
+        item.meaning.toLowerCase().includes(q) ||
+        item.synonyms.some(s => s.toLowerCase().includes(q));
+      return matchCat && matchSearch;
+    });
+
+    ['CAMPUS', 'ACADEMIC', 'MALAY', 'CHINESE'].forEach(c => {
+      const el = document.getElementById(`count-${c}`);
+      if (el) el.innerText = dictionaryData.filter(d => d.category === c).length;
+    });
+
+    const tbody = document.getElementById('glossaryTableBody');
+    if (filtered.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="5" style="text-align:center; padding:36px; color:#64748b;">
+            No terms found. Try another search or click "+ Add Campus Term".
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(item => `
+      <tr>
+        <td class="term-cell">
+          <strong>${item.term}</strong>
+          <span>ID #${item.id}</span>
+        </td>
+        <td>${getCatBadge(item.category)}</td>
+        <td>
+          <div class="synonym-chips-list">
+            ${item.synonyms.map(s => `<span class="syn-chip">${s}</span>`).join('')}
+          </div>
+        </td>
+        <td style="color:#94a3b8; font-size:12px;">
+          ${item.meaning || '—'}
+        </td>
+        <td style="text-align:right;">
+          <div style="display:inline-flex; align-items:center; gap:8px;">
+            <button class="toggle-switch ${item.active ? 'on' : 'off'}" onclick="toggleTerm(${item.id})">
+              <span class="toggle-dot ${item.active ? 'on' : 'off'}"></span>
+              ${item.active ? 'Active' : 'Paused'}
+            </button>
+            <button class="act-btn del" onclick="deleteTerm(${item.id})" title="Delete Term">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  function toggleTerm(id) {
+    const item = dictionaryData.find(d => d.id === id);
+    if (item) {
+      item.active = !item.active;
+      showToast(`Term "${item.term}" is now ${item.active ? 'Active' : 'Paused'}`);
+      renderTable();
+    }
+  }
+
+  function deleteTerm(id) {
+    const item = dictionaryData.find(d => d.id === id);
+    if (item && confirm(`Remove "${item.term}" from the campus dictionary?`)) {
+      dictionaryData = dictionaryData.filter(d => d.id !== id);
+      showToast(`Removed "${item.term}"`);
+      renderTable();
+    }
+  }
+
+  function setCategoryFilter(cat) {
+    currentCategory = cat;
+    document.querySelectorAll('#filterGroup .filter-btn').forEach(btn => btn.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+    renderTable();
+  }
+
+  function onSearch(val) {
+    searchQuery = val;
+    renderTable();
+  }
+
+  function quickAdd(term, category, synonymsStr, meaning) {
+    if (dictionaryData.some(d => d.term.toLowerCase() === term.toLowerCase())) {
+      showToast(`"${term}" is already in your dictionary.`);
+      return;
+    }
+    const syns = synonymsStr.split(',').map(s => s.trim()).filter(Boolean);
+    dictionaryData.unshift({
+      id: Date.now(),
+      term,
+      category,
+      synonyms: syns,
+      meaning,
+      active: true
+    });
+    showToast(`Added "${term}" to dictionary!`);
+    renderTable();
+  }
+
+  /* MODAL */
+  function openAddWordModal() {
+    document.getElementById('modalTitle').innerText = "Add Campus Dictionary Term";
+    document.getElementById('editTermId').value = "";
+    document.getElementById('inputTerm').value = "";
+    document.getElementById('inputSynonyms').value = "";
+    document.getElementById('inputMeaning').value = "";
+    selectCat('CAMPUS');
+    document.getElementById('termModal').classList.add('open');
+    document.getElementById('inputTerm').focus();
+  }
+
+  function closeModal() {
+    document.getElementById('termModal').classList.remove('open');
+  }
+
+  function selectCat(cat) {
+    document.getElementById('inputCat').value = cat;
+    document.querySelectorAll('.cat-select-btn').forEach(btn => {
+      if (btn.getAttribute('data-cat') === cat) btn.classList.add('active');
+      else btn.classList.remove('active');
+    });
+  }
+
+  function handleSaveTerm(e) {
+    e.preventDefault();
+    const term = document.getElementById('inputTerm').value.trim();
+    const cat = document.getElementById('inputCat').value;
+    const synStr = document.getElementById('inputSynonyms').value.trim();
+    const meaning = document.getElementById('inputMeaning').value.trim();
+    if (!term) return;
+
+    const syns = synStr ? synStr.split(',').map(s => s.trim()).filter(Boolean) : [term.toLowerCase()];
+
+    dictionaryData.unshift({
+      id: Date.now(),
+      term,
+      category: cat,
+      synonyms: syns,
+      meaning,
+      active: true
+    });
+
+    showToast(`Saved "${term}" to campus dictionary!`);
+    closeModal();
+    renderTable();
+  }
+
+  /* TEST SANDBOX INTERACTION */
+  function handleSendChat(e) {
+    e.preventDefault();
+    const input = document.getElementById('sandboxInput');
+    const txt = input.value.trim();
+    if (!txt) return;
+    testPhrase(txt);
+    input.value = "";
+  }
+
+  function testPhrase(phrase) {
+    const chatArea = document.getElementById('chatArea');
+
+    // Append User bubble
+    const userDiv = document.createElement('div');
+    userDiv.className = 'chat-bubble user';
+    userDiv.innerText = `"${phrase}"`;
+    chatArea.appendChild(userDiv);
+
+    // Find matches in dictionary
+    const lower = phrase.toLowerCase();
+    const matches = [];
+    dictionaryData.filter(d => d.active).forEach(d => {
+      const matchTerm = lower.includes(d.term.toLowerCase());
+      const matchSyn = d.synonyms.some(s => lower.includes(s.toLowerCase()));
+      if (matchTerm || matchSyn) matches.push(d);
+    });
+
+    // Bot Response
+    const botDiv = document.createElement('div');
+    botDiv.className = 'chat-bubble bot';
+
+    if (matches.length > 0) {
+      let explanation = "";
+      if (matches[0].term === 'FOCS') {
+        explanation = "FOCS (Faculty of Computing & Science) is located in Block B, Level 3. Dean's Office is Room B-302.";
+      } else if (matches[0].term === 'Surau') {
+        explanation = "The Surau (Muslim Prayer Room) is on Level 2 of Block B.";
+      } else if (matches[0].term === 'Yuran pengajian') {
+        explanation = "Tuition fees can be paid via the Finance Portal or at the Bursar Counter in Block A.";
+      } else if (matches[0].term === 'Perpustakaan') {
+        explanation = "The Library is situated in the Student Commons Building, open 8:30 AM – 9:00 PM.";
+      } else if (matches[0].term === 'PTPTN') {
+        explanation = "PTPTN loan inquiries can be directed to the Student Affairs Office (Level 1, Block A).";
+      } else {
+        explanation = `Found information for <strong>${matches[0].term}</strong> (${matches[0].meaning || matches[0].category}).`;
+      }
+
+      botDiv.innerHTML = `
+        ${explanation}
+        <div class="recognized-inspector">
+          <div class="recog-header">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+            Recognized ${matches.length} Dictionary Term${matches.length > 1 ? 's' : ''}:
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
+            ${matches.map(m => `<span class="recog-tag">${m.term} (${m.category})</span>`).join('')}
+          </div>
+        </div>
+      `;
+    } else {
+      botDiv.innerHTML = `
+        I answered your inquiry using general campus knowledge, but I did not detect any specialized dictionary terms in your sentence.
+      `;
+    }
+
+    chatArea.appendChild(botDiv);
+    chatArea.scrollTop = chatArea.scrollHeight;
+  }
+
+  function switchMainTab(tab) {
+    if (tab === 'glossary') {
+      showToast("Viewing Campus Dictionary & Glossary");
+    } else if (tab === 'docs') {
+      showToast("Knowledge Docs tab: upload policy PDFs and course handbooks");
+    } else if (tab === 'analytics') {
+      showToast("Analytics tab: view student query logs & recognition confidence");
+    }
+  }
+
+  let toastTimer;
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.innerText = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+    renderTable();
+  });
+</script>
+</body>
+</html>

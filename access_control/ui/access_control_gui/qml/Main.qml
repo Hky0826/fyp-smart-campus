@@ -49,6 +49,7 @@ ApplicationWindow {
         onCloseRequested: accessController.exitChat()
         onStopAnsweringRequested: chatbotController.stopAudioPlayback()
         onToggleMuteRequested: accessController.toggleMute()
+        onDismissNavigationRequested: chatbotController.clearNavigation()
     }
 
     ChatbotButton {

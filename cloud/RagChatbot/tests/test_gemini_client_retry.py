@@ -10,6 +10,7 @@ import pytest
 
 from RagChatbot.gemini_client import (
     InFlightDeduplicator,
+    acall_with_retry,
     call_with_retry,
     is_retryable_gemini_error,
 )
@@ -30,6 +31,8 @@ def test_is_retryable_gemini_error():
     assert is_retryable_gemini_error(MockGeminiClientError(code=503, message="Unavailable"))
     assert is_retryable_gemini_error(Exception("409 Conflict: resource aborted"))
     assert is_retryable_gemini_error(Exception("gRPC status ABORTED"))
+    assert is_retryable_gemini_error(Exception("Failed to connect to stream"))
+    assert is_retryable_gemini_error(Exception("Session already exists"))
     assert not is_retryable_gemini_error(MockGeminiClientError(code=400, message="Bad Request"))
     assert not is_retryable_gemini_error(MockGeminiClientError(code=404, message="Not Found"))
     assert not is_retryable_gemini_error(ValueError("invalid value"))
@@ -143,3 +146,19 @@ def test_in_flight_deduplicator_propagates_exceptions():
     for err in errors:
         assert isinstance(err, RuntimeError)
         assert str(err) == "API failure"
+
+
+@pytest.mark.anyio
+async def test_acall_with_retry_recovers_after_409():
+    call_count = 0
+
+    async def flaky_async_call():
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise MockGeminiClientError(code=409, message="Aborted: conflict")
+        return "async_recovered"
+
+    res = await acall_with_retry(flaky_async_call, max_retries=3, initial_delay=0.01)
+    assert res == "async_recovered"
+    assert call_count == 3

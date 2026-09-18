@@ -132,7 +132,7 @@ You are the voice interface for Quest International University (QIU) Smart Campu
 
 Core Rules:
 1. Transcribe microphone input and, for ANY user question or request, ALWAYS call the backend function process_campus_request with the user's inquiry.
-2. NEVER answer ANY question from your own pre-trained knowledge. Specifically, NEVER solve general math problems, arithmetic, calculations, homework, coding, or non-campus trivia. Do not emit answer audio before the backend function response.
+2. NEVER answer ANY question from your own pre-trained knowledge. Specifically, NEVER solve general math problems, arithmetic, calculations, homework, coding, or non-campus trivia. While invoking process_campus_request, you may speak a brief, polite verbal filler (e.g. "Looking that up for you...", "Checking campus records...") to acknowledge the user's inquiry, but never provide factual answers before the backend function response.
 3. The backend function response is authoritative and grounded by Gemini 3.1 Flash Lite. Present the `answer` in that response naturally in spoken voice. Do not alter factual dates, names, fees, or policy decisions.
 4. When asked about programmes or courses, present the specific programmes or courses returned by the backend response.
 5. For campus navigation and wayfinding (when the backend returns directional steps like 'Start from...', 'Walk straight...', 'Turn left...'), ALWAYS recite the full step-by-step turn instructions to the user. Do not omit, truncate, or summarize the directional turns.
@@ -141,6 +141,7 @@ Core Rules:
 8. Maintain an articulate, polite, calm, and professional campus presenter persona with clear diction at all times.
 9. Conversational Language Switching: If the user explicitly asks to speak or switch to another language (e.g. 'Can we speak in Japanese?', 'Please converse in Arabic', 'Tamil please', 'Boleh cakap Melayu?'), you MUST immediately call the tool set_session_language with target_language set to that requested language.
 10. Speech Recognition & Audio Fidelity: Strictly transcribe actual speech in the speaker's true language without hallucinating words from background noise, microphone static, room reverberation, breathing, or silence. Support Malaysian code-switching naturally without mistaking it for foreign languages.
+11. Greeting Triggers: When receiving a [SYSTEM GREETING TRIGGER] instruction, immediately speak the requested welcome greeting in a warm, articulate, and professional campus presenter tone without calling backend functions.
 """.strip()
 
 
@@ -221,12 +222,16 @@ class GeminiLiveSession:
         self._reader_task: asyncio.Task | None = None
         self._events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._send_lock = asyncio.Lock()
+        self._connect_lock = asyncio.Lock()
         self._connected_at = 0.0
+        self._closed_at = 0.0
         self._transcript = ""
         self._output_transcript = ""
         self._resumption_handle: str | None = None
         self._renew_requested = False
         self._input_activity_open = False
+        self._greeting_sent = False
+        self._greeting_in_progress = False
         self._active_language_codes: list[str] | None = None
         self._session_switched_language: str | None = None
 
@@ -239,61 +244,86 @@ class GeminiLiveSession:
         return self._resumption_handle
 
     async def start(self) -> None:
-        if self.is_connected and not self._renew_requested and (
-            time.monotonic() - self._connected_at
-            < rag_settings.LIVE_SESSION_TIMEOUT_SECONDS
-        ):
-            return
+        async with self._connect_lock:
+            if self.is_connected and not self._renew_requested and (
+                time.monotonic() - self._connected_at
+                < rag_settings.LIVE_SESSION_TIMEOUT_SECONDS
+            ):
+                return
 
-        if self.is_connected:
-            await self.close(preserve_resumption=True)
-        else:
-            await self._discard_pending_events()
+            if self.is_connected:
+                await self._close_unlocked(preserve_resumption=True)
+            else:
+                await self._discard_pending_events()
 
-        active_lang_codes = self._active_language_codes or _load_active_speech_languages()
-        adaptation_phrases = _load_speech_adaptation_phrases()
+            # Ensure cloud gateway teardown cooldown to prevent 409 Conflict
+            if self._closed_at > 0.0:
+                elapsed = time.monotonic() - self._closed_at
+                if elapsed < 0.2:
+                    await asyncio.sleep(0.2 - elapsed)
 
-        config = {
-            "response_modalities": ["AUDIO"],
-            "speech_config": {
-                "voice_config": {
-                    "prebuilt_voice_config": {
-                        "voice_name": rag_settings.AUDIO_TTS_VOICE or "Kore",
+            active_lang_codes = self._active_language_codes or _load_active_speech_languages()
+            adaptation_phrases = _load_speech_adaptation_phrases()
+
+            config = {
+                "response_modalities": ["AUDIO"],
+                "speech_config": {
+                    "voice_config": {
+                        "prebuilt_voice_config": {
+                            "voice_name": getattr(rag_settings, "LIVE_VOICE_NAME", getattr(rag_settings, "AUDIO_TTS_VOICE", "Kore")) or "Kore",
+                        }
                     }
-                }
-            },
-            "system_instruction": _LIVE_SYSTEM_INSTRUCTION,
-            "input_audio_transcription": {
-                "language_hints": {
-                    "language_codes": active_lang_codes,
                 },
-                "adaptation_phrases": adaptation_phrases,
-            },
-            "output_audio_transcription": {},
-            "tools": [_tool_declaration()],
-        }
-        try:
-            self._connection = self._client.aio.live.connect(
-                model=rag_settings.LIVE_MODEL,
-                config=config,
-            )
-            self._session = await asyncio.wait_for(
-                self._connection.__aenter__(),
-                timeout=rag_settings.LIVE_CONNECT_TIMEOUT_SECONDS,
-            )
-        except Exception as exc:
-            await self.close(preserve_resumption=True)
-            raise GeminiLiveSessionError("Gemini Live session connection failed") from exc
+                "system_instruction": _LIVE_SYSTEM_INSTRUCTION,
+                "input_audio_transcription": {
+                    "language_hints": {
+                        "language_codes": active_lang_codes,
+                    },
+                    "adaptation_phrases": adaptation_phrases,
+                },
+                "output_audio_transcription": {},
+                "tools": [_tool_declaration()],
+            }
+            connect_retries = 2
+            connect_delay = 0.3
+            last_connect_exc: Exception | None = None
+            for attempt in range(connect_retries + 1):
+                try:
+                    self._connection = self._client.aio.live.connect(
+                        model=rag_settings.LIVE_MODEL,
+                        config=config,
+                    )
+                    self._session = await asyncio.wait_for(
+                        self._connection.__aenter__(),
+                        timeout=rag_settings.LIVE_CONNECT_TIMEOUT_SECONDS,
+                    )
+                    break
+                except Exception as exc:
+                    last_connect_exc = exc
+                    await self._close_unlocked(preserve_resumption=True)
+                    from RagChatbot.gemini_client import is_retryable_gemini_error
+                    if attempt < connect_retries and is_retryable_gemini_error(exc):
+                        logger.warning(
+                            "Gemini Live connect transient conflict/error (%s); retrying in %.2fs (attempt %d/%d)",
+                            exc,
+                            connect_delay,
+                            attempt + 1,
+                            connect_retries,
+                        )
+                        await asyncio.sleep(connect_delay)
+                        connect_delay *= 1.5
+                    else:
+                        raise GeminiLiveSessionError("Gemini Live session connection failed") from last_connect_exc
 
-        self._renew_requested = False
-        self._connected_at = time.monotonic()
-        self._reader_task = asyncio.create_task(self._reader(), name="gemini-live-reader")
-        logger.info(
-            "Gemini Live session connected model=%s resumed=%s languages=%s",
-            rag_settings.LIVE_MODEL,
-            bool(self._resumption_handle),
-            active_lang_codes,
-        )
+            self._renew_requested = False
+            self._connected_at = time.monotonic()
+            self._reader_task = asyncio.create_task(self._reader(), name="gemini-live-reader")
+            logger.info(
+                "Gemini Live session connected model=%s resumed=%s languages=%s",
+                rag_settings.LIVE_MODEL,
+                bool(self._resumption_handle),
+                active_lang_codes,
+            )
 
     async def switch_language(
         self,
@@ -325,6 +355,9 @@ class GeminiLiveSession:
     async def send_audio(self, audio_bytes: bytes) -> None:
         if not audio_bytes:
             return
+        if self._greeting_in_progress:
+            # Gating: Drop ambient mic audio while greeting turn is generating to avoid 409 collisions
+            return
         await self.start()
         try:
             async with self._send_lock:
@@ -350,6 +383,52 @@ class GeminiLiveSession:
             logger.debug("Sent activity_end to Gemini Live session")
         except Exception as exc:
             logger.debug("Failed to signal activity_end: %s", exc)
+
+    def reset_greeting(self) -> None:
+        """Allow greeting to be re-triggered for this session."""
+        self._greeting_sent = False
+        self._greeting_in_progress = False
+
+    async def trigger_greeting(self, user_name: str | None = None) -> None:
+        """Trigger Gemini Live to speak an articulate, warm welcome greeting over the live duplex session."""
+        if self._greeting_sent:
+            logger.debug("Greeting already triggered for this session; skipping duplicate invocation")
+            return
+        self._greeting_sent = True
+        self._greeting_in_progress = True
+
+        await self.start()
+        clean_name = " ".join((user_name or "").split())
+        if clean_name:
+            greeting_prompt = (
+                f"[SYSTEM GREETING TRIGGER] Greet the user warmly: 'Hello {clean_name}! "
+                "Welcome to Quest International University. How can I help you today?' "
+                "Speak clearly, politely, and articulately in a professional campus presenter tone."
+            )
+        else:
+            greeting_prompt = (
+                "[SYSTEM GREETING TRIGGER] Greet the visitor warmly: 'Hello! "
+                "Welcome to Quest International University. How can I help you today?' "
+                "Speak clearly, politely, and articulately in a professional campus presenter tone."
+            )
+        try:
+            async with self._send_lock:
+                await asyncio.wait_for(
+                    self._session.send_client_content(
+                        turns=[
+                            types.Content(
+                                role="user",
+                                parts=[types.Part.from_text(text=greeting_prompt)],
+                            )
+                        ],
+                        turn_complete=True,
+                    ),
+                    timeout=rag_settings.LIVE_IO_TIMEOUT_SECONDS,
+                )
+            logger.info("Triggered Gemini Live spoken greeting for user=%s", clean_name or "visitor")
+        except Exception as exc:
+            self._greeting_in_progress = False
+            logger.warning("Failed to trigger Gemini Live greeting: %s", exc)
 
     async def receive_events(
         self,
@@ -441,12 +520,14 @@ class GeminiLiveSession:
                             await res
 
                 elif event_type == "interrupted":
+                    self._greeting_in_progress = False
                     if on_interrupted:
                         res = on_interrupted()
                         if asyncio.iscoroutine(res):
                             await res
 
                 elif event_type == "turn_complete":
+                    self._greeting_in_progress = False
                     self._transcript = ""
                     self._output_transcript = ""
                     if on_turn_complete:
@@ -546,8 +627,7 @@ class GeminiLiveSession:
                         )
                     approved = True
                 elif event_type == "audio":
-                    # Audio from the pre-tool model turn is never released.
-                    if approved and on_audio is not None and event.get("data"):
+                    if on_audio is not None and event.get("data"):
                         await _maybe_await(on_audio, event["data"])
                 elif event_type == "output_transcript":
                     if approved:
@@ -683,7 +763,7 @@ class GeminiLiveSession:
         except Exception as exc:
             raise GeminiLiveSessionError("Gemini Live approved speech failed") from exc
 
-    async def close(self, *, preserve_resumption: bool = False) -> None:
+    async def _close_unlocked(self, *, preserve_resumption: bool = False) -> None:
         handle = self._resumption_handle if preserve_resumption else None
         if self._reader_task is not None:
             self._reader_task.cancel()
@@ -694,7 +774,7 @@ class GeminiLiveSession:
             self._reader_task = None
         if self._connection is not None:
             try:
-                await self._connection.__aexit__(None, None, None)
+                await asyncio.wait_for(self._connection.__aexit__(None, None, None), timeout=2.0)
             except Exception:
                 logger.debug("Gemini Live session close failed", exc_info=True)
         self._connection = None
@@ -703,7 +783,14 @@ class GeminiLiveSession:
         self._renew_requested = False
         self._resumption_handle = handle
         self._input_activity_open = False
+        self._greeting_sent = False
+        self._greeting_in_progress = False
+        self._closed_at = time.monotonic()
         await self._discard_pending_events()
+
+    async def close(self, *, preserve_resumption: bool = False) -> None:
+        async with self._connect_lock:
+            await self._close_unlocked(preserve_resumption=preserve_resumption)
 
     async def _reader(self) -> None:
         is_mock = type(self._session).__name__ == "FakeSession"

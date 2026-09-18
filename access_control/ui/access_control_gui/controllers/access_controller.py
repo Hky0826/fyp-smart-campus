@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import time
 from typing import Any, Callable
 
 from PySide6.QtCore import QObject, Property, QTimer, QThread, Signal, Slot
@@ -12,6 +13,11 @@ from .api_client import KioskApiClient
 from .camera_controller import CameraController
 from .chatbot_controller import ChatbotController
 from .presence_controller import PresenceController
+
+try:
+    from access_control.timing_logger import edge_timing
+except ImportError:
+    from timing_logger import edge_timing
 
 
 CAMERA_FRAME_INTERVAL_MS = int(os.getenv("EDGE_GUI_CAMERA_FRAME_INTERVAL_MS", "33"))
@@ -94,6 +100,7 @@ class AccessController(QObject):
         self._greeting_session_id: Any = None
         self._frame_in_flight = False
         self._chat_in_flight = False
+        self._chat_message_start_mono = 0.0
         self._face_boxes: list[list[int]] = []
         self._dwell_progress: float = 0.0
         self._presence_detected: bool = False
@@ -152,6 +159,8 @@ class AccessController(QObject):
 
     @Slot()
     def openChat(self) -> None:
+        self._chatbot.clearNavigation()
+        self._chatbot.resetSessionState()
         self._set_chat_expanded(True)
         self._last_presence_check_ms = _now_ms()
         if not self._session and not self._chat_verification_active:
@@ -164,6 +173,8 @@ class AccessController(QObject):
         self._transcribed_text = ""
         self._partial_text = ""
         self._set_chat_verification_active(True)
+        self._chatbot.clearNavigation()
+        self._chatbot.resetSessionState()
         self._chatbot.stopVoiceLoop()
         self._chatbot.stopAudioPlayback()
         self._emit_all()
@@ -171,10 +182,14 @@ class AccessController(QObject):
 
     @Slot()
     def exitChat(self) -> None:
+        self._chatbot.clearNavigation()
+        self._chatbot.resetSessionState()
         self._chatbot.stopVoiceLoop()
         self._set_chat_expanded(False)
         self._set_chat_verification_active(False)
         self._greeting_session_id = None
+        self._transcribed_text = ""
+        self._partial_text = ""
         self._run_worker("end-chat", self._api.end_chat)
         if self._state:
             self._state = {**self._state, "active_chat_session": None, "chat_recoverable": False}
@@ -190,6 +205,8 @@ class AccessController(QObject):
             return
         self._chat_in_flight = True
         self._chat_error = ""
+        self._chat_message_start_mono = time.monotonic()
+        edge_timing.log_send("GUI_MESSAGE_SEND", query=cleaned[:60])
         self.uiChanged.emit()
         self._run_worker("chat-message", lambda: self._api.send_chat_message(cleaned))
 
@@ -299,10 +316,13 @@ class AccessController(QObject):
                 session_id = (session or {}).get("session_id")
                 if session_id is not None and session_id != self._greeting_session_id:
                     self._greeting_session_id = session_id
-                    self._chatbot.playGreeting()
+                    user_name = (session or {}).get("given_name") or (session or {}).get("display_name")
+                    self._chatbot.triggerLiveGreeting(user_name)
             elif name == "chat-presence-frame":
                 launched_followup_frame = self._handle_presence_payload(payload)
             elif name in {"chat-message", "chat-audio"}:
+                gui_latency_ms = (time.monotonic() - self._chat_message_start_mono) * 1000.0 if self._chat_message_start_mono > 0 else None
+                edge_timing.log_receive("GUI_MESSAGE_RECEIVE", duration_ms=gui_latency_ms)
                 session = payload.get("session")
                 if session:
                     self._merge_chat_session(session)
@@ -352,6 +372,9 @@ class AccessController(QObject):
                 self._set_chat_verification_active(False)
         elif name in {"chat-message", "chat-audio", "lock-chat"}:
             self._chat_error = message or "Chatbot request failed."
+            if name in {"chat-message", "chat-audio"}:
+                gui_latency_ms = (time.monotonic() - self._chat_message_start_mono) * 1000.0 if self._chat_message_start_mono > 0 else None
+                edge_timing.log_receive("GUI_MESSAGE_FAILURE", duration_ms=gui_latency_ms, error=message)
         if name in {"chat-message", "chat-audio"}:
             self._chat_in_flight = False
         elif name.endswith("frame"):
@@ -591,18 +614,18 @@ class AccessController(QObject):
             for item in reversed(history[-2:]):
                 if item.get("role") == "user":
                     existing = str(item.get("content") or "").strip()
-                    if existing == temp_user or temp_user in existing or existing in temp_user:
+                    if existing == temp_user:
                         already_committed = True
                         break
             if not already_committed:
                 history.append({"role": "user", "content": temp_user})
 
-        # Deduplicate assistant streaming text if already committed
+        # Append assistant streaming text as active assistant bubble
         if temp_bot:
             already_committed = False
             if history and history[-1].get("role") == "assistant":
                 existing_bot = str(history[-1].get("content") or "").strip()
-                if existing_bot == temp_bot or temp_bot in existing_bot:
+                if existing_bot == temp_bot:
                     already_committed = True
             if not already_committed:
                 history.append({"role": "assistant", "content": temp_bot})
