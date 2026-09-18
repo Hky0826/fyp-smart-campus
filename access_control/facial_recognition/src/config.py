@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 MODULE_ROOT = PACKAGE_ROOT.parent  # access_control/
 MODEL_ROOT = PACKAGE_ROOT / "models"
-DEFAULT_CAMERA = "0"
+DEFAULT_CAMERA = "auto"
 
 
 def default_cloud_url() -> str:

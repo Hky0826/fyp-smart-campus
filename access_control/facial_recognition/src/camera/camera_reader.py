@@ -1,16 +1,24 @@
-"""Configurable OpenCV camera, RTSP, or video-file reader."""
+"""Configurable camera reader supporting Raspberry Pi 5 CSI (IMX219), V4L2/USB, RTSP, or files."""
 
 from __future__ import annotations
 
 import logging
 import os
-import time
 from typing import Optional, Tuple
 
-logger = logging.getLogger(__name__)
+from .capture_backend import (
+    DEFAULT_HEIGHT,
+    DEFAULT_WIDTH,
+    Picamera2Capture,
+    detect_available_cameras,
+    detect_csi_cameras,
+    get_camera_candidates,
+    is_picamera2_available,
+    open_camera_capture,
+    parse_camera_source,
+)
 
-DEFAULT_WIDTH = int(os.getenv("EDGE_CAMERA_WIDTH", "1280"))
-DEFAULT_HEIGHT = int(os.getenv("EDGE_CAMERA_HEIGHT", "720"))
+logger = logging.getLogger(__name__)
 
 try:
     import cv2
@@ -19,34 +27,33 @@ except Exception:  # pragma: no cover
 
 
 class CameraReader:
-    def __init__(self, source: str = "/dev/video4", width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT) -> None:
+    """Acquires video frames from CSI (IMX219), V4L2/USB webcams, RTSP streams, or files."""
+
+    def __init__(
+        self,
+        source: str = "auto",
+        width: int = DEFAULT_WIDTH,
+        height: int = DEFAULT_HEIGHT,
+    ) -> None:
         self.source = source
         self.width = int(width)
         self.height = int(height)
         self.cap = None
+        self.active_source: Optional[str | int] = None
 
     def open(self) -> None:
-        if cv2 is None:
-            raise RuntimeError("OpenCV is required for camera input")
-        source = self._opencv_source(self.source)
-        logger.info("Initializing camera source %s", self.source)
-        if isinstance(source, int) and hasattr(cv2, "CAP_V4L2"):
-            self.cap = cv2.VideoCapture(source, cv2.CAP_V4L2)
-            if not self.cap.isOpened():
-                logger.warning("V4L2 camera open failed for %s; retrying with default backend", self.source)
-                self.cap.release()
-                self.cap = cv2.VideoCapture(source)
-        else:
-            self.cap = cv2.VideoCapture(source)
-        if not self.cap.isOpened():
+        logger.info("Opening camera with requested source '%s'", self.source)
+        capture, active_src = open_camera_capture(
+            source=self.source,
+            width=self.width,
+            height=self.height,
+        )
+        if capture is None:
             raise RuntimeError(f"Failed to open camera source: {self.source}")
 
-        if isinstance(source, int):
-            fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-            self.cap.set(cv2.CAP_PROP_FOURCC, fourcc)
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-            time.sleep(1.0)
+        self.cap = capture
+        self.active_source = active_src
+        logger.info("Camera successfully active on source '%s'", self.active_source)
 
     def read(self) -> Tuple[bool, Optional[object]]:
         if self.cap is None:
@@ -55,15 +62,14 @@ class CameraReader:
 
     def release(self) -> None:
         if self.cap is not None:
-            self.cap.release()
+            try:
+                self.cap.release()
+            except Exception as exc:
+                logger.debug("Exception releasing camera capture: %s", exc)
             self.cap = None
+            self.active_source = None
 
     @staticmethod
     def _opencv_source(source: str):
-        if source.startswith("/dev/video"):
-            suffix = source.replace("/dev/video", "")
-            if suffix.isdigit():
-                return int(suffix)
-        if source.isdigit():
-            return int(source)
-        return source
+        """Legacy helper for backward-compatibility."""
+        return parse_camera_source(source)

@@ -92,7 +92,7 @@ All parameters are configurable via `access_control/.env`. Key parameters includ
 
 | Setting | Default | Description |
 |---|---|---|
-| `EDGE_CAMERA` | `0` | Camera device index or RTSP stream URL |
+| `EDGE_CAMERA` | `auto` | Camera source: `auto` (auto-detects CSI IMX219 on RPi 5, falls back to V4L2), `csi`, `/dev/video4`, `0`, or RTSP URL |
 | `EDGE_ACCESS_DETECTOR_MODEL_PATH` | `models/access_control/face_detection_yunet_2023mar_int8bq.onnx` | Path to YuNet ONNX detection model |
 | `EDGE_ACCESS_EMBEDDING_MODEL_PATH` | `models/access_control/face_recognition_sface_2021dec.onnx` | Path to SFace ONNX recognition model |
 | `EDGE_ACCESS_DETECTION_THRESHOLD` | `0.60` | Detector confidence threshold |
@@ -100,6 +100,20 @@ All parameters are configurable via `access_control/.env`. Key parameters includ
 | `EDGE_ACCESS_REQUIRE_LIVENESS` | `true` | Enable motion/liveness anti-spoofing |
 | `EDGE_ACCESS_AUDIO_ENABLED` | `true` | Enable voice feedback & chatbot |
 | `EDGE_SYNC_CLOUD_URL` | `http://127.0.0.1:8000` | Central cloud database sync server |
+
+### Raspberry Pi 5 & CSI Camera Setup (IMX219)
+
+For Sony IMX219 cameras connected to Raspberry Pi 5 via MIPI CSI (`CAM0` or `CAM1`):
+1. Connect the 15-pin to 22-pin ribbon cable to either `CAM0` or `CAM1` (ensure contacts face the HDMI ports on Pi 5).
+2. Install the official Raspberry Pi camera library:
+   ```bash
+   sudo apt update && sudo apt install -y python3-picamera2
+   ```
+3. Verify sensor detection:
+   ```bash
+   rpicam-hello --list-cameras
+   ```
+4. Keep `EDGE_CAMERA=auto` (default) to automatically use the CSI camera, or set `EDGE_CAMERA=csi` to force CSI mode. If no CSI camera is attached, the system seamlessly falls back to USB / V4L2 `/dev/video*`.
 
 ---
 

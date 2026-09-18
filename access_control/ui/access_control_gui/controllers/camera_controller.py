@@ -1,31 +1,85 @@
-"""Camera capture worker and QML image provider."""
+"""Camera capture worker and QML image provider supporting CSI IMX219 and V4L2/USB."""
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 from typing import Any
 
-from PySide6.QtCore import QObject, Property, QThread, Signal, Slot
-from PySide6.QtGui import QImage
-from PySide6.QtQuick import QQuickImageProvider
+try:
+    from PySide6.QtCore import QObject, Property, QThread, Signal, Slot
+    from PySide6.QtGui import QImage
+    from PySide6.QtQuick import QQuickImageProvider
+except ImportError:  # pragma: no cover - headless/test environments
+    class QObject:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs): pass
+        def setParent(self, parent): pass
+    class QThread:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs): pass
+        def isRunning(self): return False
+        def start(self): pass
+        def stop(self): pass
+        def wait(self, *args): pass
+        def msleep(self, ms): time.sleep(ms / 1000.0)
+    class QQuickImageProvider:  # type: ignore[no-redef]
+        Image = None
+        def __init__(self, *args, **kwargs): pass
+    class QImage:  # type: ignore[no-redef]
+        Format_RGB32 = None
+        Format_RGB888 = None
+        def __init__(self, *args, **kwargs): pass
+        def fill(self, *args): pass
+        def copy(self): return self
+        def width(self): return 1280
+        def height(self): return 720
+    def Signal(*args, **kwargs):  # type: ignore[no-redef]
+        class _Signal:
+            def emit(self, *a, **kw): pass
+            def connect(self, *a, **kw): pass
+        return _Signal()
+    def Slot(*args, **kwargs):  # type: ignore[no-redef]
+        return lambda f: f
+    def Property(*args, **kwargs):  # type: ignore[no-redef]
+        return property(args[1] if len(args) > 1 else None)
+
+logger = logging.getLogger(__name__)
 
 try:
     import cv2
 except Exception:  # pragma: no cover - depends on target image
     cv2 = None
 
+try:
+    from access_control.facial_recognition.src.camera.capture_backend import (
+        Picamera2Capture,
+        detect_available_cameras,
+        detect_csi_cameras,
+        get_camera_candidates,
+        open_single_capture,
+        parse_camera_source,
+    )
+except ImportError:  # pragma: no cover
+    Picamera2Capture = None
+    detect_available_cameras = None
+    detect_csi_cameras = None
+    get_camera_candidates = None
+    open_single_capture = None
+    parse_camera_source = None
 
-DEFAULT_CAMERA = "/dev/video4"
+
+DEFAULT_CAMERA = "auto"
 JPEG_QUALITY = 82
-DEFAULT_CAMERA_FALLBACKS = "/dev/video0,/dev/video1,/dev/video2,/dev/video3,/dev/video4,/dev/video5,0,1"
+DEFAULT_CAMERA_FALLBACKS = "csi,/dev/video4,/dev/video0,/dev/video1,/dev/video2,/dev/video3,0,1"
 DEFAULT_CAMERA_WIDTH = 1280
 DEFAULT_CAMERA_HEIGHT = 720
 DEFAULT_CAMERA_FOURCC = "MJPG"
 
 
 def _camera_source(value: str) -> str | int:
+    if parse_camera_source is not None:
+        return parse_camera_source(value)
     if value.startswith("/dev/video"):
         suffix = value.replace("/dev/video", "")
         if suffix.isdigit():
@@ -34,10 +88,15 @@ def _camera_source(value: str) -> str | int:
 
 
 def _camera_candidates(camera: str) -> list[str | int]:
-    configured = camera.strip()
-    candidates: list[str | int] = [_camera_source(configured)]
-    if os.getenv("EDGE_GUI_CAMERA_NO_FALLBACK", "").strip().lower() in {"1", "true", "yes", "on"}:
-        return candidates
+    configured = (camera or "").strip()
+    allow_fallbacks = os.getenv("EDGE_GUI_CAMERA_NO_FALLBACK", "").strip().lower() not in {"1", "true", "yes", "on"}
+
+    if get_camera_candidates is not None:
+        return get_camera_candidates(configured, allow_fallbacks=allow_fallbacks)
+
+    candidates: list[str | int] = [_camera_source(configured)] if configured and configured.lower() != "auto" else []
+    if not allow_fallbacks:
+        return candidates or [0]
 
     fallback_text = os.getenv("EDGE_GUI_CAMERA_FALLBACKS", DEFAULT_CAMERA_FALLBACKS)
     for item in fallback_text.split(","):
@@ -51,6 +110,14 @@ def _camera_candidates(camera: str) -> list[str | int]:
 
 
 def _open_capture(source: str | int) -> Any:
+    width = int(os.getenv("EDGE_GUI_CAMERA_WIDTH", str(DEFAULT_CAMERA_WIDTH)))
+    height = int(os.getenv("EDGE_GUI_CAMERA_HEIGHT", str(DEFAULT_CAMERA_HEIGHT)))
+    fourcc_name = os.getenv("EDGE_GUI_CAMERA_FOURCC", DEFAULT_CAMERA_FOURCC).strip()
+
+    if open_single_capture is not None:
+        return open_single_capture(source, width=width, height=height, fourcc=fourcc_name)
+
+    # Local fallback if capture_backend is not imported
     if cv2 is None:
         return None
 
@@ -88,7 +155,7 @@ def _configure_capture(capture: Any, source: str | int) -> None:
         capture.set(cv2.CAP_PROP_FOURCC, fourcc)
     capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-    time.sleep(1.0)
+    time.sleep(0.5)
 
 
 def sys_platform_is_linux() -> bool:
@@ -137,7 +204,7 @@ class CameraCaptureThread(QThread):
             self.readyChanged.emit(False)
             return
 
-        capture, _active_camera = self._connect_camera()
+        capture, active_camera = self._connect_camera()
         if capture is None:
             tried = ", ".join(str(camera) for camera in self._cameras)
             self.errorChanged.emit(
@@ -147,6 +214,7 @@ class CameraCaptureThread(QThread):
             self.readyChanged.emit(False)
             return
 
+        logger.info("Camera capture started on active device: %s", active_camera)
         self._running = True
         self.readyChanged.emit(True)
         self.errorChanged.emit("")

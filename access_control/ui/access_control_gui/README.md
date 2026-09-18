@@ -146,8 +146,8 @@ Useful environment variables:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `EDGE_GUI_API_BASE_URL` | `http://127.0.0.1:8080` | Local edge API base URL |
-| `EDGE_GUI_CAMERA` | `EDGE_ACCESS_CAMERA` / `EDGE_CAMERA` / `/dev/video4` | Camera source |
-| `EDGE_GUI_CAMERA_FALLBACKS` | `/dev/video0,/dev/video1,/dev/video2,/dev/video3,/dev/video4,/dev/video5,0,1` | Extra camera sources tried when the primary source fails |
+| `EDGE_GUI_CAMERA` | `auto` (or `EDGE_ACCESS_CAMERA` / `EDGE_CAMERA`) | Camera source: `auto` (probes CSI IMX219 first, then V4L2), `csi`, `/dev/video4`, `0`, or RTSP URL |
+| `EDGE_GUI_CAMERA_FALLBACKS` | `csi,/dev/video4,/dev/video0,/dev/video1,/dev/video2,/dev/video3,0,1` | Extra camera sources tried when the primary source fails |
 | `EDGE_GUI_CAMERA_NO_FALLBACK` | unset | Set to `1` to try only `EDGE_GUI_CAMERA` |
 | `EDGE_GUI_CAMERA_WIDTH` | `1920` | Requested V4L2 camera width for numeric `/dev/video*` devices |
 | `EDGE_GUI_CAMERA_HEIGHT` | `1080` | Requested V4L2 camera height for numeric `/dev/video*` devices |
