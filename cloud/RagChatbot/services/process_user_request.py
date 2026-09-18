@@ -27,7 +27,7 @@ from RagChatbot.personalisation.intents import parse_personal_intent
 from RagChatbot.personalisation.service import handle_personal_request
 from RagChatbot.personalisation.schemas import PersonalIntent
 from RagChatbot.retrieval.retriever import retrieve_chunks
-from RagChatbot.schemas import CitationSchema
+from RagChatbot.schemas import CitationSchema, ChatResponse
 from RagChatbot.security.audit_logger import (
     log_access_denied,
     log_chatbot_interaction,
@@ -41,14 +41,35 @@ from RagChatbot.services.chat_service import (
     AUTH_REQUIRED_STATUS,
     PROTECTED_ACCESS_LEVELS,
     VISITOR_ACCESS_LEVELS,
+    _RAG_RESPONSE_CACHE,
+    _RAG_RESPONSE_CACHE_LOCK,
     _confirmed_navigation_label,
     _greeting_name,
+    _rag_cache_key,
 )
 from RagChatbot.services.map_service import is_navigation_query
 from RagChatbot.utils.language_detection import detect_query_language
 from RagChatbot.utils.translations import get_translated, get_capabilities_translated
 
 logger = logging.getLogger(__name__)
+
+
+class _CachedVoiceResponse:
+    __slots__ = ("answer", "citations", "access_granted", "status_message", "response_time_ms")
+
+    def __init__(
+        self,
+        answer: str,
+        citations: list[Any],
+        access_granted: bool = True,
+        status_message: str | None = None,
+        response_time_ms: int = 0,
+    ) -> None:
+        self.answer = answer
+        self.citations = citations
+        self.access_granted = access_granted
+        self.status_message = status_message
+        self.response_time_ms = response_time_ms
 
 _FLASH_LITE_INTENT_MAP = {
     "PROFILE": PersonalIntent.PROFILE,
@@ -337,6 +358,27 @@ def process_user_request(
             "reason": None,
             "clarification_question": None,
         }
+    elif fast_voice and local_route.category == "UNIVERSITY_INFO":
+        # Fast Voice Path: Query passed safety check and was confidently identified
+        # as UNIVERSITY_INFO by the ~2ms local regex & catalog router.
+        # Bypass the remote Flash-Lite classification call to save 1.5s–2.0s latency.
+        classification = {
+            "safe": True,
+            "scope": "UNIVERSITY_INFO",
+            "route": "UNIVERSITY_INFO",
+            "intent": local_route.category_hint or "UNIVERSITY_INFO",
+            "reason": None,
+            "clarification_question": None,
+        }
+    elif fast_voice and local_route.category == "CAPABILITY":
+        classification = {
+            "safe": True,
+            "scope": "IN_SCOPE",
+            "route": "CAPABILITY",
+            "intent": "CAPABILITY",
+            "reason": None,
+            "clarification_question": None,
+        }
     else:
         try:
             classification = _classify_with_flash_lite(sanitized)
@@ -499,6 +541,34 @@ def process_user_request(
         return _fixed_response(answer, "UNCLEAR", sanitized, resolved_session_id, user_id, db, intent=intent)
 
     # UNIVERSITY_INFO routes directly through the single-pass Fast RAG engine
+    cache_key = _rag_cache_key(sanitized, allowed_levels)
+    with _RAG_RESPONSE_CACHE_LOCK:
+        if cache_key in _RAG_RESPONSE_CACHE:
+            cached_time, cached_res = _RAG_RESPONSE_CACHE[cache_key]
+            ttl = getattr(rag_settings, "RESPONSE_CACHE_TTL_SECONDS", 300.0)
+            if time.monotonic() - cached_time < ttl:
+                _RAG_RESPONSE_CACHE.move_to_end(cache_key)
+                logger.info("RAG response cache hit in process_user_request for: %.40s", sanitized)
+                cached_citations = [
+                    c.model_dump(mode="json") if hasattr(c, "model_dump") else (
+                        c if isinstance(c, dict) else {"document_title": str(c)}
+                    )
+                    for c in (cached_res.citations or [])
+                ]
+                return _result(
+                    status="ok" if cached_res.access_granted else "no_access",
+                    route="UNIVERSITY_INFO",
+                    intent=intent or "UNIVERSITY_INFO",
+                    query=sanitized,
+                    response_text=cached_res.answer,
+                    exact_response=False,
+                    access_granted=cached_res.access_granted,
+                    citations=cached_citations,
+                    grounded_context=cached_res.answer,
+                )
+            else:
+                del _RAG_RESPONSE_CACHE[cache_key]
+
     try:
         from RagChatbot.generation.live_fast_rag import live_fast_rag
         from RagChatbot.services.chat_service import _load_recent_chat_history, _condense_query_with_history
@@ -550,6 +620,23 @@ def process_user_request(
                 error_message=AUTH_REQUIRED_STATUS,
                 authentication_required=True,
             )
+
+    # Cache successful RAG response for subsequent voice turns:
+    if fast_res.get("status") == "ok" and fast_res.get("answer"):
+        with _RAG_RESPONSE_CACHE_LOCK:
+            _RAG_RESPONSE_CACHE[cache_key] = (
+                time.monotonic(),
+                _CachedVoiceResponse(
+                    answer=fast_res.get("answer"),
+                    citations=sources,
+                    access_granted=True,
+                    status_message=None,
+                    response_time_ms=int((time.monotonic() - started) * 1000),
+                ),
+            )
+            max_size = getattr(rag_settings, "RESPONSE_CACHE_SIZE", 256)
+            while len(_RAG_RESPONSE_CACHE) > max_size:
+                _RAG_RESPONSE_CACHE.popitem(last=False)
 
     if resolved_session_id is not None:
         logged = log_chatbot_interaction(

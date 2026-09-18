@@ -191,7 +191,7 @@ Role: {role_label}
                 config=types.GenerateContentConfig(
                     system_instruction=_VOICE_SYSTEM_PROMPT,
                     temperature=0.3,
-                    max_output_tokens=300,
+                    max_output_tokens=getattr(rag_settings, "LIVE_SYNTHESIS_MAX_TOKENS", 180),
                 ),
             )
             answer = (response.text or "").strip()

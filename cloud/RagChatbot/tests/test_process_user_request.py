@@ -4,10 +4,20 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from RagChatbot.personalisation.schemas import AuthenticatedChatContext
 from RagChatbot.retrieval.ranking import RankedChunk
 from RagChatbot.services import process_user_request as request_module
 from RagChatbot.services import map_service
+from RagChatbot.services.chat_service import clear_rag_response_cache
+
+
+@pytest.fixture(autouse=True)
+def clean_cache():
+    clear_rag_response_cache()
+    yield
+    clear_rag_response_cache()
 
 
 def _flash_response(route: str = "UNIVERSITY_INFO", intent: str = "ADMISSIONS"):

@@ -413,7 +413,6 @@ class _LiveDuplexWorker(QThread):
                     is_speaking = False
                     silence_started = 0.0
                     consecutive_barge_count = 0
-                    pre_roll_buffer: collections.deque[bytes] = collections.deque(maxlen=self._pre_roll_chunks)
 
                     sos = None
                     zi = None
@@ -485,15 +484,22 @@ class _LiveDuplexWorker(QThread):
                                     continue
                             else:
                                 consecutive_barge_count = 0
-                                # Client VAD audio gating with pre-roll lookback buffer:
-                                # Silence and ambient hiss are suppressed locally to prevent ASR hallucinations.
-                                if not is_speaking:
-                                    if rms >= self._speech_threshold:
-                                        # Voice onset detected! Flush pre-roll buffer to preserve initial syllables
+                                # Continuous streaming: send microphone audio continuously while assistant is not playing.
+                                # This ensures Gemini Live's ASR pipeline receives unbroken audio frames (mirroring
+                                # test_chatbot_rbac.py) and completely eliminates the ~17.5s inactivity timeout freeze.
+                                try:
+                                    turn_audio_bytes_sent[0] += len(pcm_chunk)
+                                    await ws.send(pcm_chunk)
+                                except Exception:
+                                    break
+
+                                # Client VAD turn-end detection for instant response
+                                if rms >= self._speech_threshold:
+                                    if not is_speaking:
                                         is_speaking = True
                                         turn_speech_onset_mono[0] = time.monotonic()
                                         turn_id[0] = f"turn_{int(time.time() * 1000)}"
-                                        turn_audio_bytes_sent[0] = 0
+                                        turn_audio_bytes_sent[0] = len(pcm_chunk)
                                         first_audio_chunk_received[0] = False
                                         first_audio_playback_started[0] = False
                                         edge_timing.log_internal(
@@ -504,60 +510,35 @@ class _LiveDuplexWorker(QThread):
                                         )
                                         last_assistant_text[0] = ""
                                         self.speechStateChanged.emit(True)
+                                    silence_started = 0.0
+                                elif is_speaking:
+                                    if silence_started == 0.0:
+                                        silence_started = now
+                                    elif (now - silence_started) >= self._silence_hold_sec:
+                                        is_speaking = False
                                         silence_started = 0.0
-                                        while pre_roll_buffer:
-                                            try:
-                                                chunk = pre_roll_buffer.popleft()
-                                                turn_audio_bytes_sent[0] += len(chunk)
-                                                await ws.send(chunk)
-                                            except Exception:
-                                                break
+                                        turn_speech_end_mono[0] = time.monotonic()
+                                        speech_duration_ms = (turn_speech_end_mono[0] - turn_speech_onset_mono[0]) * 1000.0
+                                        client_sent_at = edge_timing.log_send(
+                                            "ACTIVITY_END",
+                                            turn_id=turn_id[0],
+                                            duration_ms=speech_duration_ms,
+                                            audio_bytes=turn_audio_bytes_sent[0],
+                                        )
+                                        self.speechStateChanged.emit(False)
+                                        self.userAudioLevelChanged.emit(0.0)
                                         try:
-                                            turn_audio_bytes_sent[0] += len(pcm_chunk)
-                                            await ws.send(pcm_chunk)
+                                            await ws.send(json.dumps({
+                                                "event": "activity_end",
+                                                "data": {
+                                                    "turn_id": turn_id[0],
+                                                    "client_sent_at": client_sent_at,
+                                                    "speech_duration_ms": round(speech_duration_ms, 2),
+                                                    "total_audio_bytes": turn_audio_bytes_sent[0],
+                                                },
+                                            }))
                                         except Exception:
-                                            break
-                                    else:
-                                        # Ambient silence/room hiss: keep rolling buffer, do not stream to WebSocket
-                                        pre_roll_buffer.append(pcm_chunk)
-                                else:
-                                    # Currently in active speech: stream chunk to Gemini Live
-                                    try:
-                                        turn_audio_bytes_sent[0] += len(pcm_chunk)
-                                        await ws.send(pcm_chunk)
-                                    except Exception:
-                                        break
-
-                                    if rms >= self._speech_threshold:
-                                        silence_started = 0.0
-                                    else:
-                                        if silence_started == 0.0:
-                                            silence_started = now
-                                        elif (now - silence_started) >= self._silence_hold_sec:
-                                            is_speaking = False
-                                            silence_started = 0.0
-                                            turn_speech_end_mono[0] = time.monotonic()
-                                            speech_duration_ms = (turn_speech_end_mono[0] - turn_speech_onset_mono[0]) * 1000.0
-                                            client_sent_at = edge_timing.log_send(
-                                                "ACTIVITY_END",
-                                                turn_id=turn_id[0],
-                                                duration_ms=speech_duration_ms,
-                                                audio_bytes=turn_audio_bytes_sent[0],
-                                            )
-                                            self.speechStateChanged.emit(False)
-                                            self.userAudioLevelChanged.emit(0.0)
-                                            try:
-                                                await ws.send(json.dumps({
-                                                    "event": "activity_end",
-                                                    "data": {
-                                                        "turn_id": turn_id[0],
-                                                        "client_sent_at": client_sent_at,
-                                                        "speech_duration_ms": round(speech_duration_ms, 2),
-                                                        "total_audio_bytes": turn_audio_bytes_sent[0],
-                                                    },
-                                                }))
-                                            except Exception:
-                                                pass
+                                            pass
 
                 player_task = asyncio.create_task(player_loop())
                 receiver_task = asyncio.create_task(receiver_loop())

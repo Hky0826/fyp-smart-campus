@@ -387,6 +387,16 @@ def _condense_query_with_history(query: str, history: list[dict[str, str]]) -> s
     if not needs_rewrite and len(query.strip().split()) <= 4:
         needs_rewrite = True
 
+    # If the query already specifies a concrete programme/degree entity, do not trigger a slow LLM rewrite:
+    if needs_rewrite and len(query.strip().split()) >= 5:
+        has_substantive_entity = bool(re.search(
+            r"\b(bachelor|diploma|master|phd|foundation|faculty|department|computer science|pharmacy|medicine|business|biotechnology|accounting|engineering)\b",
+            query,
+            re.IGNORECASE,
+        ))
+        if has_substantive_entity:
+            needs_rewrite = False
+
     if not needs_rewrite:
         return query
 
