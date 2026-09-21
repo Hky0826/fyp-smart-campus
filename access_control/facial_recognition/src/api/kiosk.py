@@ -25,6 +25,7 @@ from ..config import RuntimeConfig
 from ..face.types import AuthenticationResult
 from ..pipelines.access_audio import EdgeAuthToken, EdgeAuthTokenClient
 from .chatbot_client import ChatbotClient, ChatbotClientError
+from ..hardware.door_controller import get_door_controller
 
 try:
     from access_control.timing_logger import edge_timing
@@ -197,6 +198,21 @@ class ChatLiveConfigResponse(BaseModel):
     roles: list[str] = Field(default_factory=list)
 
 
+class DoorUnlockRequest(BaseModel):
+    duration_seconds: Optional[float] = Field(default=None, ge=0.5, le=60.0)
+
+
+class DoorStatusResponse(BaseModel):
+    state: str
+    is_unlocked: bool
+    is_simulated: bool
+    enabled: bool
+    pin: int
+    active_high: bool
+    unlock_count: int
+    remaining_seconds: float
+
+
 @dataclass
 class _StoredChatSession:
     view: ChatSessionView
@@ -276,6 +292,10 @@ class KioskStateStore:
             attempt.detected_user_id = detected_user_id
             if granted:
                 attempt.access_decision = "GRANTED"
+                try:
+                    get_door_controller().unlock()
+                except Exception as exc:
+                    logger.error("Failed to unlock door on access granted: %s", exc)
             elif is_retry:
                 attempt.access_decision = "VERIFYING"
             elif authentication_result == AuthenticationResult.SYSTEM_ERROR.value:
@@ -643,6 +663,18 @@ def create_kiosk_router(
                 intent_detected=bool(presence_payload.get("intent_detected", False)),
             )
         return AccessRequestResponse(attempt=store.complete_access_attempt(result), presence=presence_view)
+
+    @router.post("/door/unlock", response_model=DoorStatusResponse)
+    def unlock_door(body: Optional[DoorUnlockRequest] = None) -> DoorStatusResponse:
+        door = get_door_controller()
+        duration = body.duration_seconds if body else None
+        door.unlock(duration=duration)
+        return DoorStatusResponse(**door.get_state())
+
+    @router.get("/door/status", response_model=DoorStatusResponse)
+    def get_door_status() -> DoorStatusResponse:
+        door = get_door_controller()
+        return DoorStatusResponse(**door.get_state())
 
     @router.post("/chat/verify/frame", response_model=ChatVerifyResponse)
     async def verify_chat_owner(file: UploadFile = File(...)) -> ChatVerifyResponse:

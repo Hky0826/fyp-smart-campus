@@ -90,6 +90,10 @@ def main() -> int:
     if not engine.rootObjects():
         return 1
 
+    root_window = engine.rootObjects()[0]
+    if hasattr(root_window, "showFullScreen"):
+        root_window.showFullScreen()
+
     camera.start()
     access.start()
     device.refresh()

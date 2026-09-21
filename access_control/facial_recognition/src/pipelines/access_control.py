@@ -18,6 +18,7 @@ import numpy as np
 
 from ..camera.camera_reader import CameraReader
 from ..config import AccessControlConfig
+from ..hardware.door_controller import get_door_controller
 from ..face.aggregation import EmbeddingAggregationConfig, TrackEmbeddingAggregator
 from ..face.alignment import FaceAligner
 from ..face.database import DeviceUserRepository
@@ -879,6 +880,12 @@ def main() -> None:
         elif key == QUIT_KEY:
             request_stop()
 
+    door = get_door_controller(
+        pin=config.door_relay_pin,
+        unlock_duration=config.door_unlock_duration_seconds,
+        active_high=config.door_relay_active_high,
+        enabled=config.door_relay_enabled,
+    )
     camera = CameraReader(config.camera)
     try:
         pipeline = build_pipeline(config)
@@ -891,6 +898,8 @@ def main() -> None:
                 continue
             result = pipeline.process_frame(frame, target_user_id=args.target_user_id)
             audio_coordinator.handle_access_result(result)
+            if result.get("access_granted"):
+                door.unlock()
             logger.debug(json.dumps(result, default=str))
             if args.display and not show_pipeline_result(
                 args.window_name,
@@ -902,6 +911,7 @@ def main() -> None:
                 break
     finally:
         keyboard_listener.stop()
+        door.cleanup()
         camera.release()
         audio_coordinator.stop()
         sync_engine.stop()

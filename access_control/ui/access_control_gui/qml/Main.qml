@@ -6,12 +6,8 @@ ApplicationWindow {
     width: 800
     height: 480
     visible: true
-    // Temporary laptop preview: keep the content area at the kiosk resolution.
-    visibility: Window.Windowed
-    minimumWidth: 800
-    maximumWidth: 800
-    minimumHeight: 480
-    maximumHeight: 480
+    visibility: Window.FullScreen
+    flags: Qt.Window | Qt.FramelessWindowHint
     color: "#020617"
     title: "Edge Access Control"
     readonly property bool showAccessGlow: !accessController.chatExpanded
