@@ -58,6 +58,7 @@ Item {
     signal stopAnsweringRequested()
     signal toggleMuteRequested()
     signal dismissNavigationRequested()
+    signal optionSelected(string option)
 
     onVisibleChanged: {
         if (visible) {
@@ -269,10 +270,10 @@ Item {
         // Auto-lock on exit caption
         Text {
             x: 10
-            y: root.height - 72
+            y: root.height - 76
             width: leftDock.width - 20
             horizontalAlignment: Text.AlignHCenter
-            text: root.ownerPresent ? "Session closes after 10s away" : "Out of frame — return within 10s"
+            text: root.ownerPresent ? "Closes after 10s away\n(or say \"Exit\" to close)" : "Return within 10s\n(or say \"Exit\" to close)"
             wrapMode: Text.Wrap
             color: "#64748b" // Preview: text-slate-600
             font.pixelSize: 8
@@ -1221,6 +1222,71 @@ Item {
                                 wrapMode: Text.Wrap
                             }
 
+                            // Touch-screen & Voice Option Chips
+                            Flow {
+                                id: optionsFlow
+                                visible: modelData.role === "assistant" && modelData.options && modelData.options.length > 0
+                                width: parent.width
+                                spacing: 8
+                                topPadding: 6
+
+                                Repeater {
+                                    model: (modelData.options && modelData.options.length > 0) ? modelData.options : []
+                                    Rectangle {
+                                        id: optChip
+                                        radius: 8
+                                        color: optMouse.pressed ? "#e0e7ff" : (optMouse.containsMouse ? "#eef2ff" : "#f8fafc")
+                                        border.width: 1
+                                        border.color: optMouse.containsMouse ? "#6366f1" : "#cbd5e1"
+                                        implicitHeight: 36
+                                        implicitWidth: optRow.implicitWidth + 20
+
+                                        RowLayout {
+                                            id: optRow
+                                            anchors.centerIn: parent
+                                            spacing: 6
+
+                                            // Number badge for voice & touch cue
+                                            Rectangle {
+                                                width: 20
+                                                height: 20
+                                                radius: 10
+                                                color: "#4f46e5" // indigo-600
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: String(index + 1)
+                                                    color: "#ffffff"
+                                                    font.pixelSize: 10
+                                                    font.bold: true
+                                                }
+                                            }
+
+                                            Text {
+                                                text: String(modelData || "")
+                                                color: "#1e293b" // slate-800
+                                                font.pixelSize: 11
+                                                font.bold: true
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            id: optMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                var chosen = String(modelData || "")
+                                                root.optionSelected(chosen)
+                                                if (typeof accessController !== "undefined" && accessController) {
+                                                    accessController.sendMessage(chosen)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
 
                         }
                     }
@@ -1402,7 +1468,7 @@ Item {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                         elide: Text.ElideRight
-                        text: "Speak naturally to query or interrupt"
+                        text: "Speak an option, tap screen, or say \"Exit\""
                         color: "#64748b" // slate-500
                         font.pixelSize: 10
                         font.weight: Font.Medium

@@ -49,6 +49,7 @@ ApplicationWindow {
         onStopAnsweringRequested: chatbotController.stopAudioPlayback()
         onToggleMuteRequested: accessController.toggleMute()
         onDismissNavigationRequested: chatbotController.clearNavigation()
+        onOptionSelected: function(option) { accessController.sendMessage(option) }
     }
 
     ChatbotButton {

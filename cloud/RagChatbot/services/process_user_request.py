@@ -91,6 +91,7 @@ _VALID_SCOPES = {
     "UNIVERSITY_INFO",
     "UNCLEAR",
     "OUT_OF_SCOPE",
+    "EXIT",
 }
 _VALID_ROUTES = _VALID_SCOPES
 _SAFE_RESPONSE_STATUSES = {"ok", "blocked", "no_access", "auth_required"}
@@ -136,6 +137,7 @@ def _result(
     citations: list[dict[str, Any]] | None = None,
     grounded_context: str | None = None,
     navigation: dict[str, Any] | None = None,
+    options: list[str] | None = None,
     error_message: str | None = None,
     query_id: int | None = None,
     response_scope: str = "DOCUMENT",
@@ -155,6 +157,7 @@ def _result(
         "citations": citations or [],
         "grounded_context": grounded_context,
         "navigation": navigation,
+        "options": options or [],
         "error_message": error_message,
         "query_id": query_id,
         "response_scope": response_scope,
@@ -321,7 +324,16 @@ def process_user_request(
 
     # Navigation, Greetings, and Out-of-Scope queries are resolved deterministically before calling any model.
     local_route = classify_query(sanitized, db=db)
-    if local_route.category == "OUT_OF_SCOPE":
+    if local_route.category == "EXIT":
+        classification = {
+            "safe": True,
+            "scope": "IN_SCOPE",
+            "route": "EXIT",
+            "intent": "EXIT",
+            "reason": None,
+            "clarification_question": None,
+        }
+    elif local_route.category == "OUT_OF_SCOPE":
         classification = {
             "safe": True,
             "scope": "OUT_OF_SCOPE",
@@ -483,6 +495,17 @@ def process_user_request(
             navigation=navigation,
         )
 
+    if route == "EXIT":
+        confirmations = {
+            "en": "Goodbye! Have a great day.",
+            "zh": "再见！祝你有美好的一天。",
+            "yue": "再見！祝你有美好嘅一日。",
+            "ms": "Selamat tinggal! Semoga hari anda menyenangkan.",
+            "ta": "விடைபெறுகிறேன்! நல்ல நாளாக அமையட்டும்.",
+        }
+        answer = confirmations.get(detected_lang, "Goodbye! Have a great day.")
+        return _fixed_response(answer, "EXIT", sanitized, resolved_session_id, user_id, db, intent="EXIT")
+
     if route == "GREETING":
         name = _greeting_name(context) if context.authenticated else ""
         answer = f"Hi {name}, how may I help you today?" if name else "Hi, how may I help you today?"
@@ -514,7 +537,7 @@ def process_user_request(
     if route == "NAVIGATIONAL":
         from RagChatbot.services.map_service import calculate_navigation
 
-        confirmed = _confirmed_navigation_label(sanitized, db, resolved_session_id)
+        confirmed = _confirmed_navigation_label(sanitized, db, resolved_session_id, chat_history=chat_history)
         try:
             navigation_data = calculate_navigation(
                 f"where is {confirmed}" if confirmed else sanitized,
@@ -525,6 +548,7 @@ def process_user_request(
             logger.warning("Live navigation routing failed: %s", type(exc).__name__)
             navigation_data = None
         answer = (navigation_data or {}).get("answer") or "Please tell me the unique destination you want to reach."
+        nav_options = (navigation_data or {}).get("options")
         return _fixed_response(
             answer,
             "NAVIGATIONAL",
@@ -534,11 +558,13 @@ def process_user_request(
             db,
             intent="NAVIGATION_CONFIRMATION" if (navigation_data or {}).get("confirmation_required") else "NAVIGATIONAL",
             navigation=navigation_data,
+            options=nav_options,
         )
 
     if route == "UNCLEAR":
         answer = classification["clarification_question"] or "Could you please clarify what university information you are looking for?"
-        return _fixed_response(answer, "UNCLEAR", sanitized, resolved_session_id, user_id, db, intent=intent)
+        default_options = ["Campus Navigation", "Admissions & Fees", "Academic Programmes"]
+        return _fixed_response(answer, "UNCLEAR", sanitized, resolved_session_id, user_id, db, intent=intent, options=default_options)
 
     # UNIVERSITY_INFO routes directly through the single-pass Fast RAG engine
     cache_key = _rag_cache_key(sanitized, allowed_levels)
@@ -667,7 +693,18 @@ def process_user_request(
     )
 
 
-def _fixed_response(answer: str, route: str, query: str, session_id: int | None, user_id: int | None, db: Session, *, intent: str | None = None, navigation: dict[str, Any] | None = None) -> dict[str, Any]:
+def _fixed_response(
+    answer: str,
+    route: str,
+    query: str,
+    session_id: int | None,
+    user_id: int | None,
+    db: Session,
+    *,
+    intent: str | None = None,
+    navigation: dict[str, Any] | None = None,
+    options: list[str] | None = None,
+) -> dict[str, Any]:
     query_id = None
     if session_id is not None:
         logged = log_chatbot_interaction(
@@ -690,5 +727,6 @@ def _fixed_response(answer: str, route: str, query: str, session_id: int | None,
         exact_response=True,
         access_granted=True,
         navigation=navigation,
+        options=options,
         query_id=query_id,
     )

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import os
+import re
 import time
 from typing import Any, Callable
 
@@ -18,6 +20,29 @@ try:
     from access_control.timing_logger import edge_timing
 except ImportError:
     from timing_logger import edge_timing
+
+logger = logging.getLogger(__name__)
+
+_VOICE_EXIT_PATTERNS = re.compile(
+    r"^(?:"
+    r"exit|quit|close|leave|bye|goodbye"
+    r"|(?:thank\s+you|thanks)(?:,\s*|\s+)(?:that['’]?s\s+all|that\s+is\s+all|that['’]?ll\s+be\s+all|all\s+good|i['’]?m\s+good|i['’]?m\s+done)(?:\s+(?:for\s+now|today))?"
+    r"|(?:that['’]?s\s+all|thats\s+all|that\s+is\s+all|that['’]?ll\s+be\s+all)(?:,\s*|\s+)(?:thank\s+you|thanks)"
+    r"|(?:that['’]?s\s+all|thats\s+all|that\s+is\s+all|that['’]?ll\s+be\s+all)(?:\s+(?:for\s+now|today))?"
+    r"|i['’]?m\s+done|i\s+am\s+done|all\s+done|nothing\s+else|no\s+more\s+questions"
+    r"|keluar|tutup|berhenti|tinggalkan"
+    r"|terima\s+kasih\s+itu\s+sahaja|itu\s+sahaja|itu\s+je|terima\s+kasih\s+itu\s+je|tak\s+ada\s+apa\s+lagi"
+    r"|退出|关闭|离开|再见|拜拜"
+    r"|谢谢[，,\s]*这样就好|就这样|就这样了|没事了|没有问题了|好了谢谢|好了"
+    r"|வெளியேறு|முடி|பை|நன்றி\s+அவ்வளவுதான்"
+    r")[.?!。！？]*$",
+    re.IGNORECASE,
+)
+
+
+def _is_voice_exit_command(text: str) -> bool:
+    cleaned = (text or "").strip()
+    return bool(_VOICE_EXIT_PATTERNS.match(cleaned))
 
 
 CAMERA_FRAME_INTERVAL_MS = int(os.getenv("EDGE_GUI_CAMERA_FRAME_INTERVAL_MS", "33"))
@@ -110,6 +135,8 @@ class AccessController(QObject):
         self._chat_error = ""
         self._now_ms = _now_ms()
         self._last_presence_check_ms = 0
+        self._last_owner_seen_ms: int = 0
+        self._chat_verify_started_ms: int = 0
         self._workers: list[QThread] = []
         self._events_worker: _StateEventsWorker | None = None
 
@@ -129,6 +156,7 @@ class AccessController(QObject):
         self._chatbot.errorChanged.connect(self._on_chatbot_error)
         self._chatbot.transcribedTextChanged.connect(self._on_chatbot_transcribed_text)
         self._chatbot.partialTextChanged.connect(self._on_chatbot_partial_text)
+        self._chatbot.exitRequested.connect(self.exitChat)
 
         try:
             from access_control.audio_io.access_feedback import AccessFeedbackPlayer
@@ -164,6 +192,7 @@ class AccessController(QObject):
         self._chatbot.resetSessionState()
         self._set_chat_expanded(True)
         self._last_presence_check_ms = _now_ms()
+        self._last_owner_seen_ms = _now_ms()
         if not self._session and not self._chat_verification_active:
             self.startChatVerification()
 
@@ -173,6 +202,8 @@ class AccessController(QObject):
         self._camera_error = ""
         self._transcribed_text = ""
         self._partial_text = ""
+        self._chat_verify_started_ms = _now_ms()
+        self._last_owner_seen_ms = _now_ms()
         self._set_chat_verification_active(True)
         self._chatbot.clearNavigation()
         self._chatbot.resetSessionState()
@@ -191,6 +222,8 @@ class AccessController(QObject):
         self._greeting_session_id = None
         self._transcribed_text = ""
         self._partial_text = ""
+        self._last_owner_seen_ms = 0
+        self._chat_verify_started_ms = 0
         self._run_worker("end-chat", self._api.end_chat)
         if self._state:
             self._state = {**self._state, "active_chat_session": None, "chat_recoverable": False}
@@ -200,6 +233,10 @@ class AccessController(QObject):
     def sendMessage(self, query: str) -> None:
         cleaned = query.strip()
         if not cleaned:
+            return
+        if _is_voice_exit_command(cleaned):
+            logger.info("Voice exit command received in sendMessage: %s", cleaned)
+            self.exitChat()
             return
         if self._chat_in_flight:
             logger.debug("Chat message already in flight, ignoring duplicate send: %s", cleaned)
@@ -249,10 +286,30 @@ class AccessController(QObject):
     @Slot()
     def _on_tick(self) -> None:
         self._now_ms = _now_ms()
-        absent_since = _parse_datetime((self._session or {}).get("owner_absent_since"))
         timeout = float(self._timings.get("owner_absent_terminate_seconds", 10))
-        if self._chat_expanded and absent_since and self._now_ms - int(absent_since.timestamp() * 1000) >= timeout * 1000:
-            self.exitChat()
+        timeout_ms = int(timeout * 1000)
+
+        if self._chat_expanded:
+            # 1. Unverified trap watchdog: chat verification active for >= timeout with no session
+            if self._chat_verification_active and not self._session:
+                if self._chat_verify_started_ms > 0 and (self._now_ms - self._chat_verify_started_ms >= timeout_ms):
+                    logger.info("Chat verification timed out after %ds without owner face. Auto-closing.", timeout)
+                    self.exitChat()
+                    return
+
+            # 2. Server-reported absent_since watchdog
+            absent_since = _parse_datetime((self._session or {}).get("owner_absent_since"))
+            if absent_since and (self._now_ms - int(absent_since.timestamp() * 1000) >= timeout_ms):
+                logger.info("Chat owner absent_since exceeded %ds. Auto-closing.", timeout)
+                self.exitChat()
+                return
+
+            # 3. Client-side watchdog: if no owner face seen for >= timeout
+            if self._last_owner_seen_ms > 0 and (self._now_ms - self._last_owner_seen_ms >= timeout_ms):
+                logger.info("Client-side watchdog: no owner face seen for %ds. Auto-closing.", timeout)
+                self.exitChat()
+                return
+
         self._update_mode()
 
     def _start_events(self) -> None:
@@ -289,6 +346,10 @@ class AccessController(QObject):
     @Slot()
     def _on_chatbot_transcribed_text(self) -> None:
         self._transcribed_text = self._chatbot.transcribedText
+        if _is_voice_exit_command(self._transcribed_text):
+            logger.info("Voice exit command detected from transcribed text: %s", self._transcribed_text)
+            self.exitChat()
+            return
 
     @Slot()
     def _on_chatbot_partial_text(self) -> None:
@@ -310,6 +371,8 @@ class AccessController(QObject):
                 self._merge_chat_session(session)
                 self._face_boxes = _coerce_boxes(payload.get("bboxes"))
                 self._set_chat_verification_active(False)
+                self._chat_verify_started_ms = 0
+                self._last_owner_seen_ms = self._now_ms
                 self._chat_error = ""
                 self._last_presence_check_ms = _now_ms()
                 session_id = (session or {}).get("session_id")
@@ -322,6 +385,10 @@ class AccessController(QObject):
             elif name == "chat-presence-frame":
                 launched_followup_frame = self._handle_presence_payload(payload)
             elif name in {"chat-message", "chat-audio"}:
+                if payload.get("intent") == "EXIT" or payload.get("route") == "EXIT":
+                    logger.info("Chatbot EXIT intent received in %s, exiting chat.", name)
+                    self.exitChat()
+                    return
                 gui_latency_ms = (time.monotonic() - self._chat_message_start_mono) * 1000.0 if self._chat_message_start_mono > 0 else None
                 edge_timing.log_receive("GUI_MESSAGE_RECEIVE", duration_ms=gui_latency_ms)
                 session = payload.get("session")
@@ -331,6 +398,7 @@ class AccessController(QObject):
                     user_text = payload.get("transcribed_input")
                     bot_text = payload.get("text_response")
                     citations = payload.get("citations", [])
+                    options = payload.get("options", [])
                     history = list(self._live_history or self._session.get("conversation_history") or [])
                     now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
                     if user_text:
@@ -342,7 +410,13 @@ class AccessController(QObject):
                         if not already_has_user:
                             history.append({"role": "user", "content": user_text, "created_at": now_iso, "citations": []})
                     if bot_text:
-                        history.append({"role": "assistant", "content": bot_text, "created_at": now_iso, "citations": citations})
+                        history.append({
+                            "role": "assistant",
+                            "content": bot_text,
+                            "created_at": now_iso,
+                            "citations": citations,
+                            "options": options,
+                        })
                     self._live_history = history
                     self._merge_chat_session({**self._session, "conversation_history": history})
                 self._transcribed_text = ""
@@ -438,6 +512,8 @@ class AccessController(QObject):
 
     def _handle_presence_payload(self, payload: dict[str, Any]) -> bool:
         self._face_boxes = _coerce_boxes(payload.get("bboxes"))
+        if payload.get("owner_present"):
+            self._last_owner_seen_ms = _now_ms()
         if payload.get("ended"):
             if self._state:
                 self._state = {**self._state, "active_chat_session": None, "chat_recoverable": False}
@@ -451,6 +527,10 @@ class AccessController(QObject):
     @Slot(dict)
     def _on_audio_response(self, payload: dict[str, Any]) -> None:
         if not self._chat_expanded or not self._session:
+            return
+        if payload.get("intent") == "EXIT" or payload.get("route") == "EXIT":
+            logger.info("Chatbot EXIT intent received in audio response, exiting chat.")
+            self.exitChat()
             return
         self._transcribed_text = ""
         self._partial_text = ""
@@ -491,6 +571,12 @@ class AccessController(QObject):
             self._live_history = []
             self._transcribed_text = ""
             self._partial_text = ""
+        if session.get("presence_state") == "OWNER_PRESENT":
+            self._last_owner_seen_ms = _now_ms()
+        elif session.get("last_owner_seen_at"):
+            last_seen = _parse_datetime(session.get("last_owner_seen_at"))
+            if last_seen:
+                self._last_owner_seen_ms = max(self._last_owner_seen_ms, int(last_seen.timestamp() * 1000))
         incoming = list(session.get("conversation_history") or [])
         if len(incoming) >= len(self._live_history):
             self._live_history = incoming

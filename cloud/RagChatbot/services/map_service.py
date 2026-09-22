@@ -604,15 +604,19 @@ def calculate_navigation(query: str, *, db, context):
             if suggestions:
                 suggestion_data = [_candidate_data(node) for node in suggestions]
                 if len(suggestion_data) == 1:
-                    answer = f"Did you mean {suggestion_data[0]['label']}? Is that the place you want to go?"
+                    candidate_label = suggestion_data[0]['label']
+                    answer = f"Did you mean {candidate_label}? Is that the place you want to go?"
+                    options = [candidate_label, "Cancel"]
                 else:
                     labels = ", ".join(item["label"] for item in suggestion_data)
                     answer = f"Which place did you mean: {labels}?"
+                    options = [item["label"] for item in suggestion_data]
                 return {
                     "intent": "NAVIGATIONAL",
                     "confirmation_required": True,
                     "navigation_target": {"confirmation_required": True, "candidates": suggestion_data},
                     "answer": answer,
+                    "options": options,
                 }
         if len(matches) > 1:
             query_words = set(_normalise_label(label).split())
@@ -627,6 +631,7 @@ def calculate_navigation(query: str, *, db, context):
                     seen_desc.add(desc)
                     formatted_labels.append(desc)
             labels = ", ".join(formatted_labels[:6])
+            options = [node.label for node in matches[:6]]
             answer = (
                 f"I found these food destinations: {labels}. Which one do you mean?"
                 if query_words & _FOOD_WORDS
@@ -638,6 +643,7 @@ def calculate_navigation(query: str, *, db, context):
                 "intent": "NAVIGATIONAL",
                 "navigation_target": {"candidates": [_candidate_data(node) for node in matches]},
                 "answer": answer,
+                "options": options,
             }
         return {
             "intent": "NAVIGATIONAL",

@@ -95,6 +95,7 @@ class ChatResponse(BaseModel):
     route_summary: Optional[dict[str, Any]] = None
     instructions: List[dict[str, Any]] = Field(default_factory=list)
     visualisation: Optional[dict[str, Any]] = None
+    options: List[str] = Field(default_factory=list)
 
 
 class IngestionRequest(BaseModel):
@@ -165,6 +166,7 @@ class AudioChatResponse(BaseModel):
     route_summary: Optional[dict[str, Any]] = None
     instructions: List[dict[str, Any]] = Field(default_factory=list)
     visualisation: Optional[dict[str, Any]] = None
+    options: List[str] = Field(default_factory=list)
 
 
 class ExtractedQuery(BaseModel):

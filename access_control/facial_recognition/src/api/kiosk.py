@@ -78,6 +78,7 @@ class ChatMessage(BaseModel):
     content: str
     created_at: str
     citations: list[dict[str, Any]] = Field(default_factory=list)
+    options: list[str] = Field(default_factory=list)
 
 
 class ChatSessionView(BaseModel):
@@ -162,6 +163,7 @@ class ChatMessageResponse(BaseModel):
     response_scope: str = "DOCUMENT"
     personal_intent: Optional[str] = None
     navigation_target: Optional[dict[str, Any]] = None
+    options: list[str] = Field(default_factory=list)
 
 
 class ChatAudioResponse(BaseModel):
@@ -178,6 +180,7 @@ class ChatAudioResponse(BaseModel):
     response_scope: str = "DOCUMENT"
     personal_intent: Optional[str] = None
     navigation_target: Optional[dict[str, Any]] = None
+    options: list[str] = Field(default_factory=list)
 
 
 class ChatGreetingAudioResponse(BaseModel):
@@ -390,6 +393,7 @@ class KioskStateStore:
         user_text: str,
         answer: str,
         citations: list[dict[str, Any]],
+        options: list[str] | None = None,
     ) -> ChatSessionView:
         now = self._now().isoformat()
         with self._lock:
@@ -421,7 +425,13 @@ class KioskStateStore:
 
             target_session.history.append(ChatMessage(role="user", content=user_text, created_at=now))
             target_session.history.append(
-                ChatMessage(role="assistant", content=answer, created_at=now, citations=citations)
+                ChatMessage(
+                    role="assistant",
+                    content=answer,
+                    created_at=now,
+                    citations=citations,
+                    options=options or [],
+                )
             )
             target_session.view.last_interaction_at = now
             if target_session.view.presence_state == "OWNER_PRESENT":
@@ -784,10 +794,12 @@ def create_kiosk_router(
             raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
         citations = response.get("citations", [])
+        options = response.get("options", [])
         session = store.append_chat_exchange(
             body.query,
             str(response.get("answer") or ""),
             citations,
+            options=options,
         )
         return ChatMessageResponse(
             session=session,
@@ -800,6 +812,7 @@ def create_kiosk_router(
             response_scope=response.get("response_scope", "DOCUMENT"),
             personal_intent=response.get("personal_intent"),
             navigation_target=response.get("navigation_target"),
+            options=options,
         )
 
     @router.post("/chat/stream")
@@ -846,6 +859,7 @@ def create_kiosk_router(
                                             body.query,
                                             metadata.get("answer") or "",
                                             metadata.get("citations") or [],
+                                            options=metadata.get("options", []),
                                         )
                                         session = store.current_chat_session()
                                         if session is not None:
@@ -930,6 +944,7 @@ def create_kiosk_router(
         transcribed_input = str(response.get("transcribed_input") or "").strip()
         answer = str(response.get("text_response") or response.get("error_message") or "")
         citations = response.get("sources", [])
+        options = response.get("options", [])
         audio_response = response.get("audio_response")
         logger.info(
             "Kiosk audio chat response forwarding. status=%s answer_len=%d audio_base64_chars=%d",
@@ -941,6 +956,7 @@ def create_kiosk_router(
             transcribed_input or "[Audio input]",
             answer,
             citations,
+            options=options,
         )
         return ChatAudioResponse(
             session=session,
@@ -956,6 +972,7 @@ def create_kiosk_router(
             response_scope=response.get("response_scope", "DOCUMENT"),
             personal_intent=response.get("personal_intent"),
             navigation_target=response.get("navigation_target"),
+            options=options,
         )
 
     @router.post("/chat/audio/stream")
@@ -1003,7 +1020,8 @@ def create_kiosk_router(
                                         store.append_chat_exchange(
                                             metadata.get("transcribed_input") or "[Audio input]",
                                             metadata.get("text_response") or "",
-                                            metadata.get("sources") or []
+                                            metadata.get("sources") or [],
+                                            options=metadata.get("options", []),
                                         )
                                         session = store.current_chat_session()
                                         if session is not None:

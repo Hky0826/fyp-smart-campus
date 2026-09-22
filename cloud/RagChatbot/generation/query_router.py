@@ -39,6 +39,23 @@ _GREETING_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_EXIT_PATTERN = re.compile(
+    r"^(?:"
+    r"(?:please\s+)?(?:exit|quit|close|leave|end|finish|terminate|stop)(?:\s+(?:the\s+)?(?:chat|chatbot|session|app|interface|conversation|screen))?(?:\s+please)?"
+    r"|(?:goodbye|bye|bye\s*bye|bye-bye|see\s+you|farewell|cya)(?:\s+please)?"
+    r"|(?:thank\s+you|thanks)(?:,\s*|\s+)(?:that['’]?s\s+all|that\s+is\s+all|that['’]?ll\s+be\s+all|all\s+good|i['’]?m\s+good|i['’]?m\s+done)(?:\s+(?:for\s+now|today))?"
+    r"|(?:that['’]?s\s+all|thats\s+all|that\s+is\s+all|that['’]?ll\s+be\s+all)(?:,\s*|\s+)(?:thank\s+you|thanks)"
+    r"|(?:that['’]?s\s+all|thats\s+all|that\s+is\s+all|that['’]?ll\s+be\s+all)(?:\s+(?:for\s+now|today))?"
+    r"|(?:i['’]?m\s+done|i\s+am\s+done|all\s+done|nothing\s+else|no\s+more\s+questions)"
+    r"|(?:tolong\s+)?(?:keluar|tutup|tutup\s+chat|tutup\s+sesi|tamat|selesai|selamat\s+tinggal|henti)(?:\s+tolong)?"
+    r"|(?:terima\s+kasih\s+itu\s+sahaja|itu\s+sahaja|itu\s+je|terima\s+kasih\s+itu\s+je|tak\s+ada\s+apa\s+lagi)"
+    r"|(?:请)?(?:退出|退出聊天|退出程序|关闭|关闭聊天|结束|结束对话|再见|拜拜|走了)"
+    r"|(?:谢谢[，,\s]*这样就好|就这样|就这样了|没事了|没有问题了|好了谢谢|好了)"
+    r"|(?:வெளியேறு|முடி|பை|நன்றி\s+அவ்வளவுதான்)"
+    r")[.!。！？]*$",
+    re.IGNORECASE,
+)
+
 _CAPABILITY_PATTERN = re.compile(
     r"\b(what\s+can\s+you\s+do|how\s+can\s+you\s+help|what\s+are\s+your\s+capabilities|what\s+do\s+you\s+know|features)\b",
     re.IGNORECASE,
@@ -225,7 +242,7 @@ def detect_language_switch(query: str) -> Optional[tuple[str, str]]:
     return None
 
 
-_ROUTE_CATEGORIES = {"GREETING", "CAPABILITY", "NAVIGATIONAL", "OUT_OF_SCOPE", "UNCLEAR", "UNIVERSITY_INFO", "LANGUAGE_SWITCH"}
+_ROUTE_CATEGORIES = {"GREETING", "CAPABILITY", "NAVIGATIONAL", "OUT_OF_SCOPE", "UNCLEAR", "UNIVERSITY_INFO", "LANGUAGE_SWITCH", "EXIT"}
 _ROUTER_SYSTEM_PROMPT = """Classify the user's request into exactly one category.
 
 Use NAVIGATIONAL when the user wants to find, reach, visit, or get directions to a
@@ -380,6 +397,11 @@ def classify_query(query: str, db=None) -> RouteClassification:
         )
 
     cat_hint, fac_hint, is_broad = _extract_facets_from_query(clean_query)
+ 
+    # 0. EXIT Fast-Path
+    if _EXIT_PATTERN.match(clean_query):
+        logger.info("Local Regex Router classified '%s' as EXIT (0 LLM calls)", query)
+        return RouteClassification(category="EXIT")
 
     # 1. GREETING Fast-Path
     if _GREETING_PATTERN.match(clean_query):

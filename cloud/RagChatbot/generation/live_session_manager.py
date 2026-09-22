@@ -184,6 +184,7 @@ Core Rules:
 9. Conversational Language Switching: If the user explicitly asks to speak or switch to another language (e.g. 'Can we speak in Japanese?', 'Please converse in Arabic', 'Tamil please', 'Boleh cakap Melayu?'), you MUST immediately call the tool set_session_language with target_language set to that requested language.
 10. Speech Recognition & Audio Fidelity: Strictly transcribe actual speech in the speaker's true language without hallucinating words from background noise, microphone static, room reverberation, breathing, or silence. Support Malaysian code-switching naturally without mistaking it for foreign languages.
 11. Greeting Triggers: When receiving a [SYSTEM GREETING TRIGGER] instruction, immediately speak the requested welcome greeting in a warm, articulate, and professional campus presenter tone without calling backend functions.
+12. Exit & Session Closure: When the user indicates they want to end the session, leave, exit, or concludes the conversation (e.g. 'thank you that's all', 'that's all thank you', 'that's all', 'thats all', 'I'm done', 'goodbye', 'bye', 'exit'), you MUST call the exit_chat_session tool with a polite, warm farewell message in the active language (e.g. 'You are most welcome! Have a wonderful day!', 'Thank you for visiting Quest International University. Goodbye!'). NEVER call exit_chat_session if the user is asking where an exit or door is located (e.g. 'where is the exit?').
 """.strip()
 
 
@@ -248,6 +249,26 @@ def _tool_declaration() -> dict[str, Any]:
                         },
                     },
                     "required": ["target_language"],
+                },
+            },
+            {
+                "name": "exit_chat_session",
+                "description": (
+                    "Call this tool when the user indicates they want to end the session, leave, exit, "
+                    "or concludes the conversation (e.g., 'thank you that's all', 'that's all thank you', "
+                    "'I'm done', 'goodbye', 'exit'). Do NOT call this tool if the user is asking where an "
+                    "exit or door is located."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "farewell_message": {
+                            "type": "STRING",
+                            "description": (
+                                "Polite farewell or goodbye message acknowledging the user's conclusion in the active language."
+                            ),
+                        },
+                    },
                 },
             },
         ]
@@ -519,6 +540,24 @@ class GeminiLiveSession:
                                 await self._session.send_tool_response(
                                     function_responses=[func_response]
                                 )
+                        elif call_name == "exit_chat_session":
+                            farewell = args.get("farewell_message") or "Thank you for visiting Quest International University. Have a wonderful day!"
+                            if on_tool_call:
+                                call["farewell_message"] = farewell
+                                await on_tool_call(call)
+                            func_response = types.FunctionResponse(
+                                name=call_name,
+                                id=call.get("id"),
+                                response={
+                                    "status": "success",
+                                    "message": "Session exit initiated.",
+                                    "farewell_message": farewell,
+                                },
+                            )
+                            async with self._send_lock:
+                                await self._session.send_tool_response(
+                                    function_responses=[func_response]
+                                )
                         elif on_tool_call:
                             raw_query = args.get("query") or args.get("transcript") or self._transcript.strip()
                             call["transcript"] = str(raw_query or "").strip()
@@ -635,6 +674,16 @@ class GeminiLiveSession:
                         target = args.get("target_language") or "en"
                         ack = args.get("acknowledgment_message")
                         tool_response_payload = await self.switch_language(target, ack)
+                    elif call_name == "exit_chat_session":
+                        farewell = args.get("farewell_message") or "Thank you for visiting Quest International University. Have a wonderful day!"
+                        if on_tool_call:
+                            call["farewell_message"] = farewell
+                            await on_tool_call(call)
+                        tool_response_payload = {
+                            "status": "success",
+                            "message": "Session exit initiated.",
+                            "farewell_message": farewell,
+                        }
                     else:
                         if on_tool_call is None:
                             raise GeminiLiveSessionError("Live requested a tool without a backend handler")

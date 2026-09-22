@@ -176,22 +176,104 @@ def _navigation_intent(navigation_data: dict | None) -> str | None:
     return "NAVIGATIONAL"
 
 
-def _confirmed_navigation_label(query: str, db: Session, session_id: int | None) -> str | None:
-    """Resolve confirmations and short category choices from the latest prompt."""
-    if not session_id:
-        return None
+_ORDINAL_MAP: dict[str, int] = {
+    "1": 0, "one": 0, "first": 0, "the first": 0, "first one": 0, "the first one": 0,
+    "first option": 0, "option 1": 0, "option one": 0, "number 1": 0, "number one": 0,
+    "no 1": 0, "no. 1": 0, "choice 1": 0, "item 1": 0, "第一个": 0, "第1个": 0,
+    "yang pertama": 0, "pertama": 0, "nombor 1": 0, "ke-1": 0, "ke 1": 0,
+    "2": 1, "two": 1, "second": 1, "the second": 1, "second one": 1, "the second one": 1,
+    "second option": 1, "option 2": 1, "option two": 1, "number 2": 1, "number two": 1,
+    "no 2": 1, "no. 2": 1, "choice 2": 1, "item 2": 1, "第二个": 1, "第2个": 1,
+    "yang kedua": 1, "kedua": 1, "nombor 2": 1, "ke-2": 1, "ke 2": 1,
+    "3": 2, "three": 2, "third": 2, "the third": 2, "third one": 2, "the third one": 2,
+    "third option": 2, "option 3": 2, "option three": 2, "number 3": 2, "number three": 2,
+    "no 3": 2, "no. 3": 2, "choice 3": 2, "item 3": 2, "第三个": 2, "第3个": 2,
+    "yang ketiga": 2, "ketiga": 2, "nombor 3": 2, "ke-3": 2, "ke 3": 2,
+    "4": 3, "four": 3, "fourth": 3, "the fourth": 3, "fourth one": 3, "the fourth one": 3,
+    "option 4": 3, "number 4": 3, "no 4": 3, "第四个": 3, "第4个": 3,
+    "yang keempat": 3, "keempat": 3, "nombor 4": 3, "ke-4": 3,
+    "5": 4, "five": 4, "fifth": 4, "the fifth": 4, "fifth one": 4, "the fifth one": 4,
+    "option 5": 4, "number 5": 4, "no 5": 4, "第五个": 4, "第5个": 4,
+    "yang kelima": 4, "kelima": 4, "nombor 5": 4, "ke-5": 4,
+    "6": 5, "six": 5, "sixth": 5, "the sixth": 5, "option 6": 5, "number 6": 5,
+    "第六个": 5, "第6个": 5, "yang keenam": 5, "keenam": 5,
+}
 
+
+def _extract_candidates_from_response(response_text: str) -> list[str]:
+    """Extract candidate destination names from an assistant prompt."""
+    if not response_text:
+        return []
+    candidates: list[str] = []
+    # 1. "Did you mean <label>?"
+    match_single = re.search(r"(?:Did you mean|您是指|Adakah anda maksudkan)\s+(?P<label>[^?？]+)", response_text, flags=re.IGNORECASE)
+    if match_single:
+        candidates.append(match_single.group("label").strip())
+        return candidates
+
+    # 2. "Which place did you mean: <label1>, <label2>...?"
+    match_which = re.search(r"(?:Which place did you mean|Which one do you mean|Which one did you mean):\s*(?P<labels>[^.?？]+)", response_text, flags=re.IGNORECASE)
+    if match_which:
+        for item in match_which.group("labels").split(","):
+            cleaned = item.strip()
+            if cleaned:
+                candidates.append(cleaned)
+        if candidates:
+            return candidates
+
+    # 3. "I found these ...: <labels>. Which one..."
+    labels_match = re.search(r":\s*(?P<labels>[^.]+)\.\s*Which one", response_text, flags=re.IGNORECASE)
+    if labels_match:
+        for item in labels_match.group("labels").split(","):
+            cleaned = item.strip()
+            if cleaned:
+                candidates.append(cleaned)
+        if candidates:
+            return candidates
+
+    # 4. Numbered list: "1. Label\n2. Label"
+    numbered = re.findall(r"(?:^|\n)\s*(?:\d+\.|\(\d+\))\s*([^\n\r]+)", response_text)
+    if numbered:
+        return [item.strip() for item in numbered if item.strip()]
+
+    return candidates
+
+
+def _confirmed_navigation_label(
+    query: str,
+    db: Session,
+    session_id: int | None,
+    chat_history: list[dict[str, Any]] | None = None,
+) -> str | None:
+    """Resolve confirmations, ordinals, numbers, and short category choices from the latest prompt."""
     try:
-        from app.models.models import ChatbotQuery
+        response_text = ""
+        if session_id:
+            from app.models.models import ChatbotQuery
 
-        latest = (
-            db.query(ChatbotQuery)
-            .filter(ChatbotQuery.session_id == session_id)
-            .order_by(ChatbotQuery.timestamp.desc(), ChatbotQuery.query_id.desc())
-            .first()
-        )
-        response_text = str(getattr(latest, "response_text", "") or "")
-        affirmative = re.fullmatch(
+            latest = (
+                db.query(ChatbotQuery)
+                .filter(ChatbotQuery.session_id == session_id)
+                .order_by(ChatbotQuery.timestamp.desc(), ChatbotQuery.query_id.desc())
+                .first()
+            )
+            response_text = str(getattr(latest, "response_text", "") or "")
+
+        if not response_text and chat_history:
+            for msg in reversed(chat_history):
+                if msg.get("role") in ("assistant", "bot"):
+                    response_text = str(msg.get("content") or msg.get("answer") or msg.get("response_text") or "")
+                    if response_text:
+                        break
+
+        if not response_text:
+            return None
+
+        candidates = _extract_candidates_from_response(response_text)
+        cleaned_query = " ".join(str(query or "").casefold().split())
+
+        # Check affirmative ("yes", "yeah", "sure", etc.)
+        affirmative = bool(re.fullmatch(
             r"\s*(?:yes|yeah|yep|correct|right|that(?:'s| is) it|yes please|go ahead|proceed"
             r"|ya|betul|okay|ok"
             r"|是|对|好|没错|是的|好的|对的"
@@ -200,21 +282,30 @@ def _confirmed_navigation_label(query: str, db: Session, session_id: int | None)
             r")\s*[.!。！]?\s*",
             query,
             flags=re.IGNORECASE,
-        )
-        if affirmative:
-            match = re.match(
-                r"\s*(?:Did you mean|您是指|Adakah anda maksudkan)\s+(?P<label>[^?？]+)",
-                response_text,
-                flags=re.IGNORECASE,
-            )
-            if match:
-                return match.group("label").strip()
+        ))
+        if affirmative and candidates:
+            return candidates[0]
 
-        # A user commonly answers a category clarification with a short
-        # choice such as “men”, “women”, or “unisex”. Resolve that choice
-        # against the current catalog rather than manufacturing a fixed
-        # destination label. This keeps the continuation working if labels
-        # or facilities change.
+        # Check negative / cancellation
+        negative = bool(re.fullmatch(
+            r"\s*(?:no|nope|cancel|stop|neither|none|never mind|nevermind"
+            r"|不|不要|取消|算了"
+            r"|tidak|batal"
+            r")\s*[.!。！]?\s*",
+            query,
+            flags=re.IGNORECASE,
+        ))
+        if negative:
+            return None
+
+        # Check ordinal / number choice ("first one", "number 1", "option 2", "1", "2", etc.)
+        norm_ordinal = re.sub(r"[.!?。！]+$", "", cleaned_query).strip()
+        if norm_ordinal in _ORDINAL_MAP and candidates:
+            idx = _ORDINAL_MAP[norm_ordinal]
+            if 0 <= idx < len(candidates):
+                return candidates[idx]
+
+        # Check washroom category shortcuts ("men", "women", "unisex", etc.)
         if (
             re.fullmatch(
                 r"\s*(?:men|mens|male|women|womens|female|unisex|accessible"
@@ -230,17 +321,12 @@ def _confirmed_navigation_label(query: str, db: Session, session_id: int | None)
         ):
             from RagChatbot.services.map_service import _destination_matches, _normalise_label
 
-            # Prefer the candidate labels already shown to the user. This
-            # preserves the conversational contract and does not assume any
-            # particular washroom naming convention.
-            labels_match = re.search(r":\s*(?P<labels>[^.]+)\.\s*Which one", response_text, flags=re.IGNORECASE)
-            if labels_match:
+            if candidates:
                 requested = _normalise_label(query)
-                for candidate_label in labels_match.group("labels").split(","):
-                    candidate_label = candidate_label.strip()
-                    candidate_words = set(_normalise_label(candidate_label).split())
-                    if requested in candidate_words or requested == _normalise_label(candidate_label):
-                        return candidate_label or None
+                for cand in candidates:
+                    cand_words = set(_normalise_label(cand).split())
+                    if requested in cand_words or requested == _normalise_label(cand):
+                        return cand
 
             from RagChatbot.services.map_service import get_map_snapshot
 
@@ -249,8 +335,22 @@ def _confirmed_navigation_label(query: str, db: Session, session_id: int | None)
             if len(matches) == 1:
                 return str(getattr(matches[0], "label", "")).strip() or None
 
-        # For a catalog response, accept a short label choice verbatim. The
-        # navigation resolver still performs the final RBAC/catalog check.
+        # Check direct or partial match against candidates
+        if candidates:
+            from RagChatbot.services.map_service import _normalise_label
+            query_norm = _normalise_label(query)
+            # Strip leading "yes, " or "option " if user said "yes, Boardroom 1"
+            query_norm = re.sub(r"^(?:yes\s+|option\s+|choice\s+)", "", query_norm).strip()
+            for cand in candidates:
+                cand_norm = _normalise_label(cand)
+                if query_norm == cand_norm:
+                    return cand
+            for cand in candidates:
+                cand_norm = _normalise_label(cand)
+                if query_norm in cand_norm or cand_norm in query_norm:
+                    return cand
+
+        # Fallback: if short label matches verbatim in response text
         if len(str(query).split()) <= 5 and "which one" in response_text.casefold():
             labels_match = re.search(r":\s*(?P<labels>[^.]+)\.\s*Which one", response_text, flags=re.IGNORECASE)
             if labels_match:

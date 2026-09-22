@@ -677,6 +677,37 @@ async def live_websocket_chat(
                 pass
 
     async def on_tool_call(call: dict[str, Any]) -> dict[str, Any]:
+        call_name = call.get("name")
+        if call_name == "exit_chat_session":
+            farewell = call.get("farewell_message") or "Thank you for visiting Quest International University. Have a wonderful day!"
+            server_ts = cloud_timing.now_iso()
+            cloud_timing.log_internal("EXIT_TOOL_CALL", turn_id=current_turn[0], farewell=farewell)
+            if active:
+                try:
+                    await websocket.send_json({
+                        "event": "exit_session",
+                        "data": {
+                            "farewell": farewell,
+                            "intent": "EXIT",
+                            "turn_id": current_turn[0],
+                            "server_sent_at": server_ts,
+                        }
+                    })
+                    await websocket.send_json({
+                        "event": "rag_complete",
+                        "data": {
+                            "route": "EXIT",
+                            "intent": "EXIT",
+                            "status": "ok",
+                            "answer": farewell,
+                            "turn_id": current_turn[0],
+                            "server_sent_at": server_ts,
+                        }
+                    })
+                except Exception:
+                    pass
+            return {"status": "ok", "route": "EXIT", "intent": "EXIT", "answer": farewell}
+
         transcript = call.get("transcript", "")
         t_tool_start = time.monotonic()
         cloud_timing.log_internal("RAG_TOOL_CALL_START", turn_id=current_turn[0], query=transcript[:60])
@@ -730,9 +761,11 @@ async def live_websocket_chat(
                 server_ts = cloud_timing.now_iso()
                 rag_payload = {
                     "route": result.get("route"),
+                    "intent": result.get("intent"),
                     "status": result.get("status"),
                     "citations": result.get("citations", []),
                     "access_granted": result.get("access_granted", True),
+                    "options": result.get("options", []),
                     "turn_id": current_turn[0],
                     "server_sent_at": server_ts,
                 }

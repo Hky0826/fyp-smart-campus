@@ -110,9 +110,11 @@ class _LiveDuplexWorker(QThread):
     ragStatusChanged = Signal(str, str)
     navigationReceived = Signal(dict)
     citationsReceived = Signal(list)
+    optionsReceived = Signal(list)
     turnCompleted = Signal()
     responseReceived = Signal(dict)
     errorOccurred = Signal(str)
+    exitRequested = Signal()
 
     def __init__(
         self,
@@ -172,6 +174,7 @@ class _LiveDuplexWorker(QThread):
         last_user_query = [""]
         last_assistant_text = [""]
         last_citations: list[list[Any]] = [[]]
+        last_options: list[list[Any]] = [[]]
         session_ready = [False]
 
         turn_id = [""]
@@ -185,15 +188,18 @@ class _LiveDuplexWorker(QThread):
             user_q = last_user_query[0]
             bot_a = last_assistant_text[0]
             cites = last_citations[0]
+            opts = last_options[0]
             last_user_query[0] = ""
             last_assistant_text[0] = ""
             last_citations[0] = []
+            last_options[0] = []
             if user_q or bot_a:
                 self.turnCompleted.emit()
                 self.responseReceived.emit({
                     "transcribed_input": user_q,
                     "text_response": bot_a,
                     "citations": cites,
+                    "options": opts,
                 })
 
         self._commit_in_flight_fn = commit_in_flight
@@ -354,10 +360,19 @@ class _LiveDuplexWorker(QThread):
                             elif event == "navigation":
                                 self.navigationReceived.emit(data)
                                 edge_timing.log_receive("NAVIGATION", turn_id=msg_turn_id, server_sent_at=server_sent_at)
+                            elif event == "exit_session":
+                                edge_timing.log_receive("EXIT_SESSION", turn_id=msg_turn_id, server_sent_at=server_sent_at)
+                                self.exitRequested.emit()
                             elif event == "rag_complete":
                                 cites = data.get("citations") or data.get("sources") or []
+                                opts = data.get("options") or []
+                                intent = data.get("intent") or ""
                                 last_citations[0] = cites
+                                last_options[0] = opts
                                 self.citationsReceived.emit(cites)
+                                self.optionsReceived.emit(opts)
+                                if intent == "EXIT":
+                                    self.exitRequested.emit()
                                 edge_timing.log_receive(
                                     "RAG_COMPLETE",
                                     turn_id=msg_turn_id,
@@ -624,6 +639,7 @@ class ChatbotController(QObject):
     ragStatusChanged = Signal()
     currentNavigationChanged = Signal()
     citationsChanged = Signal()
+    currentOptionsChanged = Signal()
     outputGainChanged = Signal()
     micGainChanged = Signal()
     bargeThresholdChanged = Signal()
@@ -632,6 +648,7 @@ class ChatbotController(QObject):
     silenceHoldSecChanged = Signal()
     bargeRatioChanged = Signal()
     responseReceived = Signal(dict)
+    exitRequested = Signal()
 
     def __init__(self, api: KioskApiClient) -> None:
         super().__init__()
@@ -650,6 +667,7 @@ class ChatbotController(QObject):
         self._rag_status = ""
         self._current_navigation: dict[str, Any] = {}
         self._citations: list[Any] = []
+        self._current_options: list[str] = []
         self._output_gain = DEFAULT_OUTPUT_GAIN
         self._mic_gain = DEFAULT_MIC_GAIN
         self._barge_threshold = DEFAULT_BARGE_IN_THRESHOLD
@@ -693,8 +711,10 @@ class ChatbotController(QObject):
         worker.ragStatusChanged.connect(self._on_rag_status)
         worker.navigationReceived.connect(self._on_navigation)
         worker.citationsReceived.connect(self._on_citations)
+        worker.optionsReceived.connect(self._on_options)
         worker.turnCompleted.connect(self._on_turn_completed)
         worker.responseReceived.connect(self._on_worker_response)
+        worker.exitRequested.connect(self.exitRequested.emit)
         worker.errorOccurred.connect(self._set_error)
         worker.finished.connect(lambda: self._cleanup_worker(worker))
         self._worker = worker
@@ -711,11 +731,13 @@ class ChatbotController(QObject):
         """Reset all ephemeral session state (navigation, citations, transcripts)."""
         self._current_navigation = {}
         self._citations = []
+        self._current_options = []
         self._partial_text = ""
         self._transcribed_text = ""
         self._rag_status = ""
         self.currentNavigationChanged.emit()
         self.citationsChanged.emit()
+        self.currentOptionsChanged.emit()
         self.partialTextChanged.emit()
         self.transcribedTextChanged.emit()
         self.ragStatusChanged.emit()
@@ -736,12 +758,14 @@ class ChatbotController(QObject):
         self._rag_status = ""
         self._current_navigation = {}
         self._citations = []
+        self._current_options = []
         self.partialTextChanged.emit()
         self.transcribedTextChanged.emit()
         self.busyChanged.emit()
         self.ragStatusChanged.emit()
         self.currentNavigationChanged.emit()
         self.citationsChanged.emit()
+        self.currentOptionsChanged.emit()
 
     def _get_assistant_speaking(self) -> bool:
         return bool(self._busy or self._partial_text)
@@ -835,6 +859,11 @@ class ChatbotController(QObject):
         self._citations = citations
         self.citationsChanged.emit()
 
+    @Slot(list)
+    def _on_options(self, options: list[Any]) -> None:
+        self._current_options = [str(opt) for opt in options] if options else []
+        self.currentOptionsChanged.emit()
+
     @Slot()
     def _on_turn_completed(self) -> None:
         self._rag_status = ""
@@ -851,6 +880,9 @@ class ChatbotController(QObject):
         self._partial_text = ""
         self._transcribed_text = ""
         self._rag_status = ""
+        if "options" in payload:
+            self._current_options = [str(opt) for opt in payload.get("options", [])]
+            self.currentOptionsChanged.emit()
         self.partialTextChanged.emit()
         self.transcribedTextChanged.emit()
         self.ragStatusChanged.emit()
@@ -973,6 +1005,9 @@ class ChatbotController(QObject):
     def _get_citations(self) -> list[Any]:
         return self._citations
 
+    def _get_current_options(self) -> list[str]:
+        return self._current_options
+
     @Slot(float)
     def setOutputGain(self, gain: float) -> None:
         val = max(0.1, min(1.0, float(gain)))
@@ -1070,6 +1105,7 @@ class ChatbotController(QObject):
     ragStatus = Property(str, _get_rag_status, notify=ragStatusChanged)
     currentNavigation = Property("QVariantMap", _get_current_navigation, notify=currentNavigationChanged)
     citations = Property("QVariantList", _get_citations, notify=citationsChanged)
+    currentOptions = Property("QVariantList", _get_current_options, notify=currentOptionsChanged)
     outputGain = Property(float, _get_output_gain, setOutputGain, notify=outputGainChanged)
     micGain = Property(float, _get_mic_gain, setMicGain, notify=micGainChanged)
     bargeThreshold = Property(float, _get_barge_threshold, setBargeThreshold, notify=bargeThresholdChanged)
