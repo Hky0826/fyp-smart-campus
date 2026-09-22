@@ -690,23 +690,19 @@ Item {
                         }
                     }
 
-            // Campus Navigation Card (Matches Preview turn-by-turn route)
+            // Campus Navigation Card (Light Theme: Multi-Step Directions + Companion QR Code)
             Rectangle {
                 id: navCard
                 Layout.fillWidth: true
                 Layout.margins: 10
-                radius: 8
-                gradient: Gradient {
-                    orientation: Gradient.Horizontal
-                    GradientStop { position: 0.0; color: "#f8fafc" }
-                    GradientStop { position: 1.0; color: "#eef2ff" }
-                }
+                radius: 10
+                color: "#ffffff"
                 border.width: 1
                 border.color: "#cbd5e1"
                 visible: root.currentNavigation !== null && root.currentNavigation !== undefined && Object.keys(root.currentNavigation).length > 0
-                implicitHeight: navCol.implicitHeight + 16
+                implicitHeight: navCol.implicitHeight + 20
 
-                // Indigo left border strip (border-l-4 border-indigo-600)
+                // Indigo left border accent strip
                 Rectangle {
                     anchors.left: parent.left
                     anchors.top: parent.top
@@ -716,28 +712,55 @@ Item {
                     color: "#4f46e5"
                 }
 
+                readonly property var qrSession: (root.currentNavigation && root.currentNavigation.qr_session) ? root.currentNavigation.qr_session : null
+                readonly property string qrUrl: {
+                    if (qrSession) {
+                        return qrSession.qr_code_file_url || qrSession.qr_code_local_url || qrSession.qr_code_url || qrSession.qr_code_data_url || ""
+                    }
+                    if (root.currentNavigation) {
+                        return root.currentNavigation.qr_code_file_url || root.currentNavigation.qr_code_local_url || root.currentNavigation.qr_code_url || root.currentNavigation.qr_code_data_url || ""
+                    }
+                    return ""
+                }
+                readonly property bool hasQr: qrUrl.length > 0
+                readonly property var visualisations: (root.currentNavigation && root.currentNavigation.visualisations) ? root.currentNavigation.visualisations : []
+                property int activeFloorIndex: 0
+                readonly property string routeMapUrl: {
+                    if (visualisations.length > 0) {
+                        var idx = Math.min(Math.max(0, activeFloorIndex), visualisations.length - 1)
+                        var v = visualisations[idx]
+                        return v.file_url || v.local_image_url || v.image_url || ""
+                    }
+                    return ""
+                }
+                property bool showMapGuide: false
+
                 ColumnLayout {
                     id: navCol
-                    anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 8
-                    anchors.topMargin: 8
-                    anchors.bottomMargin: 8
-                    spacing: 4
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.leftMargin: 14
+                    anchors.rightMargin: 10
+                    anchors.topMargin: 10
+                    spacing: 8
 
+                    // Header Row: Destination, Distance/ETA Pill, and Dismiss Button
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 6
 
                         Rectangle {
-                            width: 18
-                            height: 18
-                            radius: 9
-                            color: "#f59e0b" // amber-500
+                            width: 20
+                            height: 20
+                            radius: 10
+                            color: "#fef3c7"
+                            border.width: 1
+                            border.color: "#fde68a"
                             Text {
                                 anchors.centerIn: parent
                                 text: "📍"
-                                font.pixelSize: 10
+                                font.pixelSize: 11
                             }
                         }
 
@@ -750,18 +773,18 @@ Item {
                                 var dest = target.label || sum.destination_label || "Destination"
                                 return "Destination: " + dest
                             }
-                            font.pixelSize: 11
+                            font.pixelSize: 12
                             font.bold: true
-                            color: "#3730a3" // text-indigo-800
+                            color: "#0f172a"
                         }
 
-                        Item { Layout.fillWidth: true }
-
                         Rectangle {
-                            radius: 3
+                            radius: 4
                             color: "#e0e7ff"
-                            implicitWidth: floorPillText.implicitWidth + 8
-                            implicitHeight: 16
+                            border.width: 1
+                            border.color: "#c7d2fe"
+                            implicitWidth: floorPillText.implicitWidth + 10
+                            implicitHeight: 20
 
                             Text {
                                 id: floorPillText
@@ -781,9 +804,9 @@ Item {
                         // Dismiss Navigation Button
                         Rectangle {
                             id: dismissNavBtn
-                            width: 18
-                            height: 18
-                            radius: 9
+                            width: 20
+                            height: 20
+                            radius: 10
                             color: dismissNavMouse.pressed ? "#cbd5e1" : (dismissNavMouse.containsMouse ? "#e2e8f0" : "#f1f5f9")
                             border.width: 1
                             border.color: "#cbd5e1"
@@ -809,36 +832,306 @@ Item {
                         }
                     }
 
-                    Column {
+                    // Content Row: Left = Multi-Step Directions, Right = QR Code Card
+                    RowLayout {
                         Layout.fillWidth: true
-                        spacing: 3
-                        Repeater {
-                            model: (root.currentNavigation && root.currentNavigation.instructions) ? root.currentNavigation.instructions : []
-                            RowLayout {
-                                width: parent.width
-                                spacing: 6
+                        spacing: 10
+                        Layout.alignment: Qt.AlignTop
 
-                                Rectangle {
-                                    width: 16
-                                    height: 16
-                                    radius: 8
-                                    color: "#059669" // emerald-600
+                        // Left Section: Multi-Step Turn-by-Turn List or Map Image
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 160
+                            Layout.preferredHeight: 160
+                            radius: 8
+                            color: "#f8fafc"
+                            border.width: 1
+                            border.color: "#e2e8f0"
+                            clip: true
 
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                spacing: 4
+
+                                RowLayout {
+                                    Layout.fillWidth: true
                                     Text {
-                                        anchors.centerIn: parent
-                                        text: String(index + 1)
+                                        text: navCard.showMapGuide ? "🗺️ Floor Plan Map" : "🚶 Directions on Kiosk"
                                         font.pixelSize: 9
                                         font.bold: true
+                                        color: navCard.showMapGuide ? "#4f46e5" : "#059669"
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    
+                                    // View Toggle: Steps vs Map
+                                    Row {
+                                        spacing: 3
+                                        visible: navCard.routeMapUrl.length > 0
+                                        Rectangle {
+                                            radius: 3
+                                            color: !navCard.showMapGuide ? "#059669" : "#ffffff"
+                                            border.width: 1
+                                            border.color: !navCard.showMapGuide ? "#059669" : "#cbd5e1"
+                                            implicitWidth: 38
+                                            implicitHeight: 16
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "Steps"
+                                                font.pixelSize: 8
+                                                font.bold: true
+                                                color: !navCard.showMapGuide ? "#ffffff" : "#64748b"
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: navCard.showMapGuide = false
+                                            }
+                                        }
+                                        Rectangle {
+                                            radius: 3
+                                            color: navCard.showMapGuide ? "#4f46e5" : "#ffffff"
+                                            border.width: 1
+                                            border.color: navCard.showMapGuide ? "#4f46e5" : "#cbd5e1"
+                                            implicitWidth: 34
+                                            implicitHeight: 16
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "Map"
+                                                font.pixelSize: 8
+                                                font.bold: true
+                                                color: navCard.showMapGuide ? "#ffffff" : "#64748b"
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: navCard.showMapGuide = true
+                                            }
+                                        }
+                                    }
+
+                                    // Floor Level Switcher for Kiosk Map (Ordered: 1. Start -> 2. Next -> 3. Destination)
+                                    Row {
+                                        spacing: 2
+                                        visible: navCard.showMapGuide && navCard.visualisations.length > 1
+                                        Repeater {
+                                            model: navCard.visualisations
+                                            Rectangle {
+                                                radius: 3
+                                                color: navCard.activeFloorIndex === index ? "#4f46e5" : "#ffffff"
+                                                border.width: 1
+                                                border.color: navCard.activeFloorIndex === index ? "#4f46e5" : "#cbd5e1"
+                                                implicitWidth: floorBtnText.implicitWidth + 8
+                                                implicitHeight: 16
+                                                Text {
+                                                    id: floorBtnText
+                                                    anchors.centerIn: parent
+                                                    text: {
+                                                        var item = modelData || {}
+                                                        var bld = item.building_name || "L"
+                                                        var lvl = item.floor_level != null ? item.floor_level : (index + 1)
+                                                        var prefix = index === 0 ? "1." : (index + 1) + "."
+                                                        return prefix + bld + " F" + lvl
+                                                    }
+                                                    font.pixelSize: 8
+                                                    font.bold: true
+                                                    color: navCard.activeFloorIndex === index ? "#ffffff" : "#475569"
+                                                }
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: navCard.activeFloorIndex = index
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        visible: !navCard.showMapGuide && navCard.routeMapUrl.length === 0
+                                        radius: 3
                                         color: "#ffffff"
+                                        border.width: 1
+                                        border.color: "#e2e8f0"
+                                        implicitWidth: stepCountText.implicitWidth + 8
+                                        implicitHeight: 16
+                                        Text {
+                                            id: stepCountText
+                                            anchors.centerIn: parent
+                                            text: {
+                                                var count = (root.currentNavigation && root.currentNavigation.instructions) ? root.currentNavigation.instructions.length : 0
+                                                return count + (count === 1 ? " Step" : " Steps")
+                                            }
+                                            font.pixelSize: 8
+                                            font.bold: true
+                                            color: "#64748b"
+                                        }
+                                    }
+                                }
+
+                                // 1. Map Image View
+                                Item {
+                                    visible: navCard.showMapGuide && navCard.routeMapUrl.length > 0
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+
+                                    Image {
+                                        anchors.fill: parent
+                                        anchors.margins: 2
+                                        source: navCard.routeMapUrl
+                                        fillMode: Image.PreserveAspectFit
+                                        smooth: true
+                                        asynchronous: false
+                                        onStatusChanged: {
+                                            if (status === Image.Error) {
+                                                console.warn("[ChatbotView] Map image failed to load from:", source)
+                                            } else if (status === Image.Ready) {
+                                                console.log("[ChatbotView] Map image loaded successfully from:", source)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 2. Turn-by-Turn Steps View
+                                Flickable {
+                                    visible: !navCard.showMapGuide || navCard.routeMapUrl.length === 0
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    contentHeight: stepsRepeaterCol.implicitHeight
+                                    clip: true
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    ScrollBar.vertical: ScrollBar {
+                                        policy: ScrollBar.AsNeeded
+                                        width: 4
+                                    }
+
+                                    Column {
+                                        id: stepsRepeaterCol
+                                        width: parent.width - 6
+                                        spacing: 4
+
+                                        Repeater {
+                                            model: (root.currentNavigation && root.currentNavigation.instructions) ? root.currentNavigation.instructions : []
+                                            Rectangle {
+                                                width: parent.width
+                                                radius: 6
+                                                color: "#ffffff"
+                                                border.width: 1
+                                                border.color: "#e2e8f0"
+                                                implicitHeight: stepRow.implicitHeight + 8
+
+                                                RowLayout {
+                                                    id: stepRow
+                                                    anchors.fill: parent
+                                                    anchors.margins: 4
+                                                    spacing: 6
+
+                                                    Rectangle {
+                                                        width: 18
+                                                        height: 18
+                                                        radius: 9
+                                                        color: index === 0 ? "#059669" : (index === ((root.currentNavigation.instructions.length) - 1) ? "#d97706" : "#4f46e5")
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: String(index + 1)
+                                                            font.pixelSize: 9
+                                                            font.bold: true
+                                                            color: "#ffffff"
+                                                        }
+                                                    }
+
+                                                    Text {
+                                                        Layout.fillWidth: true
+                                                        text: modelData.instruction || modelData.description || ""
+                                                        font.pixelSize: 10
+                                                        color: "#1e293b"
+                                                        wrapMode: Text.Wrap
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Right Section: Scannable QR Code Card (Light Theme)
+                        Rectangle {
+                            visible: navCard.hasQr
+                            Layout.preferredWidth: 140
+                            Layout.preferredHeight: 160
+                            height: 160
+                            radius: 8
+                            color: "#ffffff"
+                            border.width: 1
+                            border.color: "#e2e8f0"
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                spacing: 2
+                                Layout.alignment: Qt.AlignHCenter
+
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    width: 84
+                                    height: 84
+                                    radius: 6
+                                    color: "#ffffff"
+                                    border.width: 1
+                                    border.color: "#cbd5e1"
+
+                                    Image {
+                                        anchors.fill: parent
+                                        anchors.margins: 3
+                                        source: navCard.qrUrl
+                                        fillMode: Image.PreserveAspectFit
+                                        smooth: true
+                                        asynchronous: false
+                                        onStatusChanged: {
+                                            if (status === Image.Error) {
+                                                console.warn("[ChatbotView] QR code failed to load from:", source)
+                                            } else if (status === Image.Ready) {
+                                                console.log("[ChatbotView] QR code loaded successfully from:", source)
+                                            }
+                                        }
                                     }
                                 }
 
                                 Text {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: "📱 Mobile Map"
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                    color: "#0f172a"
+                                }
+
+                                Text {
                                     Layout.fillWidth: true
-                                    text: modelData.instruction || ""
-                                    font.pixelSize: 11
-                                    color: "#334155"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    text: "Scan to open on phone"
+                                    font.pixelSize: 8
+                                    color: "#64748b"
                                     wrapMode: Text.Wrap
+                                }
+
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    radius: 3
+                                    color: "#e0e7ff"
+                                    implicitWidth: expText.implicitWidth + 8
+                                    implicitHeight: 15
+                                    Text {
+                                        id: expText
+                                        anchors.centerIn: parent
+                                        text: {
+                                            var min = navCard.qrSession ? (navCard.qrSession.expires_in_minutes || 15) : 15
+                                            return "⏱️ " + min + "m session"
+                                        }
+                                        font.pixelSize: 7
+                                        font.bold: true
+                                        color: "#3730a3"
+                                    }
                                 }
                             }
                         }

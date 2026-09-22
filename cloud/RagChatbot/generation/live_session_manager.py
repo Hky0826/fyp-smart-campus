@@ -86,7 +86,22 @@ _LANGUAGE_CODE_MAP: dict[str, str] = {
 def normalize_language_code(lang_str: str) -> str:
     """Normalize language name or code to BCP-47 standard."""
     key = str(lang_str or "").strip().lower()
-    return _LANGUAGE_CODE_MAP.get(key, key if len(key) in (2, 3) else "en")
+    if key in _LANGUAGE_CODE_MAP:
+        return _LANGUAGE_CODE_MAP[key]
+    # Check if a custom registered language in the database matches by code or name
+    try:
+        from app.core.database import SessionLocal
+        from app.models.models import SpeechLanguage
+        with SessionLocal() as db:
+            match = db.query(SpeechLanguage).filter(
+                (SpeechLanguage.language_code == key) |
+                (SpeechLanguage.language_name.ilike(key))
+            ).first()
+            if match:
+                return match.language_code.lower().strip()
+    except Exception as exc:
+        logger.debug("Could not resolve language code from db: %s", exc)
+    return key if len(key) in (2, 3) else "en"
 
 
 def _load_active_speech_languages() -> list[str]:
@@ -106,16 +121,43 @@ def _load_active_speech_languages() -> list[str]:
 
 
 def _load_speech_adaptation_phrases() -> list[str]:
-    """Query active adaptation phrases from database, with fallback."""
+    """Query active adaptation phrases and translations from database, with fallback."""
     try:
+        import json
         from app.core.database import SessionLocal
         from app.models.models import SpeechAdaptationPhrase
         with SessionLocal() as db:
-            phrases = db.query(SpeechAdaptationPhrase.phrase).filter(SpeechAdaptationPhrase.is_active == True).all()
-            if phrases:
-                res = [r[0].strip() for r in phrases if r[0]]
+            records = db.query(SpeechAdaptationPhrase.phrase, SpeechAdaptationPhrase.description).filter(SpeechAdaptationPhrase.is_active == True).all()
+            if records:
+                res = []
+                for phrase, desc in records:
+                    if phrase and phrase.strip():
+                        res.append(phrase.strip())
+                    if desc and desc.strip():
+                        try:
+                            parsed = json.loads(desc)
+                            if isinstance(parsed, list):
+                                for item in parsed:
+                                    if isinstance(item, dict) and item.get("text"):
+                                        res.append(item["text"].strip())
+                                    elif isinstance(item, str) and item.strip():
+                                        res.append(item.strip())
+                            elif isinstance(parsed, dict):
+                                for v in parsed.values():
+                                    if isinstance(v, str) and v.strip():
+                                        res.append(v.strip())
+                        except Exception:
+                            # If plain text notes, do not spam ASR hypothesis space
+                            pass
                 if res:
-                    return res
+                    seen = set()
+                    deduped = []
+                    for p in res:
+                        p_lower = p.lower()
+                        if p_lower not in seen:
+                            seen.add(p_lower)
+                            deduped.append(p)
+                    return deduped
     except Exception as exc:
         logger.debug("Could not load speech adaptation phrases from db: %s", exc)
     return [

@@ -17,6 +17,99 @@ except (ImportError, Exception):  # pragma: no cover
     OutputDevice = None
 
 
+try:
+    import lgpio
+except (ImportError, Exception):  # pragma: no cover
+    lgpio = None
+
+
+class _LgpioDevice:
+    """Direct lgpio output device supporting Raspberry Pi 5 RP1 chips (gpiochip15/4).
+
+    Supports open-drain (High-Z) mode for 5V active-low relay modules to prevent
+    3.3V-to-5V threshold leakage that causes relays to stay stuck energized.
+    """
+
+    def __init__(self, pin: int, active_high: bool = False, open_drain: Optional[bool] = None) -> None:
+        if lgpio is None:
+            raise RuntimeError("lgpio module is not available")
+        self.pin = int(pin)
+        self.active_high = bool(active_high)
+        # For active-low relays on 3.3V GPIOs, default to open-drain unless explicitly overridden
+        if open_drain is None:
+            self.open_drain = not self.active_high
+        else:
+            self.open_drain = bool(open_drain)
+        self._handle = None
+        self.chip = -1
+
+        opened_handle = None
+        # On Raspberry Pi 5, RP1 pinctrl can be on gpiochip 15, 4, 0, or others
+        for c in [15, 4, 0, 11, 12, 13, 14, 16]:
+            try:
+                h = lgpio.gpiochip_open(c)
+                if self.open_drain:
+                    # In open-drain mode, start in High-Z (input) state so no current flows (locked)
+                    lgpio.gpio_claim_input(h, self.pin)
+                else:
+                    init_val = 0 if self.active_high else 1
+                    lgpio.gpio_claim_output(h, self.pin, init_val)
+                opened_handle = h
+                self.chip = c
+                break
+            except Exception:
+                continue
+
+        if opened_handle is None:
+            raise RuntimeError(f"Could not claim GPIO {self.pin} on any available lgpio chip")
+        self._handle = opened_handle
+
+    def on(self) -> None:
+        if self._handle is not None and lgpio is not None:
+            if self.open_drain:
+                # To activate active-low relay: drive pin to LOW (0V) to sink current
+                try:
+                    lgpio.gpio_free(self._handle, self.pin)
+                except Exception:
+                    pass
+                try:
+                    lgpio.gpio_claim_output(self._handle, self.pin, 0)
+                except Exception:
+                    pass
+            else:
+                val = 1 if self.active_high else 0
+                lgpio.gpio_write(self._handle, self.pin, val)
+
+    def off(self) -> None:
+        if self._handle is not None and lgpio is not None:
+            if self.open_drain:
+                # To deactivate active-low relay: set pin to INPUT (High-Z) so no current can flow from 5V
+                try:
+                    lgpio.gpio_free(self._handle, self.pin)
+                except Exception:
+                    pass
+                try:
+                    lgpio.gpio_claim_input(self._handle, self.pin)
+                except Exception:
+                    pass
+            else:
+                val = 0 if self.active_high else 1
+                lgpio.gpio_write(self._handle, self.pin, val)
+
+    def close(self) -> None:
+        if self._handle is not None and lgpio is not None:
+            try:
+                self.off()
+                lgpio.gpio_free(self._handle, self.pin)
+            except Exception:
+                pass
+            try:
+                lgpio.gpiochip_close(self._handle)
+            except Exception:
+                pass
+            self._handle = None
+
+
 class DoorState(str, enum.Enum):
     LOCKED = "LOCKED"
     UNLOCKED = "UNLOCKED"
@@ -38,11 +131,20 @@ class DoorController:
         unlock_duration: float = 5.0,
         active_high: bool = False,
         enabled: bool = True,
+        open_drain: Optional[bool] = None,
     ) -> None:
         self.pin = int(pin)
         self.default_duration = float(unlock_duration)
         self.active_high = bool(active_high)
         self.enabled = bool(enabled)
+        if open_drain is None:
+            od_env = os.getenv("EDGE_DOOR_RELAY_OPEN_DRAIN")
+            if od_env is not None:
+                self.open_drain = od_env.strip().lower() in {"1", "true", "yes", "on"}
+            else:
+                self.open_drain = not self.active_high
+        else:
+            self.open_drain = bool(open_drain)
 
         self._lock = threading.Lock()
         self._state = DoorState.LOCKED
@@ -60,32 +162,47 @@ class DoorController:
             self._is_simulated = True
             return
 
-        if OutputDevice is None:
-            self._is_simulated = True
-            logger.info("gpiozero not available; door relay running in simulation mode")
-            return
+        # 1. Try direct lgpio device (supports Raspberry Pi 5 RP1 chips mapped to chip 15/4 and open-drain mode)
+        if lgpio is not None:
+            try:
+                self._device = _LgpioDevice(self.pin, active_high=self.active_high, open_drain=self.open_drain)
+                self._is_simulated = False
+                logger.info(
+                    "Hardware door relay initialized via lgpio on BCM GPIO %d (chip %d, active_high=%s, open_drain=%s)",
+                    self.pin,
+                    getattr(self._device, "chip", -1),
+                    self.active_high,
+                    self.open_drain,
+                )
+                return
+            except Exception as exc:
+                logger.debug("lgpio init failed: %s", exc)
 
-        try:
-            # initial_value=False means starts in inactive (locked) state
-            self._device = OutputDevice(
-                self.pin,
-                active_high=self.active_high,
-                initial_value=False,
-            )
-            self._is_simulated = False
-            logger.info(
-                "Hardware door relay initialized on BCM GPIO %d (active_high=%s)",
-                self.pin,
-                self.active_high,
-            )
-        except Exception as exc:
-            self._device = None
-            self._is_simulated = True
-            logger.warning(
-                "Could not initialize physical GPIO %d (%s); falling back to simulation mode",
-                self.pin,
-                exc,
-            )
+        # 2. Try gpiozero OutputDevice
+        if OutputDevice is not None:
+            try:
+                self._device = OutputDevice(
+                    self.pin,
+                    active_high=self.active_high,
+                    initial_value=False,
+                )
+                self._is_simulated = False
+                logger.info(
+                    "Hardware door relay initialized via gpiozero on BCM GPIO %d (active_high=%s)",
+                    self.pin,
+                    self.active_high,
+                )
+                return
+            except Exception as exc:
+                logger.debug("gpiozero init failed (%s); trying direct lgpio fallback...", exc)
+
+        # 3. Fallback to simulation mode
+        self._device = None
+        self._is_simulated = True
+        logger.info(
+            "Hardware door relay running in simulation mode on BCM GPIO %d (no physical GPIO available)",
+            self.pin,
+        )
 
     def unlock(self, duration: Optional[float] = None) -> bool:
         """Unlock the door for the given duration (or default), then auto-relock."""
@@ -200,6 +317,7 @@ def get_door_controller(
     unlock_duration: Optional[float] = None,
     active_high: Optional[bool] = None,
     enabled: Optional[bool] = None,
+    open_drain: Optional[bool] = None,
 ) -> DoorController:
     """Retrieve or create the singleton DoorController instance."""
     global _global_door_controller
@@ -214,6 +332,7 @@ def get_door_controller(
                 unlock_duration=c_dur,
                 active_high=c_act,
                 enabled=c_enb,
+                open_drain=open_drain,
             )
         return _global_door_controller
 

@@ -475,6 +475,28 @@ def _call_route_microservice(*, destination_node_id: int, start_node_id: int | N
     }
     for attempt in range(2):
         try:
+            # 1. First attempt the kiosk endpoint to generate QR session & map context
+            try:
+                kiosk_resp = _HTTP_CLIENT.post(
+                    f"{MAPPING_MICROSERVICE_URL.rstrip('/')}/api/kiosk/navigate",
+                    json=payload,
+                    headers=headers,
+                )
+                if kiosk_resp.status_code == 200:
+                    data = kiosk_resp.json()
+                    nav = data.get("navigation", data)
+                    if isinstance(nav, dict):
+                        if "qr_session" in data:
+                            nav["qr_session"] = data["qr_session"]
+                        if "map_context" in data:
+                            nav["map_context"] = data["map_context"]
+                        if "visualisations" in data:
+                            nav["visualisations"] = data["visualisations"]
+                    return nav
+            except Exception:
+                pass
+
+            # 2. Fallback to standard /navigate endpoint
             resp = _HTTP_CLIENT.post(
                 f"{MAPPING_MICROSERVICE_URL.rstrip('/')}/navigate",
                 json=payload,
@@ -483,17 +505,17 @@ def _call_route_microservice(*, destination_node_id: int, start_node_id: int | N
             if resp.status_code == 200:
                 return resp.json()
 
-                try:
-                    err_data = resp.json()
-                    err_msg = err_data.get("error") or err_data.get("message") or err_data.get("detail") or "Navigation error"
-                except Exception:
-                    err_msg = f"HTTP {resp.status_code}"
+            try:
+                err_data = resp.json()
+                err_msg = err_data.get("error") or err_data.get("message") or err_data.get("detail") or "Navigation error"
+            except Exception:
+                err_msg = f"HTTP {resp.status_code}"
 
-                if resp.status_code == 422:
-                    raise StartLocationRequired(err_msg)
-                if resp.status_code == 404:
-                    raise NoRouteError(err_msg)
-                raise NavigationError(f"Route calculation failed ({resp.status_code}): {err_msg}")
+            if resp.status_code == 422:
+                raise StartLocationRequired(err_msg)
+            if resp.status_code == 404:
+                raise NoRouteError(err_msg)
+            raise NavigationError(f"Route calculation failed ({resp.status_code}): {err_msg}")
         except (httpx.ConnectError, httpx.TimeoutException):
             if attempt == 0 and _ensure_mapping_microservice():
                 continue
@@ -667,5 +689,8 @@ def calculate_navigation(query: str, *, db, context):
         "route_summary": summary,
         "instructions": route.get("instructions", []),
         "visualisation": route.get("visualisation", {}),
+        "qr_session": route.get("qr_session"),
+        "map_context": route.get("map_context"),
+        "visualisations": route.get("visualisations", []),
         "answer": speakable,
     }

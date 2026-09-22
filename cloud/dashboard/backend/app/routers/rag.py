@@ -328,6 +328,56 @@ def list_speech_languages(db: Session = Depends(get_db), current_admin=Depends(v
     ensure_speech_tables_and_seed(db)
     return db.query(SpeechLanguage).order_by(SpeechLanguage.is_default.desc(), SpeechLanguage.language_name.asc()).all()
 
+@router.post("/speech-languages", response_model=schemas.SpeechLanguageResponse, status_code=status.HTTP_201_CREATED)
+def create_speech_language(
+    payload: schemas.SpeechLanguageCreate,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_content_admin)
+):
+    from app.db_init import ensure_speech_tables_and_seed
+    ensure_speech_tables_and_seed(db)
+    code = payload.language_code.lower().strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Language code cannot be empty.")
+    if len(code) > 10:
+        raise HTTPException(status_code=400, detail="Language code cannot exceed 10 characters.")
+    
+    existing = db.query(SpeechLanguage).filter(SpeechLanguage.language_code == code).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Language code '{code}' already exists.")
+    
+    name = payload.language_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Language name cannot be empty.")
+
+    lang = SpeechLanguage(
+        language_code=code,
+        language_name=name,
+        is_default=payload.is_default,
+        is_active=payload.is_active,
+    )
+    db.add(lang)
+    db.commit()
+    db.refresh(lang)
+    return lang
+
+@router.delete("/speech-languages/{code}", status_code=status.HTTP_200_OK)
+def delete_speech_language(
+    code: str,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_content_admin)
+):
+    from app.db_init import ensure_speech_tables_and_seed
+    ensure_speech_tables_and_seed(db)
+    clean_code = code.lower().strip()
+    lang = db.query(SpeechLanguage).filter(SpeechLanguage.language_code == clean_code).first()
+    if not lang:
+        raise HTTPException(status_code=404, detail="Language not found.")
+    
+    db.delete(lang)
+    db.commit()
+    return {"message": f"Language '{clean_code}' deleted successfully."}
+
 @router.post("/speech-languages/{code}/toggle-default", response_model=schemas.SpeechLanguageResponse)
 def toggle_language_default(code: str, db: Session = Depends(get_db), current_admin=Depends(verify_content_admin)):
     from app.db_init import ensure_speech_tables_and_seed

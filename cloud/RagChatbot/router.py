@@ -738,6 +738,13 @@ async def live_websocket_chat(
                 }
                 nav_data = result.get("navigation")
                 if nav_data:
+                    if isinstance(nav_data, dict):
+                        if "qr_session" not in nav_data and result.get("qr_session"):
+                            nav_data["qr_session"] = result["qr_session"]
+                        if "map_context" not in nav_data and result.get("map_context"):
+                            nav_data["map_context"] = result["map_context"]
+                        if "visualisations" not in nav_data and result.get("visualisations"):
+                            nav_data["visualisations"] = result["visualisations"]
                     rag_payload["navigation"] = nav_data
                 await websocket.send_json({
                     "event": "rag_complete",

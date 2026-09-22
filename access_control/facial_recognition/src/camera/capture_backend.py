@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_WIDTH = int(os.getenv("EDGE_CAMERA_WIDTH", "1280"))
 DEFAULT_HEIGHT = int(os.getenv("EDGE_CAMERA_HEIGHT", "720"))
 DEFAULT_FPS = int(os.getenv("EDGE_CAMERA_FPS", "30"))
+DEFAULT_PIXEL_FORMAT = os.getenv("EDGE_CAMERA_FORMAT", "RGB888").strip().upper()
+DEFAULT_SWAP_RB = os.getenv("EDGE_CAMERA_SWAP_RB", "false").strip().lower() in {"1", "true", "yes", "on"}
+DEFAULT_EXPOSURE_VALUE = float(os.getenv("EDGE_CAMERA_EV", "1.2"))
+DEFAULT_BRIGHTNESS = float(os.getenv("EDGE_CAMERA_BRIGHTNESS", "0.1"))
+DEFAULT_CONTRAST = float(os.getenv("EDGE_CAMERA_CONTRAST", "1.0"))
 
 try:
     import cv2
@@ -106,11 +111,21 @@ class Picamera2Capture:
         width: int = DEFAULT_WIDTH,
         height: int = DEFAULT_HEIGHT,
         fps: int = DEFAULT_FPS,
+        pixel_format: str = DEFAULT_PIXEL_FORMAT,
+        swap_rb: bool = DEFAULT_SWAP_RB,
+        exposure_value: float = DEFAULT_EXPOSURE_VALUE,
+        brightness: float = DEFAULT_BRIGHTNESS,
+        contrast: float = DEFAULT_CONTRAST,
     ) -> None:
         self.camera_idx = int(camera_idx)
         self.width = int(width)
         self.height = int(height)
         self.fps = int(fps)
+        self.pixel_format = str(pixel_format).strip().upper()
+        self.swap_rb = bool(swap_rb)
+        self.exposure_value = float(exposure_value)
+        self.brightness = float(brightness)
+        self.contrast = float(contrast)
         self._picam2 = None
         self._opened = False
         self._camera_model = "unknown"
@@ -128,23 +143,44 @@ class Picamera2Capture:
             except Exception:
                 pass
 
-            # Configure video stream in BGR888 (OpenCV native 3-channel format)
+            # In Picamera2 / libcamera:
+            # - 'RGB888' outputs memory byte order [B, G, R], which directly matches OpenCV's native BGR format.
+            # - 'BGR888' outputs memory byte order [R, G, B].
+            controls: dict[str, Any] = {}
+            if self.fps:
+                controls["FrameRate"] = self.fps
+            if self.exposure_value != 0.0:
+                controls["ExposureValue"] = self.exposure_value
+            if self.brightness != 0.0:
+                controls["Brightness"] = self.brightness
+            if self.contrast != 1.0:
+                controls["Contrast"] = self.contrast
+
             video_config = self._picam2.create_video_configuration(
-                main={"format": "BGR888", "size": (self.width, self.height)},
-                controls={"FrameRate": self.fps},
+                main={"format": self.pixel_format, "size": (self.width, self.height)},
+                controls=controls,
             )
             self._picam2.configure(video_config)
             self._picam2.start()
+            if controls:
+                try:
+                    self._picam2.set_controls(controls)
+                except Exception as exc:
+                    logger.debug("set_controls failed: %s", exc)
             # Allow AEC (auto-exposure) and AWB (auto-white-balance) to converge
             time.sleep(0.5)
             self._opened = True
             logger.info(
-                "Picamera2 CSI camera %d (%s) initialized at %dx%d @ %dfps",
+                "Picamera2 CSI camera %d (%s) initialized at %dx%d @ %dfps (format=%s, swap_rb=%s, ev=%.1f, brightness=%.2f)",
                 self.camera_idx,
                 self._camera_model,
                 self.width,
                 self.height,
                 self.fps,
+                self.pixel_format,
+                self.swap_rb,
+                self.exposure_value,
+                self.brightness,
             )
         except Exception as exc:
             logger.warning("Failed to open Picamera2 CSI camera %d: %s", self.camera_idx, exc)
@@ -160,6 +196,8 @@ class Picamera2Capture:
             frame = self._picam2.capture_array("main")
             if frame is None or frame.size == 0:
                 return False, None
+            if self.swap_rb:
+                frame = frame[:, :, ::-1]
             return True, frame
         except Exception as exc:
             logger.error("Picamera2 frame capture failed: %s", exc)
@@ -288,6 +326,11 @@ def open_single_capture(
     height: int = DEFAULT_HEIGHT,
     fps: int = DEFAULT_FPS,
     fourcc: str = "MJPG",
+    pixel_format: str = DEFAULT_PIXEL_FORMAT,
+    swap_rb: bool = DEFAULT_SWAP_RB,
+    exposure_value: float = DEFAULT_EXPOSURE_VALUE,
+    brightness: float = DEFAULT_BRIGHTNESS,
+    contrast: float = DEFAULT_CONTRAST,
 ) -> Optional[Any]:
     """Attempt to open a single camera source (either CSI or OpenCV V4L2/stream)."""
     src_str = str(source).strip().lower()
@@ -299,7 +342,17 @@ def open_single_capture(
             parts = src_str.split(":", 1)
             if parts[1].isdigit():
                 camera_idx = int(parts[1])
-        capture = Picamera2Capture(camera_idx=camera_idx, width=width, height=height, fps=fps)
+        capture = Picamera2Capture(
+            camera_idx=camera_idx,
+            width=width,
+            height=height,
+            fps=fps,
+            pixel_format=pixel_format,
+            swap_rb=swap_rb,
+            exposure_value=exposure_value,
+            brightness=brightness,
+            contrast=contrast,
+        )
         if capture.isOpened():
             return capture
         capture.release()

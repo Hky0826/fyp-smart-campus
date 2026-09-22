@@ -2744,90 +2744,233 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
             );
         }
 
-        // 18. Speech Adaptation Phrase Form
+        // 18. Acronym & Translations Form (simplified from SpeechAdaptationPhraseForm)
         function SpeechAdaptationPhraseForm({ item, onSubmit, onCancel }) {
             const isEdit = !!item;
-            const [phrase, setPhrase] = useState(item?.phrase || "");
-            const [category, setCategory] = useState(item?.language_category || "CAMPUS");
-            const [description, setDescription] = useState(item?.description || "");
+            const [acronym, setAcronym] = useState(item?.phrase || "");
+            
+            // Parse existing translations from description JSON or text
+            const parseInitialTranslations = () => {
+                if (!item?.description) return [{ id: 1, lang: "en", text: "" }];
+                try {
+                    const parsed = JSON.parse(item.description);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        return parsed.map((t, idx) => ({
+                            id: idx + 1,
+                            lang: t.lang || "en",
+                            text: t.text || (typeof t === "string" ? t : "")
+                        }));
+                    }
+                    if (typeof parsed === "object" && parsed !== null) {
+                        return Object.entries(parsed).map(([lang, text], idx) => ({
+                            id: idx + 1,
+                            lang,
+                            text: String(text)
+                        }));
+                    }
+                } catch (e) {
+                    return [{ id: 1, lang: "en", text: item.description }];
+                }
+                return [{ id: 1, lang: "en", text: "" }];
+            };
+
+            const [translations, setTranslations] = useState(parseInitialTranslations);
+
+            const handleAddRow = () => {
+                setTranslations(prev => [...prev, { id: Date.now(), lang: "en", text: "" }]);
+            };
+
+            const handleRemoveRow = (id) => {
+                setTranslations(prev => {
+                    if (prev.length <= 1) return [{ id: Date.now(), lang: "en", text: "" }];
+                    return prev.filter(row => row.id !== id);
+                });
+            };
+
+            const handleUpdateRow = (id, field, value) => {
+                setTranslations(prev => prev.map(row => row.id === id ? { ...row, [field]: value } : row));
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                const cleanAcronym = acronym.trim();
+                if (!cleanAcronym) return;
+
+                const validTranslations = translations
+                    .map(t => ({ lang: t.lang, text: t.text.trim() }))
+                    .filter(t => t.text.length > 0);
+
+                onSubmit(e, {
+                    phrase: cleanAcronym,
+                    language_category: "ACRONYM",
+                    description: validTranslations.length > 0 ? JSON.stringify(validTranslations) : null,
+                    is_active: true
+                });
+            };
+
+            return (
+                <form onSubmit={handleSubmit} className="space-y-5">
+                    <div>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Acronym</label>
+                        <input
+                            type="text"
+                            required
+                            value={acronym}
+                            onChange={e => setAcronym(e.target.value)}
+                            placeholder="e.g. FOCS, QIU, PTPTN, LIB"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-bold tracking-wide"
+                        />
+                        <p className="text-[11px] text-slate-500 mt-1">Short acronym, abbreviation, or keyword.</p>
+                    </div>
+
+                    <div>
+                        <div className="flex items-center justify-between mb-2">
+                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider">Translations</label>
+                            <span className="text-[11px] text-slate-500">List all language translations for this acronym</span>
+                        </div>
+
+                        <div className="space-y-2.5">
+                            {translations.map((row, idx) => (
+                                <div key={row.id || idx} className="flex items-center gap-2">
+                                    <select
+                                        value={row.lang}
+                                        onChange={e => handleUpdateRow(row.id, 'lang', e.target.value)}
+                                        className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-200 focus:outline-none focus:border-indigo-500 shrink-0 w-36"
+                                    >
+                                        <option value="en">English (EN)</option>
+                                        <option value="ms">Bahasa Melayu (MS)</option>
+                                        <option value="zh">Chinese (ZH)</option>
+                                        <option value="ta">Tamil (TA)</option>
+                                        <option value="yue">Cantonese (YUE)</option>
+                                        <option value="ar">Arabic (AR)</option>
+                                    </select>
+                                    <input
+                                        type="text"
+                                        value={row.text}
+                                        onChange={e => handleUpdateRow(row.id, 'text', e.target.value)}
+                                        placeholder="e.g. Faculty of Computing and Science"
+                                        className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => handleRemoveRow(row.id)}
+                                        className="p-2 text-slate-500 hover:text-rose-400 transition-colors rounded-lg hover:bg-rose-500/10"
+                                        title="Remove this translation"
+                                    >
+                                        <Icon name="trash-2" className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={handleAddRow}
+                            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
+                        >
+                            <Icon name="plus" className="w-3.5 h-3.5" />
+                            <span>Add another translation</span>
+                        </button>
+                    </div>
+
+                    <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-800">
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
+                        <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all duration-300">
+                            {isEdit ? "Update Acronym" : "Add Acronym"}
+                        </button>
+                    </div>
+                </form>
+            );
+        }
+
+        // 19. Speech Language Form
+        function SpeechLanguageForm({ item, onSubmit, onCancel }) {
+            const isEdit = !!item;
+            const [languageName, setLanguageName] = useState(item?.language_name || "");
+            const [languageCode, setLanguageCode] = useState(item?.language_code || "");
+            const [isDefault, setIsDefault] = useState(item?.is_default || false);
             const [isActive, setIsActive] = useState(item?.is_active ?? true);
 
             const handleSubmit = (e) => {
                 e.preventDefault();
+                const code = languageCode.trim().toLowerCase();
+                const name = languageName.trim();
+                if (!code || !name) return;
+
                 onSubmit(e, {
-                    phrase: phrase.trim(),
-                    language_category: category.trim().toUpperCase(),
-                    description: description.trim() || null,
+                    language_code: code,
+                    language_name: name,
+                    is_default: isDefault,
                     is_active: isActive
                 });
             };
 
             return (
-                <form onSubmit={handleSubmit} className="space-y-4">
+                <form onSubmit={handleSubmit} className="space-y-5">
                     <div>
-                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Adaptation Phrase</label>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Language Name</label>
                         <input
                             type="text"
                             required
-                            value={phrase}
-                            onChange={e => setPhrase(e.target.value)}
-                            placeholder="e.g. Quest International University, FOCS, PTPTN"
+                            value={languageName}
+                            onChange={e => setLanguageName(e.target.value)}
+                            placeholder="e.g. Japanese, Korean, German, Spanish"
                             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-medium"
                         />
-                        <p className="text-[11px] text-slate-500 mt-1">Specialized terminology, campus jargon, or pronunciation-sensitive name.</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Category</label>
-                            <input
-                                type="text"
-                                list="adaptation-categories"
-                                required
-                                value={category}
-                                onChange={e => setCategory(e.target.value.toUpperCase())}
-                                placeholder="CAMPUS, MALAY, CHINESE..."
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-mono uppercase"
-                            />
-                            <datalist id="adaptation-categories">
-                                <option value="CAMPUS" />
-                                <option value="ACADEMIC" />
-                                <option value="MALAY" />
-                                <option value="CHINESE" />
-                                <option value="CANTONESE" />
-                                <option value="TAMIL" />
-                                <option value="ARABIC" />
-                                <option value="GENERAL" />
-                            </datalist>
-                        </div>
-                        <div>
-                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Active Status</label>
-                            <select
-                                value={isActive ? "true" : "false"}
-                                onChange={e => setIsActive(e.target.value === "true")}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
-                            >
-                                <option value="true">Active (Include in Live ASR)</option>
-                                <option value="false">Inactive</option>
-                            </select>
-                        </div>
+                        <p className="text-[11px] text-slate-500 mt-1">Common or official name of the language.</p>
                     </div>
 
                     <div>
-                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Description / Context (Optional)</label>
-                        <textarea
-                            value={description}
-                            onChange={e => setDescription(e.target.value)}
-                            rows={2}
-                            placeholder="Optional notes or phonetics explanation..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 resize-none"
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Language Code (BCP-47)</label>
+                        <input
+                            type="text"
+                            required
+                            disabled={isEdit}
+                            value={languageCode}
+                            onChange={e => setLanguageCode(e.target.value)}
+                            placeholder="e.g. ja, ko, de, es, vi, fr"
+                            maxLength={10}
+                            className={`w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-mono ${isEdit ? 'opacity-60 cursor-not-allowed' : ''}`}
                         />
+                        <p className="text-[11px] text-slate-500 mt-1">Standard 2-letter or 3-letter BCP-47 / ISO code (e.g. ja, ko, de).</p>
                     </div>
 
-                    <div className="flex justify-end gap-3 mt-6">
+                    <div className="pt-2 space-y-3">
+                        <label className="flex items-start gap-3 cursor-pointer select-none group">
+                            <input
+                                type="checkbox"
+                                checked={isDefault}
+                                onChange={e => {
+                                    setIsDefault(e.target.checked);
+                                    if (e.target.checked) setIsActive(true);
+                                }}
+                                className="mt-1 rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900"
+                            />
+                            <div>
+                                <span className="text-xs font-bold text-slate-200 group-hover:text-indigo-300 transition-colors">Listen by Default</span>
+                                <p className="text-[11px] text-slate-500 leading-snug">Pre-load this language into the speech recognition hypothesis hints at the start of every session.</p>
+                            </div>
+                        </label>
+
+                        <label className="flex items-start gap-3 cursor-pointer select-none group">
+                            <input
+                                type="checkbox"
+                                checked={isActive}
+                                disabled={isDefault}
+                                onChange={e => setIsActive(e.target.checked)}
+                                className="mt-1 rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900 disabled:opacity-50"
+                            />
+                            <div>
+                                <span className="text-xs font-bold text-slate-200 group-hover:text-indigo-300 transition-colors">Active in Campus Directory</span>
+                                <p className="text-[11px] text-slate-500 leading-snug">Mark as an officially active and supported language across the campus system.</p>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-800">
                         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
                         <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all duration-300">
-                            {isEdit ? "Update Phrase" : "Add Phrase"}
+                            {isEdit ? "Update Language" : "Add Language"}
                         </button>
                     </div>
                 </form>
@@ -2852,3 +2995,4 @@ window.FacultyForm = FacultyForm;
 window.DepartmentForm = DepartmentForm;
 window.ProgrammeForm = ProgrammeForm;
 window.SpeechAdaptationPhraseForm = SpeechAdaptationPhraseForm;
+window.SpeechLanguageForm = SpeechLanguageForm;

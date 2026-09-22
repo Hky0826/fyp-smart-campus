@@ -113,9 +113,24 @@ def _open_capture(source: str | int) -> Any:
     width = int(os.getenv("EDGE_GUI_CAMERA_WIDTH", str(DEFAULT_CAMERA_WIDTH)))
     height = int(os.getenv("EDGE_GUI_CAMERA_HEIGHT", str(DEFAULT_CAMERA_HEIGHT)))
     fourcc_name = os.getenv("EDGE_GUI_CAMERA_FOURCC", DEFAULT_CAMERA_FOURCC).strip()
+    pixel_format = os.getenv("EDGE_CAMERA_FORMAT", "RGB888").strip().upper()
+    swap_rb = os.getenv("EDGE_CAMERA_SWAP_RB", "false").strip().lower() in {"1", "true", "yes", "on"}
+    exposure_value = float(os.getenv("EDGE_CAMERA_EV", "1.2"))
+    brightness = float(os.getenv("EDGE_CAMERA_BRIGHTNESS", "0.1"))
+    contrast = float(os.getenv("EDGE_CAMERA_CONTRAST", "1.0"))
 
     if open_single_capture is not None:
-        return open_single_capture(source, width=width, height=height, fourcc=fourcc_name)
+        return open_single_capture(
+            source,
+            width=width,
+            height=height,
+            fourcc=fourcc_name,
+            pixel_format=pixel_format,
+            swap_rb=swap_rb,
+            exposure_value=exposure_value,
+            brightness=brightness,
+            contrast=contrast,
+        )
 
     # Local fallback if capture_backend is not imported
     if cv2 is None:

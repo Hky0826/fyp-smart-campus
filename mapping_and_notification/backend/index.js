@@ -8,7 +8,9 @@ const authRoutes = require('./routes/authRoutes');
 const mapRoutes = require('./routes/mapRoutes');
 const engineRoutes = require('./routes/engineRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
+const kioskRoutes = require('./routes/kioskRoutes');
 const { connectBroker } = require('./utils/mqBroker');
+const { startCleanupScheduler } = require('./utils/cleanupScheduler');
 
 const app = express();
 app.use(cors());
@@ -27,15 +29,19 @@ app.use('/', authRoutes);
 app.use('/', mapRoutes);
 app.use('/', engineRoutes);
 app.use('/', notificationRoutes);
+app.use('/', kioskRoutes);
 
 app.use('/api', authRoutes);
 app.use('/api', mapRoutes);
 app.use('/api', engineRoutes);
 app.use('/api', notificationRoutes);
+app.use('/api', kioskRoutes);
 
 const PORT = 5000;
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
     // Connect to RabbitMQ asynchronously on startup
     connectBroker().catch(err => console.error('[RabbitMQ] Connection startup failed:', err.message));
+    // Start automated 24-hour visualization and expired session cleanup scheduler
+    startCleanupScheduler();
 });

@@ -98,10 +98,10 @@ class TestCameraBackend(unittest.TestCase):
                 self.assertEqual(cap.get(cv2.CAP_PROP_FRAME_WIDTH) if cv2 else 1280, 1280)
                 self.assertEqual(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) if cv2 else 720, 720)
 
-                # Verify configuration was requested in BGR888 format
+                # Verify configuration was requested in RGB888 format (DRM format mapping to BGR memory)
                 mock_picam_inst.create_video_configuration.assert_called_once()
                 config_arg = mock_picam_inst.create_video_configuration.call_args[1]["main"]
-                self.assertEqual(config_arg["format"], "BGR888")
+                self.assertEqual(config_arg["format"], "RGB888")
                 self.assertEqual(config_arg["size"], (1280, 720))
 
                 # Test frame reading
@@ -115,6 +115,27 @@ class TestCameraBackend(unittest.TestCase):
                 self.assertFalse(cap.isOpened())
                 mock_picam_inst.stop.assert_called_once()
                 mock_picam_inst.close.assert_called_once()
+
+    def test_picamera2_capture_swap_rb(self):
+        mock_picam_inst = MagicMock()
+        # Mock frame with distinct B, G, R values
+        mock_frame = np.zeros((10, 10, 3), dtype=np.uint8)
+        mock_frame[:, :, 0] = 10  # B
+        mock_frame[:, :, 1] = 20  # G
+        mock_frame[:, :, 2] = 30  # R
+        mock_picam_inst.capture_array.return_value = mock_frame
+        mock_picam_cls = MagicMock(return_value=mock_picam_inst)
+        mock_picam_cls.global_camera_info.return_value = [{"Model": "imx219"}]
+
+        with patch.dict(sys.modules, {"picamera2": MagicMock(Picamera2=mock_picam_cls)}):
+            with patch("time.sleep", return_value=None):
+                cap = Picamera2Capture(camera_idx=0, swap_rb=True)
+                ok, frame = cap.read()
+                self.assertTrue(ok)
+                self.assertEqual(frame[0, 0, 0], 30)  # Was R, now in index 0
+                self.assertEqual(frame[0, 0, 1], 20)  # G remains
+                self.assertEqual(frame[0, 0, 2], 10)  # Was B, now in index 2
+                cap.release()
 
     def test_picamera2_capture_init_failure(self):
         mock_picam_cls = MagicMock(side_effect=RuntimeError("No CSI camera found"))
@@ -134,7 +155,17 @@ class TestCameraBackend(unittest.TestCase):
 
             cap = open_single_capture("csi:1", width=640, height=480)
             self.assertEqual(cap, mock_inst)
-            mock_cap_cls.assert_called_once_with(camera_idx=1, width=640, height=480, fps=30)
+            mock_cap_cls.assert_called_once_with(
+                camera_idx=1,
+                width=640,
+                height=480,
+                fps=30,
+                pixel_format="RGB888",
+                swap_rb=False,
+                exposure_value=1.2,
+                brightness=0.1,
+                contrast=1.0,
+            )
 
     def test_open_camera_capture_auto_fallback(self):
         # First candidate fails frame read, second candidate succeeds
