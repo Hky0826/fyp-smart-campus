@@ -5,6 +5,7 @@ import numpy as np
 from access_control.facial_recognition.src.config import AccessControlConfig
 from access_control.facial_recognition.src.face.alignment import AlignmentResult
 from access_control.facial_recognition.src.face.matching import FaceTemplate
+from access_control.facial_recognition.src.face.pad import PADResult
 from access_control.facial_recognition.src.face.quality import FaceQualityResult
 from access_control.facial_recognition.src.face.spoofing import SpoofResult
 from access_control.facial_recognition.src.face.types import AuthenticationResult, DetectedFace
@@ -12,6 +13,17 @@ from access_control.facial_recognition.src.pipelines.access_control import Acces
 
 
 LANDMARKS = np.array([[30, 35], [60, 35], [45, 50], [34, 65], [56, 65]], dtype=np.float32)
+
+
+class FakePAD:
+    def __init__(self, state="live", score=0.95):
+        self.state = state
+        self.score = score
+        self.model_version = "fake"
+        self.threshold = 0.75
+
+    def check(self, frame, face):
+        return PADResult(self.state, self.score, self.model_version, self.threshold)
 
 
 class FakeDetector:
@@ -101,7 +113,7 @@ class AccessControlLogicTests(unittest.TestCase):
         self.frame = np.zeros((120, 120, 3), dtype=np.uint8)
         self.clock = FakeClock()
 
-    def pipeline(self, faces, vectors, templates, *, samples=1, stable_frames=1, spoof="live", aligner=None):
+    def pipeline(self, faces, vectors, templates, *, samples=1, stable_frames=1, spoof="live", aligner=None, pad_smooth_frames=None):
         config = AccessControlConfig(
             recognition_threshold=0.75,
             recognition_delay_seconds=0.0,
@@ -109,10 +121,12 @@ class AccessControlLogicTests(unittest.TestCase):
             max_embedding_samples=max(samples, 3),
             min_stable_frames=stable_frames,
             min_stable_duration_ms=0,
+            pad_smooth_frames=pad_smooth_frames if pad_smooth_frames is not None else stable_frames,
         )
         return AccessControlPipeline(
             FakeDetector(faces), FakeEmbedder(vectors), FakeRepository(templates), config,
             aligner=aligner or PassAligner(), spoof_detector=FakeSpoof(spoof),
+            pad_detector=FakePAD(spoof),
             quality_checker=AlwaysQuality(), clock=self.clock.monotonic,
         )
 
@@ -231,6 +245,7 @@ class AccessControlLogicTests(unittest.TestCase):
             config,
             aligner=PassAligner(),
             spoof_detector=FakeSpoof("live"),
+            pad_detector=FakePAD("live"),
             quality_checker=AlwaysQuality(),
             clock=self.clock.monotonic,
         )

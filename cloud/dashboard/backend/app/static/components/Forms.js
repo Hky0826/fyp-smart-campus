@@ -2203,6 +2203,46 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
             );
         }
 
+        // 9b. Edge RBAC Form
+        function EdgeRBACForm({ edges = [], roles = [], onSubmit, onCancel }) {
+            const [edgeId, setEdgeId] = useState("");
+            const [roleId, setRoleId] = useState("");
+
+            const handleSubmit = (e) => {
+                onSubmit(e, {
+                    edge_id: parseInt(edgeId),
+                    role_id: parseInt(roleId)
+                });
+            };
+
+            return (
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Select Campus Path (Edge)</label>
+                        <select required value={edgeId} onChange={e => setEdgeId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500">
+                            <option value="">Select Path / Edge</option>
+                            {edges.map(ed => (
+                                <option key={ed.edge_id} value={ed.edge_id}>
+                                    Edge #{ed.edge_id} (Node {ed.source_node_id} &rarr; Node {ed.destination_node_id}) {ed.weight_distance ? `[${ed.weight_distance}m]` : ''}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Granted Role clearance level</label>
+                        <select required value={roleId} onChange={e => setRoleId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500">
+                            <option value="">Select Role</option>
+                            {roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
+                        </select>
+                    </div>
+                    <div className="flex justify-end gap-3 mt-6">
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
+                        <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300">Grant Path Clearance</button>
+                    </div>
+                </form>
+            );
+        }
+
         // 10. Course Registration Form
         function CourseForm({ item, programmes = [], faculties = [], onSubmit, onCancel }) {
             const isEdit = !!item;
@@ -2986,6 +3026,7 @@ window.AdminForm = AdminForm;
 window.DocumentForm = DocumentForm;
 window.DeviceForm = DeviceForm;
 window.NodeRBACForm = NodeRBACForm;
+window.EdgeRBACForm = EdgeRBACForm;
 window.CourseForm = CourseForm;
 window.EnrollmentForm = EnrollmentForm;
 window.TimetableForm = TimetableForm;

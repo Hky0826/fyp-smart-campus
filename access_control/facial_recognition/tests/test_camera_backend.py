@@ -14,7 +14,13 @@ except ImportError:
     cv2 = None
 
 from access_control.facial_recognition.src.camera.capture_backend import (
+    DEFAULT_BRIGHTNESS,
+    DEFAULT_CONTRAST,
+    DEFAULT_EXPOSURE_VALUE,
+    DEFAULT_FPS,
     DEFAULT_HEIGHT,
+    DEFAULT_PIXEL_FORMAT,
+    DEFAULT_SWAP_RB,
     DEFAULT_WIDTH,
     Picamera2Capture,
     detect_available_cameras,
@@ -159,12 +165,12 @@ class TestCameraBackend(unittest.TestCase):
                 camera_idx=1,
                 width=640,
                 height=480,
-                fps=30,
-                pixel_format="RGB888",
-                swap_rb=False,
-                exposure_value=1.2,
-                brightness=0.1,
-                contrast=1.0,
+                fps=DEFAULT_FPS,
+                pixel_format=DEFAULT_PIXEL_FORMAT,
+                swap_rb=DEFAULT_SWAP_RB,
+                exposure_value=DEFAULT_EXPOSURE_VALUE,
+                brightness=DEFAULT_BRIGHTNESS,
+                contrast=DEFAULT_CONTRAST,
             )
 
     def test_open_camera_capture_auto_fallback(self):

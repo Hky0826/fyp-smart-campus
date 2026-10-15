@@ -182,10 +182,16 @@ class AccessControlAudioCoordinator:
         user_id = result.get("user_id")
         if user_id is None:
             return
-        if not self._should_attempt_authenticated_token(int(user_id)):
+        if not self._should_attempt_authenticated_token(user_id):
             return
+        pad_score = float(result.get("pad_score") or 0.0)
+        pad_model_version = str(result.get("pad_model_version") or "minifasnet-v2")
         try:
-            token = self.token_client.issue_token(user_id)
+            token = self.token_client.issue_token(
+                user_id,
+                pad_score=pad_score,
+                pad_model_version=pad_model_version,
+            )
         except Exception as exc:
             logger.warning("Face matched user %s, but JWT issuance failed: %s", user_id, exc)
             return
@@ -280,23 +286,24 @@ class AccessControlAudioCoordinator:
                 conn.close()
         return int(row[0]) if row else None
 
-    def _should_attempt_authenticated_token(self, user_id: int) -> bool:
+    def _should_attempt_authenticated_token(self, user_id: int | str) -> bool:
         with self._lock:
             now = time.monotonic()
-            last_attempt = self._last_token_attempts.get(user_id, 0.0)
+            key = str(user_id)
+            last_attempt = self._last_token_attempts.get(key, 0.0)
             if now - last_attempt < self.config.audio_token_retry_seconds:
                 return False
 
             token = self._authenticated_token
-            if token is None or token.user_id != user_id:
-                self._last_token_attempts[user_id] = now
+            if token is None or str(token.user_id) != key:
+                self._last_token_attempts[key] = now
                 return True
             if not token.is_fresh():
-                self._last_token_attempts[user_id] = now
+                self._last_token_attempts[key] = now
                 return True
             elapsed = now - self._last_authenticated_refresh
             if elapsed >= self.config.audio_token_refresh_seconds:
-                self._last_token_attempts[user_id] = now
+                self._last_token_attempts[key] = now
                 return True
             return False
 

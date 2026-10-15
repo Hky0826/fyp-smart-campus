@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import json
 import logging
 import os
@@ -164,6 +165,7 @@ class AccessControlPipeline:
         self._last_full_recognition_time = 0.0
         self._cached_recognition_result: dict | None = None
         self._recognition_interval = 0.25
+        self._pad_track_history: dict[int, deque[float]] = {}
 
         presence_cfg = PresenceConfig(
             enabled=getattr(self.config, "presence_activation_enabled", True),
@@ -204,15 +206,23 @@ class AccessControlPipeline:
         face_count = len(visible_tracks)
         bboxes = [face.xyxy_int() for face in faces]
 
-        # Update presence detector on every frame
-        presence_status = self.presence_detector.update(
-            faces=all_faces,
-            tracks=visible_tracks,
-            frame_shape=frame.shape[:2],
-            timestamp=timestamp,
-        )
-
+        # Check if the active track is currently in verification state
         def with_presence(res: dict) -> dict:
+            auth_res = res.get("authentication_result")
+            is_verifying = auth_res in {
+                AuthenticationResult.RETRY_NO_FACE.value,
+                AuthenticationResult.RETRY_UNSTABLE_TRACK.value,
+                AuthenticationResult.RETRY_LOW_QUALITY.value,
+                AuthenticationResult.RETRY_ALIGNMENT.value,
+                AuthenticationResult.RETRY_INSUFFICIENT_SAMPLES.value,
+            }
+            presence_status = self.presence_detector.update(
+                faces=all_faces,
+                tracks=visible_tracks,
+                frame_shape=frame.shape[:2],
+                is_verifying=is_verifying,
+                timestamp=timestamp,
+            )
             res["presence"] = presence_status.as_dict()
             return res
 
@@ -242,10 +252,12 @@ class AccessControlPipeline:
 
         active_track_ids = {t.track_id for t in tracks}
         self.identity_manager.update_active_tracks(active_track_ids, timestamp=timestamp)
+        if self._pad_track_history:
+            self._pad_track_history = {tid: hist for tid, hist in self._pad_track_history.items() if tid in active_track_ids}
 
         # Fast-Path: Persistent Track Identity Check (Track-then-Recognize)
         # Avoid repeatedly running face recognition once identity is assigned to this active track
-        if not self.identity_manager.should_recognize(track.track_id):
+        if not self.identity_manager.should_recognize(track.track_id, timestamp=timestamp):
             identity_rec = self.identity_manager.get_identity(track.track_id)
             if identity_rec.cached_payload is not None:
                 result = dict(identity_rec.cached_payload)
@@ -310,9 +322,41 @@ class AccessControlPipeline:
                 logger.info("Access-control spoofing result: %s score=%.4f reason=%s", spoof_result.state, spoof_result.score, spoof_result.reason)
                 pad_result = self.pad_detector.check(frame, face)
                 logger.info("Access-control PAD result: %s score=%.4f model=%s threshold=%.4f", pad_result.state, pad_result.score, pad_result.model_version, pad_result.threshold)
-                liveness_failed = pad_result.state != "live" if self.config.pad_required else spoof_result.state != "live"
+
+                effective_pad_state = pad_result.state
+                effective_pad_score = pad_result.score
+                pad_version = getattr(pad_result, "model_version", "minifasnet-v2")
+                if track.track_id is not None and getattr(self.config, "pad_smooth_frames", 1) > 1 and pad_result.state in {"live", "spoof"}:
+                    if track.track_id not in self._pad_track_history:
+                        self._pad_track_history[track.track_id] = deque(maxlen=self.config.pad_smooth_frames)
+                    self._pad_track_history[track.track_id].append(pad_result.score)
+                    history = self._pad_track_history[track.track_id]
+                    if len(history) >= self.config.pad_smooth_frames:
+                        effective_pad_score = float(np.mean(history))
+                        effective_pad_state = "live" if effective_pad_score >= pad_result.threshold else "spoof"
+                        logger.info("Access-control PAD smoothed: state=%s score=%.4f (samples=%d/%d)", effective_pad_state, effective_pad_score, len(history), self.config.pad_smooth_frames)
+                    else:
+                        effective_pad_state = "live" if pad_result.state == "live" else "warming_up"
+                        logger.info("Access-control PAD warming up: state=%s (samples=%d/%d)", effective_pad_state, len(history), self.config.pad_smooth_frames)
+
+                if self.config.pad_required and effective_pad_state == "warming_up":
+                    timer.total()
+                    return with_presence(self._deny(
+                        "Collecting liveness samples",
+                        face_count,
+                        AuthenticationResult.RETRY_UNSTABLE_TRACK,
+                        spoofing_passed=True,
+                        similarity=effective_pad_score,
+                        metrics=timer.metrics,
+                        bbox=bbox,
+                        bboxes=bboxes,
+                        pad_score=effective_pad_score,
+                        pad_model_version=pad_version,
+                    ))
+
+                liveness_failed = effective_pad_state != "live" if self.config.pad_required else spoof_result.state != "live"
                 if liveness_failed:
-                    is_spoof = pad_result.state == "spoof" or (not self.config.pad_required and spoof_result.state == "spoof")
+                    is_spoof = effective_pad_state == "spoof" or (not self.config.pad_required and spoof_result.state == "spoof")
                     reason = "Spoofing/liveness check failed." if is_spoof else "Liveness check inconclusive."
                     if is_spoof:
                         self._log_event(None, "SPOOFING", spoof_result.score)
@@ -322,10 +366,12 @@ class AccessControlPipeline:
                         face_count,
                         AuthenticationResult.DENY_SPOOF if is_spoof else AuthenticationResult.RETRY_UNSTABLE_TRACK,
                         spoofing_passed=False,
-                        similarity=pad_result.score if self.config.pad_required else spoof_result.score,
+                        similarity=effective_pad_score if self.config.pad_required else spoof_result.score,
                         metrics=timer.metrics,
                         bbox=bbox,
                         bboxes=bboxes,
+                        pad_score=effective_pad_score,
+                        pad_model_version=pad_version,
                     ))
 
             alignment = self.aligner.align(frame, face)
@@ -436,8 +482,28 @@ class AccessControlPipeline:
             )
 
             if not match.matched or str(match.user_id) != consistent_candidate:
+                # Rejection Leniency: If we haven't reached max_embedding_samples yet,
+                # do not issue a premature denial! Keep accumulating samples to give the user a fair chance.
+                if self.embedding_aggregator.sample_count < self.config.max_embedding_samples:
+                    timer.mark("database_matching")
+                    timer.total()
+                    return with_presence(self._deny(
+                        "Verifying face identity",
+                        face_count,
+                        AuthenticationResult.RETRY_INSUFFICIENT_SAMPLES,
+                        similarity=match.similarity,
+                        matched_template=match.matched_template,
+                        metrics=timer.metrics,
+                        bbox=bbox,
+                        bboxes=bboxes,
+                        sample_count=self.embedding_aggregator.sample_count,
+                        pad_score=effective_pad_score if self.config.pad_required else None,
+                        pad_model_version=pad_version if self.config.pad_required else None,
+                    ))
+
                 logger.info(
-                    "ACCESS DENIED (low confidence / candidate mismatch): identity=%s recognition_score=%.4f threshold=%.3f",
+                    "ACCESS DENIED (low confidence / candidate mismatch after %d samples): identity=%s recognition_score=%.4f threshold=%.3f",
+                    self.embedding_aggregator.sample_count,
                     match.identity,
                     match.similarity,
                     self.config.recognition_threshold,
@@ -455,6 +521,9 @@ class AccessControlPipeline:
                     metrics=timer.metrics,
                     bbox=bbox,
                     bboxes=bboxes,
+                    sample_count=self.embedding_aggregator.sample_count,
+                    pad_score=effective_pad_score if self.config.pad_required else None,
+                    pad_model_version=pad_version if self.config.pad_required else None,
                 ))
 
             if not match.is_active:
@@ -477,6 +546,8 @@ class AccessControlPipeline:
                     metrics=timer.metrics,
                     bbox=bbox,
                     bboxes=bboxes,
+                    pad_score=effective_pad_score if self.config.pad_required else None,
+                    pad_model_version=pad_version if self.config.pad_required else None,
                 ))
 
             policy_check = getattr(self.repository, "evaluate_access", None)
@@ -485,7 +556,7 @@ class AccessControlPipeline:
                 if not decision.allowed:
                     self._log_event(match.user_id, "FAILED", match.similarity, node_id=decision.node_id, policy_version=decision.policy_version, decision_reason=decision.reason)
                     timer.total()
-                    denied = self._deny("Access policy denied", face_count, AuthenticationResult.DENY_NO_MATCH, identity=match.identity, similarity=match.similarity, matched_template=match.matched_template, metrics=timer.metrics, bbox=bbox, bboxes=bboxes)
+                    denied = self._deny("Access policy denied", face_count, AuthenticationResult.DENY_NO_MATCH, identity=match.identity, similarity=match.similarity, matched_template=match.matched_template, metrics=timer.metrics, bbox=bbox, bboxes=bboxes, pad_score=effective_pad_score if self.config.pad_required else None, pad_model_version=pad_version if self.config.pad_required else None)
                     denied.update({"node_id": decision.node_id, "policy_version": decision.policy_version, "decision_reason": decision.reason})
                     return cache_and_return(denied)
 
@@ -511,6 +582,8 @@ class AccessControlPipeline:
                 "similarity": match.similarity,
                 "matched_template": match.matched_template,
                 "spoofing_passed": True,
+                "pad_score": float(effective_pad_score) if self.config.pad_required else None,
+                "pad_model_version": str(pad_version) if self.config.pad_required else None,
                 "face_count": face_count,
                 "bbox": bbox,
                 "bboxes": bboxes,
@@ -532,8 +605,8 @@ class AccessControlPipeline:
         finally:
             self._mark_recognition_finished()
 
-    def describe_faces(self, frame: np.ndarray, include_embeddings: bool = False) -> dict:
-        """Return detected face boxes, optionally with embeddings, without access gating."""
+    def describe_faces(self, frame: np.ndarray, include_embeddings: bool = False, include_pad: bool = False) -> dict:
+        """Return detected face boxes, optionally with embeddings and PAD liveness, without access gating."""
         timer = StageTimer()
         try:
             faces = self._detect(frame)
@@ -559,6 +632,17 @@ class AccessControlPipeline:
                 "confidence": float(face.confidence),
                 "track_id": track_id,
             }
+            if include_pad:
+                try:
+                    pad_res = self.pad_detector.check(frame, face)
+                    item["pad_score"] = float(pad_res.score)
+                    item["pad_model_version"] = str(pad_res.model_version)
+                    item["pad_state"] = str(pad_res.state)
+                except Exception:
+                    logger.exception("Face PAD check failed during face description")
+                    item["pad_score"] = 0.0
+                    item["pad_model_version"] = "unknown"
+                    item["pad_state"] = "unknown"
             if include_embeddings:
                 try:
                     quality = self.quality_checker.check(frame, face)
@@ -717,6 +801,8 @@ class AccessControlPipeline:
         bboxes: Optional[List[List[int]]] = None,
         sample_count: int | None = None,
         quality: dict | None = None,
+        pad_score: Optional[float] = None,
+        pad_model_version: Optional[str] = None,
     ) -> dict:
         result = {
             "success": False,
@@ -739,6 +825,10 @@ class AccessControlPipeline:
             result["sample_count"] = sample_count
         if quality is not None:
             result["quality"] = quality
+        if pad_score is not None:
+            result["pad_score"] = pad_score
+        if pad_model_version is not None:
+            result["pad_model_version"] = pad_model_version
         if self._active_track_id is not None:
             result["track_id"] = self._active_track_id
         return result

@@ -14,16 +14,20 @@ from app.core.database import get_db
 from app.core.config import settings
 from app.core.device_auth import generate_device_secret, encrypt_device_secret, require_signed_device_request, bind_device_id
 from app.core.private_storage import safe_existing_path
-from app.core.security import verify_super_admin, get_current_admin
+from app.core.security import verify_super_admin, verify_system_admin, get_current_admin
 from app.models.models import Device, DeviceRBAC, NodeRBAC, EdgeRBAC, JWTSession, AuthenticationLog, SurveillanceLog, Node, Role, Edge, User, Admin, Floorplan, Course, UploadedDocument
 from app.schemas import schemas
 
 try:
+    import sys as _sys, os as _os
+    _cloud_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "..", ".."))
+    if _cloud_root not in _sys.path:
+        _sys.path.insert(0, _cloud_root)
     from sync.cloud_to_edge.cloud_sync_service import push_sync_to_all_edges
-except ImportError:
+except Exception:
     try:
         from cloud_sync_service import push_sync_to_all_edges
-    except ImportError:
+    except Exception:
         push_sync_to_all_edges = None
 
 router = APIRouter(prefix="/infra", tags=["Infrastructure & Access Control"])
@@ -102,7 +106,7 @@ def _generate_device_id(db: Session, device_type: schemas.DeviceTypeEnum) -> str
 
 
 @router.get("/devices", response_model=List[schemas.DeviceResponse])
-def list_devices(db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def list_devices(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     devices = db.query(Device).options(joinedload(Device.device_rbac)).all()
     results = []
     for d in devices:
@@ -112,7 +116,7 @@ def list_devices(db: Session = Depends(get_db), current_admin=Depends(verify_sup
     return results
 
 @router.post("/devices", response_model=schemas.DeviceResponse)
-def create_device(device_in: schemas.DeviceCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def create_device(device_in: schemas.DeviceCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     device_id = device_in.device_id or _generate_device_id(db, device_in.device_type)
     existing = db.query(Device).filter_by(device_id=device_id).first()
     if existing:
@@ -154,7 +158,7 @@ def create_device(device_in: schemas.DeviceCreate, background_tasks: BackgroundT
 
 
 @router.post("/devices/{device_id}/rotate-credential")
-def rotate_device_credential(device_id: str, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def rotate_device_credential(device_id: str, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     device = db.query(Device).filter_by(device_id=device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -165,7 +169,7 @@ def rotate_device_credential(device_id: str, db: Session = Depends(get_db), curr
     return {"device_id": device.device_id, "provisioned_secret": secret, "warning": "Store this secret in deployment secret storage; it will not be shown again."}
 
 @router.put("/devices/{device_id}", response_model=schemas.DeviceResponse)
-def update_device(device_id: str, device_in: schemas.DeviceUpdate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def update_device(device_id: str, device_in: schemas.DeviceUpdate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     device = db.query(Device).filter_by(device_id=device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -195,7 +199,7 @@ def update_device(device_id: str, device_in: schemas.DeviceUpdate, background_ta
     return resp
 
 @router.post("/devices/{device_id}/heartbeat")
-def record_heartbeat(device_id: str, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def record_heartbeat(device_id: str, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     device = db.query(Device).filter_by(device_id=device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -220,7 +224,7 @@ def record_heartbeat(device_id: str, db: Session = Depends(get_db), current_admi
     }
 
 @router.delete("/devices/{device_id}")
-def delete_device(device_id: str, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def delete_device(device_id: str, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     device = db.query(Device).filter_by(device_id=device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -255,14 +259,14 @@ def delete_device(device_id: str, db: Session = Depends(get_db), current_admin=D
 # DEVICE RBAC CLEARANCE MATRIX CRUD
 # ==========================================
 @router.get("/device-rbac", response_model=List[schemas.DeviceRBACBase])
-def list_device_rbac(device_id: Optional[str] = None, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def list_device_rbac(device_id: Optional[str] = None, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     query = db.query(DeviceRBAC)
     if device_id:
         query = query.filter_by(device_id=device_id)
     return query.all()
 
 @router.post("/device-rbac", response_model=schemas.DeviceRBACBase)
-def grant_device_clearance(rbac_in: schemas.DeviceRBACBase, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def grant_device_clearance(rbac_in: schemas.DeviceRBACBase, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     device = db.query(Device).filter_by(device_id=rbac_in.device_id).first()
     if not device:
         raise HTTPException(status_code=400, detail="Device not found")
@@ -282,7 +286,7 @@ def grant_device_clearance(rbac_in: schemas.DeviceRBACBase, background_tasks: Ba
     return rbac
 
 @router.delete("/device-rbac/{device_id}/{role_id}")
-def revoke_device_clearance(device_id: str, role_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def revoke_device_clearance(device_id: str, role_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     rbac = db.query(DeviceRBAC).filter_by(device_id=device_id, role_id=role_id).first()
     if not rbac:
         raise HTTPException(status_code=404, detail="Device clearance rule not found")
@@ -293,7 +297,7 @@ def revoke_device_clearance(device_id: str, role_id: int, background_tasks: Back
     return {"detail": "Device clearance rule revoked successfully"}
 
 @router.put("/devices/{device_id}/rbac", response_model=List[int])
-def set_device_clearance(device_id: str, role_ids: List[int], background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def set_device_clearance(device_id: str, role_ids: List[int], background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     device = db.query(Device).filter_by(device_id=device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -311,11 +315,11 @@ def set_device_clearance(device_id: str, role_ids: List[int], background_tasks: 
 # NODE RBAC CLEARANCE MATRIX CRUD
 # ==========================================
 @router.get("/node-rbac", response_model=List[schemas.NodeRBACBase])
-def list_node_rbac(db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def list_node_rbac(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     return db.query(NodeRBAC).all()
 
 @router.post("/node-rbac", response_model=schemas.NodeRBACBase)
-def grant_node_clearance(rbac_in: schemas.NodeRBACBase, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def grant_node_clearance(rbac_in: schemas.NodeRBACBase, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     # Verify node and role exist
     node = db.query(Node).filter_by(node_id=rbac_in.node_id).first()
     if not node:
@@ -334,7 +338,7 @@ def grant_node_clearance(rbac_in: schemas.NodeRBACBase, db: Session = Depends(ge
     return rbac
 
 @router.delete("/node-rbac/{node_id}/{role_id}")
-def revoke_node_clearance(node_id: int, role_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def revoke_node_clearance(node_id: int, role_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     rbac = db.query(NodeRBAC).filter_by(node_id=node_id, role_id=role_id).first()
     if not rbac:
         raise HTTPException(status_code=404, detail="Clearance rule not found")
@@ -346,11 +350,11 @@ def revoke_node_clearance(node_id: int, role_id: int, db: Session = Depends(get_
 # EDGE RBAC CLEARANCE MATRIX CRUD
 # ==========================================
 @router.get("/edge-rbac", response_model=List[schemas.EdgeRBACBase])
-def list_edge_rbac(db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def list_edge_rbac(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     return db.query(EdgeRBAC).all()
 
 @router.post("/edge-rbac", response_model=schemas.EdgeRBACBase)
-def grant_edge_clearance(rbac_in: schemas.EdgeRBACBase, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def grant_edge_clearance(rbac_in: schemas.EdgeRBACBase, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     # Verify edge and role exist
     edge = db.query(Edge).filter_by(edge_id=rbac_in.edge_id).first()
     if not edge:
@@ -369,7 +373,7 @@ def grant_edge_clearance(rbac_in: schemas.EdgeRBACBase, db: Session = Depends(ge
     return rbac
 
 @router.delete("/edge-rbac/{edge_id}/{role_id}")
-def revoke_edge_clearance(edge_id: int, role_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def revoke_edge_clearance(edge_id: int, role_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     rbac = db.query(EdgeRBAC).filter_by(edge_id=edge_id, role_id=role_id).first()
     if not rbac:
         raise HTTPException(status_code=404, detail="Clearance rule not found")
@@ -386,7 +390,7 @@ def list_jwt_sessions(
     limit: int = 50, 
     admin_id: Optional[str] = None,
     db: Session = Depends(get_db), 
-    current_admin=Depends(verify_super_admin)
+    current_admin=Depends(verify_system_admin)
 ):
     query = db.query(JWTSession)
     if admin_id is not None:
@@ -399,7 +403,7 @@ def list_auth_logs(
     limit: int = 50, 
     email: Optional[str] = None,
     db: Session = Depends(get_db), 
-    current_admin=Depends(verify_super_admin)
+    current_admin=Depends(verify_system_admin)
 ):
     query = db.query(AuthenticationLog)
     if email is not None:
@@ -412,7 +416,7 @@ def list_surveillance_logs(
     limit: int = 50,
     email: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_admin=Depends(verify_super_admin)
+    current_admin=Depends(verify_system_admin)
 ):
     query = db.query(SurveillanceLog)
     if email is not None:
@@ -421,7 +425,7 @@ def list_surveillance_logs(
 
 
 @router.get("/surveillance-logs/{log_id}/image", include_in_schema=False)
-def download_surveillance_image(log_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def download_surveillance_image(log_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     log = db.query(SurveillanceLog).filter_by(log_id=log_id).first()
     if not log or not log.image_path:
         raise HTTPException(status_code=404, detail="Surveillance image not found")
@@ -432,7 +436,7 @@ def download_surveillance_image(log_id: int, db: Session = Depends(get_db), curr
 def list_last_known_locations(
     active_only: bool = True,
     db: Session = Depends(get_db),
-    current_admin=Depends(verify_super_admin),
+    current_admin=Depends(verify_system_admin),
 ):
     query = db.query(User).options(
         joinedload(User.location).joinedload(Node.floorplan).joinedload(Floorplan.building)

@@ -194,13 +194,13 @@ class _LiveDuplexWorker(QThread):
             last_citations[0] = []
             last_options[0] = []
             if user_q or bot_a:
-                self.turnCompleted.emit()
                 self.responseReceived.emit({
                     "transcribed_input": user_q,
                     "text_response": bot_a,
                     "citations": cites,
                     "options": opts,
                 })
+                self.turnCompleted.emit()
 
         self._commit_in_flight_fn = commit_in_flight
 
@@ -328,7 +328,8 @@ class _LiveDuplexWorker(QThread):
                             elif event in ("user_transcript", "transcript"):
                                 text = data.get("text", "")
                                 if text:
-                                    commit_in_flight()
+                                    if last_user_query[0] and last_user_query[0] != text:
+                                        commit_in_flight()
                                     last_user_query[0] = text
                                     last_assistant_text[0] = ""
                                     self.userTranscriptReceived.emit(text)
@@ -877,6 +878,8 @@ class ChatbotController(QObject):
     @Slot(dict)
     def _on_worker_response(self, payload: dict) -> None:
         self._set_busy(self._speaking)
+        if not payload.get("transcribed_input") and self._transcribed_text:
+            payload["transcribed_input"] = self._transcribed_text
         self._partial_text = ""
         self._transcribed_text = ""
         self._rag_status = ""

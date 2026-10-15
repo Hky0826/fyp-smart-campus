@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 import requests
 
 from app.core.database import get_db, Base, engine
-from app.core.security import verify_super_admin
+from app.core.security import verify_super_admin, verify_system_admin
 from app.models.models import User, Role, NodeRBAC, Device, DeviceRBAC, UserRole, DeletedUser
 from app.core.device_auth import decrypt_device_secret, require_signed_device_request, bind_device_id, sign_request
 from sync.callback_security import validate_callback_url
@@ -461,7 +461,7 @@ def push_sync_to_all_edges(db: Session) -> None:
         logger.error(f"push_sync_to_all_edges failed: {str(e)}")
 
 @router.post("/register", status_code=status.HTTP_200_OK)
-def register_edge(registration: EdgeRegistration, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def register_edge(registration: EdgeRegistration, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     """
     Enrolls an edge device's LAN metadata so the cloud publisher knows where to dispatch direct pushes.
     """
@@ -489,7 +489,7 @@ def get_deltas(last_synced_at: Optional[str] = None, module: Optional[str] = Non
     return payload
 
 @router.post("/deactivate")
-def administrative_deactivate(req: DeactivateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def administrative_deactivate(req: DeactivateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     """
     Admin control panel endpoint: Deactivates a user profile and broadcasts immediate deactivation commands to edge nodes.
     """
@@ -505,7 +505,7 @@ def get_all_user_ids(device: Device = Depends(require_signed_device_request), db
 
 
 @router.post("/push-sync")
-def trigger_push_sync(background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def trigger_push_sync(background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     """
     Admin / internal endpoint: immediately broadcasts a trigger-sync signal to all
     registered edge devices so they pull the latest cloud delta without waiting for

@@ -16,6 +16,7 @@ from access_control.facial_recognition.src.face.alignment import AlignmentResult
 from access_control.facial_recognition.src.face.association import IdentityManager
 from access_control.facial_recognition.src.face.bytetrack import ByteTracker, STrack
 from access_control.facial_recognition.src.face.matching import FaceTemplate, TemplateMatcher
+from access_control.facial_recognition.src.face.pad import PADResult
 from access_control.facial_recognition.src.face.quality import FaceQualityResult
 from access_control.facial_recognition.src.face.spoofing import SpoofResult
 from access_control.facial_recognition.src.face.tracking import FaceTrack, FaceTracker, FaceTrackerConfig
@@ -25,6 +26,17 @@ from access_control.facial_recognition.src.pipelines.access_control import Acces
 
 
 LANDMARKS = np.array([[30, 35], [60, 35], [45, 50], [34, 65], [56, 65]], dtype=np.float32)
+
+
+class MockPAD:
+    def __init__(self, state="live", score=0.95):
+        self.state = state
+        self.score = score
+        self.model_version = "mock-pad"
+        self.threshold = 0.75
+
+    def check(self, frame, face):
+        return PADResult(self.state, self.score, self.model_version, self.threshold)
 
 
 class CountingEmbedder:
@@ -178,6 +190,7 @@ class AccessControlIdentityPersistenceTests(unittest.TestCase):
             config=config,
             aligner=MockAligner(),
             spoof_detector=MockSpoof(),
+            pad_detector=MockPAD(),
             quality_checker=MockQuality(),
         )
 
@@ -219,6 +232,7 @@ class AccessControlIdentityPersistenceTests(unittest.TestCase):
             config=config,
             aligner=MockAligner(),
             spoof_detector=MockSpoof(),
+            pad_detector=MockPAD(),
             quality_checker=MockQuality(),
         )
 
@@ -264,6 +278,7 @@ class AccessControlIdentityPersistenceTests(unittest.TestCase):
             config=config,
             aligner=MockAligner(),
             spoof_detector=MockSpoof(),
+            pad_detector=MockPAD(),
             quality_checker=MockQuality(),
             clock=clock.monotonic,
         )

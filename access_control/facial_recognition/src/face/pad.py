@@ -36,7 +36,12 @@ def load_pad(config: Any) -> PresentationAttackDetector:
         # remains behind this interface so the access decision never silently
         # falls back to motion heuristics in production.
         adapter = importlib.import_module("access_control.facial_recognition.src.face.pad_model_adapter")
-        return adapter.PADModel(Path(path), getattr(config, "pad_model_version", "configured"))
+        return adapter.PADModel(
+            Path(path),
+            getattr(config, "pad_model_version", "configured"),
+            threshold=getattr(config, "pad_threshold", 0.75),
+            scale=getattr(config, "pad_scale", 2.7),
+        )
     if getattr(config, "pad_required", False) and os.getenv("APP_ENV", "development").lower() == "production":
         raise RuntimeError("Configured PAD model is unavailable")
     return UnavailablePAD()

@@ -21,6 +21,7 @@ ApplicationWindow {
         videoWidth: cameraController.videoWidth
         videoHeight: cameraController.videoHeight
         boxes: accessController.faceBoxes
+        preserveAspectFit: cameraController.preserveAspectFit
     }
 
     ChatbotView {

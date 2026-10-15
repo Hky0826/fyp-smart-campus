@@ -71,9 +71,8 @@ except ImportError:  # pragma: no cover
 
 DEFAULT_CAMERA = "auto"
 JPEG_QUALITY = 82
-DEFAULT_CAMERA_FALLBACKS = "csi,/dev/video4,/dev/video0,/dev/video1,/dev/video2,/dev/video3,0,1"
-DEFAULT_CAMERA_WIDTH = 1280
-DEFAULT_CAMERA_HEIGHT = 720
+DEFAULT_CAMERA_WIDTH = int(os.getenv("EDGE_CAMERA_WIDTH", os.getenv("EDGE_GUI_CAMERA_WIDTH", "1640")))
+DEFAULT_CAMERA_HEIGHT = int(os.getenv("EDGE_CAMERA_HEIGHT", os.getenv("EDGE_GUI_CAMERA_HEIGHT", "1232")))
 DEFAULT_CAMERA_FOURCC = "MJPG"
 
 
@@ -357,8 +356,12 @@ class CameraController(QObject):
     def _get_video_height(self) -> int:
         return self._video_height
 
+    def _get_preserve_aspect_fit(self) -> bool:
+        return os.getenv("EDGE_CAMERA_PRESERVE_ASPECT_FIT", "false").strip().lower() in {"1", "true", "yes", "on"}
+
     sourceUrl = Property(str, _get_source_url, notify=sourceUrlChanged)
     ready = Property(bool, _get_ready, notify=readyChanged)
     error = Property(str, _get_error, notify=errorChanged)
     videoWidth = Property(int, _get_video_width, notify=videoSizeChanged)
     videoHeight = Property(int, _get_video_height, notify=videoSizeChanged)
+    preserveAspectFit = Property(bool, _get_preserve_aspect_fit, constant=True)

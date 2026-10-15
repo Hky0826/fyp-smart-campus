@@ -866,16 +866,9 @@ function CampusMapTab() {
                 setLiveScanActive(false);
             };
 
-            // ── Guided video recording flow ───────────────────────
+            // ── Single front camera capture flow ───────────────────────
             const GUIDE_POSES = [
-                { id: 'front',       dir: null,    label: 'Face the camera — stay still' },
-                { id: 'left_30',     dir: 'left',  label: 'Slowly turn your head LEFT →' },
-                { id: 'left_60',     dir: 'left',  label: 'Turn your head further LEFT →' },
-                { id: 'front',       dir: null,    label: 'Come back to center' },
-                { id: 'right_30',    dir: 'right', label: 'Slowly turn your head RIGHT ←' },
-                { id: 'right_60',    dir: 'right', label: 'Turn your head further RIGHT ←' },
-                { id: 'front',       dir: null,    label: 'Come back to center' },
-                { id: 'slightly_up', dir: 'up',    label: 'Gently tilt your chin UP ↑' }
+                { id: 'front',       dir: null,    label: 'Face the camera — stay still' }
             ];
 
             const startCamera = async () => {
@@ -1209,7 +1202,7 @@ function CampusMapTab() {
             // ── Camera frame polling ──────────────────────────
             useEffect(() => {
                 let active = true, timerId = null;
-                const validPoses = ["front","left_30","right_30","left_60","right_60","slightly_up"];
+                const validPoses = ["front"];
                 async function pollFrame() {
                     if (!active || enrollMethod !== 'live' || !liveScanActive || !cameraStream || !selectedItem) return;
                     if (!videoRef.current || !canvasRef.current) { timerId = setTimeout(pollFrame, 500); return; }
@@ -1316,6 +1309,8 @@ function CampusMapTab() {
                 if (currentTab === "rag" && subTab === "adaptation-phrases") return <SpeechAdaptationPhraseForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "rag" && subTab === "speech-languages") return <SpeechLanguageForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "infra" && subTab === "devices") return <DeviceForm item={selectedItem} nodes={refs.nodes} roles={refs.roles} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
+                if (currentTab === "infra" && subTab === "node-rbac") return <NodeRBACForm nodes={refs.nodes} roles={refs.roles} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
+                if (currentTab === "infra" && subTab === "edge-rbac") return <EdgeRBACForm edges={refs.edges} roles={refs.roles} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "courses") return <CourseForm item={selectedItem} programmes={refs.programmes} faculties={refs.faculties} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "enrollments") return <EnrollmentForm item={selectedItem} courses={refs.courses} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "timetables") return <TimetableForm item={selectedItem} nodes={refs.nodes} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
@@ -1835,8 +1830,17 @@ function CampusMapTab() {
                                                                 </td>
                                                                 <td className="p-4 pr-6 text-right">
                                                                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                        <button onClick={() => { setSelectedItem(item); setModalType("edit"); setShowModal(true); }} title="Manage Biometrics"
-                                                                            className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white">
+                                                                        <button onClick={() => {
+                                                                            setSelectedItem(item);
+                                                                            setSelectedPhotoFile(null);
+                                                                            setUploadedPhoto(null);
+                                                                            setPhotoPose("front");
+                                                                            setEnrollMethod("photo");
+                                                                            setScanStep(0);
+                                                                            setScanning(false);
+                                                                            setShowFaceModal(true);
+                                                                        }} title="Manage Biometrics"
+                                                                            className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-indigo-400 rounded-xl transition-all hover:text-white">
                                                                             <Icon name="scan-face" className="w-4 h-4" />
                                                                         </button>
                                                                     </div>
@@ -1927,6 +1931,19 @@ function CampusMapTab() {
                                                                     </td>
                                                                     <td className="p-4 pr-6 text-right">
                                                                         <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                            <button onClick={() => {
+                                                                                setSelectedItem(item);
+                                                                                setSelectedPhotoFile(null);
+                                                                                setUploadedPhoto(null);
+                                                                                setPhotoPose("front");
+                                                                                setEnrollMethod("photo");
+                                                                                setScanStep(0);
+                                                                                setScanning(false);
+                                                                                setShowFaceModal(true);
+                                                                            }} title="Manage Face ID"
+                                                                                className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-indigo-400 rounded-xl transition-all hover:text-white">
+                                                                                <Icon name="scan-face" className="w-4 h-4" />
+                                                                            </button>
                                                                             <button onClick={() => { setSelectedItem(item); setModalType("edit"); setShowModal(true); }} title="Edit User"
                                                                                 className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white">
                                                                                 <Icon name="edit-3" className="w-4 h-4" />
@@ -3281,7 +3298,7 @@ function CampusMapTab() {
                                                     {recordingPhase === 'recording' && cameraStream && (
                                                         <div className='absolute bottom-3 left-3 right-3 pointer-events-none'>
                                                             <div className='bg-black/75 border border-white/15 backdrop-blur-md rounded-xl px-3 py-2 text-center shadow-lg'>
-                                                                <p className='text-sm font-bold text-white tracking-wide'>{curPose.label}</p>
+                                                                <p className='text-sm font-bold text-white tracking-wide'>{enrollFeedback || curPose.label}</p>
                                                             </div>
                                                         </div>
                                                     )}
@@ -3289,7 +3306,7 @@ function CampusMapTab() {
                                                     {/* ── LIVE / STANDBY badge ── */}
                                                     <div className='absolute top-3 left-3 flex items-center gap-1.5 bg-black/70 border border-white/10 px-2.5 py-1 rounded-lg text-[10px] font-bold'>
                                                         {recordingPhase === 'recording'
-                                                            ? <><span className='w-2 h-2 rounded-full bg-red-500 animate-ping'></span><span className='text-red-400'>REC</span></>
+                                                            ? <><span className='w-2 h-2 rounded-full bg-red-500 animate-ping'></span><span className='text-red-400'>CAPTURING</span></>
                                                             : cameraStream
                                                                 ? <><span className='w-2 h-2 rounded-full bg-emerald-500'></span><span className='text-emerald-400'>READY</span></>
                                                                 : <><span className='w-2 h-2 rounded-full bg-slate-600'></span><span className='text-slate-400'>NO CAMERA</span></>
@@ -3301,33 +3318,22 @@ function CampusMapTab() {
                                                 {(recordingPhase === 'recording' || recordingPhase === 'embedding') && (
                                                     <div className='space-y-1.5'>
                                                         <div className='flex justify-between text-[10px] font-mono font-bold text-slate-500'>
-                                                            <span>{recordingPhase === 'embedding' ? 'Embedding Face ID...' : 'Recording in progress...'}</span>
+                                                            <span>{recordingPhase === 'embedding' ? 'Embedding Face ID...' : 'Capturing front photo...'}</span>
                                                             <span>{phaseProgress}%</span>
                                                         </div>
                                                         <div className='w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800 shadow-inner'>
-                                                            <div className='h-full bg-gradient-to-r from-indigo-500 to-red-500 transition-all duration-200 rounded-full'
+                                                            <div className='h-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-200 rounded-full'
                                                                 style={{width:`${phaseProgress}%`}}></div>
                                                         </div>
                                                     </div>
                                                 )}
 
-                                                {/* ── Pose step progress dots (idle/ready state) ── */}
+                                                {/* ── Single front capture instructions (idle/ready state) ── */}
                                                 {(recordingPhase === 'idle' || recordingPhase === 'failed') && cameraStream && (
-                                                    <div className='bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-inner'>
-                                                        <p className='text-xs font-bold text-slate-400 uppercase tracking-wider'>Motion sequence to follow</p>
-                                                        <div className='flex items-center gap-1.5'>
-                                                            {GUIDE_POSES.map((p, i) => {
-                                                                const sym = {left:'←',right:'→',up:'↑',down:'↓'}[p.dir] || '●';
-                                                                return (
-                                                                    <div key={i} title={p.label}
-                                                                        className='flex-1 h-8 rounded-lg flex items-center justify-center text-sm font-bold bg-slate-900 border border-slate-800 text-slate-400 shadow-sm'>
-                                                                        {sym}
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                        <p className='text-xs text-slate-500 leading-relaxed'>
-                                                            When you press Record, follow the arrows on screen — turn your head slowly left, then right, then look up and gently down. The whole thing takes about 10 seconds.
+                                                    <div className='bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-2 shadow-inner'>
+                                                        <p className='text-xs font-bold text-slate-400 uppercase tracking-wider'>Front-Facing Photo Capture</p>
+                                                        <p className='text-xs text-slate-400 leading-relaxed'>
+                                                            Position your face in the center of the frame and look directly into the camera. Only a single front-facing image will be captured for Face ID enrollment.
                                                         </p>
                                                     </div>
                                                 )}
@@ -3337,9 +3343,9 @@ function CampusMapTab() {
                                                     <div className='flex items-start gap-3 bg-red-950/40 border border-red-900/40 rounded-2xl p-4 shadow-sm'>
                                                         <Icon name='alert-circle' className='w-4 h-4 text-red-400 shrink-0 mt-0.5'/>
                                                         <div>
-                                                            <p className='text-sm font-bold text-red-400'>Enrollment failed</p>
+                                                            <p className='text-sm font-bold text-red-400'>Capture failed</p>
                                                             <p className='text-xs text-red-400/80 mt-0.5 leading-relaxed'>{enrollFeedback}</p>
-                                                            <p className='text-xs text-slate-500 mt-1.5'>Try again — move your head more slowly and keep your face well-lit.</p>
+                                                            <p className='text-xs text-slate-500 mt-1.5'>Try again — look straight at the camera and ensure good lighting.</p>
                                                         </div>
                                                     </div>
                                                 )}
@@ -3359,8 +3365,8 @@ function CampusMapTab() {
                                                             </button>
                                                             <button type='button' onClick={startGuidedRecording}
                                                                 className='flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-lg shadow-indigo-900/30'>
-                                                                <Icon name='circle' className='w-3.5 h-3.5 fill-red-400 text-red-400'/>
-                                                                <span>{recordingPhase === 'failed' ? 'Record Again' : 'Start Recording'}</span>
+                                                                <Icon name='camera' className='w-4 h-4'/>
+                                                                <span>{recordingPhase === 'failed' ? 'Capture Again' : 'Capture Photo'}</span>
                                                             </button>
                                                         </>
                                                     ) : recordingPhase === 'countdown' ? (
@@ -3371,7 +3377,7 @@ function CampusMapTab() {
                                                             setRecordingPhase('failed');
                                                             setEnrollFeedback('Capture stopped before enrollment completed.');
                                                         }} className='flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-md shadow-red-900/20'>
-                                                            <Icon name='square' className='w-3.5 h-3.5 fill-white'/><span>Stop Early</span>
+                                                            <Icon name='square' className='w-3.5 h-3.5 fill-white'/><span>Cancel</span>
                                                         </button>
                                                     ) : null}
                                                 </div>

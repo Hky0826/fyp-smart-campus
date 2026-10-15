@@ -193,11 +193,19 @@ class DeviceUserRepository:
                     return None
                 from datetime import datetime
                 return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+            max_age_env = os.getenv("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS")
+            try:
+                max_age = int(max_age_env) if max_age_env is not None else 604800
+            except ValueError:
+                max_age = 604800
+
             return evaluate_access(
                 user_id=user_id, is_active=bool(row[0]), user_role_ids=user_roles,
                 allowed_role_ids=allowed_roles, node_id=effective_node,
                 policy_version=policy_version, policy_synced_at=parse(synced_at),
                 now=now, visitor_start=parse(row[1]), visitor_expiry=parse(row[2]),
+                max_age_seconds=max_age,
             )
         except (OSError, ValueError, TypeError, sqlite3.Error) as exc:
             logger.warning("Local authorization snapshot unavailable: %s", type(exc).__name__)

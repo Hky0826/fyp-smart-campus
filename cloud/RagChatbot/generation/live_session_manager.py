@@ -562,6 +562,12 @@ class GeminiLiveSession:
                             raw_query = args.get("query") or args.get("transcript") or self._transcript.strip()
                             call["transcript"] = str(raw_query or "").strip()
                             call["query"] = call["transcript"]
+                            if call["transcript"] and not self._transcript:
+                                self._transcript = call["transcript"]
+                                if on_transcript:
+                                    res = on_transcript(self._transcript)
+                                    if asyncio.iscoroutine(res):
+                                        await res
                             result = await on_tool_call(call)
                             answer_text = (
                                 result.get("answer")
@@ -608,6 +614,8 @@ class GeminiLiveSession:
                             await res
 
                 elif event_type == "turn_complete":
+                    if event.get("pre_tool"):
+                        continue
                     self._greeting_in_progress = False
                     self._transcript = ""
                     self._output_transcript = ""
@@ -905,7 +913,7 @@ class GeminiLiveSession:
                         # tool call. Queue transcription first so the backend never
                         # runs with stale or empty text.
                         if content is not None:
-                            input_transcription = getattr(content, "input_transcription", None)
+                            input_transcription = getattr(content, "input_transcription", None) or getattr(content, "interim_input_transcription", None)
                             if input_transcription is not None and getattr(input_transcription, "text", None):
                                 logger.info(
                                     "Gemini Live input transcription received chars=%d",

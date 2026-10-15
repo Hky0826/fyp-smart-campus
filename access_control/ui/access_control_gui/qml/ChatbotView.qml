@@ -67,6 +67,20 @@ Item {
         }
     }
 
+    onTranscribedTextChanged: {
+        if (transcribedText && transcribedText.trim().length > 0) {
+            history.userScrolledUp = false
+            history.scrollToBottom()
+        }
+    }
+
+    onPartialTextChanged: {
+        if (partialText && partialText.trim().length > 0) {
+            history.userScrolledUp = false
+            history.scrollToBottom()
+        }
+    }
+
     function getInitials(name) {
         if (!name || name === "Visitor") return "AT"
         var parts = name.trim().split(" ")
@@ -546,8 +560,12 @@ Item {
                         id: inFlightUserBubble
                         visible: root.transcribedText.trim().length > 0 && !root.isUserTextCommitted(root.transcribedText)
                         Layout.alignment: Qt.AlignRight
+                        Layout.preferredWidth: visible ? Math.min(history.width * 0.86, 500) : 0
+                        implicitWidth: Math.min(history.width * 0.86, 500)
                         width: Math.min(history.width * 0.86, 500)
+                        Layout.preferredHeight: visible ? (userInFlightCol.implicitHeight + 20) : 0
                         implicitHeight: userInFlightCol.implicitHeight + 20
+                        height: implicitHeight
                         radius: 12
                         gradient: Gradient {
                             orientation: Gradient.Horizontal
@@ -584,8 +602,13 @@ Item {
                     Rectangle {
                         id: inlineThinkingBubble
                         visible: (root.ragStatus.length > 0 || (root.busy && root.partialText.trim().length === 0)) && root.partialText.trim().length === 0
+                        Layout.alignment: Qt.AlignLeft
+                        Layout.preferredWidth: visible ? Math.min(history.width * 0.75, 320) : 0
+                        implicitWidth: Math.min(history.width * 0.75, 320)
                         width: Math.min(history.width * 0.75, 320)
+                        Layout.preferredHeight: visible ? 36 : 0
                         implicitHeight: 36
+                        height: 36
                         radius: 10
                         color: "#f0fdf4" // soft emerald-50
                         border.width: 1
@@ -644,8 +667,12 @@ Item {
                         id: inFlightAssistantBubble
                         visible: root.partialText.trim().length > 0 && !root.isAssistantTextCommitted(root.partialText)
                         Layout.alignment: Qt.AlignLeft
+                        Layout.preferredWidth: visible ? Math.min(history.width * 0.86, 500) : 0
+                        implicitWidth: Math.min(history.width * 0.86, 500)
                         width: Math.min(history.width * 0.86, 500)
+                        Layout.preferredHeight: visible ? (botInFlightCol.implicitHeight + 20) : 0
                         implicitHeight: botInFlightCol.implicitHeight + 20
+                        height: implicitHeight
                         radius: 12
                         color: "#ffffff"
                         border.width: 1
@@ -716,10 +743,10 @@ Item {
                 readonly property var qrSession: (root.currentNavigation && root.currentNavigation.qr_session) ? root.currentNavigation.qr_session : null
                 readonly property string qrUrl: {
                     if (qrSession) {
-                        return qrSession.qr_code_file_url || qrSession.qr_code_local_url || qrSession.qr_code_url || qrSession.qr_code_data_url || ""
+                        return qrSession.qr_code_data_url || qrSession.qr_code_url || qrSession.qr_code_local_url || qrSession.qr_code_file_url || ""
                     }
                     if (root.currentNavigation) {
-                        return root.currentNavigation.qr_code_file_url || root.currentNavigation.qr_code_local_url || root.currentNavigation.qr_code_url || root.currentNavigation.qr_code_data_url || ""
+                        return root.currentNavigation.qr_code_data_url || root.currentNavigation.qr_code_url || root.currentNavigation.qr_code_local_url || root.currentNavigation.qr_code_file_url || ""
                     }
                     return ""
                 }
@@ -730,7 +757,7 @@ Item {
                     if (visualisations.length > 0) {
                         var idx = Math.min(Math.max(0, activeFloorIndex), visualisations.length - 1)
                         var v = visualisations[idx]
-                        return v.file_url || v.local_image_url || v.image_url || ""
+                        return v.image_url || v.local_image_url || v.file_url || ""
                     }
                     return ""
                 }

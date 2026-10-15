@@ -33,6 +33,10 @@ class TrackIdentity:
     def is_decided(self) -> bool:
         return self.status in ("recognized", "denied")
 
+    @property
+    def is_denied(self) -> bool:
+        return self.status == "denied"
+
     def bind_match(
         self,
         user_id: str,
@@ -53,16 +57,15 @@ class TrackIdentity:
         self.status = "recognized"
         self.reason = reason
         self.cached_payload = cached_payload
-        if self.first_recognized_at is None:
-            self.first_recognized_at = timestamp
         self.last_seen_at = timestamp
+        if self.first_recognized_at is None and timestamp > 0:
+            self.first_recognized_at = timestamp
         logger.info(
-            "Bound track ID %s to identity '%s' (user_id=%s, similarity=%.4f, decision=%s)",
+            "Bound track ID %s to identity '%s' (user_id=%s, similarity=%.4f)",
             self.track_id,
             self.identity,
             self.user_id,
             self.similarity,
-            self.access_decision,
         )
 
     def bind_denial(
@@ -72,13 +75,14 @@ class TrackIdentity:
         cached_payload: Optional[Dict[str, Any]] = None,
         timestamp: float = 0.0,
     ) -> None:
-        """Bind terminal denial decision to this track to prevent redundant re-matching."""
+        """Bind denial reason and access decision to this track."""
         self.access_decision = "DENIED"
         self.status = "denied"
         self.reason = reason
         self.similarity = float(similarity)
         self.cached_payload = cached_payload
         self.last_seen_at = timestamp
+        self.denied_at = timestamp
         logger.info(
             "Bound track ID %s to denial: reason='%s' (similarity=%.4f)",
             self.track_id,
@@ -86,9 +90,13 @@ class TrackIdentity:
             self.similarity,
         )
 
+    def touch(self, timestamp: float) -> None:
+        """Update last seen timestamp."""
+        self.last_seen_at = timestamp
+
 
 class IdentityManager:
-    """Manages persistent track-to-identity bindings over track lifecycles."""
+    """Manages identity associations for active tracks."""
 
     def __init__(self) -> None:
         self._identities: Dict[int, TrackIdentity] = {}
@@ -97,13 +105,17 @@ class IdentityManager:
         """Clear all active identities."""
         self._identities.clear()
 
-    def get_identity(self, track_id: int) -> TrackIdentity:
-        """Fetch or create identity record for a given track ID."""
+    def get_identity(self, track_id: int) -> Optional[TrackIdentity]:
+        """Get identity record for track if it exists."""
+        return self._identities.get(track_id)
+
+    def get_or_create(self, track_id: int, timestamp: float = 0.0) -> TrackIdentity:
+        """Get existing identity record or create a new one."""
         if track_id not in self._identities:
-            self._identities[track_id] = TrackIdentity(track_id=track_id)
+            self._identities[track_id] = TrackIdentity(track_id=track_id, last_seen_at=timestamp)
         return self._identities[track_id]
 
-    def associate_identity(
+    def bind_match(
         self,
         track_id: int,
         user_id: str,
@@ -115,8 +127,8 @@ class IdentityManager:
         cached_payload: Optional[Dict[str, Any]] = None,
         timestamp: float = 0.0,
     ) -> TrackIdentity:
-        """Associate recognized identity and access decision with track ID."""
-        record = self.get_identity(track_id)
+        """Bind recognized user identity to track."""
+        record = self.get_or_create(track_id, timestamp=timestamp)
         record.bind_match(
             user_id=user_id,
             identity=identity,
@@ -129,7 +141,7 @@ class IdentityManager:
         )
         return record
 
-    def associate_denial(
+    def bind_denial(
         self,
         track_id: int,
         reason: str,
@@ -137,8 +149,8 @@ class IdentityManager:
         cached_payload: Optional[Dict[str, Any]] = None,
         timestamp: float = 0.0,
     ) -> TrackIdentity:
-        """Associate terminal denial with track ID."""
-        record = self.get_identity(track_id)
+        """Bind denial to track."""
+        record = self.get_or_create(track_id, timestamp=timestamp)
         record.bind_denial(
             reason=reason,
             similarity=similarity,
@@ -147,7 +159,10 @@ class IdentityManager:
         )
         return record
 
-    def should_recognize(self, track_id: int) -> bool:
+    associate_identity = bind_match
+    associate_denial = bind_denial
+
+    def should_recognize(self, track_id: int, timestamp: float = 0.0) -> bool:
         """Check if track requires recognition.
 
         Avoid repeatedly running face recognition once a track has been recognized/granted.

@@ -219,6 +219,7 @@ class PresenceDetector:
         frame_shape: tuple[int, int] = (720, 1280),
         is_chat_active: bool = False,
         is_auth_transition: bool = False,
+        is_verifying: bool = False,
         timestamp: float | None = None,
     ) -> PresenceStatus:
         """Process one camera frame through the presence state machine."""
@@ -265,7 +266,7 @@ class PresenceDetector:
         selected_candidate = self._select_candidate(valid_candidates)
 
         # State machine update
-        status = self._update_dwell_state(selected_candidate, now)
+        status = self._update_dwell_state(selected_candidate, now, is_verifying=is_verifying)
         return status
 
     def _evaluate_candidates(
@@ -376,6 +377,7 @@ class PresenceDetector:
         self,
         candidate: Optional[PresenceCandidate],
         now: float,
+        is_verifying: bool = False,
     ) -> PresenceStatus:
         if candidate is not None:
             # Case 1: Starting dwell on new candidate
@@ -444,6 +446,21 @@ class PresenceDetector:
             # Case 3: Same candidate continuing dwell
             self._last_seen_time = now
             self._candidate_bbox = candidate.bbox
+            if is_verifying:
+                # When verifying access control (recognizing face / checking PAD),
+                # hold dwell progress at 0.0 and update dwell_start_time to now.
+                self._dwell_start_time = now
+                self._state = PresenceState.PRESENCE_DETECTED
+                return PresenceStatus(
+                    state=self._state,
+                    dwell_progress=0.0,
+                    dwell_seconds=0.0,
+                    candidate_bbox=self._candidate_bbox,
+                    candidate_track_id=self._candidate_track_id,
+                    attention_valid=True,
+                    intent_detected=False,
+                )
+
             assert self._dwell_start_time is not None
             dwell_time = max(0.0, now - self._dwell_start_time)
             progress = min(1.0, dwell_time / max(self.config.dwell_seconds, 1e-6))
@@ -499,9 +516,14 @@ class PresenceDetector:
             missing_elapsed = now - self._last_seen_time
             if missing_elapsed <= self.config.grace_period_seconds:
                 # Within grace period: maintain dwell progress
-                assert self._dwell_start_time is not None
-                dwell_time = max(0.0, now - self._dwell_start_time)
-                progress = min(1.0, dwell_time / max(self.config.dwell_seconds, 1e-6))
+                if is_verifying:
+                    self._dwell_start_time = now
+                    dwell_time = 0.0
+                    progress = 0.0
+                else:
+                    assert self._dwell_start_time is not None
+                    dwell_time = max(0.0, now - self._dwell_start_time)
+                    progress = min(1.0, dwell_time / max(self.config.dwell_seconds, 1e-6))
                 return PresenceStatus(
                     state=self._state,
                     dwell_progress=progress,

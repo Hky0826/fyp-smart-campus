@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 
-MAX_POLICY_AGE_SECONDS = 300
+import os
+
+MAX_POLICY_AGE_SECONDS = int(os.getenv("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS", "300"))
 
 
 @dataclass(frozen=True)
@@ -62,7 +64,8 @@ def evaluate_access(
         age = (current - synced).total_seconds()
     except (AttributeError, TypeError, ValueError, OverflowError):
         return AccessDecision(False, "malformed_policy_timestamp", node_id, policy_version)
-    if age < 0 or age > max(1, int(max_age_seconds)):
+    max_age_val = int(max_age_seconds)
+    if age < 0 or (max_age_val > 0 and age > max_age_val):
         return AccessDecision(False, "stale_policy", node_id, policy_version)
 
     try:

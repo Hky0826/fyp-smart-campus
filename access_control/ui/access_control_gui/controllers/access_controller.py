@@ -526,8 +526,19 @@ class AccessController(QObject):
 
     @Slot(dict)
     def _on_audio_response(self, payload: dict[str, Any]) -> None:
-        if not self._chat_expanded or not self._session:
+        if not self._chat_expanded:
             return
+        if not self._session:
+            self._state = {
+                **(self._state or {}),
+                "active_chat_session": {
+                    "session_id": "guest_session",
+                    "full_name": "Visitor",
+                    "presence_state": "OWNER_PRESENT",
+                    "conversation_history": list(self._live_history),
+                },
+                "chat_recoverable": False,
+            }
         if payload.get("intent") == "EXIT" or payload.get("route") == "EXIT":
             logger.info("Chatbot EXIT intent received in audio response, exiting chat.")
             self.exitChat()

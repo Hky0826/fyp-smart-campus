@@ -7,6 +7,7 @@ Item {
     property int videoWidth: 0
     property int videoHeight: 0
     property var boxes: []
+    property bool preserveAspectFit: false
 
     x: minimized ? 10 : 0
     y: minimized ? 10 : 0
@@ -33,7 +34,7 @@ Item {
         anchors.fill: parent
         source: root.sourceUrl
         cache: false
-        fillMode: Image.PreserveAspectCrop
+        fillMode: root.preserveAspectFit ? Image.PreserveAspectFit : Image.PreserveAspectCrop
         mirror: true
         asynchronous: false
         smooth: true
@@ -74,7 +75,9 @@ Item {
         var y1 = Number(box[1])
         var x2 = Number(box[2])
         var y2 = Number(box[3])
-        var scale = Math.max(root.width / root.videoWidth, root.height / root.videoHeight)
+        var scale = root.preserveAspectFit
+            ? Math.min(root.width / root.videoWidth, root.height / root.videoHeight)
+            : Math.max(root.width / root.videoWidth, root.height / root.videoHeight)
         var drawnWidth = root.videoWidth * scale
         var drawnHeight = root.videoHeight * scale
         var offsetX = (root.width - drawnWidth) / 2

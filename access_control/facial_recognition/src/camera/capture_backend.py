@@ -19,6 +19,8 @@ DEFAULT_SWAP_RB = os.getenv("EDGE_CAMERA_SWAP_RB", "false").strip().lower() in {
 DEFAULT_EXPOSURE_VALUE = float(os.getenv("EDGE_CAMERA_EV", "1.2"))
 DEFAULT_BRIGHTNESS = float(os.getenv("EDGE_CAMERA_BRIGHTNESS", "0.1"))
 DEFAULT_CONTRAST = float(os.getenv("EDGE_CAMERA_CONTRAST", "1.0"))
+DEFAULT_AE_METERING_MODE = int(os.getenv("EDGE_CAMERA_AE_METERING_MODE", "1"))  # 1 = Spot metering
+DEFAULT_AE_EXPOSURE_MODE = int(os.getenv("EDGE_CAMERA_AE_EXPOSURE_MODE", "2"))  # 2 = Long exposure mode
 
 try:
     import cv2
@@ -116,6 +118,8 @@ class Picamera2Capture:
         exposure_value: float = DEFAULT_EXPOSURE_VALUE,
         brightness: float = DEFAULT_BRIGHTNESS,
         contrast: float = DEFAULT_CONTRAST,
+        ae_metering_mode: int = DEFAULT_AE_METERING_MODE,
+        ae_exposure_mode: int = DEFAULT_AE_EXPOSURE_MODE,
     ) -> None:
         self.camera_idx = int(camera_idx)
         self.width = int(width)
@@ -126,6 +130,8 @@ class Picamera2Capture:
         self.exposure_value = float(exposure_value)
         self.brightness = float(brightness)
         self.contrast = float(contrast)
+        self.ae_metering_mode = int(ae_metering_mode)
+        self.ae_exposure_mode = int(ae_exposure_mode)
         self._picam2 = None
         self._opened = False
         self._camera_model = "unknown"
@@ -155,6 +161,10 @@ class Picamera2Capture:
                 controls["Brightness"] = self.brightness
             if self.contrast != 1.0:
                 controls["Contrast"] = self.contrast
+            if self.ae_metering_mode is not None:
+                controls["AeMeteringMode"] = self.ae_metering_mode
+            if self.ae_exposure_mode is not None:
+                controls["AeExposureMode"] = self.ae_exposure_mode
 
             video_config = self._picam2.create_video_configuration(
                 main={"format": self.pixel_format, "size": (self.width, self.height)},

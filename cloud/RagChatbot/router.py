@@ -714,6 +714,8 @@ async def live_websocket_chat(
         if active:
             try:
                 server_ts = cloud_timing.now_iso()
+                if transcript:
+                    await on_transcript(transcript)
                 await websocket.send_json({
                     "event": "rag_status",
                     "data": {

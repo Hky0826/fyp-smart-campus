@@ -395,3 +395,129 @@ def test_live_session_handles_two_consecutive_turns_and_duplicate_call_shapes():
     calls, audio = asyncio.run(run_test())
     assert calls == ["question 1", "question 2"]
     assert audio == [b"answer-1", b"answer-2"]
+
+
+def test_receive_events_ignores_pre_tool_turn_complete():
+    """Verify that full-duplex receive_events loop ignores pre-tool turn_complete to prevent premature turn commit."""
+    class FakeConnection:
+        async def __aenter__(self):
+            return FakeSession()
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class FakeSession:
+        async def send_realtime_input(self, **kwargs):
+            pass
+
+        async def send_tool_response(self, **kwargs):
+            pass
+
+        async def receive(self):
+            # 1. User input transcript
+            yield SimpleNamespace(
+                server_content=SimpleNamespace(
+                    input_transcription=SimpleNamespace(text="where is the library"),
+                    output_transcription=None,
+                    model_turn=None,
+                    interrupted=False,
+                    turn_complete=False,
+                ),
+                tool_call=None,
+                error=None,
+            )
+            # 2. Tool call with pre_tool turn_complete
+            yield SimpleNamespace(
+                server_content=SimpleNamespace(
+                    input_transcription=None,
+                    output_transcription=None,
+                    model_turn=None,
+                    interrupted=False,
+                    turn_complete=True,
+                ),
+                tool_call=SimpleNamespace(
+                    function_calls=[
+                        SimpleNamespace(
+                            name="process_campus_request",
+                            id="call_1",
+                            args={"query": "where is the library"},
+                        )
+                    ]
+                ),
+                error=None,
+            )
+            # 3. Output text chunk
+            yield SimpleNamespace(
+                server_content=SimpleNamespace(
+                    input_transcription=None,
+                    output_transcription=SimpleNamespace(text="The library is in Building 3."),
+                    model_turn=None,
+                    interrupted=False,
+                    turn_complete=False,
+                ),
+                tool_call=None,
+                error=None,
+            )
+            # 4. Final actual turn_complete
+            yield SimpleNamespace(
+                server_content=SimpleNamespace(
+                    input_transcription=None,
+                    output_transcription=None,
+                    model_turn=None,
+                    interrupted=False,
+                    turn_complete=True,
+                ),
+                tool_call=None,
+                error=None,
+            )
+
+    class FakeClient:
+        def __init__(self):
+            self.aio = SimpleNamespace(live=SimpleNamespace(connect=lambda **kw: FakeConnection()))
+
+    async def run():
+        with patch("RagChatbot.generation.live_session_manager.genai.Client", return_value=FakeClient()):
+            session = GeminiLiveSession()
+            turn_completed_count = 0
+            transcripts = []
+            output_chunks = []
+
+            async def on_turn_complete():
+                nonlocal turn_completed_count
+                turn_completed_count += 1
+
+            async def on_tool_call(call):
+                return {"status": "ok", "response_text": "Library info"}
+
+            async def on_transcript(t):
+                transcripts.append(t)
+
+            async def on_output_transcript(t):
+                output_chunks.append(t)
+
+            # Start receive_events task
+            task = asyncio.create_task(
+                session.receive_events(
+                    on_transcript=on_transcript,
+                    on_audio=lambda data: None,
+                    on_tool_call=on_tool_call,
+                    on_output_transcript=on_output_transcript,
+                    on_turn_complete=on_turn_complete,
+                )
+            )
+            # Allow events to process
+            await asyncio.sleep(0.15)
+            await session.close()
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+            return turn_completed_count, transcripts, output_chunks
+
+    turn_completed_count, transcripts, output_chunks = asyncio.run(run())
+    assert turn_completed_count == 1, f"Expected exactly 1 turn_complete, got {turn_completed_count}"
+    assert "where is the library" in transcripts
+    assert "The library is in Building 3." in output_chunks
+

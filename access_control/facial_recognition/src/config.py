@@ -276,9 +276,15 @@ class AccessControlConfig(RuntimeConfig):
     snapshot_enabled: bool = _bool_env("EDGE_ACCESS_SNAPSHOT_ENABLED", False)
     snapshot_dir: Path = Path(_env_str("EDGE_ACCESS_SNAPSHOT_DIR", None, str(Path.home() / ".smart-campus-edge" / "snapshots")))
     snapshot_retention_days: int = _int_env("EDGE_ACCESS_SNAPSHOT_RETENTION_DAYS", 7)
-    pad_model_path: Path = Path(_env_str("EDGE_ACCESS_PAD_MODEL_PATH", None, ""))
-    pad_model_version: str = _env_str("EDGE_ACCESS_PAD_MODEL_VERSION", None, "")
+    pad_model_path: Path = _resolve_model_path(
+        _env_str("EDGE_ACCESS_PAD_MODEL_PATH", None, str(MODEL_ROOT / "access_control" / "2.7_80x80_MiniFASNetV2.onnx")),
+        MODEL_ROOT / "access_control" / "2.7_80x80_MiniFASNetV2.onnx",
+    )
+    pad_model_version: str = _env_str("EDGE_ACCESS_PAD_MODEL_VERSION", None, "minifasnet-v2")
     pad_required: bool = _bool_env("EDGE_ACCESS_PAD_REQUIRED", os.getenv("APP_ENV", "development").lower() == "production")
+    pad_threshold: float = _float_env("EDGE_ACCESS_PAD_THRESHOLD", 0.75, "ACCESS_PAD_THRESHOLD")
+    pad_scale: float = _float_env("EDGE_ACCESS_PAD_SCALE", 2.7, "ACCESS_PAD_SCALE")
+    pad_smooth_frames: int = _int_env("EDGE_ACCESS_PAD_SMOOTH_FRAMES", 3, "ACCESS_PAD_SMOOTH_FRAMES")
     presence_activation_enabled: bool = _bool_env("EDGE_PRESENCE_ACTIVATION_ENABLED", True, "PRESENCE_ACTIVATION_ENABLED")
     presence_dwell_seconds: float = _float_env("EDGE_PRESENCE_DWELL_SECONDS", 3.0, "PRESENCE_DWELL_SECONDS")
     presence_detection_grace_ms: int = _int_env("EDGE_PRESENCE_DETECTION_GRACE_MS", 400, "PRESENCE_DETECTION_GRACE_MS")

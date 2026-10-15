@@ -691,7 +691,7 @@ def create_kiosk_router(
         frame = await _decode_upload(file)
         try:
             pipeline = access_pipeline()
-            result = pipeline.describe_faces(frame, include_embeddings=True)
+            result = pipeline.describe_faces(frame, include_embeddings=True, include_pad=True)
         except Exception as exc:
             logger.exception("Kiosk chatbot owner verification failed")
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -707,9 +707,22 @@ def create_kiosk_router(
         if owner_face is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No usable face detected.")
 
+        if getattr(pipeline.config, "require_liveness", True) or getattr(pipeline.config, "pad_required", False):
+            if owner_face.get("pad_state") == "spoof":
+                logger.warning("Chatbot owner verification rejected: PAD liveness failed")
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Liveness check failed.")
+
         owner_embedding = owner_face["embedding"]
         owner_track_id = str(owner_face["track_id"]) if owner_face.get("track_id") is not None else None
-        token = _try_issue_registered_token(pipeline, owner_embedding, runtime_config())
+        pad_score = float(owner_face.get("pad_score") or 0.0)
+        pad_model_version = str(owner_face.get("pad_model_version") or "minifasnet-v2")
+        token = _try_issue_registered_token(
+            pipeline,
+            owner_embedding,
+            runtime_config(),
+            pad_score=pad_score,
+            pad_model_version=pad_model_version,
+        )
         try:
             pipeline.notify_chat_started()
         except Exception:
@@ -1149,7 +1162,13 @@ def _first_face_with_embedding(result: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _try_issue_registered_token(pipeline: Any, owner_embedding: np.ndarray, config: RuntimeConfig) -> EdgeAuthToken | None:
+def _try_issue_registered_token(
+    pipeline: Any,
+    owner_embedding: np.ndarray,
+    config: RuntimeConfig,
+    pad_score: float = 0.0,
+    pad_model_version: str = "minifasnet-v2",
+) -> EdgeAuthToken | None:
     try:
         templates = pipeline.repository.load_templates()
         match = pipeline.matcher.match(
@@ -1181,8 +1200,15 @@ def _try_issue_registered_token(pipeline: Any, owner_embedding: np.ndarray, conf
         allow_insecure_loopback=config.allow_insecure_loopback,
     )
     try:
-        token = token_client.issue_token(match.user_id)
-        logger.info("Chatbot JWT issued for user_id=%s with recognition_score=%.4f", match.user_id, match.similarity)
+        if pad_score > 0.0:
+            token = token_client.issue_token(
+                match.user_id,
+                pad_score=pad_score,
+                pad_model_version=pad_model_version,
+            )
+        else:
+            token = token_client.issue_token(match.user_id)
+        logger.info("Chatbot JWT issued for user_id=%s with recognition_score=%.4f pad_score=%.4f", match.user_id, match.similarity, pad_score)
         return token
     except Exception as exc:
         logger.warning("Chatbot token issuance failed for user_id=%s: %s", match.user_id, exc)
@@ -1192,9 +1218,11 @@ def _try_issue_registered_token(pipeline: Any, owner_embedding: np.ndarray, conf
 def _detect_owner_presence(
     pipeline: Any,
     frame: np.ndarray,
-    owner_embedding: np.ndarray,
+    owner_embedding: Optional[np.ndarray],
     owner_track_id: Optional[str] = None,
 ) -> tuple[bool, Optional[int], list[list[int]]]:
+    if owner_embedding is None:
+        return False, None, []
     verify_presence_func = getattr(pipeline, "verify_owner_presence", None)
     if callable(verify_presence_func):
         try:
