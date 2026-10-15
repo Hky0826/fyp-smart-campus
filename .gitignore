@@ -138,6 +138,11 @@ data/
 *.npy
 *.pkl
 *.pickle
+*.pth
+*.pt
+*.bin
+*.safetensors
+*.tflite
 cloud/models/
 cloud/dashboard/backend/app/facial_recognition/models/
 access_control/facial_recognition/models/
@@ -150,6 +155,15 @@ access_control/test/eval_framework/data/
 access_control/test/eval_framework/results/
 edgeface
 
+# Sample/scratch test images and media
+sample_*.jpg
+sample_*.jpeg
+sample_*.png
+*.mp4
+*.avi
+*.mov
+*.mkv
+
 # ==============================================================================
 # Application Uploads & Generated Visualizations
 # ==============================================================================
@@ -161,12 +175,37 @@ cloud/dashboard/backend/app/static/uploads/
 runtime-data/
 
 # ==============================================================================
+# Academic Documents, Presentations & Office Files (Non-code)
+# ==============================================================================
+*.pdf
+*.doc
+*.docx
+*.ppt
+*.pptx
+*.xls
+*.xlsx
+*.csv
+
+# ==============================================================================
+# Evaluation, Test & Benchmark Outputs
+# ==============================================================================
+outputs/
+**/outputs/
+reports/
+**/reports/
+test-results/
+benchmark_results/
+.pytest-tmp/
+
+# ==============================================================================
 # Project Work, Notes & Scratch Directories
 # ==============================================================================
-*.docx
 AGENTS.md
 issues*.md
-prompt.md
+prompt*.md
+instructions*.md
+notes*.md
+todo*.md
 pytest.ini
 
 documents/
@@ -175,6 +214,7 @@ floorplan/
 graphify-out/
 scratch/
 presentation_assets/
+shitz/
 
 scripts/
 !scripts/deploy_cloud_run.ps1
