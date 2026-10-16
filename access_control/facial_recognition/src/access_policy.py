@@ -14,7 +14,21 @@ from typing import Iterable, Optional
 
 import os
 
-MAX_POLICY_AGE_SECONDS = int(os.getenv("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS", "300"))
+DEFAULT_MAX_POLICY_AGE_SECONDS = 300
+# Keep this name for callers that import the default directly.
+MAX_POLICY_AGE_SECONDS = DEFAULT_MAX_POLICY_AGE_SECONDS
+
+
+def configured_max_policy_age_seconds() -> int | None:
+    """Return the supported override, or None when it is malformed/unsafe."""
+    value = os.getenv("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS")
+    if value is None:
+        return DEFAULT_MAX_POLICY_AGE_SECONDS
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds > 0 else None
 
 
 @dataclass(frozen=True)
@@ -43,7 +57,7 @@ def evaluate_access(
     now: datetime | None = None,
     visitor_start: datetime | None = None,
     visitor_expiry: datetime | None = None,
-    max_age_seconds: int = MAX_POLICY_AGE_SECONDS,
+    max_age_seconds: int | None = None,
 ) -> AccessDecision:
     """Evaluate a local policy snapshot and return an auditable decision.
 
@@ -64,8 +78,13 @@ def evaluate_access(
         age = (current - synced).total_seconds()
     except (AttributeError, TypeError, ValueError, OverflowError):
         return AccessDecision(False, "malformed_policy_timestamp", node_id, policy_version)
-    max_age_val = int(max_age_seconds)
-    if age < 0 or (max_age_val > 0 and age > max_age_val):
+    try:
+        max_age_val = configured_max_policy_age_seconds() if max_age_seconds is None else int(max_age_seconds)
+    except (TypeError, ValueError, OverflowError):
+        max_age_val = None
+    if max_age_val is None or max_age_val <= 0:
+        return AccessDecision(False, "invalid_policy_age_limit", node_id, policy_version)
+    if age < 0 or age > max_age_val:
         return AccessDecision(False, "stale_policy", node_id, policy_version)
 
     try:
@@ -97,7 +116,7 @@ def evaluate_access(
 class AccessPolicyEvaluator:
     """Compatibility wrapper for callers that prefer an object evaluator."""
 
-    def __init__(self, max_age_seconds: int = MAX_POLICY_AGE_SECONDS):
+    def __init__(self, max_age_seconds: int | None = None):
         self.max_age_seconds = max_age_seconds
 
     def evaluate(self, **kwargs) -> AccessDecision:

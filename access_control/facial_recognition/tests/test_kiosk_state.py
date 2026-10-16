@@ -34,7 +34,7 @@ class KioskStateTests(unittest.TestCase):
         pipeline = SimpleNamespace(
             repository=SimpleNamespace(load_templates=lambda: [template]),
             matcher=TemplateMatcher(0.8),
-            config=SimpleNamespace(recognition_threshold=0.8),
+            config=SimpleNamespace(recognition_threshold=0.8, pad_threshold=0.75),
         )
         config = RuntimeConfig(
             sync_cloud_url="https://cloud.example",
@@ -50,6 +50,7 @@ class KioskStateTests(unittest.TestCase):
                 pipeline,
                 np.array([1.0, 0.0], dtype=np.float32),
                 config,
+                pad_score=0.9,
             )
 
         self.assertIs(result, token)
@@ -58,8 +59,38 @@ class KioskStateTests(unittest.TestCase):
             "entry-gate-01",
             "device-secret",
             allow_insecure_loopback=True,
+            pad_threshold=0.75,
         )
-        token_client_type.return_value.issue_token.assert_called_once_with("42")
+        token_client_type.return_value.issue_token.assert_called_once_with("42", pad_score=0.9, pad_model_version="minifasnet-v2")
+
+    def test_chatbot_owner_matching_does_not_issue_token_without_valid_pad_score(self):
+        template = FaceTemplate(
+            user_id="42",
+            identity="42",
+            template_name="left_30",
+            embedding=np.array([1.0, 0.0], dtype=np.float32),
+        )
+        pipeline = SimpleNamespace(
+            repository=SimpleNamespace(load_templates=lambda: [template]),
+            matcher=TemplateMatcher(0.8),
+            config=SimpleNamespace(recognition_threshold=0.8, pad_threshold=0.75),
+        )
+        config = RuntimeConfig(
+            sync_cloud_url="https://cloud.example",
+            sync_device_id="entry-gate-01",
+            sync_device_secret="device-secret",
+        )
+
+        with patch("access_control.facial_recognition.src.api.kiosk.EdgeAuthTokenClient") as token_client_type:
+            result = _try_issue_registered_token(
+                pipeline,
+                np.array([1.0, 0.0], dtype=np.float32),
+                config,
+                pad_score=0.05,
+            )
+
+        self.assertIsNone(result)
+        token_client_type.assert_not_called()
 
     def test_retry_access_result_keeps_attempt_verifying(self):
         store = KioskStateStore(RuntimeConfig(sync_device_id="door-1", sync_device_name="Door 1"))

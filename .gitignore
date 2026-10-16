@@ -39,6 +39,10 @@ desktop.ini
 *.bak
 *.tmp
 *.temp
+tmp/
+**/tmp/
+temp/
+**/temp/
 
 # ==============================================================================
 # Python & Virtual Environments

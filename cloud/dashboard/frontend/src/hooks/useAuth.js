@@ -17,6 +17,10 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { authAxios } from '../services/api';
 
+const isCookieAuthenticatedPortal = typeof window !== 'undefined' &&
+    (window.location.port === '8000' || window.location.pathname.includes('/static/vite') || window.location.pathname.includes('/dashboard'));
+const storedAdminToken = localStorage.getItem('adminToken') || localStorage.getItem('token');
+
 /**
  * @typedef {Object} UseAuthReturn
  * @property {string|null}    token           - The current JWT token or null if not authenticated.
@@ -39,7 +43,8 @@ import { authAxios } from '../services/api';
  * @returns {UseAuthReturn}
  */
 export function useAuth({ onLoginSuccess, onLogout }) {
-    const [token, setToken]               = useState(localStorage.getItem('adminToken') || localStorage.getItem('token') || 'dashboard-admin-session');
+    const [token, setToken]               = useState(isCookieAuthenticatedPortal ? null : storedAdminToken);
+    const [isAuthenticated, setIsAuthenticated] = useState(!isCookieAuthenticatedPortal && Boolean(storedAdminToken?.includes('.')));
     const [adminName, setAdminName]       = useState(localStorage.getItem('adminName') || localStorage.getItem('full_name') || 'System Administrator');
     const [loginEmail, setLoginEmail]     = useState('');
     const [loginPassword, setLoginPassword] = useState('');
@@ -49,15 +54,41 @@ export function useAuth({ onLoginSuccess, onLogout }) {
      * Clears all authentication state from memory and localStorage.
      * Triggers `onLogout` callback to reset dependent app-level state.
      */
-    const handleLogout = () => {
+    const handleLogout = async () => {
+        if (isCookieAuthenticatedPortal) {
+            const csrf = document.cookie.split('; ').find(value => value.startsWith('csrf_token='));
+            try {
+                await axios.post('/api/auth/logout', {}, {
+                    withCredentials: true,
+                    headers: csrf ? { 'X-CSRF-Token': decodeURIComponent(csrf.split('=').slice(1).join('=')) } : {},
+                });
+            } catch (error) {
+                if (error.response?.status !== 401) {
+                    alert('Sign out could not be confirmed. Please try again.');
+                    return;
+                }
+            }
+        }
         setToken(null);
+        setIsAuthenticated(false);
         setAdminName('');
         localStorage.removeItem('adminToken');
+        localStorage.removeItem('token');
         localStorage.removeItem('adminName');
         setLoginEmail('');
         setLoginPassword('');
         if (onLogout) onLogout();
     };
+
+    useEffect(() => {
+        if (isCookieAuthenticatedPortal) {
+            axios.get('/api/auth/me', { withCredentials: true }).then(response => {
+                setAdminName(response.data.user?.full_name || 'System Administrator');
+                setIsAuthenticated(true);
+                if (onLoginSuccess) onLoginSuccess();
+            }).catch(() => setIsAuthenticated(false));
+        }
+    }, []);
 
     // Set up axios request interceptor (attach JWT), response interceptor (auto-logout on 401/403),
     // and cross-tab synchronization via `storage` event.
@@ -74,7 +105,7 @@ export function useAuth({ onLoginSuccess, onLogout }) {
 
         // Attach the Bearer token to every outgoing request
         const reqIntercept = authAxios.interceptors.request.use(config => {
-            const currentToken = localStorage.getItem('adminToken') || localStorage.getItem('token') || 'dashboard-admin-session';
+            const currentToken = localStorage.getItem('adminToken') || localStorage.getItem('token');
             if (currentToken) config.headers.Authorization = `Bearer ${currentToken}`;
             return config;
         });
@@ -84,9 +115,7 @@ export function useAuth({ onLoginSuccess, onLogout }) {
             response => response,
             error => {
                 if (error.response && error.response.status === 401) {
-                    if (localStorage.getItem('adminToken')) {
-                        handleLogout();
-                    }
+                    handleLogout();
                 }
                 return Promise.reject(error);
             }
@@ -103,6 +132,7 @@ export function useAuth({ onLoginSuccess, onLogout }) {
     // On token change: pre-fetch initial data and set up session expiry timer
     useEffect(() => {
         if (token) {
+            setIsAuthenticated(true);
             if (onLoginSuccess) onLoginSuccess();
 
             // Decode JWT payload to determine remaining session time if valid JWT
@@ -119,9 +149,9 @@ export function useAuth({ onLoginSuccess, onLogout }) {
                         }, timeRemainingMs);
                         return () => clearTimeout(autoLogoutTimer);
                     }
-                } catch (error) {
-                    console.warn('Non-standard token format; running in embedded portal session mode.');
-                }
+                } catch (error) { handleLogout(); }
+            } else {
+                handleLogout();
             }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -137,22 +167,30 @@ export function useAuth({ onLoginSuccess, onLogout }) {
     const handleLogin = async (e) => {
         e.preventDefault();
         try {
-            const res = await axios.post('http://localhost:5000/api/login', {
-                email: loginEmail,
-                password: loginPassword
-            });
-            setToken(res.data.token);
-            setAdminName(res.data.adminName);
-            localStorage.setItem('adminToken', res.data.token);
-            localStorage.setItem('adminName', res.data.adminName);
+            const csrf = document.cookie.split('; ').find(value => value.startsWith('csrf_token='));
+            const cookieHeaders = csrf ? { 'X-CSRF-Token': decodeURIComponent(csrf.split('=').slice(1).join('=')) } : {};
+            const res = isCookieAuthenticatedPortal
+                ? await axios.post('/api/auth/login-json', { email: loginEmail, password: loginPassword }, { withCredentials: true, headers: cookieHeaders })
+                : await axios.post('http://localhost:5000/api/login', { email: loginEmail, password: loginPassword });
+            const issuedToken = isCookieAuthenticatedPortal ? null : res.data.token;
+            setToken(issuedToken);
+            setIsAuthenticated(true);
+            setAdminName(isCookieAuthenticatedPortal ? res.data.full_name : res.data.adminName);
+            if (issuedToken) {
+                localStorage.setItem('adminToken', issuedToken);
+                localStorage.setItem('adminName', res.data.adminName);
+            } else if (onLoginSuccess) {
+                onLoginSuccess();
+            }
             setLoginError('');
         } catch (err) {
-            setLoginError(err.response?.data?.message || 'Server error.');
+            setLoginError(err.response?.data?.detail || err.response?.data?.message || 'Server error.');
         }
     };
 
     return {
         token,
+        isAuthenticated,
         adminName,
         loginEmail,
         setLoginEmail,

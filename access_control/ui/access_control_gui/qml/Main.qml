@@ -3,13 +3,18 @@ import QtQuick.Controls
 
 ApplicationWindow {
     id: root
-    width: 800
-    height: 480
+    readonly property bool isWindowed: (typeof windowedMode !== "undefined") ? Boolean(windowedMode) : false
+    width: (typeof simulatedWidth !== "undefined" && simulatedWidth > 0) ? simulatedWidth : 800
+    height: (typeof simulatedHeight !== "undefined" && simulatedHeight > 0) ? simulatedHeight : 480
+    minimumWidth: isWindowed ? 400 : 0
+    minimumHeight: isWindowed ? 240 : 0
     visible: true
-    visibility: Window.FullScreen
-    flags: Qt.Window | Qt.FramelessWindowHint
+    visibility: isWindowed ? Window.Windowed : Window.FullScreen
+    flags: isWindowed ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
     color: "#020617"
-    title: "Edge Access Control"
+    title: isWindowed
+           ? "Edge Access Control (Raspberry Pi Screen Simulation - " + width + "x" + height + ")"
+           : "Edge Access Control"
     readonly property bool showAccessGlow: !accessController.chatExpanded
                                            && (accessController.mode === "access-granted"
                                                || accessController.mode === "access-denied")
@@ -74,6 +79,13 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+Q"
         onActivated: Qt.quit()
+    }
+
+    Shortcut {
+        sequence: "F11"
+        onActivated: {
+            root.visibility = (root.visibility === Window.FullScreen) ? Window.Windowed : Window.FullScreen
+        }
     }
 
     Button {

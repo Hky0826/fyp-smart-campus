@@ -1,4 +1,5 @@
 import os
+import math
 from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy.engine import URL
@@ -37,7 +38,9 @@ class Settings:
     # accepting traffic.
     JWT_SECRET: str = os.getenv("JWT_SECRET", "")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+    MAPPING_JWT_SECRET: str = os.getenv("MAPPING_JWT_SECRET", "")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "120"))
+    EDGE_ACCESS_PAD_THRESHOLD: float = float(os.getenv("EDGE_ACCESS_PAD_THRESHOLD", "0.75"))
     APP_ENV: str = os.getenv("APP_ENV", "development").lower()
     DASHBOARD_ORIGINS: tuple[str, ...] = tuple(
         origin.strip() for origin in os.getenv("DASHBOARD_ORIGINS", "http://127.0.0.1:5173").split(",") if origin.strip()
@@ -59,6 +62,8 @@ class Settings:
     COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "true").lower() in {"1", "true", "yes", "on"}
 
     def validate_security(self) -> None:
+        if not math.isfinite(self.EDGE_ACCESS_PAD_THRESHOLD) or not 0.0 < self.EDGE_ACCESS_PAD_THRESHOLD <= 1.0:
+            raise RuntimeError("EDGE_ACCESS_PAD_THRESHOLD must be greater than 0 and no more than 1")
         secret = self.JWT_SECRET.strip()
         weak_values = {"", "secret", "change-me", "changeme", "password", "jwt_secret"}
         if secret.lower() in weak_values or len(secret) < 32:

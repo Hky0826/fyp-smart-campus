@@ -3,7 +3,8 @@ from datetime import datetime, timedelta, timezone
 from access_control.facial_recognition.src.access_policy import evaluate_access
 
 
-def test_policy_requires_explicit_role_and_fresh_snapshot():
+def test_policy_requires_explicit_role_and_fresh_snapshot(monkeypatch):
+    monkeypatch.delenv("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS", raising=False)
     now = datetime.now(timezone.utc)
     allowed = evaluate_access(
         user_id=7, is_active=True, user_role_ids=[2], allowed_role_ids=[2],
@@ -14,10 +15,27 @@ def test_policy_requires_explicit_role_and_fresh_snapshot():
         user_id=7, is_active=True, user_role_ids=[3], allowed_role_ids=[2],
         node_id=11, policy_version="v3", policy_synced_at=now, now=now,
     ).allowed
-    assert not evaluate_access(
+    stale = evaluate_access(
+        user_id=7, is_active=True, user_role_ids=[2], allowed_role_ids=[2],
+        node_id=11, policy_version="v3", policy_synced_at=now - timedelta(seconds=301), now=now,
+    )
+    assert not stale.allowed
+    assert stale.reason == "stale_policy"
+
+    monkeypatch.setenv("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS", "600")
+    assert evaluate_access(
         user_id=7, is_active=True, user_role_ids=[2], allowed_role_ids=[2],
         node_id=11, policy_version="v3", policy_synced_at=now - timedelta(seconds=301), now=now,
     ).allowed
+
+    for invalid_limit in ("not-a-number", "0", "-1"):
+        monkeypatch.setenv("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS", invalid_limit)
+        invalid = evaluate_access(
+            user_id=7, is_active=True, user_role_ids=[2], allowed_role_ids=[2],
+            node_id=11, policy_version="v3", policy_synced_at=now, now=now,
+        )
+        assert not invalid.allowed
+        assert invalid.reason == "invalid_policy_age_limit"
 
 
 def test_policy_enforces_visitor_window():
@@ -30,7 +48,7 @@ def test_policy_enforces_visitor_window():
     assert decision.reason == "visitor_window_not_started"
 
 
-def test_device_rbac_repository_evaluation():
+def test_device_rbac_repository_evaluation(monkeypatch):
     import tempfile
     from pathlib import Path
     from access_control.facial_recognition.src.face.database import DeviceUserRepository
@@ -60,6 +78,29 @@ def test_device_rbac_repository_evaluation():
         # User 10 (STAFF) should be allowed at node 100
         decision = repo.evaluate_access(user_id=10, node_id=100, now=now, device_id="gate-01")
         assert decision.allowed
+
+        # The repository uses the same secure 300-second default as the evaluator.
+        edge_db.save_policy_metadata(
+            node_id=100, policy_version="v1",
+            synced_at=(now - timedelta(seconds=301)).isoformat(), device_id="gate-01",
+        )
+        stale = repo.evaluate_access(user_id=10, node_id=100, now=now, device_id="gate-01")
+        assert not stale.allowed
+        assert stale.reason == "stale_policy"
+
+        # Deployments can deliberately choose a longer positive limit.
+        monkeypatch.setenv("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS", "600")
+        assert repo.evaluate_access(user_id=10, node_id=100, now=now, device_id="gate-01").allowed
+
+        # Invalid or nonpositive overrides fail closed rather than disabling the age check.
+        for invalid_limit in ("not-a-number", "0", "-1"):
+            monkeypatch.setenv("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS", invalid_limit)
+            invalid = repo.evaluate_access(user_id=10, node_id=100, now=now, device_id="gate-01")
+            assert not invalid.allowed
+            assert invalid.reason == "invalid_policy_age_limit"
+
+        monkeypatch.delenv("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS")
+        edge_db.save_policy_metadata(node_id=100, policy_version="v1", synced_at=now_iso, device_id="gate-01")
 
         # User 20 (STUDENT) should be denied at node 100
         decision = repo.evaluate_access(user_id=20, node_id=100, now=now, device_id="gate-01")

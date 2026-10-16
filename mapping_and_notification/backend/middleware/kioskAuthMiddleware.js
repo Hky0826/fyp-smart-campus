@@ -13,7 +13,7 @@
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET;
-const KIOSK_API_KEY = process.env.NAVIGATION_API_KEY || 'campus-nav-key';
+const KIOSK_API_KEY = process.env.NAVIGATION_API_KEY;
 
 const authenticateKioskAccess = (req, res, next) => {
     // 1. Check for JWT Bearer token
@@ -32,7 +32,7 @@ const authenticateKioskAccess = (req, res, next) => {
 
     // 2. Check for system API key
     const clientApiKey = req.headers['x-api-key'];
-    if (clientApiKey && clientApiKey === KIOSK_API_KEY) {
+    if (KIOSK_API_KEY && clientApiKey && clientApiKey === KIOSK_API_KEY) {
         req.apiKeyAuth = true;
         return next();
     }

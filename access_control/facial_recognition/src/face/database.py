@@ -15,7 +15,7 @@ import numpy as np
 
 from .matching import FaceTemplate, count_templates_by_user
 from ..utils.sync_key import generate_sync_key
-from ..access_policy import AccessDecision, evaluate_access
+from ..access_policy import AccessDecision, configured_max_policy_age_seconds, evaluate_access
 
 
 logger = logging.getLogger(__name__)
@@ -194,11 +194,7 @@ class DeviceUserRepository:
                 from datetime import datetime
                 return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
-            max_age_env = os.getenv("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS")
-            try:
-                max_age = int(max_age_env) if max_age_env is not None else 604800
-            except ValueError:
-                max_age = 604800
+            max_age = configured_max_policy_age_seconds()
 
             return evaluate_access(
                 user_id=user_id, is_active=bool(row[0]), user_role_ids=user_roles,

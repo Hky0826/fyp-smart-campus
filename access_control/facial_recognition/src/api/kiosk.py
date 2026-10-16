@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import math
 import threading
 import time
 import uuid
@@ -716,7 +717,8 @@ def create_kiosk_router(
         owner_track_id = str(owner_face["track_id"]) if owner_face.get("track_id") is not None else None
         pad_score = float(owner_face.get("pad_score") or 0.0)
         pad_model_version = str(owner_face.get("pad_model_version") or "minifasnet-v2")
-        token = _try_issue_registered_token(
+        token = await asyncio.to_thread(
+            _try_issue_registered_token,
             pipeline,
             owner_embedding,
             runtime_config(),
@@ -1193,21 +1195,23 @@ def _try_issue_registered_token(
     if not match.matched or not match.is_active or match.user_id is None:
         return None
 
+    pad_threshold = pipeline.config.pad_threshold
+    if isinstance(pad_score, bool) or not isinstance(pad_score, (int, float)) or not math.isfinite(pad_score) or not 0.0 <= pad_score <= 1.0 or pad_score < pad_threshold:
+        return None
+
     token_client = EdgeAuthTokenClient(
         config.sync_cloud_url,
         config.sync_device_id,
         config.sync_device_secret,
         allow_insecure_loopback=config.allow_insecure_loopback,
+        pad_threshold=pad_threshold,
     )
     try:
-        if pad_score > 0.0:
-            token = token_client.issue_token(
-                match.user_id,
-                pad_score=pad_score,
-                pad_model_version=pad_model_version,
-            )
-        else:
-            token = token_client.issue_token(match.user_id)
+        token = token_client.issue_token(
+            match.user_id,
+            pad_score=pad_score,
+            pad_model_version=pad_model_version,
+        )
         logger.info("Chatbot JWT issued for user_id=%s with recognition_score=%.4f pad_score=%.4f", match.user_id, match.similarity, pad_score)
         return token
     except Exception as exc:
