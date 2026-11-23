@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 MODULE_ROOT = PACKAGE_ROOT.parent  # access_control/
 MODEL_ROOT = PACKAGE_ROOT / "models"
-DEFAULT_CAMERA = "0"
+DEFAULT_CAMERA = "auto"
 
 
 def default_cloud_url() -> str:
@@ -243,14 +243,16 @@ class AccessControlConfig(RuntimeConfig):
     detection_threshold: float = _float_env("EDGE_ACCESS_DETECTION_THRESHOLD", 0.60, "ACCESS_YUNET_CONFIDENCE")
     recognition_threshold: float = _float_env("EDGE_ACCESS_RECOGNITION_THRESHOLD", 0.363, "ACCESS_SFACE_THRESHOLD")
     recognition_delay_seconds: float = _float_env("EDGE_ACCESS_RECOGNITION_DELAY_SECONDS", 1.0)
+    detector_max_dim: int = _int_env("EDGE_ACCESS_DETECTOR_MAX_DIM", 640)
     min_face_size: int = _int_env("EDGE_ACCESS_MIN_FACE_SIZE", 48, "ACCESS_MIN_FACE_SIZE")
     min_inter_eye_distance: float = _float_env("EDGE_ACCESS_MIN_INTER_EYE_DISTANCE", 18.0)
-    min_embedding_samples: int = _int_env("EDGE_ACCESS_MIN_EMBEDDING_SAMPLES", 3, "ACCESS_MIN_EMBEDDING_SAMPLES")
+    min_embedding_samples: int = _int_env("EDGE_ACCESS_MIN_EMBEDDING_SAMPLES", 2, "ACCESS_MIN_EMBEDDING_SAMPLES")
     max_embedding_samples: int = _int_env("EDGE_ACCESS_MAX_EMBEDDING_SAMPLES", 15, "ACCESS_MAX_EMBEDDING_SAMPLES")
     embedding_outlier_threshold: float = _float_env("EDGE_ACCESS_EMBEDDING_OUTLIER_THRESHOLD", 0.25, "ACCESS_EMBEDDING_OUTLIER_THRESHOLD")
     candidate_consistency_ratio: float = _float_env("EDGE_ACCESS_CANDIDATE_CONSISTENCY_RATIO", 0.65, "ACCESS_CANDIDATE_CONSISTENCY_RATIO")
-    min_stable_frames: int = _int_env("EDGE_ACCESS_MIN_STABLE_FRAMES", 5, "ACCESS_MIN_STABLE_FRAMES")
-    min_stable_duration_ms: int = _int_env("EDGE_ACCESS_MIN_STABLE_DURATION_MS", 250, "ACCESS_MIN_STABLE_DURATION_MS")
+    min_stable_frames: int = _int_env("EDGE_ACCESS_MIN_STABLE_FRAMES", 2, "ACCESS_MIN_STABLE_FRAMES")
+    min_stable_duration_ms: int = _int_env("EDGE_ACCESS_MIN_STABLE_DURATION_MS", 100, "ACCESS_MIN_STABLE_DURATION_MS")
+    spoof_history_size: int = _int_env("EDGE_ACCESS_SPOOF_HISTORY_SIZE", 4)
     max_missed_frames: int = _int_env("EDGE_ACCESS_MAX_MISSED_FRAMES", 3, "ACCESS_MAX_MISSED_FRAMES")
     track_timeout_ms: int = _int_env("EDGE_ACCESS_TRACK_TIMEOUT_MS", 1000, "ACCESS_TRACK_TIMEOUT_MS")
     min_iou_for_match: float = _float_env("EDGE_ACCESS_MIN_IOU_FOR_MATCH", 0.30, "ACCESS_MIN_IOU_FOR_MATCH")
@@ -261,6 +263,10 @@ class AccessControlConfig(RuntimeConfig):
     detector_box_expansion_ratio: float = _float_env("EDGE_ACCESS_BOX_EXPANSION_RATIO", 0.0)
     require_liveness: bool = _bool_env("EDGE_ACCESS_REQUIRE_LIVENESS", True, "ACCESS_REQUIRE_LIVENESS")
     audio_enabled: bool = _bool_env("EDGE_ACCESS_AUDIO_ENABLED", True, "ACCESS_AUDIO_ENABLED")
+    door_relay_enabled: bool = _bool_env("EDGE_DOOR_RELAY_ENABLED", True, "ACCESS_DOOR_RELAY_ENABLED")
+    door_relay_pin: int = _int_env("EDGE_DOOR_RELAY_PIN", 17, "ACCESS_DOOR_RELAY_PIN")
+    door_unlock_duration_seconds: float = _float_env("EDGE_DOOR_UNLOCK_DURATION_SECONDS", 5.0, "ACCESS_DOOR_UNLOCK_DURATION_SECONDS")
+    door_relay_active_high: bool = _bool_env("EDGE_DOOR_RELAY_ACTIVE_HIGH", False, "ACCESS_DOOR_RELAY_ACTIVE_HIGH")
     audio_skip_model_setup: bool = _bool_env("EDGE_ACCESS_AUDIO_SKIP_MODEL_SETUP", False)
     audio_auth_timeout_seconds: float = _float_env("EDGE_ACCESS_AUDIO_AUTH_TIMEOUT_SECONDS", 45.0, "ACCESS_AUDIO_AUTH_TIMEOUT_SECONDS")
     audio_token_refresh_seconds: float = _float_env("EDGE_ACCESS_AUDIO_TOKEN_REFRESH_SECONDS", 600.0, "ACCESS_AUDIO_TOKEN_REFRESH_SECONDS")
@@ -270,9 +276,26 @@ class AccessControlConfig(RuntimeConfig):
     snapshot_enabled: bool = _bool_env("EDGE_ACCESS_SNAPSHOT_ENABLED", False)
     snapshot_dir: Path = Path(_env_str("EDGE_ACCESS_SNAPSHOT_DIR", None, str(Path.home() / ".smart-campus-edge" / "snapshots")))
     snapshot_retention_days: int = _int_env("EDGE_ACCESS_SNAPSHOT_RETENTION_DAYS", 7)
-    pad_model_path: Path = Path(_env_str("EDGE_ACCESS_PAD_MODEL_PATH", None, ""))
-    pad_model_version: str = _env_str("EDGE_ACCESS_PAD_MODEL_VERSION", None, "")
+    pad_model_path: Path = _resolve_model_path(
+        _env_str("EDGE_ACCESS_PAD_MODEL_PATH", None, str(MODEL_ROOT / "access_control" / "2.7_80x80_MiniFASNetV2.onnx")),
+        MODEL_ROOT / "access_control" / "2.7_80x80_MiniFASNetV2.onnx",
+    )
+    pad_model_version: str = _env_str("EDGE_ACCESS_PAD_MODEL_VERSION", None, "minifasnet-v2")
     pad_required: bool = _bool_env("EDGE_ACCESS_PAD_REQUIRED", os.getenv("APP_ENV", "development").lower() == "production")
+    pad_threshold: float = _float_env("EDGE_ACCESS_PAD_THRESHOLD", 0.75, "ACCESS_PAD_THRESHOLD")
+    pad_scale: float = _float_env("EDGE_ACCESS_PAD_SCALE", 2.7, "ACCESS_PAD_SCALE")
+    pad_smooth_frames: int = _int_env("EDGE_ACCESS_PAD_SMOOTH_FRAMES", 3, "ACCESS_PAD_SMOOTH_FRAMES")
+    presence_activation_enabled: bool = _bool_env("EDGE_PRESENCE_ACTIVATION_ENABLED", True, "PRESENCE_ACTIVATION_ENABLED")
+    presence_dwell_seconds: float = _float_env("EDGE_PRESENCE_DWELL_SECONDS", 3.0, "PRESENCE_DWELL_SECONDS")
+    presence_detection_grace_ms: int = _int_env("EDGE_PRESENCE_DETECTION_GRACE_MS", 400, "PRESENCE_DETECTION_GRACE_MS")
+    presence_activation_cooldown_seconds: float = _float_env("EDGE_PRESENCE_ACTIVATION_COOLDOWN_SECONDS", 5.0, "PRESENCE_ACTIVATION_COOLDOWN_SECONDS")
+    interaction_zone_x: float = _float_env("EDGE_INTERACTION_ZONE_X", 0.15)
+    interaction_zone_y: float = _float_env("EDGE_INTERACTION_ZONE_Y", 0.10)
+    interaction_zone_width: float = _float_env("EDGE_INTERACTION_ZONE_WIDTH", 0.70)
+    interaction_zone_height: float = _float_env("EDGE_INTERACTION_ZONE_HEIGHT", 0.80)
+    minimum_face_size_ratio: float = _float_env("EDGE_MINIMUM_FACE_SIZE_RATIO", 0.15)
+    frontal_face_threshold: float = _float_env("EDGE_FRONTAL_FACE_THRESHOLD", 25.0)
+    frontal_pitch_threshold: float = _float_env("EDGE_FRONTAL_PITCH_THRESHOLD", 20.0)
 
     @property
     def setup_marker_path(self) -> Path:
@@ -281,10 +304,23 @@ class AccessControlConfig(RuntimeConfig):
 
     def validate_security(self) -> None:
         from urllib.parse import urlparse
+        import ipaddress
         parsed = urlparse(self.sync_cloud_url)
         if parsed.scheme != "https":
-            if not (self.allow_insecure_loopback and parsed.hostname in {"127.0.0.1", "localhost", "::1"}):
-                raise ValueError("Cloud URL must use HTTPS; insecure HTTP is allowed only for explicit loopback development")
+            is_allowed = False
+            if self.allow_insecure_loopback and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+                is_allowed = True
+            elif os.getenv("EDGE_ALLOW_INSECURE_HTTP", "false").lower() in {"1", "true", "yes", "on"} or (
+                self.allow_insecure_loopback and os.getenv("APP_ENV", "development").lower() != "production"
+            ):
+                try:
+                    ip = ipaddress.ip_address(parsed.hostname)
+                    if ip.is_private or ip.is_loopback:
+                        is_allowed = True
+                except (ValueError, TypeError):
+                    pass
+            if not is_allowed:
+                raise ValueError("Cloud URL must use HTTPS; insecure HTTP is allowed only for explicit loopback or private LAN development")
         if self.remote_api_enabled and not (self.installation_credential or self.sync_device_secret):
             raise ValueError("A device secret or installation credential is required when remote edge API exposure is enabled")
         if os.getenv("APP_ENV", "development").lower() == "production" and not self.sync_device_secret:

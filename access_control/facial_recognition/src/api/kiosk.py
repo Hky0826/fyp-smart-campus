@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import math
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional
@@ -24,6 +26,12 @@ from ..config import RuntimeConfig
 from ..face.types import AuthenticationResult
 from ..pipelines.access_audio import EdgeAuthToken, EdgeAuthTokenClient
 from .chatbot_client import ChatbotClient, ChatbotClientError
+from ..hardware.door_controller import get_door_controller
+
+try:
+    from access_control.timing_logger import edge_timing
+except ImportError:
+    from timing_logger import edge_timing
 
 try:
     import cv2
@@ -71,6 +79,7 @@ class ChatMessage(BaseModel):
     content: str
     created_at: str
     citations: list[dict[str, Any]] = Field(default_factory=list)
+    options: list[str] = Field(default_factory=list)
 
 
 class ChatSessionView(BaseModel):
@@ -112,8 +121,19 @@ class KioskStateResponse(BaseModel):
     chat_recoverable: bool = False
 
 
+class PresenceStatusView(BaseModel):
+    state: str = "IDLE"
+    dwell_progress: float = 0.0
+    dwell_seconds: float = 0.0
+    candidate_bbox: Optional[list[int]] = None
+    candidate_track_id: Optional[str] = None
+    attention_valid: bool = False
+    intent_detected: bool = False
+
+
 class AccessRequestResponse(BaseModel):
     attempt: AccessAttemptView
+    presence: Optional[PresenceStatusView] = None
 
 
 class ChatVerifyResponse(BaseModel):
@@ -144,6 +164,7 @@ class ChatMessageResponse(BaseModel):
     response_scope: str = "DOCUMENT"
     personal_intent: Optional[str] = None
     navigation_target: Optional[dict[str, Any]] = None
+    options: list[str] = Field(default_factory=list)
 
 
 class ChatAudioResponse(BaseModel):
@@ -160,6 +181,7 @@ class ChatAudioResponse(BaseModel):
     response_scope: str = "DOCUMENT"
     personal_intent: Optional[str] = None
     navigation_target: Optional[dict[str, Any]] = None
+    options: list[str] = Field(default_factory=list)
 
 
 class ChatGreetingAudioResponse(BaseModel):
@@ -168,6 +190,31 @@ class ChatGreetingAudioResponse(BaseModel):
     audio_response: Optional[str] = None
     encoding: str = "pcm_s16le"
     sample_rate: int = 24000
+
+
+class ChatLiveConfigResponse(BaseModel):
+    ws_url: str
+    cloud_url: str
+    device_id: str
+    access_token: Optional[str] = None
+    session_id: Optional[int] = None
+    user_id: Optional[int] = None
+    roles: list[str] = Field(default_factory=list)
+
+
+class DoorUnlockRequest(BaseModel):
+    duration_seconds: Optional[float] = Field(default=None, ge=0.5, le=60.0)
+
+
+class DoorStatusResponse(BaseModel):
+    state: str
+    is_unlocked: bool
+    is_simulated: bool
+    enabled: bool
+    pin: int
+    active_high: bool
+    unlock_count: int
+    remaining_seconds: float
 
 
 @dataclass
@@ -249,6 +296,10 @@ class KioskStateStore:
             attempt.detected_user_id = detected_user_id
             if granted:
                 attempt.access_decision = "GRANTED"
+                try:
+                    get_door_controller().unlock()
+                except Exception as exc:
+                    logger.error("Failed to unlock door on access granted: %s", exc)
             elif is_retry:
                 attempt.access_decision = "VERIFYING"
             elif authentication_result == AuthenticationResult.SYSTEM_ERROR.value:
@@ -280,6 +331,7 @@ class KioskStateStore:
         full_name: str | None = None,
         given_name: str | None = None,
         owner_embedding: np.ndarray | None = None,
+        owner_face_track_id: str | None = None,
     ) -> ChatSessionView:
         now = self._now().isoformat()
         full_name = full_name or (token.full_name if token else None)
@@ -291,6 +343,7 @@ class KioskStateStore:
             full_name=full_name,
             roles=list(token.roles) if token else [],
             cloud_session_id=token.session_id if token else None,
+            owner_face_track_id=owner_face_track_id,
             owner_absent_since=None,
             last_owner_seen_at=now,
             last_interaction_at=now,
@@ -341,31 +394,90 @@ class KioskStateStore:
         user_text: str,
         answer: str,
         citations: list[dict[str, Any]],
+        options: list[str] | None = None,
     ) -> ChatSessionView:
         now = self._now().isoformat()
         with self._lock:
-            if self._chat_session is None:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No active chatbot session.")
-            if self._chat_session.view.locked or self._chat_session.view.presence_state != "OWNER_PRESENT":
-                raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Chatbot session is locked.")
-            self._chat_session.history.append(ChatMessage(role="user", content=user_text, created_at=now))
-            self._chat_session.history.append(
-                ChatMessage(role="assistant", content=answer, created_at=now, citations=citations)
+            target_session = self._chat_session
+            if target_session is None:
+                target_session = self._recoverable_chat_session
+            if target_session is None:
+                self._chat_session = _StoredChatSession(
+                    view=ChatSessionView(
+                        session_id=str(uuid.uuid4()),
+                        authenticated_user_id=None,
+                        email=None,
+                        full_name="Visitor",
+                        roles=[],
+                        cloud_session_id=None,
+                        owner_face_track_id=None,
+                        owner_absent_since=None,
+                        last_owner_seen_at=now,
+                        last_interaction_at=now,
+                        presence_state="OWNER_PRESENT",
+                        expires_at=None,
+                        locked=False,
+                    ),
+                    token=None,
+                    owner_embedding=None,
+                    history=[],
+                )
+                target_session = self._chat_session
+
+            target_session.history.append(ChatMessage(role="user", content=user_text, created_at=now))
+            target_session.history.append(
+                ChatMessage(
+                    role="assistant",
+                    content=answer,
+                    created_at=now,
+                    citations=citations,
+                    options=options or [],
+                )
             )
-            self._chat_session.view.last_interaction_at = now
-            self._chat_session.owner_absent_since = None
-            self._chat_session.view.owner_absent_since = None
-            self._chat_session.view.presence_state = "OWNER_PRESENT"
-            self._chat_session.view.last_owner_seen_at = now
-            return self._safe_chat_view_locked() or self._chat_session.view
+            target_session.view.last_interaction_at = now
+            if target_session.view.presence_state == "OWNER_PRESENT":
+                target_session.owner_absent_since = None
+                target_session.view.owner_absent_since = None
+                target_session.view.last_owner_seen_at = now
+            return self._safe_chat_view_locked() or target_session.view
 
     def current_token(self) -> EdgeAuthToken | None:
         with self._lock:
-            if self._chat_session is None:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No active chatbot session.")
-            if self._chat_session.view.locked or self._chat_session.view.presence_state != "OWNER_PRESENT":
-                raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Chatbot session is locked.")
-            return self._chat_session.token
+            if self._chat_session is not None:
+                return self._chat_session.token
+            if self._recoverable_chat_session is not None:
+                return self._recoverable_chat_session.token
+            return None
+
+    def recent_chat_history(self, limit: int = 3) -> list[dict[str, str]]:
+        """Extract recent conversation turns as [{'user': '...', 'assistant': '...'}] from active session history."""
+        with self._lock:
+            target = self._chat_session or self._recoverable_chat_session
+            if not target or not target.history:
+                return []
+            turns: list[dict[str, str]] = []
+            current_turn: dict[str, str] = {}
+            for msg in target.history:
+                if msg.role == "user":
+                    if "user" in current_turn:
+                        turns.append(current_turn)
+                        current_turn = {}
+                    current_turn["user"] = msg.content
+                elif msg.role == "assistant":
+                    current_turn["assistant"] = msg.content
+                    turns.append(current_turn)
+                    current_turn = {}
+            if current_turn:
+                turns.append(current_turn)
+            return turns[-limit:]
+
+    def recoverable_chat_session_view(self) -> ChatSessionView | None:
+        with self._lock:
+            if self._recoverable_chat_session is None:
+                return None
+            view = self._recoverable_chat_session.view.model_copy(deep=True)
+            view.conversation_history = list(self._recoverable_chat_session.history)
+            return view
 
     def current_chat_session(self) -> ChatSessionView | None:
         """Return a snapshot of the active chat session for API responses."""
@@ -390,16 +502,30 @@ class KioskStateStore:
                 return None
             return _copy_embedding(self._recoverable_chat_session.owner_embedding)
 
+    def current_owner_track_id(self) -> str | None:
+        with self._lock:
+            if self._chat_session is None:
+                return None
+            return self._chat_session.view.owner_face_track_id
+
+    def update_owner_track_id(self, track_id: str | int | None) -> None:
+        with self._lock:
+            tid_str = None if track_id is None else str(track_id)
+            if self._chat_session:
+                self._chat_session.view.owner_face_track_id = tid_str
+            if self._recoverable_chat_session:
+                self._recoverable_chat_session.view.owner_face_track_id = tid_str
+
     def update_owner_presence(self, owner_present: bool, bboxes: list[list[int]] | None = None) -> ChatPresenceResponse:
         now = self._now()
         now_text = now.isoformat()
         frame_bboxes = bboxes or []
         with self._lock:
+            self._safe_chat_view_locked()
             if self._chat_session is None:
                 if self._recoverable_chat_session is not None and not owner_present:
                     absent_since = self._recoverable_chat_session.owner_absent_since
-                    lock_after = self.timings.owner_missing_grace_seconds + self.timings.owner_absent_lock_seconds
-                    terminate_after = lock_after + self.timings.owner_absent_terminate_seconds
+                    terminate_after = self.timings.owner_absent_terminate_seconds
                     if absent_since is not None and (now - absent_since).total_seconds() >= terminate_after:
                         self._recoverable_chat_session = None
                         return ChatPresenceResponse(owner_present=False, ended=True, bboxes=frame_bboxes)
@@ -425,7 +551,7 @@ class KioskStateStore:
 
             elapsed = (now - self._chat_session.owner_absent_since).total_seconds()
             lock_after = self.timings.owner_missing_grace_seconds + self.timings.owner_absent_lock_seconds
-            terminate_after = lock_after + self.timings.owner_absent_terminate_seconds
+            terminate_after = self.timings.owner_absent_terminate_seconds
             if elapsed >= terminate_after:
                 self._recoverable_chat_session = None
                 self._chat_session.view.owner_absent_since = now_text
@@ -458,8 +584,7 @@ class KioskStateStore:
                 return ChatPresenceResponse(owner_present=False, ended=True, bboxes=bboxes or [])
 
             absent_since = self._recoverable_chat_session.owner_absent_since
-            lock_after = self.timings.owner_missing_grace_seconds + self.timings.owner_absent_lock_seconds
-            terminate_after = lock_after + self.timings.owner_absent_terminate_seconds
+            terminate_after = self.timings.owner_absent_terminate_seconds
             if absent_since is not None and (now - absent_since).total_seconds() >= terminate_after:
                 self._recoverable_chat_session = None
                 return ChatPresenceResponse(owner_present=False, ended=True, bboxes=bboxes or [])
@@ -479,6 +604,11 @@ class KioskStateStore:
             )
 
     def _safe_chat_view_locked(self) -> ChatSessionView | None:
+        for attribute in ("_chat_session", "_recoverable_chat_session"):
+            session = getattr(self, attribute)
+            if session is not None and session.owner_absent_since is not None:
+                if (self._now() - session.owner_absent_since).total_seconds() >= self.timings.owner_absent_terminate_seconds:
+                    setattr(self, attribute, None)
         if self._chat_session is None:
             return None
         view = self._chat_session.view.model_copy(deep=True)
@@ -531,14 +661,38 @@ def create_kiosk_router(
         except Exception as exc:
             logger.exception("Kiosk access verification failed")
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-        return AccessRequestResponse(attempt=store.complete_access_attempt(result))
+        presence_payload = result.get("presence")
+        presence_view = None
+        if presence_payload:
+            presence_view = PresenceStatusView(
+                state=str(presence_payload.get("state", "IDLE")),
+                dwell_progress=float(presence_payload.get("dwell_progress", 0.0)),
+                dwell_seconds=float(presence_payload.get("dwell_seconds", 0.0)),
+                candidate_bbox=presence_payload.get("candidate_bbox"),
+                candidate_track_id=str(presence_payload.get("candidate_track_id")) if presence_payload.get("candidate_track_id") is not None else None,
+                attention_valid=bool(presence_payload.get("attention_valid", False)),
+                intent_detected=bool(presence_payload.get("intent_detected", False)),
+            )
+        return AccessRequestResponse(attempt=store.complete_access_attempt(result), presence=presence_view)
+
+    @router.post("/door/unlock", response_model=DoorStatusResponse)
+    def unlock_door(body: Optional[DoorUnlockRequest] = None) -> DoorStatusResponse:
+        door = get_door_controller()
+        duration = body.duration_seconds if body else None
+        door.unlock(duration=duration)
+        return DoorStatusResponse(**door.get_state())
+
+    @router.get("/door/status", response_model=DoorStatusResponse)
+    def get_door_status() -> DoorStatusResponse:
+        door = get_door_controller()
+        return DoorStatusResponse(**door.get_state())
 
     @router.post("/chat/verify/frame", response_model=ChatVerifyResponse)
     async def verify_chat_owner(file: UploadFile = File(...)) -> ChatVerifyResponse:
         frame = await _decode_upload(file)
         try:
             pipeline = access_pipeline()
-            result = pipeline.describe_faces(frame, include_embeddings=True)
+            result = pipeline.describe_faces(frame, include_embeddings=True, include_pad=True)
         except Exception as exc:
             logger.exception("Kiosk chatbot owner verification failed")
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -554,14 +708,34 @@ def create_kiosk_router(
         if owner_face is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No usable face detected.")
 
+        if getattr(pipeline.config, "require_liveness", True) or getattr(pipeline.config, "pad_required", False):
+            if owner_face.get("pad_state") == "spoof":
+                logger.warning("Chatbot owner verification rejected: PAD liveness failed")
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Liveness check failed.")
+
         owner_embedding = owner_face["embedding"]
-        token = _try_issue_registered_token(pipeline, owner_embedding, runtime_config())
+        owner_track_id = str(owner_face["track_id"]) if owner_face.get("track_id") is not None else None
+        pad_score = float(owner_face.get("pad_score") or 0.0)
+        pad_model_version = str(owner_face.get("pad_model_version") or "minifasnet-v2")
+        token = await asyncio.to_thread(
+            _try_issue_registered_token,
+            pipeline,
+            owner_embedding,
+            runtime_config(),
+            pad_score=pad_score,
+            pad_model_version=pad_model_version,
+        )
+        try:
+            pipeline.notify_chat_started()
+        except Exception:
+            pass
         return ChatVerifyResponse(
             session=store.start_chat_session(
                 token=token,
                 full_name=token.full_name if token else None,
                 given_name=token.given_name if token else None,
                 owner_embedding=owner_embedding,
+                owner_face_track_id=owner_track_id,
             ),
             bboxes=_result_bboxes(result),
         )
@@ -573,8 +747,13 @@ def create_kiosk_router(
             return ChatPresenceResponse(owner_present=False, ended=True)
 
         frame = await _decode_upload(file)
+        owner_track_id = store.current_owner_track_id()
         try:
-            owner_present, bboxes = _detect_owner_presence(access_pipeline(), frame, owner_embedding)
+            owner_present, new_track_id, bboxes = _detect_owner_presence(
+                access_pipeline(), frame, owner_embedding, owner_track_id=owner_track_id
+            )
+            if owner_present and new_track_id is not None and str(new_track_id) != owner_track_id:
+                store.update_owner_track_id(new_track_id)
         except Exception as exc:
             logger.exception("Kiosk chatbot owner presence check failed")
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -589,7 +768,11 @@ def create_kiosk_router(
 
         frame = await _decode_upload(file)
         try:
-            owner_present, bboxes = _detect_owner_presence(access_pipeline(), frame, owner_embedding)
+            owner_present, new_track_id, bboxes = _detect_owner_presence(
+                access_pipeline(), frame, owner_embedding, owner_track_id=None
+            )
+            if owner_present and new_track_id is not None:
+                store.update_owner_track_id(new_track_id)
         except Exception as exc:
             logger.exception("Kiosk chatbot owner recovery check failed")
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -600,23 +783,38 @@ def create_kiosk_router(
 
     @router.post("/chat/message", response_model=ChatMessageResponse)
     def send_chat_message(body: ChatMessageRequest) -> ChatMessageResponse:
+        t0 = time.monotonic()
+        edge_timing.log_send("REST_PROXY_MESSAGE_SEND", query=(body.query or "")[:60])
         token = store.current_token()
+        chat_history = store.recent_chat_history(limit=3)
         try:
             response = chatbot_client().chat(
                 query=body.query,
                 jwt_token=token.access_token if token else None,
                 device_id=runtime_config().sync_device_id,
                 session_id=token.session_id if token else None,
+                chat_history=chat_history or None,
+            )
+            round_trip_ms = (time.monotonic() - t0) * 1000.0
+            edge_timing.log_receive(
+                "REST_PROXY_MESSAGE_RECEIVE",
+                duration_ms=round_trip_ms,
+                response_time_ms=response.get("response_time_ms"),
+                answer_len=len(str(response.get("answer") or "")),
             )
         except ChatbotClientError as exc:
+            round_trip_ms = (time.monotonic() - t0) * 1000.0
+            edge_timing.log_receive("REST_PROXY_MESSAGE_ERROR", duration_ms=round_trip_ms, error=str(exc))
             status_code = exc.status_code or status.HTTP_502_BAD_GATEWAY
             raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
         citations = response.get("citations", [])
+        options = response.get("options", [])
         session = store.append_chat_exchange(
             body.query,
             str(response.get("answer") or ""),
             citations,
+            options=options,
         )
         return ChatMessageResponse(
             session=session,
@@ -629,11 +827,13 @@ def create_kiosk_router(
             response_scope=response.get("response_scope", "DOCUMENT"),
             personal_intent=response.get("personal_intent"),
             navigation_target=response.get("navigation_target"),
+            options=options,
         )
 
     @router.post("/chat/stream")
     async def send_chat_stream(body: ChatMessageRequest):
         token = store.current_token()
+        chat_history = store.recent_chat_history(limit=3)
         headers = {"Accept": "text/event-stream", "Content-Type": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token.access_token}"
@@ -644,6 +844,8 @@ def create_kiosk_router(
         }
         if token and token.session_id is not None:
             payload["session_id"] = token.session_id
+        if chat_history:
+            payload["chat_history"] = chat_history
 
         async def stream_generator():
             cloud_url = f"{runtime_config().sync_cloud_url.rstrip('/')}/api/chatbot/chat/stream"
@@ -672,6 +874,7 @@ def create_kiosk_router(
                                             body.query,
                                             metadata.get("answer") or "",
                                             metadata.get("citations") or [],
+                                            options=metadata.get("options", []),
                                         )
                                         session = store.current_chat_session()
                                         if session is not None:
@@ -693,6 +896,8 @@ def create_kiosk_router(
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    @router.post("/chat/greeting/audio", response_model=ChatGreetingAudioResponse)
     def chat_greeting_audio() -> ChatGreetingAudioResponse:
         token = store.current_token()
         try:
@@ -702,7 +907,9 @@ def create_kiosk_router(
             raise HTTPException(status_code=status_code, detail=str(exc)) from exc
         session = store.current_chat_session()
         if session is None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No active chatbot session.")
+            session = store.recoverable_chat_session_view()
+        if session is None:
+            session = store.start_chat_session(None)
         return ChatGreetingAudioResponse(
             session=session,
             text=str(response.get("text_response") or "Hi, how may I help you today?"),
@@ -726,6 +933,8 @@ def create_kiosk_router(
                 detail="Uploaded audio file is empty.",
             )
 
+        t0 = time.monotonic()
+        edge_timing.log_send("REST_PROXY_AUDIO_SEND", audio_bytes=len(audio_bytes))
         try:
             response = chatbot_client().audio_chat(
                 audio_bytes=audio_bytes,
@@ -734,13 +943,23 @@ def create_kiosk_router(
                 device_id=runtime_config().sync_device_id,
                 session_id=token.session_id if token else None,
             )
+            round_trip_ms = (time.monotonic() - t0) * 1000.0
+            edge_timing.log_receive(
+                "REST_PROXY_AUDIO_RECEIVE",
+                duration_ms=round_trip_ms,
+                status=response.get("status"),
+                response_time_ms=response.get("response_time_ms"),
+            )
         except ChatbotClientError as exc:
+            round_trip_ms = (time.monotonic() - t0) * 1000.0
+            edge_timing.log_receive("REST_PROXY_AUDIO_ERROR", duration_ms=round_trip_ms, error=str(exc))
             status_code = exc.status_code or status.HTTP_502_BAD_GATEWAY
             raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
         transcribed_input = str(response.get("transcribed_input") or "").strip()
         answer = str(response.get("text_response") or response.get("error_message") or "")
         citations = response.get("sources", [])
+        options = response.get("options", [])
         audio_response = response.get("audio_response")
         logger.info(
             "Kiosk audio chat response forwarding. status=%s answer_len=%d audio_base64_chars=%d",
@@ -752,6 +971,7 @@ def create_kiosk_router(
             transcribed_input or "[Audio input]",
             answer,
             citations,
+            options=options,
         )
         return ChatAudioResponse(
             session=session,
@@ -767,6 +987,7 @@ def create_kiosk_router(
             response_scope=response.get("response_scope", "DOCUMENT"),
             personal_intent=response.get("personal_intent"),
             navigation_target=response.get("navigation_target"),
+            options=options,
         )
 
     @router.post("/chat/audio/stream")
@@ -814,7 +1035,8 @@ def create_kiosk_router(
                                         store.append_chat_exchange(
                                             metadata.get("transcribed_input") or "[Audio input]",
                                             metadata.get("text_response") or "",
-                                            metadata.get("sources") or []
+                                            metadata.get("sources") or [],
+                                            options=metadata.get("options", []),
                                         )
                                         session = store.current_chat_session()
                                         if session is not None:
@@ -828,7 +1050,14 @@ def create_kiosk_router(
                 logger.warning("Kiosk audio stream proxy error: %s", exc)
                 yield json.dumps({"event": "error", "data": {"message": str(exc)}}).encode("utf-8") + b"\n"
 
-        return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+        return StreamingResponse(
+            stream_generator(),
+            media_type="application/x-ndjson",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @router.post("/chat/lock", response_model=ChatVerifyResponse)
     def lock_chat() -> ChatVerifyResponse:
@@ -840,6 +1069,10 @@ def create_kiosk_router(
     @router.post("/chat/end")
     def end_chat() -> dict[str, bool]:
         store.end_chat_session()
+        try:
+            access_pipeline().notify_chat_ended()
+        except Exception:
+            pass
         return {"success": True}
 
     @router.post("/chat/audio/stop")
@@ -847,6 +1080,33 @@ def create_kiosk_router(
         # Browser playback is controlled by the frontend. The endpoint exists so
         # kiosk orchestration can treat audio interruption as a backend action.
         return {"success": True}
+
+    @router.get("/chat/live-config", response_model=ChatLiveConfigResponse)
+    def get_chat_live_config() -> ChatLiveConfigResponse:
+        try:
+            token = store.current_token()
+        except HTTPException:
+            token = None
+
+        cfg = runtime_config()
+        cloud_url = cfg.sync_cloud_url.rstrip("/")
+        ws_scheme = "wss" if cloud_url.startswith("https") else "ws"
+        host = cloud_url.split("://")[-1]
+        access_token = token.access_token if token else ""
+        session_id = str(token.session_id) if token and token.session_id is not None else ""
+        ws_url = (
+            f"{ws_scheme}://{host}/api/chatbot/live/ws?"
+            f"token={access_token}&device_id={cfg.sync_device_id}&session_id={session_id}"
+        )
+        return ChatLiveConfigResponse(
+            ws_url=ws_url,
+            cloud_url=cloud_url,
+            device_id=cfg.sync_device_id,
+            access_token=token.access_token if token else None,
+            session_id=token.session_id if token else None,
+            user_id=token.user_id if token else None,
+            roles=list(token.roles) if token else ["VISITOR"],
+        )
 
     return router
 
@@ -904,7 +1164,13 @@ def _first_face_with_embedding(result: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _try_issue_registered_token(pipeline: Any, owner_embedding: np.ndarray, config: RuntimeConfig) -> EdgeAuthToken | None:
+def _try_issue_registered_token(
+    pipeline: Any,
+    owner_embedding: np.ndarray,
+    config: RuntimeConfig,
+    pad_score: float = 0.0,
+    pad_model_version: str = "minifasnet-v2",
+) -> EdgeAuthToken | None:
     try:
         templates = pipeline.repository.load_templates()
         match = pipeline.matcher.match(
@@ -929,25 +1195,49 @@ def _try_issue_registered_token(pipeline: Any, owner_embedding: np.ndarray, conf
     if not match.matched or not match.is_active or match.user_id is None:
         return None
 
+    pad_threshold = pipeline.config.pad_threshold
+    if isinstance(pad_score, bool) or not isinstance(pad_score, (int, float)) or not math.isfinite(pad_score) or not 0.0 <= pad_score <= 1.0 or pad_score < pad_threshold:
+        return None
+
     token_client = EdgeAuthTokenClient(
         config.sync_cloud_url,
         config.sync_device_id,
         config.sync_device_secret,
         allow_insecure_loopback=config.allow_insecure_loopback,
+        pad_threshold=pad_threshold,
     )
     try:
-        token = token_client.issue_token(match.user_id)
-        logger.info("Chatbot JWT issued for user_id=%s with recognition_score=%.4f", match.user_id, match.similarity)
+        token = token_client.issue_token(
+            match.user_id,
+            pad_score=pad_score,
+            pad_model_version=pad_model_version,
+        )
+        logger.info("Chatbot JWT issued for user_id=%s with recognition_score=%.4f pad_score=%.4f", match.user_id, match.similarity, pad_score)
         return token
     except Exception as exc:
         logger.warning("Chatbot token issuance failed for user_id=%s: %s", match.user_id, exc)
         return None
 
 
-def _detect_owner_presence(pipeline: Any, frame: np.ndarray, owner_embedding: np.ndarray) -> tuple[bool, list[list[int]]]:
+def _detect_owner_presence(
+    pipeline: Any,
+    frame: np.ndarray,
+    owner_embedding: Optional[np.ndarray],
+    owner_track_id: Optional[str] = None,
+) -> tuple[bool, Optional[int], list[list[int]]]:
+    if owner_embedding is None:
+        return False, None, []
+    verify_presence_func = getattr(pipeline, "verify_owner_presence", None)
+    if callable(verify_presence_func):
+        try:
+            return verify_presence_func(frame, owner_track_id=owner_track_id, owner_embedding=owner_embedding)
+        except Exception:
+            logger.exception("pipeline.verify_owner_presence failed, falling back to describe_faces")
+
     result = pipeline.describe_faces(frame, include_embeddings=True)
     threshold = float(getattr(pipeline.config, "recognition_threshold", 0.55))
     owner_present = False
+    matched_track_id = None
     for face in result.get("faces", []):
         if not isinstance(face, dict) or face.get("embedding") is None:
             continue
@@ -955,8 +1245,9 @@ def _detect_owner_presence(pipeline: Any, frame: np.ndarray, owner_embedding: np
         logger.info("Owner presence check: recognition_score=%.4f threshold=%.3f matched=%s", similarity, threshold, similarity >= threshold)
         if similarity >= threshold:
             owner_present = True
+            matched_track_id = face.get("track_id")
             break
-    return owner_present, _result_bboxes(result)
+    return owner_present, matched_track_id, _result_bboxes(result)
 
 
 def _optional_int(value: Any) -> int | None:

@@ -65,7 +65,13 @@ def resolve_auth_context(
 ) -> AuthenticatedChatContext:
     """Resolve identity from verified token and active DB session only."""
     if not token:
-        return AuthenticatedChatContext(user_id=None, session_id=None, authenticated=False, reason="anonymous")
+        return AuthenticatedChatContext(
+            user_id=None,
+            session_id=None,
+            roles=("VISITOR",),
+            authenticated=False,
+            reason="anonymous",
+        )
     from app.models.models import Device, User
     payload, user_id, session = resolve_user_session(token, db)
     trusted_device = None

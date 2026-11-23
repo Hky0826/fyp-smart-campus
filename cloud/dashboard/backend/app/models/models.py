@@ -76,6 +76,7 @@ class Node(Base):
     cord_x = synonym("coord_x")
     cord_y = synonym("coord_y")
     room_label = Column(String(100), nullable=False)
+    label = synonym("room_label")
     is_accessible = Column(Enum("ALLOW", "DENY"), default="ALLOW", nullable=False)
     node_type = Column(Enum('CLASSROOM','CORRIDOR','ENTRANCE','STAIRWELL','ELEVATOR','FOOD','OFFICE','FACILITIES','HALL','WASHROOM','OUTDOOR','SOCIAL SPACES','OTHER','ROOM','CAFETERIA','LABORATORY','LECTURE_HALL','RESTROOM'), nullable=False)
     
@@ -114,6 +115,7 @@ class Role(Base):
     users = relationship("User", secondary="user_roles", back_populates="roles")
     node_rbac = relationship("NodeRBAC", back_populates="role", cascade="all, delete-orphan")
     edge_rbac = relationship("EdgeRBAC", back_populates="role", cascade="all, delete-orphan")
+    device_rbac = relationship("DeviceRBAC", back_populates="role", cascade="all, delete-orphan")
 
 class User(Base):
     __tablename__ = "users"
@@ -485,6 +487,26 @@ class ChatbotQuery(Base):
     user = relationship("User", back_populates="chatbot_queries")
     session = relationship("JWTSession")
 
+class SpeechLanguage(Base):
+    __tablename__ = "speech_languages"
+
+    language_code = Column(String(10), primary_key=True)
+    language_name = Column(String(100), nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False, index=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class SpeechAdaptationPhrase(Base):
+    __tablename__ = "speech_adaptation_phrases"
+
+    phrase_id = Column(Integer, primary_key=True, autoincrement=True)
+    phrase = Column(String(255), nullable=False, unique=True, index=True)
+    language_category = Column(String(50), nullable=False, default="GENERAL", index=True)
+    description = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
 # ==========================================
 # Category 3: Infrastructure & Security Management
 # ==========================================
@@ -505,6 +527,16 @@ class Device(Base):
     credential_rotated_at = Column(DateTime, nullable=True)
     
     node = relationship("Node")
+    device_rbac = relationship("DeviceRBAC", back_populates="device", cascade="all, delete-orphan")
+
+class DeviceRBAC(Base):
+    __tablename__ = "device_rbac"
+    
+    device_id = Column(String(100), ForeignKey("devices.device_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    role_id = Column(Integer, ForeignKey("roles.role_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    
+    device = relationship("Device", back_populates="device_rbac")
+    role = relationship("Role", back_populates="device_rbac")
 
 class NodeRBAC(Base):
     __tablename__ = "node_rbac"

@@ -1,11 +1,16 @@
 import datetime as dt
+import json
 import sqlite3
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from edge.audio_io.cloud_audio_client import CloudAudioClient, CloudChatCredentials
-from edge.audio_io.config import _cloud_audio_stream_url, _cloud_audio_url
+try:
+    from access_control.audio_io.cloud_audio_client import CloudAudioClient, CloudChatCredentials
+    from access_control.audio_io.config import _cloud_audio_stream_url, _cloud_audio_url
+except ImportError:
+    from edge.audio_io.cloud_audio_client import CloudAudioClient, CloudChatCredentials
+    from edge.audio_io.config import _cloud_audio_stream_url, _cloud_audio_url
 from access_control.facial_recognition.src.config import AccessControlConfig
 from access_control.facial_recognition.src.pipelines.access_audio import (
     AccessControlAudioCoordinator,
@@ -63,7 +68,7 @@ class AccessAudioIntegrationTests(unittest.TestCase):
                 "https://cloud.example:8000",
                 "entry-gate-01",
                 "device-secret-for-tests",
-            ).issue_token(7)
+            ).issue_token(7, pad_score=0.9)
 
         self.assertEqual(post.call_count, 2)
         self.assertEqual(post.call_args_list[0].args[0], "https://cloud.example:8000/api/edge-auth/challenge")
@@ -75,6 +80,37 @@ class AccessAudioIntegrationTests(unittest.TestCase):
         self.assertEqual(token.access_token, "jwt-value")
         self.assertEqual(token.session_id, 99)
         self.assertEqual(token.roles, ("STUDENT",))
+
+    def test_edge_auth_token_client_rejects_low_pad_before_request(self):
+        client = EdgeAuthTokenClient(
+            "https://cloud.example:8000",
+            "entry-gate-01",
+            "device-secret-for-tests",
+        )
+        with patch("access_control.facial_recognition.src.pipelines.access_audio.requests.post") as post:
+            with self.assertRaisesRegex(ValueError, "PAD score"):
+                client.issue_token(7, pad_score=0.05)
+        post.assert_not_called()
+
+    def test_edge_auth_token_client_rejects_boolean_pad_score(self):
+        client = EdgeAuthTokenClient("https://cloud.example:8000", "entry-gate-01", "device-secret-for-tests")
+        with self.assertRaisesRegex(ValueError, "numeric PAD score"):
+            client.issue_token(7, pad_score=True)
+
+    def test_edge_auth_token_client_sends_liveness_only_after_pad_threshold(self):
+        with patch(
+            "access_control.facial_recognition.src.pipelines.access_audio.requests.post",
+            side_effect=[FakeResponse(payload={"challenge_id": "challenge-1"}), FakeResponse(payload={"access_token": "jwt-value", "user_id": 7})],
+        ) as post:
+            EdgeAuthTokenClient(
+                "https://cloud.example:8000",
+                "entry-gate-01",
+                "device-secret-for-tests",
+                pad_threshold=0.8,
+            ).issue_token(7, pad_score=0.8)
+        assertion = json.loads(post.call_args_list[1].kwargs["data"])["assertion"]
+        self.assertIs(assertion["liveness_passed"], True)
+        self.assertEqual(assertion["pad_score"], 0.8)
 
     def test_coordinator_finds_local_visitor_and_returns_credentials(self):
         db_path = Path(__file__).with_name("_visitor_test.db")

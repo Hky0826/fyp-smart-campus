@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Campus - Acronyms & Translations</title>
+  <style>
+    /* ============================================================
+       CLEAN, MODERN ACRONYMS & TRANSLATIONS LIST
+       ============================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background-color: #090d16;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    a, button { cursor: pointer; border: none; outline: none; font-family: inherit; }
+    input, select { font-family: inherit; }
+
+    /* SCROLLBAR */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #090d16; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 999px; }
+
+    .app-wrap {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* TOP BAR */
+    .nav-bar {
+      height: 56px;
+      border-bottom: 1px solid #172033;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #090d16;
+    }
+    .nav-left { display: flex; align-items: center; gap: 10px; }
+    .nav-logo {
+      width: 28px;
+      height: 28px;
+      background: #4f46e5;
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .nav-title { font-size: 13px; font-weight: 700; color: #f8fafc; }
+    .nav-sub { font-size: 11px; color: #64748b; margin-left: 6px; }
+
+    /* MAIN CONTAINER (CENTERED SINGLE COLUMN) */
+    .main-wrap {
+      flex: 1;
+      max-width: 740px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 36px 20px 80px 20px;
+    }
+
+    /* HEADER */
+    .header-area { margin-bottom: 24px; }
+    .header-title { font-size: 24px; font-weight: 800; color: #f8fafc; letter-spacing: -0.02em; }
+    .header-desc { font-size: 13px; color: #94a3b8; margin-top: 4px; }
+
+    /* SEARCH + ADD ROW */
+    .toolbar-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .search-wrap {
+      flex: 1;
+      position: relative;
+    }
+    .search-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #64748b;
+      pointer-events: none;
+    }
+    .search-input {
+      width: 100%;
+      background: #101726;
+      border: 1px solid #1f2c47;
+      border-radius: 12px;
+      padding: 11px 14px 11px 38px;
+      font-size: 13px;
+      color: #f8fafc;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-input:focus { border-color: #4f46e5; }
+    .search-input::placeholder { color: #64748b; }
+
+    .btn-add {
+      background: #4f46e5;
+      color: #fff;
+      padding: 0 18px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      transition: background 0.2s;
+    }
+    .btn-add:hover { background: #4338ca; }
+
+    /* ACRONYM CARD */
+    .acronym-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .acronym-card {
+      background: #101726;
+      border: 1px solid #1a253c;
+      border-radius: 14px;
+      padding: 18px 20px;
+      transition: border-color 0.15s;
+    }
+    .acronym-card:hover { border-color: #2b3b5c; }
+
+    /* CARD HEADER: ACRONYM NAME + ACTIONS */
+    .card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #172033;
+      margin-bottom: 12px;
+    }
+    .acronym-badge-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .acronym-text {
+      font-size: 18px;
+      font-weight: 800;
+      color: #f8fafc;
+      letter-spacing: -0.01em;
+    }
+    .count-tag {
+      font-size: 11px;
+      font-weight: 600;
+      color: #818cf8;
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      padding: 2px 8px;
+      border-radius: 6px;
+    }
+
+    .card-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-action-text {
+      background: transparent;
+      color: #818cf8;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+    .btn-action-text:hover { background: rgba(99, 102, 241, 0.12); color: #a5b4fc; }
+
+    .btn-delete-card {
+      background: transparent;
+      color: #64748b;
+      padding: 5px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      transition: color 0.15s;
+    }
+    .btn-delete-card:hover { color: #f87171; }
+
+    /* TRANSLATION LIST UNDER THE ACRONYM */
+    .translations-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .translation-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #090d16;
+      border: 1px solid #172033;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+    .trans-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .lang-pill {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 2px 6px;
+      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-width: 68px;
+      justify-content: center;
+    }
+    .lang-pill.en { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3); }
+    .lang-pill.ms { background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .lang-pill.zh { background: rgba(244, 63, 94, 0.15); color: #fda4af; border: 1px solid rgba(244, 63, 94, 0.3); }
+    .lang-pill.ta { background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); }
+
+    .trans-text {
+      color: #e2e8f0;
+      font-weight: 500;
+    }
+
+    .btn-remove-trans {
+      background: transparent;
+      color: #64748b;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1;
+    }
+    .btn-remove-trans:hover { color: #f87171; }
+
+    /* EMPTY STATE */
+    .empty-box {
+      text-align: center;
+      padding: 40px 20px;
+      color: #64748b;
+      font-size: 13px;
+    }
+
+    /* MODAL */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 100;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal-card {
+      background: #101726;
+      border: 1px solid #223250;
+      border-radius: 16px;
+      width: 100%;
+      max-width: 480px;
+      padding: 24px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+    }
+    .modal-head-title { font-size: 17px; font-weight: 800; color: #f8fafc; margin-bottom: 4px; }
+    .modal-head-sub { font-size: 12px; color: #94a3b8; margin-bottom: 20px; }
+
+    .form-group { margin-bottom: 16px; }
+    .form-lbl {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      color: #cbd5e1;
+      margin-bottom: 6px;
+    }
+    .form-txt {
+      width: 100%;
+      background: #090d16;
+      border: 1px solid #1f2c47;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: #f8fafc;
+      outline: none;
+    }
+    .form-txt:focus { border-color: #4f46e5; }
+    .form-txt::placeholder { color: #556680; }
+
+    /* DYNAMIC TRANSLATION INPUT ROWS */
+    .modal-trans-section { margin-top: 14px; }
+    .trans-inputs-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+    .trans-input-row { display: flex; gap: 8px; }
+    .lang-dropdown {
+      width: 110px;
+      background: #090d16;
+      border: 1px solid #1f2c47;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: #f8fafc;
+      outline: none;
+    }
+    .trans-input-field {
+      flex: 1;
+      background: #090d16;
+      border: 1px solid #1f2c47;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: #f8fafc;
+      outline: none;
+    }
+    .trans-input-field:focus, .lang-dropdown:focus { border-color: #4f46e5; }
+
+    .btn-add-trans-row {
+      background: transparent;
+      color: #818cf8;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 6px;
+    }
+    .btn-add-trans-row:hover { color: #a5b4fc; }
+
+    .modal-actions-row {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 24px;
+      padding-top: 14px;
+      border-top: 1px solid #172033;
+    }
+    .btn-cancel {
+      background: transparent;
+      color: #94a3b8;
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 8px;
+    }
+    .btn-cancel:hover { color: #fff; }
+
+    /* TOAST */
+    .toast-msg {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(40px);
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #f8fafc;
+      padding: 8px 16px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+      opacity: 0;
+      transition: all 0.2s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    .toast-msg.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+
+<div class="app-wrap">
+
+  <!-- TOP BAR -->
+  <header class="nav-bar">
+    <div class="nav-left">
+      <div class="nav-logo">Q</div>
+      <div class="nav-title">Smart Campus</div>
+      <div class="nav-sub">/ Chatbot Acronyms</div>
+    </div>
+  </header>
+
+  <!-- MAIN WRAPPER -->
+  <main class="main-wrap">
+    
+    <!-- HEADER -->
+    <div class="header-area">
+      <h1 class="header-title">Acronyms & Translations</h1>
+      <p class="header-desc">
+        List of campus acronyms and all their language translations.
+      </p>
+    </div>
+
+    <!-- SEARCH + ADD ROW -->
+    <div class="toolbar-row">
+      <div class="search-wrap">
+        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input 
+          type="text" 
+          id="searchInput" 
+          class="search-input" 
+          placeholder="Search by acronym or translation (e.g. FOCS, Perpustakaan)..." 
+          oninput="renderList()"
+        >
+      </div>
+      <button class="btn-add" onclick="openAddModal()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Acronym
+      </button>
+    </div>
+
+    <!-- ACRONYMS & TRANSLATIONS LIST -->
+    <div class="acronym-list" id="acronymList">
+      <!-- Populated via JavaScript -->
+    </div>
+
+    <div class="empty-box" id="emptyNotice" style="display:none;">
+      No acronyms match your search.
+    </div>
+
+  </main>
+
+  <!-- ================= ADD / EDIT MODAL ================= -->
+  <div class="modal-backdrop" id="modal">
+    <div class="modal-card">
+      <div class="modal-head-title" id="modalTitle">Add Acronym & Translations</div>
+      <div class="modal-head-sub">Enter the acronym and list its translations below.</div>
+
+      <form onsubmit="handleSave(event)">
+        <input type="hidden" id="editAcronymId">
+
+        <div class="form-group">
+          <label class="form-lbl">Acronym</label>
+          <input 
+            type="text" 
+            id="acronymInput" 
+            class="form-txt" 
+            placeholder="e.g. FOCS, QIU, PTPTN, LIB" 
+            required 
+            autocomplete="off"
+          >
+        </div>
+
+        <div class="modal-trans-section">
+          <label class="form-lbl">Translations</label>
+          <div class="trans-inputs-list" id="modalTransRows">
+            <!-- Dynamic Translation Rows -->
+          </div>
+
+          <button type="button" class="btn-add-trans-row" onclick="addTransRow()">
+            + Add another translation
+          </button>
+        </div>
+
+        <div class="modal-actions-row">
+          <button type="button" class="btn-cancel" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn-add">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div class="toast-msg" id="toast">Saved</div>
+
+</div>
+
+<!-- ================= JAVASCRIPT ================= -->
+<script>
+  // Dataset structured strictly as: Acronym + List of Translations
+  let acronymData = [
+    {
+      id: 1,
+      acronym: "FOCS",
+      translations: [
+        { lang: "en", text: "Faculty of Computing and Science" },
+        { lang: "ms", text: "Fakulti Pengkomputeran dan Sains" },
+        { lang: "zh", text: "计算与科学学院" }
+      ]
+    },
+    {
+      id: 2,
+      acronym: "QIU",
+      translations: [
+        { lang: "en", text: "Quest International University" },
+        { lang: "ms", text: "Universiti Antarabangsa Quest" },
+        { lang: "zh", text: "培南国际大学" }
+      ]
+    },
+    {
+      id: 3,
+      acronym: "LIB",
+      translations: [
+        { lang: "en", text: "Library" },
+        { lang: "ms", text: "Perpustakaan" },
+        { lang: "zh", text: "图书馆" },
+        { lang: "ta", text: "நூலகம்" }
+      ]
+    },
+    {
+      id: 4,
+      acronym: "PTPTN",
+      translations: [
+        { lang: "ms", text: "Perbadanan Tabung Pendidikan Tinggi Nasional" },
+        { lang: "en", text: "National Higher Education Fund Corporation" }
+      ]
+    },
+    {
+      id: 5,
+      acronym: "FEES",
+      translations: [
+        { lang: "en", text: "Tuition Fees" },
+        { lang: "ms", text: "Yuran Pengajian" },
+        { lang: "zh", text: "学费" }
+      ]
+    },
+    {
+      id: 6,
+      acronym: "EXAM",
+      translations: [
+        { lang: "en", text: "Examination" },
+        { lang: "ms", text: "Peperiksaan" },
+        { lang: "zh", text: "考试" }
+      ]
+    },
+    {
+      id: 7,
+      acronym: "FOP",
+      translations: [
+        { lang: "en", text: "Faculty of Pharmacy" },
+        { lang: "ms", text: "Fakulti Farmasi" },
+        { lang: "zh", text: "药剂学院" }
+      ]
+    },
+    {
+      id: 8,
+      acronym: "SURAU",
+      translations: [
+        { lang: "ms", text: "Surau / Bilik Solat" },
+        { lang: "en", text: "Muslim Prayer Room" }
+      ]
+    }
+  ];
+
+  function getLangBadge(lang) {
+    if (lang === 'en') return '<span class="lang-pill en">🇬🇧 English</span>';
+    if (lang === 'ms') return '<span class="lang-pill ms">🇲🇾 Malay</span>';
+    if (lang === 'zh') return '<span class="lang-pill zh">🇨🇳 Chinese</span>';
+    if (lang === 'ta') return '<span class="lang-pill ta">🇮🇳 Tamil</span>';
+    return `<span class="lang-pill en">${lang.toUpperCase()}</span>`;
+  }
+
+  function renderList() {
+    const q = document.getElementById('searchInput').value.toLowerCase().trim();
+    const container = document.getElementById('acronymList');
+    const empty = document.getElementById('emptyNotice');
+
+    const filtered = acronymData.filter(item => {
+      if (!q) return true;
+      const matchAcronym = item.acronym.toLowerCase().includes(q);
+      const matchTrans = item.translations.some(t => t.text.toLowerCase().includes(q));
+      return matchAcronym || matchTrans;
+    });
+
+    if (filtered.length === 0) {
+      container.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+
+    container.innerHTML = filtered.map(item => `
+      <div class="acronym-card">
+        <div class="card-top">
+          <div class="acronym-badge-group">
+            <span class="acronym-text">${item.acronym}</span>
+            <span class="count-tag">${item.translations.length} Translations</span>
+          </div>
+          <div class="card-actions">
+            <button class="btn-action-text" onclick="editAcronym(${item.id})">Edit</button>
+            <button class="btn-delete-card" onclick="deleteAcronym(${item.id})" title="Delete">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="translations-list">
+          ${item.translations.map((t, idx) => `
+            <div class="translation-row">
+              <div class="trans-left">
+                ${getLangBadge(t.lang)}
+                <span class="trans-text">${t.text}</span>
+              </div>
+              <button class="btn-remove-trans" onclick="removeSingleTrans(${item.id}, ${idx})" title="Remove translation">✕</button>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function deleteAcronym(id) {
+    const item = acronymData.find(a => a.id === id);
+    if (item && confirm(`Delete acronym "${item.acronym}" and all its translations?`)) {
+      acronymData = acronymData.filter(a => a.id !== id);
+      renderList();
+      showToast(`Deleted ${item.acronym}`);
+    }
+  }
+
+  function removeSingleTrans(acronymId, transIndex) {
+    const item = acronymData.find(a => a.id === acronymId);
+    if (item) {
+      item.translations.splice(transIndex, 1);
+      renderList();
+      showToast("Translation removed");
+    }
+  }
+
+  /* MODAL LOGIC */
+  function openAddModal() {
+    document.getElementById('modalTitle').innerText = "Add Acronym & Translations";
+    document.getElementById('editAcronymId').value = "";
+    document.getElementById('acronymInput').value = "";
+    
+    // Default 2 translation rows (English & Malay)
+    const container = document.getElementById('modalTransRows');
+    container.innerHTML = '';
+    addTransRow('en', '');
+    addTransRow('ms', '');
+
+    document.getElementById('modal').classList.add('open');
+    document.getElementById('acronymInput').focus();
+  }
+
+  function editAcronym(id) {
+    const item = acronymData.find(a => a.id === id);
+    if (!item) return;
+
+    document.getElementById('modalTitle').innerText = "Edit Acronym & Translations";
+    document.getElementById('editAcronymId').value = item.id;
+    document.getElementById('acronymInput').value = item.acronym;
+
+    const container = document.getElementById('modalTransRows');
+    container.innerHTML = '';
+    item.translations.forEach(t => {
+      addTransRow(t.lang, t.text);
+    });
+
+    document.getElementById('modal').classList.add('open');
+  }
+
+  function addTransRow(lang = 'en', text = '') {
+    const container = document.getElementById('modalTransRows');
+    const row = document.createElement('div');
+    row.className = 'trans-input-row';
+    row.innerHTML = `
+      <select class="lang-dropdown">
+        <option value="en" ${lang === 'en' ? 'selected' : ''}>🇬🇧 English</option>
+        <option value="ms" ${lang === 'ms' ? 'selected' : ''}>🇲🇾 Malay</option>
+        <option value="zh" ${lang === 'zh' ? 'selected' : ''}>🇨🇳 Chinese</option>
+        <option value="ta" ${lang === 'ta' ? 'selected' : ''}>🇮🇳 Tamil</option>
+      </select>
+      <input type="text" class="trans-input-field" placeholder="Translation text..." value="${text.replace(/"/g, '&quot;')}" required>
+      <button type="button" class="btn-remove-trans" onclick="this.parentElement.remove()" style="padding:0 8px; font-size:14px;">✕</button>
+    `;
+    container.appendChild(row);
+  }
+
+  function closeModal() {
+    document.getElementById('modal').classList.remove('open');
+  }
+
+  function handleSave(e) {
+    e.preventDefault();
+    const id = document.getElementById('editAcronymId').value;
+    const acronym = document.getElementById('acronymInput').value.trim().toUpperCase();
+    if (!acronym) return;
+
+    // Collect translations
+    const rows = document.querySelectorAll('#modalTransRows .trans-input-row');
+    const translations = [];
+    rows.forEach(r => {
+      const lang = r.querySelector('.lang-dropdown').value;
+      const text = r.querySelector('.trans-input-field').value.trim();
+      if (text) {
+        translations.push({ lang, text });
+      }
+    });
+
+    if (translations.length === 0) {
+      alert("Please enter at least one translation.");
+      return;
+    }
+
+    if (id) {
+      // Update existing
+      const item = acronymData.find(a => a.id == id);
+      if (item) {
+        item.acronym = acronym;
+        item.translations = translations;
+        showToast(`Updated ${acronym}`);
+      }
+    } else {
+      // Add new
+      acronymData.unshift({
+        id: Date.now(),
+        acronym,
+        translations
+      });
+      showToast(`Added ${acronym}`);
+    }
+
+    closeModal();
+    renderList();
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.innerText = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2000);
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+    renderList();
+  });
+</script>
+</body>
+</html>

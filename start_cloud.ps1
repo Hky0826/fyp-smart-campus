@@ -167,7 +167,20 @@ if ($StartNotificationWorker -or -not $SkipNotificationWorker) {
     $mappingServiceProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath "node" -ArgumentList @(
         "index.js"
     ) -WorkingDirectory (Join-Path $repoRoot "mapping_and_notification\backend")
-    Start-Sleep -Seconds 1
+    $mappingReady = $false
+    for ($i = 0; $i -lt 10; $i++) {
+        $conn = Test-NetConnection -ComputerName 127.0.0.1 -Port 5000 -WarningAction SilentlyContinue
+        if ($conn.TcpTestSucceeded) {
+            $mappingReady = $true
+            break
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    if ($mappingReady) {
+        Write-Host "Node.js Mapping Microservice ready: http://localhost:5000" -ForegroundColor Green
+    } else {
+        Write-Warning "Node.js Mapping Microservice did not respond on port 5000 within 5 seconds."
+    }
 
     Write-Host "Starting background notification worker/consumer..." -ForegroundColor Cyan
     $workerProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath "node" -ArgumentList @(

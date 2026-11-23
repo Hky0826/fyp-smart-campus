@@ -34,7 +34,7 @@ class KioskStateTests(unittest.TestCase):
         pipeline = SimpleNamespace(
             repository=SimpleNamespace(load_templates=lambda: [template]),
             matcher=TemplateMatcher(0.8),
-            config=SimpleNamespace(recognition_threshold=0.8),
+            config=SimpleNamespace(recognition_threshold=0.8, pad_threshold=0.75),
         )
         config = RuntimeConfig(
             sync_cloud_url="https://cloud.example",
@@ -50,6 +50,7 @@ class KioskStateTests(unittest.TestCase):
                 pipeline,
                 np.array([1.0, 0.0], dtype=np.float32),
                 config,
+                pad_score=0.9,
             )
 
         self.assertIs(result, token)
@@ -58,8 +59,38 @@ class KioskStateTests(unittest.TestCase):
             "entry-gate-01",
             "device-secret",
             allow_insecure_loopback=True,
+            pad_threshold=0.75,
         )
-        token_client_type.return_value.issue_token.assert_called_once_with("42")
+        token_client_type.return_value.issue_token.assert_called_once_with("42", pad_score=0.9, pad_model_version="minifasnet-v2")
+
+    def test_chatbot_owner_matching_does_not_issue_token_without_valid_pad_score(self):
+        template = FaceTemplate(
+            user_id="42",
+            identity="42",
+            template_name="left_30",
+            embedding=np.array([1.0, 0.0], dtype=np.float32),
+        )
+        pipeline = SimpleNamespace(
+            repository=SimpleNamespace(load_templates=lambda: [template]),
+            matcher=TemplateMatcher(0.8),
+            config=SimpleNamespace(recognition_threshold=0.8, pad_threshold=0.75),
+        )
+        config = RuntimeConfig(
+            sync_cloud_url="https://cloud.example",
+            sync_device_id="entry-gate-01",
+            sync_device_secret="device-secret",
+        )
+
+        with patch("access_control.facial_recognition.src.api.kiosk.EdgeAuthTokenClient") as token_client_type:
+            result = _try_issue_registered_token(
+                pipeline,
+                np.array([1.0, 0.0], dtype=np.float32),
+                config,
+                pad_score=0.05,
+            )
+
+        self.assertIsNone(result)
+        token_client_type.assert_not_called()
 
     def test_retry_access_result_keeps_attempt_verifying(self):
         store = KioskStateStore(RuntimeConfig(sync_device_id="door-1", sync_device_name="Door 1"))
@@ -143,6 +174,58 @@ class KioskStateTests(unittest.TestCase):
         self.assertTrue(expired.ended)
         self.assertIsNone(store.state("ok").active_chat_session)
         self.assertFalse(store.state("ok").chat_recoverable)
+
+    def test_default_absence_deadline_expires_on_state_refresh(self):
+        now = dt.datetime(2026, 9, 8, tzinfo=dt.timezone.utc)
+        store = KioskStateStore(RuntimeConfig(), clock=lambda: now)
+        store.start_chat_session(owner_embedding=np.array([1.0, 0.0]))
+        missing = store.update_owner_presence(False)
+        self.assertEqual(missing.session.presence_state, "OWNER_TEMPORARILY_MISSING")
+        now += dt.timedelta(seconds=9.9)
+        self.assertIsNotNone(store.state("ok").active_chat_session)
+        now += dt.timedelta(seconds=0.1)
+        self.assertIsNone(store.state("ok").active_chat_session)
+        self.assertFalse(store.state("ok").chat_recoverable)
+
+    def test_returning_owner_resets_absence_deadline(self):
+        now = dt.datetime(2026, 9, 8, tzinfo=dt.timezone.utc)
+        store = KioskStateStore(RuntimeConfig(), clock=lambda: now)
+        store.start_chat_session(owner_embedding=np.array([1.0, 0.0]))
+        store.update_owner_presence(False)
+        now += dt.timedelta(seconds=9)
+        store.update_owner_presence(True)
+        now += dt.timedelta(seconds=2)
+        self.assertIsNotNone(store.state("ok").active_chat_session)
+        self.assertIsNone(store.current_chat_session().owner_absent_since)
+
+    def test_chat_live_config_endpoint(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from access_control.facial_recognition.src.api.kiosk import create_kiosk_router
+
+        config = RuntimeConfig(
+            sync_cloud_url="http://127.0.0.1:8000",
+            sync_device_id="ENTRY-A8F3D155",
+            sync_device_secret="secret",
+        )
+        app = FastAPI()
+        app.include_router(
+            create_kiosk_router(
+                runtime_config=lambda: config,
+                access_pipeline=lambda: None,
+                chatbot_client=lambda: None,
+                sync_status=lambda: "ok",
+            )
+        )
+        client = TestClient(app)
+
+        # Visitor / no active session
+        resp = client.get("/kiosk/chat/live-config")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("ws://127.0.0.1:8000/api/chatbot/live/ws", data["ws_url"])
+        self.assertEqual(data["roles"], ["VISITOR"])
+        self.assertEqual(data["device_id"], "ENTRY-A8F3D155")
 
 
 if __name__ == "__main__":

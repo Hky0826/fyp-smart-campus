@@ -50,20 +50,21 @@ if (!fs.existsSync(VIS_DIR)) {
 // STYLING CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ROUTE_COLOR       = '#1e293b';  // slate-800 — high contrast dark route
+const ROUTE_COLOR       = '#0d9488';  // teal-600 — vibrant luminous walking path (clearly distinct from walls)
 const ROUTE_GLOW_COLOR  = '#ffffff';  // white glow underlay for contrast on any background
-const START_COLOR       = '#14b8a6';  // teal-500 — start marker
-const END_COLOR         = '#f59e0b';  // amber-400 — destination marker
-const ARROW_COLOR       = '#1e293b';  // same as route for consistency
+const START_COLOR       = '#0d9488';  // teal-600 — start marker
+const END_COLOR         = '#d97706';  // amber-600 — destination marker
+const TRANSITION_COLOR  = '#7c3aed';  // violet-600 — elevator/stairs transition marker
+const ARROW_COLOR       = '#0d9488';  // matching vibrant route
 const ARROW_OUTLINE     = '#ffffff';  // white outline for arrow contrast
 
-const EDGE_GLOW_WIDTH   = 14;
-const EDGE_GLOW_ALPHA   = 0.7;
-const EDGE_LINE_WIDTH   = 4.5;
+const EDGE_GLOW_WIDTH   = 12;
+const EDGE_GLOW_ALPHA   = 0.85;
+const EDGE_LINE_WIDTH   = 5;
 const EDGE_LINE_ALPHA   = 1.0;
 
 const NODE_GLOW_R       = 18;
-const NODE_GLOW_ALPHA   = 0.22;
+const NODE_GLOW_ALPHA   = 0.25;
 const NODE_RING_R       = 12;
 const NODE_RING_WIDTH   = 3;
 const NODE_DOT_R        = 6;
@@ -199,15 +200,28 @@ function drawRouteNodes(ctx, nodesOnFloor, startNodeId, endNodeId, scaleX, scale
     for (const node of nodesOnFloor) {
         const isStart = node.node_id === startNodeId;
         const isEnd   = node.node_id === endNodeId;
+        const isTransition = !isStart && !isEnd && (
+            node.node_type === 'ELEVATOR' || 
+            node.node_type === 'STAIRWELL' || 
+            (node.room_label && /lift|elevator|stair/i.test(node.room_label))
+        );
 
-        // Only render Start and Destination markers
-        if (!isStart && !isEnd) continue;
+        // Only render Start, Destination, and Transition markers
+        if (!isStart && !isEnd && !isTransition) continue;
 
         // Map points from 800x600 logical canvas to original image coordinates
         const x = node.coord_x * scaleX;
         const y = node.coord_y * scaleY;
 
-        const markerColor = isEnd ? END_COLOR : START_COLOR;
+        let markerColor = START_COLOR;
+        let mainLabel = 'START';
+        if (isEnd) {
+            markerColor = END_COLOR;
+            mainLabel = 'DESTINATION';
+        } else if (isTransition) {
+            markerColor = TRANSITION_COLOR;
+            mainLabel = node.node_type === 'ELEVATOR' ? 'LIFT / ELEVATOR' : 'STAIRWELL';
+        }
 
         // Outer glow disc
         ctx.save();
@@ -234,17 +248,16 @@ function drawRouteNodes(ctx, nodesOnFloor, startNodeId, endNodeId, scaleX, scale
         ctx.fill();
         ctx.restore();
 
-        // Text Labels (START / DESTINATION + room_label)
+        // Text Labels (START / DESTINATION / TRANSITION + room_label)
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
         ctx.lineJoin = 'round';
         ctx.miterLimit = 2;
 
-        const mainLabel = isStart ? 'START' : 'DESTINATION';
-        const nodeName  = node.room_label || 'Location';
+        const nodeName  = node.room_label || (isTransition ? 'Transition' : 'Location');
 
-        // 1. Draw "START" / "DESTINATION"
+        // 1. Draw main label
         ctx.font = `bold ${14 * avgScale}px 'Inter', sans-serif`;
         const yOffsetMain = y - (24 * avgScale);
         

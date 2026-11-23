@@ -18,7 +18,7 @@ import { authAxios } from '../services/api';
  * Manages all state and side effects for the Notification Hub panel.
  *
  * @param {Object} deps
- * @param {string|null}   deps.token            - Current JWT token (used to gate API calls).
+ * @param {boolean}       deps.isAuthenticated - Verified admin session state.
  * @param {string}        deps.navStartId       - Currently selected start node ID (shared with navigation panel).
  * @param {string}        deps.navEndId         - Currently selected destination node ID (shared with navigation panel).
  * @param {string}        deps.navRoleId        - Currently selected role ID (shared with navigation panel).
@@ -29,7 +29,7 @@ import { authAxios } from '../services/api';
  * @returns {Object} Notification hub state and handlers.
  */
 export function useNotificationHub({
-    token,
+    isAuthenticated,
     navStartId,
     navEndId,
     navRoleId,
@@ -58,7 +58,7 @@ export function useNotificationHub({
      * Called when the notification panel opens and after a test notification is sent.
      */
     const fetchNotifData = async () => {
-        if (!token) return;
+        if (!isAuthenticated) return;
         try {
             const usersRes = await authAxios.get('/api/notification-users');
             setNotifUsers(usersRes.data);
@@ -75,11 +75,11 @@ export function useNotificationHub({
 
     // Auto-fetch data when the notification panel is opened
     useEffect(() => {
-        if (notifPanelOpen && token) {
+        if (notifPanelOpen && isAuthenticated) {
             fetchNotifData();
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [notifPanelOpen, token]);
+    }, [notifPanelOpen, isAuthenticated]);
 
     /**
      * Automatically generates an alert message template based on the selected

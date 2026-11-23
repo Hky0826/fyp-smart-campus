@@ -88,51 +88,13 @@ def _safe_query_id(val: Any) -> Optional[int]:
     return None
 
 def _tts_base64(text: str, language_code: Optional[str] = None) -> Optional[str]:
-    """Generate base64 PCM audio for safe response text."""
-    if not rag_settings.AUDIO_TTS_ENABLED or not text.strip():
-        return None
-    timeout_seconds = max(0.0, float(getattr(rag_settings, "AUDIO_TTS_TIMEOUT_SECONDS", 6)))
-    use_language = bool(language_code and str(language_code).lower() not in {"en", "en-us"})
-    tts_args = (text, language_code) if use_language else (text,)
-    try:
-        if timeout_seconds:
-            future = _TTS_EXECUTOR.submit(generate_audio_from_text, *tts_args)
-            try:
-                audio_pcm = future.result(timeout=timeout_seconds)
-            except concurrent.futures.TimeoutError:
-                future.cancel()
-                logger.warning(
-                    "Audio chat: TTS timed out after %.1fs, returning text only.",
-                    timeout_seconds,
-                )
-                return None
-        else:
-            audio_pcm = generate_audio_from_text(*tts_args)
-    except Exception as exc:
-        logger.warning("Audio chat: TTS failed, returning text only: %s", exc)
-        return None
-    if audio_pcm is None:
-        return None
-    audio_base64 = base64.b64encode(audio_pcm).decode("ascii")
-    logger.info(
-        "Audio chat: TTS payload ready. pcm_bytes=%d base64_chars=%d",
-        len(audio_pcm),
-        len(audio_base64),
-    )
-    return audio_base64
+    """Deprecated. All spoken audio output is handled exclusively by Gemini Live."""
+    return None
 
 
 def _tts_job(text: str, language_code: Optional[str] = None) -> tuple[Optional[bytes], float, Optional[str]]:
-    """Run one synthesis request off the response-generation path."""
-    started = time.monotonic()
-    try:
-        if language_code and str(language_code).lower() not in {"en", "en-us"}:
-            audio = generate_audio_from_text(text, language_code)
-        else:
-            audio = generate_audio_from_text(text)
-        return audio, (time.monotonic() - started) * 1000.0, None
-    except Exception as exc:  # TTS is best-effort; text must still complete.
-        return None, (time.monotonic() - started) * 1000.0, str(exc)
+    """Deprecated. All spoken audio output is handled exclusively by Gemini Live."""
+    return None, 0.0, None
 
 
 def _drain_tts_queue(pending: list[tuple[str, concurrent.futures.Future]], metrics: InferenceMetrics,
@@ -471,12 +433,15 @@ def process_audio_chat(
                 intent="OUT_OF_SCOPE",
             )
         else:
+            from RagChatbot.services.chat_service import _load_recent_chat_history, _condense_query_with_history
+            chat_history = _load_recent_chat_history(resolved_session_id, db)
             with StageTimer() as timer:
                 planned = llm_planner.execute_planned_turn(
                     sanitized_query,
                     context=context,
                     db=db,
                     confirmation_context=confirmation_context,
+                    chat_history=chat_history,
                 )
             metrics.prompt_classification_ms += timer.elapsed_ms
 
@@ -530,132 +495,35 @@ def process_audio_chat(
             visualisation=(navigation_data or {}).get("visualisation"),
         )
 
-# Step 6: Embed the extracted query
+    # Step 6-12: Execute through Fast RAG engine
+    from RagChatbot.services.chat_service import _load_recent_chat_history, _condense_query_with_history
+    chat_history = _load_recent_chat_history(resolved_session_id, db)
+    search_query = _condense_query_with_history(sanitized_query, chat_history)
     with StageTimer() as timer:
-        try:
-            query_embedding = embed_text(sanitized_query)
-        except RuntimeError as exc:
-            logger.error("Audio chat: embedding failed for user_id=%s: %s", user_id, exc)
-            return _audio_response(
-                transcribed_input=user_query,
-                text_response=None,
-                status="error",
-                access_granted=False,
-                error_message=get_translated("search_unavailable", lang),
-                start_time=start_time,
-                include_audio=include_audio,
-                metrics=metrics,
-                user_id=user_id,
-                session_id=resolved_session_id,
-                language_code=detected_language,
-            )
-    metrics.embedding_return_ms += timer.elapsed_ms
-
-# Step 7: Retrieve authorized document chunks
-    with StageTimer() as timer:
-        ranked_chunks = retrieve_chunks(
-            query_embedding=query_embedding,
-            allowed_access_levels=allowed_levels,
+        from RagChatbot.generation.live_fast_rag import live_fast_rag
+        fast_res = live_fast_rag.process_voice_query(
+            query=sanitized_query,
+            auth_context=context,
             db=db,
-            query_text=sanitized_query,
+            chat_history=chat_history,
+            search_query=search_query,
         )
-    metrics.embedding_db_search_ms += timer.elapsed_ms
-
-# Check whether authentication upgrade could help
-    if not ranked_chunks:
-        if not bearer_token and _has_relevant_protected_chunks(query_embedding, db):
-            # Anonymous user but there are protected chunks that match
-            return _audio_response(
-                transcribed_input=user_query,
-                text_response=get_translated("auth_required", lang),
-                status="auth_required",
-                access_granted=False,
-                start_time=start_time,
-                include_audio=include_audio,
-                metrics=metrics,
-                user_id=user_id,
-                session_id=resolved_session_id,
-                language_code=detected_language,
-            )
-        else:
-            # No relevant chunks at all
-            return _audio_response(
-                transcribed_input=user_query,
-                text_response=get_translated("no_access", lang),
-                status="no_access",
-                access_granted=False,
-                start_time=start_time,
-                include_audio=include_audio,
-                metrics=metrics,
-                user_id=user_id,
-                session_id=resolved_session_id,
-                language_code=detected_language,
-            )
-
-# Step 9: Generate text response using the same pipeline as text chat
-    with StageTimer() as timer:
-        try:
-            answer_text = generate_answer(
-                sanitized_query,
-                ranked_chunks,
-                chat_history=_recent_chat_history(db, resolved_session_id),
-                user_context=context,
-            )
-        except RuntimeError as exc:
-            logger.error("Audio chat: generation failed for user_id=%s: %s", user_id, exc)
-            return _audio_response(
-                transcribed_input=user_query,
-                text_response=None,
-                status="error",
-                access_granted=False,
-                error_message="The answer service is temporarily unavailable. Please try again later.",
-                start_time=start_time,
-                include_audio=include_audio,
-                metrics=metrics,
-                user_id=user_id,
-                session_id=resolved_session_id,
-            )
     metrics.rag_ms += timer.elapsed_ms
 
-# Step 10: Validate text response and sources
-    validation: ValidationResult = validate_response(
-        text=answer_text,
-        sources=ranked_chunks,
-        original_query=sanitized_query,
-    )
-
-    if not validation.valid:
-        logger.warning(
-            "Audio chat: response validation failed: %s", validation.reason
-        )
-        # If validation failed, sanitize the text and regenerate audio
-        if validation.sanitized_text:
-            answer_text = validation.sanitized_text
-
-# Do not include audio when validation has failed
-        # may contain sanitised/redacted text that should not be spoken.
-        # Return with validation_failed status so the edge device knows
-        # the response went through extra sanitisation
-        status_str = "validation_failed"
-        include_response_audio = False
-    else:
-        status_str = "ok"
-        include_response_audio = include_audio
-
-# Step 12: Build CitationSchema objects
-    citations: List[CitationSchema] = [
+    answer_text = fast_res.get("answer", "")
+    access_granted = True
+    status_str = fast_res.get("status", "ok")
+    citations = [
         CitationSchema(
-            chunk_id=chunk.chunk_id,
-            document_id=chunk.document_id,
-            document_title=chunk.document_title,
-            chunk_index=chunk.chunk_index,
-            access_level=chunk.access_level,
-            excerpt=chunk.chunk_text[:200],
-            chunk_type=getattr(chunk, "chunk_type", "DETAIL"),
-            section_path=getattr(chunk, "section_path", None),
-            entity_tags=getattr(chunk, "entity_tags", []),
+            chunk_id=s.get("chunk_id", 0),
+            document_id=s.get("document_id", 0),
+            document_title=s.get("document_title", ""),
+            chunk_index=0,
+            access_level=s.get("access_level", "PUBLIC"),
+            excerpt=s.get("section_path", ""),
         )
-        for chunk in ranked_chunks
+        for s in fast_res.get("sources", [])
+        if isinstance(s, dict)
     ]
 
     response_time_ms = int(metrics.time_to_first_tts_ms) if metrics.time_to_first_tts_ms > 0 else int((time.monotonic() - start_time) * 1000)
@@ -667,7 +535,7 @@ def process_audio_chat(
         user_id=user_id,
         query_text=sanitized_query,
         response_text=answer_text,
-        retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
+        retrieved_chunk_ids=[c.chunk_id for c in citations],
         response_time_ms=response_time_ms,
     )
     audit_query_id: Optional[int] = _safe_query_id(logged_id)
@@ -681,7 +549,7 @@ def process_audio_chat(
         access_granted=True,
         start_time=start_time,
         query_id=audit_query_id,
-        include_audio=include_response_audio,
+        include_audio=include_audio,
         metrics=metrics,
         user_id=user_id,
         session_id=resolved_session_id,
@@ -991,9 +859,9 @@ def process_audio_chat_stream(
         yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
         return
 
-    # Query routing: check if query is related to university information
+    # Query routing: classify query intent (navigational, greeting, capability, or university info)
     with StageTimer() as timer:
-        route = type("Route", (), {"category": "UNIVERSITY_INFO"})()
+        route = classify_query(sanitized_query, db=db)
     metrics.prompt_classification_ms += timer.elapsed_ms
 
     navigation_data = None
@@ -1056,6 +924,27 @@ def process_audio_chat_stream(
         log_chatbot_interaction(db, session_id=resolved_session_id, user_id=user_id, query_text=sanitized_query, response_text=fast_answer, retrieved_chunk_ids=[], response_time_ms=tts_time, is_navigational=bool(navigation_data))
         yield {"event": "done", "data": res.model_dump(mode="json", exclude={"audio_response"})}
         return
+
+    # If acoustic bridge is enabled, immediately stream conversational bridge audio so user hears speech with <300ms perceived latency
+    if getattr(rag_settings, "LIVE_ACOUSTIC_BRIDGE_ENABLED", True) and rag_settings.AUDIO_TTS_ENABLED:
+        try:
+            from RagChatbot.services.acoustic_bridge_service import get_acoustic_bridge
+            bridge_text, bridge_pcm = get_acoustic_bridge(sanitized_query)
+            if bridge_pcm:
+                logger.info("STREAM_DEBUG [%.3f]: Emitting immediate acoustic bridge audio", time.time())
+                yield {"event": "acoustic_bridge", "data": {"text": bridge_text}}
+                yield {
+                    "event": "audio",
+                    "data": {
+                        "encoding": "pcm_s16le",
+                        "sample_rate": 24000,
+                        "chunk": base64.b64encode(bridge_pcm).decode("ascii"),
+                        "text": bridge_text,
+                        "is_bridge": True,
+                    }
+                }
+        except Exception as bridge_exc:
+            logger.debug("Acoustic bridge emission failed: %s", bridge_exc)
 
     query_embedding = embed_text(sanitized_query)
     ranked_chunks = retrieve_chunks(

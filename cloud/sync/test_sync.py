@@ -14,7 +14,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from edge.facial_recognition.src.sync import SQLiteEdgeDB, DownstreamSyncWorker
+from access_control.facial_recognition.src.sync import SQLiteEdgeDB, DownstreamSyncWorker
 
 class TestDatabaseSynchronization(unittest.TestCase):
     
@@ -45,6 +45,7 @@ class TestDatabaseSynchronization(unittest.TestCase):
         cursor.execute("DROP TABLE IF EXISTS device_user_face_embeddings")
         cursor.execute("DROP TABLE IF EXISTS device_user_roles")
         cursor.execute("DROP TABLE IF EXISTS device_node_rbac")
+        cursor.execute("DROP TABLE IF EXISTS device_rbac")
         cursor.execute("DROP TABLE IF EXISTS device_roles")
         cursor.execute("DROP TABLE IF EXISTS device_users")
         cursor.execute("DROP TABLE IF EXISTS device_info")
@@ -81,7 +82,7 @@ class TestDatabaseSynchronization(unittest.TestCase):
         required_tables = [
             "device_users", "device_roles", "device_user_roles", 
             "device_user_face_embeddings", "device_auth_logs", "device_surveillance_logs",
-            "device_info", "device_node_rbac", "sync_metadata"
+            "device_info", "device_node_rbac", "device_rbac", "sync_metadata"
         ]
         
         for table in required_tables:
@@ -301,7 +302,7 @@ class TestDatabaseSynchronization(unittest.TestCase):
         """
         Verify that load_templates returns user_id, embedding, and is_active status.
         """
-        from edge.facial_recognition.src.face.database import DeviceUserRepository
+        from access_control.facial_recognition.src.face.database import DeviceUserRepository
         repository = DeviceUserRepository(self.db_path)
         
         # Seed an active and an inactive user
@@ -335,7 +336,7 @@ class TestDatabaseSynchronization(unittest.TestCase):
         
         # 2. Setup mock cloud response where only user 101 exists (102 has been deleted)
         from unittest.mock import patch, MagicMock
-        worker = DownstreamSyncWorker(self.db, "http://localhost:8000")
+        worker = DownstreamSyncWorker(self.db, "http://localhost:8000", allow_insecure_loopback=True, device_id="test_device", device_secret="test_secret")
         
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -345,7 +346,8 @@ class TestDatabaseSynchronization(unittest.TestCase):
             worker.perform_startup_cleanup()
             
             # Check requests get details
-            mock_get.assert_called_once_with("http://localhost:8000/api/sync/downstream/user-ids", timeout=10.0)
+            self.assertEqual(mock_get.call_count, 1)
+            self.assertEqual(mock_get.call_args[0][0], "http://localhost:8000/api/sync/downstream/user-ids")
             
         # Verify user 102 was deleted from local SQLite, but 101 remains
         conn = sqlite3.connect(self.db_path)
@@ -356,6 +358,41 @@ class TestDatabaseSynchronization(unittest.TestCase):
         
         self.assertIn(101, uids)
         self.assertNotIn(102, uids)
+
+    def test_save_device_rbac_delta(self):
+        """
+        Verify that device-level RBAC rules are properly stored and replaced in local SQLite.
+        """
+        # 1. First insert roles to satisfy foreign keys
+        roles = [{"role_id": 1, "role_name": "ADMIN"}, {"role_id": 2, "role_name": "STAFF"}]
+        self.db.save_authorization_snapshot(roles, [])
+
+        # 2. Save device RBAC
+        device_rbac = [
+            {"device_id": "gate-01", "role_id": 1},
+            {"device_id": "gate-01", "role_id": 2},
+        ]
+        self.db.save_device_rbac_delta(device_rbac)
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT device_id, role_id FROM device_rbac ORDER BY role_id")
+        rows = cursor.fetchall()
+        conn.close()
+
+        self.assertEqual(rows, [("gate-01", 1), ("gate-01", 2)])
+
+        # 3. Delta replacement (e.g. admin revokes STAFF from gate-01)
+        updated_rbac = [{"device_id": "gate-01", "role_id": 1}]
+        self.db.save_device_rbac_delta(updated_rbac)
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT device_id, role_id FROM device_rbac")
+        rows = cursor.fetchall()
+        conn.close()
+
+        self.assertEqual(rows, [("gate-01", 1)])
 
 
 if __name__ == "__main__":

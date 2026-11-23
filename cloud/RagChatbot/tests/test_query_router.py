@@ -82,3 +82,68 @@ def test_local_regex_unclear():
     res = classify_query("fees")
     assert res.category == "UNCLEAR"
     assert res.clarification_question is not None
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "2 + 2",
+        "15 * 3",
+        "100 / 4",
+        "what is 5 plus 10?",
+        "calculate 12 * 8",
+        "what is 2 + 2",
+        "50 - 25",
+    ],
+)
+def test_math_out_of_scope_arithmetic(query):
+    res = classify_query(query)
+    assert res.category == "OUT_OF_SCOPE"
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "solve 2x + 5 = 15",
+        "can you answer math questions?",
+        "what is the square root of 144?",
+        "can you solve my math homework",
+        "what is the derivative of x^2",
+    ],
+)
+def test_math_out_of_scope_keywords(query):
+    res = classify_query(query)
+    assert res.category == "OUT_OF_SCOPE"
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Do I need SPM credit in mathematics for Computer Science?",
+        "What is the passing mark for BCS3114?",
+        "How many credits for Bachelor of Computer Science?",
+        "What are the admission requirements for mathematics in engineering?",
+    ],
+)
+def test_campus_queries_with_math_preserved(query):
+    res = classify_query(query)
+    assert res.category == "UNIVERSITY_INFO"
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "what are the programmes",
+        "what courses are available",
+        "list the programmes",
+        "tell me about the programmes",
+        "programmes and courses",
+        "what can i study",
+    ],
+)
+def test_broad_academic_programme_queries(query):
+    res = classify_query(query)
+    assert res.category == "UNIVERSITY_INFO"
+    assert res.category_hint == "ACADEMIC"
+    assert res.is_broad_overview is True
+

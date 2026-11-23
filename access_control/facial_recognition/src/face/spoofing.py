@@ -33,7 +33,7 @@ class MotionSpoofDetector:
 
     def __init__(
         self,
-        history_size: int = 6,
+        history_size: int = 4,
         motion_threshold: float = 3.0,
         pose_threshold: float = 0.025,
         spoof_frames: int = 10,

@@ -19,7 +19,6 @@ import wave
 from pathlib import Path
 from typing import Optional
 
-from RagChatbot.generation.response_validator import generate_audio_from_text
 
 
 _AUDIO_DIR = Path(
@@ -49,23 +48,13 @@ def _read_pcm_wav(filename: str) -> Optional[bytes]:
 
 
 def generate_greeting_audio(greeting_text: str, given_name: str | None = None) -> Optional[bytes]:
-    """Build greeting PCM while minimizing paid synthesis.
-
-    With recordings installed, anonymous greetings require zero TTS calls and
-    personalized greetings synthesize only the name. Without recordings this
-    behaves exactly like the previous implementation.
-    """
+    """Build greeting PCM from pre-recorded audio or return None (live greeting is handled by Gemini Live)."""
     normalized_name = " ".join((given_name or "").split())
     if not normalized_name:
-        generic = _read_pcm_wav("greeting_generic.wav")
-        return generic if generic is not None else generate_audio_from_text(greeting_text)
+        return _read_pcm_wav("greeting_generic.wav")
 
     prefix = _read_pcm_wav("greeting_hi.wav")
     suffix = _read_pcm_wav("greeting_suffix.wav")
-    if prefix is None or suffix is None:
-        return generate_audio_from_text(greeting_text)
-
-    name_audio = generate_audio_from_text(normalized_name)
-    if not name_audio:
-        return None
-    return prefix + _JOIN_SILENCE + name_audio + _JOIN_SILENCE + suffix
+    if prefix and suffix:
+        return prefix + _JOIN_SILENCE + suffix
+    return _read_pcm_wav("greeting_generic.wav")

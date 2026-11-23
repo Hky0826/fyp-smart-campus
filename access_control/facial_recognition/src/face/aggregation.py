@@ -10,7 +10,7 @@ import numpy as np
 
 @dataclass(frozen=True)
 class EmbeddingAggregationConfig:
-    min_embedding_samples: int = 5
+    min_embedding_samples: int = 2
     max_embedding_samples: int = 10
     embedding_outlier_threshold: float = 0.25
     candidate_consistency_ratio: float = 0.8

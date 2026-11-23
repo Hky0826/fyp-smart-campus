@@ -4,10 +4,20 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from RagChatbot.personalisation.schemas import AuthenticatedChatContext
 from RagChatbot.retrieval.ranking import RankedChunk
 from RagChatbot.services import process_user_request as request_module
 from RagChatbot.services import map_service
+from RagChatbot.services.chat_service import clear_rag_response_cache
+
+
+@pytest.fixture(autouse=True)
+def clean_cache():
+    clear_rag_response_cache()
+    yield
+    clear_rag_response_cache()
 
 
 def _flash_response(route: str = "UNIVERSITY_INFO", intent: str = "ADMISSIONS"):
@@ -25,25 +35,28 @@ def _flash_response(route: str = "UNIVERSITY_INFO", intent: str = "ADMISSIONS"):
 
 def test_process_user_request_calls_flash_lite_only_for_structured_routing():
     db = MagicMock()
-    chunk = RankedChunk(
-        chunk_id=1,
-        document_id=2,
-        document_title="Admissions",
-        chunk_index=0,
-        chunk_text="Applications open in September.",
-        access_level="PUBLIC",
-        similarity_score=0.98,
-    )
+    chunk_source = {
+        "chunk_id": 1,
+        "document_id": 2,
+        "document_title": "Admissions",
+        "access_level": "PUBLIC",
+        "similarity_score": 0.98,
+    }
     fake_models = MagicMock()
     fake_models.generate_content.return_value = _flash_response()
     fake_client = SimpleNamespace(models=fake_models)
 
+    fake_fast_res = {
+        "status": "ok",
+        "route": "UNIVERSITY_INFO",
+        "answer": "Admissions context",
+        "sources": [chunk_source],
+    }
+
     with (
         patch.object(request_module.genai, "Client", return_value=fake_client),
         patch.object(request_module, "resolve_auth_context", return_value=AuthenticatedChatContext(None, None)),
-        patch.object(request_module, "embed_text", return_value=[0.1, 0.2]),
-        patch.object(request_module, "retrieve_chunks", return_value=[chunk]),
-        patch.object(request_module, "build_context_block", return_value="Admissions context"),
+        patch("RagChatbot.generation.live_fast_rag.live_fast_rag.process_voice_query", return_value=fake_fast_res),
     ):
         result = request_module.process_user_request(
             transcript="What are the admission requirements?",
@@ -54,9 +67,8 @@ def test_process_user_request_calls_flash_lite_only_for_structured_routing():
         )
 
     assert result["route"] == "UNIVERSITY_INFO"
-    assert result["response_text"] is None
     assert result["grounded_context"] == "Admissions context"
-    assert result["sources"][0]["chunk_id"] == 1
+    assert result["citations"][0]["chunk_id"] == 1
     assert fake_models.generate_content.call_args.kwargs["model"] == "gemini-3.1-flash-lite"
 
 
@@ -104,3 +116,59 @@ def test_live_navigation_uses_shared_deterministic_resolver(monkeypatch):
     assert result["route"] == "NAVIGATIONAL"
     assert result["response_text"] == "Walk to the Boardroom."
     client.assert_not_called()
+
+
+def test_process_user_request_fast_voice_routes_to_live_fast_rag():
+    db = MagicMock()
+    fake_fast_res = {
+        "answer": "Fast spoken answer",
+        "sources": ["campus_guide.md"],
+        "status": "ok",
+        "route": "UNIVERSITY_INFO",
+    }
+    fake_models = MagicMock()
+    fake_models.generate_content.return_value = _flash_response()
+    fake_client = SimpleNamespace(models=fake_models)
+
+    with (
+        patch.object(request_module.genai, "Client", return_value=fake_client),
+        patch.object(request_module, "resolve_auth_context", return_value=AuthenticatedChatContext(None, None)),
+        patch("RagChatbot.generation.live_fast_rag.live_fast_rag.process_voice_query", return_value=fake_fast_res) as mock_fast,
+    ):
+        result = request_module.process_user_request(
+            transcript="What are the admission requirements?",
+            bearer_token=None,
+            device_id="edge-1",
+            session_id=None,
+            db=db,
+            fast_voice=True,
+        )
+
+    assert result["route"] == "UNIVERSITY_INFO"
+    assert result["response_text"] == "Fast spoken answer"
+    assert result["grounded_context"] == "Fast spoken answer"
+    mock_fast.assert_called_once()
+
+
+def test_process_user_request_blocks_math_questions_as_out_of_scope():
+    db = MagicMock()
+    with (
+        patch.object(request_module, "resolve_auth_context", return_value=AuthenticatedChatContext(None, None)),
+        patch.object(request_module.genai, "Client") as mock_client,
+        patch("RagChatbot.generation.live_fast_rag.live_fast_rag.process_voice_query") as mock_fast,
+    ):
+        result = request_module.process_user_request(
+            transcript="what is 2 + 2?",
+            bearer_token=None,
+            device_id="edge-1",
+            session_id=None,
+            db=db,
+            fast_voice=True,
+        )
+
+    assert result["route"] == "OUT_OF_SCOPE"
+    assert result["status"] == "blocked"
+    assert "university information" in result["response_text"].lower()
+    mock_client.assert_not_called()
+    mock_fast.assert_not_called()
+

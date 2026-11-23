@@ -2,7 +2,7 @@ const { useState, useEffect, useRef, useMemo } = React;
 
 const DASHBOARD_SUB_TABS = {
     iam: ["users", "roles", "facial-recognition"],
-    rag: ["documents", "chatbot-queries"],
+    rag: ["documents", "chatbot-queries", "adaptation-phrases", "speech-languages"],
     infra: ["devices", "node-rbac", "edge-rbac", "auth-logs", "jwt-sessions"],
     academics: ["courses", "enrollments", "timetables", "appointments", "notifications", "faculties", "departments", "programmes"]
 };
@@ -126,8 +126,11 @@ function CampusMapTab() {
             const [roleFilter, setRoleFilter] = useState("ALL");
             const [statusFilter, setStatusFilter] = useState("ALL");
             const [accessLevelFilter, setAccessLevelFilter] = useState("ALL");
+            const [categoryFilter, setCategoryFilter] = useState("ALL");
             const [faceStatusFilter, setFaceStatusFilter] = useState("ALL");
             const [faceRoleFilter, setFaceRoleFilter] = useState("ALL");
+            const [speechLanguages, setSpeechLanguages] = useState([]);
+            const [adaptationCategories, setAdaptationCategories] = useState([]);
 
             // ── Face enrollment modal ─────────────────────────
             const [showFaceModal, setShowFaceModal] = useState(false);
@@ -188,6 +191,8 @@ function CampusMapTab() {
                 'documents': 'Documents',
                 'chunks': 'Content Chunks',
                 'chatbot-queries': 'Chatbot Logs',
+                'adaptation-phrases': 'Acronyms & Translations',
+                'speech-languages': 'Supported Languages',
                 'devices': 'Devices',
                 'node-rbac': 'Room Access',
                 'edge-rbac': 'Path Access',
@@ -222,11 +227,43 @@ function CampusMapTab() {
             const showErrorToast = (msg) => setToast({ message: msg, type: 'error' });
             const showSuccessToast = (msg) => setToast({ message: msg, type: 'success' });
 
+            const parseTranslations = (desc) => {
+                if (!desc) return [];
+                try {
+                    const parsed = JSON.parse(desc);
+                    if (Array.isArray(parsed)) {
+                        return parsed.filter(t => t && (t.text || typeof t === 'string')).map(t => {
+                            if (typeof t === 'string') return { lang: 'en', text: t };
+                            return { lang: t.lang || 'en', text: t.text || '' };
+                        });
+                    }
+                    if (typeof parsed === 'object' && parsed !== null) {
+                        return Object.entries(parsed).map(([lang, text]) => ({ lang, text: String(text) }));
+                    }
+                } catch (e) {
+                    return [{ lang: 'en', text: desc }];
+                }
+                return [];
+            };
+
+            const getLangBadge = (lang) => {
+                const l = (lang || 'en').toLowerCase();
+                const map = {
+                    'en': { name: 'English', cls: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30' },
+                    'ms': { name: 'Bahasa Melayu', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
+                    'zh': { name: 'Chinese', cls: 'bg-rose-500/15 text-rose-300 border-rose-500/30' },
+                    'ta': { name: 'Tamil', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
+                    'yue': { name: 'Cantonese', cls: 'bg-purple-500/15 text-purple-300 border-purple-500/30' },
+                    'ar': { name: 'Arabic', cls: 'bg-teal-500/15 text-teal-300 border-teal-500/30' }
+                };
+                return map[l] || { name: l.toUpperCase(), cls: 'bg-slate-800 text-slate-300 border-slate-700' };
+            };
+
             const getRecordKey = (item, tab = currentTab, activeSubTab = subTab) => {
                 if (!item) return "";
                 const keyMap = {
                     iam: { users: "user_id", roles: "role_id", "facial-recognition": "user_id" },
-                    rag: { documents: "document_id", "chatbot-queries": "query_id" },
+                    rag: { documents: "document_id", "chatbot-queries": "query_id", "adaptation-phrases": "phrase_id", "speech-languages": "language_code" },
                     infra: { devices: "device_id", "auth-logs": "log_id", "jwt-sessions": "session_id" },
                     academics: {
                         courses: "course_id", enrollments: "enrollment_id", timetables: "timetable_id",
@@ -451,7 +488,7 @@ function CampusMapTab() {
                     const headers = { "Authorization": `Bearer ${token}` };
                     const endpointMap = {
                         iam: { users: "/api/iam/users", roles: "/api/iam/roles", "facial-recognition": "/api/iam/users" },
-                        rag: { documents: "/api/rag/documents", "chatbot-queries": "/api/rag/chatbot-queries" },
+                        rag: { documents: "/api/rag/documents", "chatbot-queries": "/api/rag/chatbot-queries", "adaptation-phrases": "/api/rag/adaptation-phrases", "speech-languages": "/api/rag/speech-languages" },
                         infra: { devices: "/api/infra/devices", "node-rbac": "/api/infra/node-rbac", "edge-rbac": "/api/infra/edge-rbac", "auth-logs": "/api/infra/auth-logs", "jwt-sessions": "/api/infra/jwt-sessions" },
                         academics: { courses: "/api/academics/courses", enrollments: "/api/academics/enrollments", timetables: "/api/academics/timetables", appointments: "/api/academics/appointments", notifications: "/api/academics/notifications", faculties: "/api/refs/faculties", departments: "/api/refs/departments", programmes: "/api/refs/programmes" }
                     };
@@ -471,12 +508,81 @@ function CampusMapTab() {
                 }
             };
 
+            // ── Fetch speech languages & categories ──────────
+            const fetchSpeechLanguages = async () => {
+                if (!token) return;
+                try {
+                    const res = await fetch("/api/rag/speech-languages", { headers: { "Authorization": `Bearer ${token}` } });
+                    if (res.ok) {
+                        const data = await res.json();
+                        setSpeechLanguages(Array.isArray(data) ? data : []);
+                    }
+                } catch (e) {
+                    console.error("Failed to load speech languages", e);
+                }
+            };
+
+            const fetchAdaptationCategories = async () => {
+                if (!token) return;
+                try {
+                    const res = await fetch("/api/rag/adaptation-phrases/categories", { headers: { "Authorization": `Bearer ${token}` } });
+                    if (res.ok) {
+                        const data = await res.json();
+                        setAdaptationCategories(Array.isArray(data) ? data : []);
+                    }
+                } catch (e) {
+                    console.error("Failed to load adaptation categories", e);
+                }
+            };
+
+            const handleToggleLanguageDefault = async (code) => {
+                try {
+                    const res = await fetch(`/api/rag/speech-languages/${code}/toggle-default`, {
+                        method: "POST",
+                        headers: { "Authorization": `Bearer ${token}` }
+                    });
+                    if (!res.ok) {
+                        const d = await res.json();
+                        throw new Error(d.detail || "Failed to toggle default language status.");
+                    }
+                    showSuccessToast("Default language status updated.");
+                    await fetchSpeechLanguages();
+                    if (currentTab === "rag" && subTab === "speech-languages") await fetchTabData();
+                } catch (err) {
+                    showErrorToast(err.message);
+                }
+            };
+
+            const handleToggleLanguageActive = async (code) => {
+                try {
+                    const res = await fetch(`/api/rag/speech-languages/${code}/toggle-active`, {
+                        method: "POST",
+                        headers: { "Authorization": `Bearer ${token}` }
+                    });
+                    if (!res.ok) {
+                        const d = await res.json();
+                        throw new Error(d.detail || "Failed to toggle language active status.");
+                    }
+                    showSuccessToast("Language active status updated.");
+                    await fetchSpeechLanguages();
+                    if (currentTab === "rag" && subTab === "speech-languages") await fetchTabData();
+                } catch (err) {
+                    showErrorToast(err.message);
+                }
+            };
+
             // ── Effects: data loading ─────────────────────────
             useEffect(() => {
                 if (token) {
                     fetchReferences();
                     if (currentTab === "overview") fetchOverviewStats();
-                    else if (subTab || !DASHBOARD_DEFAULT_SUB_TAB[currentTab]) fetchTabData();
+                    else if (subTab || !DASHBOARD_DEFAULT_SUB_TAB[currentTab]) {
+                        fetchTabData();
+                        if (currentTab === "rag" && subTab === "adaptation-phrases") {
+                            fetchSpeechLanguages();
+                            fetchAdaptationCategories();
+                        }
+                    }
                 }
             }, [token, currentTab, subTab]);
 
@@ -493,11 +599,11 @@ function CampusMapTab() {
             // ── Reset filters on tab change ───────────────────
             useEffect(() => {
                 setSearchQuery(""); setRoleFilter("ALL"); setStatusFilter("ALL");
-                setAccessLevelFilter("ALL"); setFaceStatusFilter("ALL"); setFaceRoleFilter("ALL");
+                setAccessLevelFilter("ALL"); setCategoryFilter("ALL"); setFaceStatusFilter("ALL"); setFaceRoleFilter("ALL");
             }, [currentTab, subTab]);
 
             // ── Reset pagination on filter change ─────────────
-            useEffect(() => { setCurrentPage(1); }, [searchQuery, currentTab, subTab, roleFilter, statusFilter, faceStatusFilter, faceRoleFilter]);
+            useEffect(() => { setCurrentPage(1); }, [searchQuery, currentTab, subTab, roleFilter, statusFilter, accessLevelFilter, categoryFilter, faceStatusFilter, faceRoleFilter]);
 
             // ── Form submit ───────────────────────────────────
             const handleFormSubmit = async (e, payload) => {
@@ -547,9 +653,18 @@ function CampusMapTab() {
                             method = modalType === "create" ? "POST" : "PUT";
                             finalBody = payload;
                         }
-                    } else if (currentTab === "rag" && subTab === "documents") {
-                        endpoint = modalType === "create" ? "/api/rag/documents" : `/api/rag/documents/${selectedItem.document_id}`;
-                        method = modalType === "create" ? "POST" : "PUT"; finalBody = payload;
+                    } else if (currentTab === "rag") {
+                        if (subTab === "documents") {
+                            endpoint = modalType === "create" ? "/api/rag/documents" : `/api/rag/documents/${selectedItem.document_id}`;
+                            method = modalType === "create" ? "POST" : "PUT"; finalBody = payload;
+                        } else if (subTab === "adaptation-phrases") {
+                            endpoint = modalType === "create" ? "/api/rag/adaptation-phrases" : `/api/rag/adaptation-phrases/${selectedItem.phrase_id}`;
+                            method = modalType === "create" ? "POST" : "PUT"; finalBody = payload;
+                        } else if (subTab === "speech-languages") {
+                            endpoint = "/api/rag/speech-languages";
+                            method = "POST";
+                            finalBody = payload;
+                        }
                     } else if (currentTab === "infra") {
                         if (subTab === "devices") {
                             endpoint = modalType === "create" ? "/api/infra/devices" : `/api/infra/devices/${selectedItem.device_id}`;
@@ -637,7 +752,7 @@ function CampusMapTab() {
                     const headers = { "Authorization": `Bearer ${token}` };
                     const epMap = {
                         iam: { users: `/api/iam/users/${item.user_id}`, roles: `/api/iam/roles/${item.role_id}` },
-                        rag: { documents: `/api/rag/documents/${item.document_id}` },
+                        rag: { documents: `/api/rag/documents/${item.document_id}`, "adaptation-phrases": `/api/rag/adaptation-phrases/${item.phrase_id}`, "speech-languages": `/api/rag/speech-languages/${item.language_code}` },
                         infra: { devices: `/api/infra/devices/${item.device_id}`, "node-rbac": `/api/infra/node-rbac/${item.node_id}/${item.role_id}`, "edge-rbac": `/api/infra/edge-rbac/${item.edge_id}/${item.role_id}` },
                         academics: { courses: `/api/academics/courses/${item.course_id}`, enrollments: `/api/academics/enrollments/${item.enrollment_id}`, timetables: `/api/academics/timetables/${item.timetable_id}`, appointments: `/api/academics/appointments/${item.appointment_id}`, faculties: `/api/refs/faculties/${item.faculty_id}`, departments: `/api/refs/departments/${item.department_id}`, programmes: `/api/refs/programmes/${item.programme_id}` }
                     };
@@ -664,7 +779,13 @@ function CampusMapTab() {
                 setPendingActionKey(actionKey);
                 try {
                     const headers = { "Authorization": `Bearer ${token}` };
-                    const epMap = { iam: { users: `/api/iam/users/${item.user_id}/toggle-active` }, rag: { documents: `/api/rag/documents/${item.document_id}/toggle-active` } };
+                    const epMap = {
+                        iam: { users: `/api/iam/users/${item.user_id}/toggle-active` },
+                        rag: {
+                            documents: `/api/rag/documents/${item.document_id}/toggle-active`,
+                            "adaptation-phrases": `/api/rag/adaptation-phrases/${item.phrase_id}/toggle-active`
+                        }
+                    };
                     const endpoint = epMap[currentTab]?.[subTab];
                     if (!endpoint) return;
                     const response = await fetch(endpoint, { method: "POST", headers });
@@ -745,16 +866,9 @@ function CampusMapTab() {
                 setLiveScanActive(false);
             };
 
-            // ── Guided video recording flow ───────────────────────
+            // ── Single front camera capture flow ───────────────────────
             const GUIDE_POSES = [
-                { id: 'front',       dir: null,    label: 'Face the camera — stay still' },
-                { id: 'left_30',     dir: 'left',  label: 'Slowly turn your head LEFT →' },
-                { id: 'left_60',     dir: 'left',  label: 'Turn your head further LEFT →' },
-                { id: 'front',       dir: null,    label: 'Come back to center' },
-                { id: 'right_30',    dir: 'right', label: 'Slowly turn your head RIGHT ←' },
-                { id: 'right_60',    dir: 'right', label: 'Turn your head further RIGHT ←' },
-                { id: 'front',       dir: null,    label: 'Come back to center' },
-                { id: 'slightly_up', dir: 'up',    label: 'Gently tilt your chin UP ↑' }
+                { id: 'front',       dir: null,    label: 'Face the camera — stay still' }
             ];
 
             const startCamera = async () => {
@@ -999,6 +1113,16 @@ function CampusMapTab() {
                                 || (accessLevelFilter === "INFO" && !item.is_navigational);
                             return matchesQuery && matchesRole && matchesNav;
                         }
+                        if (subTab === "adaptation-phrases") {
+                            return q === "" 
+                                || item.phrase?.toLowerCase().includes(q)
+                                || item.description?.toLowerCase().includes(q);
+                        }
+                        if (subTab === "speech-languages") {
+                            return q === "" 
+                                || item.language_name?.toLowerCase().includes(q)
+                                || item.language_code?.toLowerCase().includes(q);
+                        }
                     }
                     if (currentTab === "infra") {
                         if (subTab === "devices") return q === "" || item.device_name?.toLowerCase().includes(q) || item.device_id?.toLowerCase().includes(q);
@@ -1078,7 +1202,7 @@ function CampusMapTab() {
             // ── Camera frame polling ──────────────────────────
             useEffect(() => {
                 let active = true, timerId = null;
-                const validPoses = ["front","left_30","right_30","left_60","right_60","slightly_up"];
+                const validPoses = ["front"];
                 async function pollFrame() {
                     if (!active || enrollMethod !== 'live' || !liveScanActive || !cameraStream || !selectedItem) return;
                     if (!videoRef.current || !canvasRef.current) { timerId = setTimeout(pollFrame, 500); return; }
@@ -1182,7 +1306,11 @@ function CampusMapTab() {
                 if (subTab === "users") return <UserForm item={selectedItem} roles={refs.roles} nodes={refs.nodes} programmes={refs.programmes} faculties={refs.faculties} departments={refs.departments} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (subTab === "roles") return <RoleForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "rag" && subTab === "documents") return <DocumentForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
-                if (currentTab === "infra" && subTab === "devices") return <DeviceForm item={selectedItem} nodes={refs.nodes} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
+                if (currentTab === "rag" && subTab === "adaptation-phrases") return <SpeechAdaptationPhraseForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
+                if (currentTab === "rag" && subTab === "speech-languages") return <SpeechLanguageForm item={selectedItem} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
+                if (currentTab === "infra" && subTab === "devices") return <DeviceForm item={selectedItem} nodes={refs.nodes} roles={refs.roles} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
+                if (currentTab === "infra" && subTab === "node-rbac") return <NodeRBACForm nodes={refs.nodes} roles={refs.roles} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
+                if (currentTab === "infra" && subTab === "edge-rbac") return <EdgeRBACForm edges={refs.edges} roles={refs.roles} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "courses") return <CourseForm item={selectedItem} programmes={refs.programmes} faculties={refs.faculties} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "enrollments") return <EnrollmentForm item={selectedItem} courses={refs.courses} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
                 if (currentTab === "academics" && subTab === "timetables") return <TimetableForm item={selectedItem} nodes={refs.nodes} onSubmit={handleFormSubmit} onCancel={() => setShowModal(false)} />;
@@ -1702,8 +1830,17 @@ function CampusMapTab() {
                                                                 </td>
                                                                 <td className="p-4 pr-6 text-right">
                                                                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                        <button onClick={() => { setSelectedItem(item); setModalType("edit"); setShowModal(true); }} title="Manage Biometrics"
-                                                                            className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white">
+                                                                        <button onClick={() => {
+                                                                            setSelectedItem(item);
+                                                                            setSelectedPhotoFile(null);
+                                                                            setUploadedPhoto(null);
+                                                                            setPhotoPose("front");
+                                                                            setEnrollMethod("photo");
+                                                                            setScanStep(0);
+                                                                            setScanning(false);
+                                                                            setShowFaceModal(true);
+                                                                        }} title="Manage Biometrics"
+                                                                            className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-indigo-400 rounded-xl transition-all hover:text-white">
                                                                             <Icon name="scan-face" className="w-4 h-4" />
                                                                         </button>
                                                                     </div>
@@ -1794,6 +1931,19 @@ function CampusMapTab() {
                                                                     </td>
                                                                     <td className="p-4 pr-6 text-right">
                                                                         <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                            <button onClick={() => {
+                                                                                setSelectedItem(item);
+                                                                                setSelectedPhotoFile(null);
+                                                                                setUploadedPhoto(null);
+                                                                                setPhotoPose("front");
+                                                                                setEnrollMethod("photo");
+                                                                                setScanStep(0);
+                                                                                setScanning(false);
+                                                                                setShowFaceModal(true);
+                                                                            }} title="Manage Face ID"
+                                                                                className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-indigo-400 rounded-xl transition-all hover:text-white">
+                                                                                <Icon name="scan-face" className="w-4 h-4" />
+                                                                            </button>
                                                                             <button onClick={() => { setSelectedItem(item); setModalType("edit"); setShowModal(true); }} title="Edit User"
                                                                                 className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white">
                                                                                 <Icon name="edit-3" className="w-4 h-4" />
@@ -1831,15 +1981,17 @@ function CampusMapTab() {
                                 </div>
 
                                 <SectionHeader
-                                    title={subTab === 'documents' ? "Uploaded Documents" : "Chatbot Conversations"}
+                                    title={subTab === 'documents' ? "Uploaded Documents" : subTab === 'adaptation-phrases' ? "Acronyms & Translations" : subTab === 'speech-languages' ? "Supported Languages" : "Chatbot Conversations"}
                                     description={
                                         subTab === 'documents' ? "Upload and manage documents that the campus chatbot uses to answer questions." :
+                                        subTab === 'adaptation-phrases' ? "List of campus acronyms and all their language translations." :
+                                        subTab === 'speech-languages' ? "Configure recognized campus languages and default voice recognition settings." :
                                         "Review and analyze user queries submitted to the chatbot, response quality, and latency."
                                     }
                                     searchVal={searchQuery}
                                     onSearchChange={setSearchQuery}
-                                    onCreateClick={subTab === 'documents' ? () => { setSelectedItem(null); setModalType("create"); setShowModal(true); } : null}
-                                    createLabel="Upload Document"
+                                    onCreateClick={['documents', 'adaptation-phrases', 'speech-languages'].includes(subTab) ? () => { setSelectedItem(null); setModalType("create"); setShowModal(true); } : null}
+                                    createLabel={subTab === 'adaptation-phrases' ? "Add Acronym" : subTab === 'speech-languages' ? "Add Language" : "Upload Document"}
                                     customAction={subTab === 'documents' ? (
                                         <select value={accessLevelFilter} onChange={e => setAccessLevelFilter(e.target.value)}
                                             className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer">
@@ -1879,8 +2031,164 @@ function CampusMapTab() {
                                 ) : listData.length === 0 ? (
                                     <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-800 bg-slate-900/30 rounded-3xl py-24">
                                         <div className="p-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-2xl mb-5"><Icon name="book-open" className="w-8 h-8" /></div>
-                                        <h4 className="text-base font-bold text-slate-200">No content yet</h4>
-                                        <p className="text-sm text-slate-500 mt-1 max-w-sm text-center">Upload documents to build the knowledge base.</p>
+                                        <h4 className="text-base font-bold text-slate-200">No records found</h4>
+                                        <p className="text-sm text-slate-500 mt-1 max-w-sm text-center">
+                                            {subTab === 'adaptation-phrases' ? "Add campus acronyms and their translations to get started." : subTab === 'speech-languages' ? "No languages configured." : "Upload documents to build the knowledge base."}
+                                        </p>
+                                    </div>
+                                ) : subTab === 'adaptation-phrases' ? (
+                                    <div className="space-y-3.5">
+                                        {paginatedData.map((item, idx) => {
+                                            const translations = parseTranslations(item.description);
+                                            return (
+                                                <div key={item.phrase_id || idx} className="bg-slate-900/80 border border-slate-800/80 hover:border-slate-700/80 rounded-2xl p-5 transition-all shadow-sm">
+                                                    <div className="flex items-center justify-between pb-3.5 border-b border-slate-800/80 mb-3.5">
+                                                        <div className="flex items-center gap-3">
+                                                            <span className="text-lg font-black text-white tracking-tight">{item.phrase}</span>
+                                                            <span className="text-[11px] font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-0.5 rounded-md">
+                                                                {translations.length} {translations.length === 1 ? 'translation' : 'translations'}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                onClick={() => { setSelectedItem(item); setModalType("edit"); setShowModal(true); }}
+                                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 transition-colors inline-flex items-center gap-1.5"
+                                                                title="Edit Acronym & Translations"
+                                                            >
+                                                                <Icon name="edit-3" className="w-3.5 h-3.5" />
+                                                                <span>Edit</span>
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleDeleteItem(item)}
+                                                                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                                                                title="Delete Acronym"
+                                                            >
+                                                                <Icon name="trash-2" className="w-4 h-4" />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    {translations.length === 0 ? (
+                                                        <p className="text-xs text-slate-500 italic py-1">No translations added yet.</p>
+                                                    ) : (
+                                                        <div className="space-y-2">
+                                                            {translations.map((t, tIdx) => {
+                                                                const badge = getLangBadge(t.lang);
+                                                                return (
+                                                                    <div key={tIdx} className="flex items-center justify-between bg-slate-950/60 border border-slate-800/60 rounded-xl px-3.5 py-2 text-xs">
+                                                                        <div className="flex items-center gap-3 min-w-0">
+                                                                            <span className={`inline-flex items-center justify-center font-bold text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md border shrink-0 min-w-[70px] ${badge.cls}`}>
+                                                                                {badge.name}
+                                                                            </span>
+                                                                            <span className="text-slate-200 font-medium truncate">{t.text}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ) : subTab === 'speech-languages' ? (
+                                    <div className="space-y-4">
+                                        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 backdrop-blur-sm">
+                                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                                <div>
+                                                    <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                                                        <Icon name="languages" className="w-4 h-4 text-indigo-400" />
+                                                        Speech Recognition & Voice Understanding
+                                                    </h4>
+                                                    <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                                                        The chatbot can dynamically converse and switch to <strong className="text-slate-200">any language</strong> requested by the user during conversation.
+                                                        Use <strong className="text-slate-200">"Listen by Default"</strong> to pre-load speech recognition models immediately at session start, or add new supported languages to the campus directory.
+                                                    </p>
+                                                </div>
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                    <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-xl">
+                                                        {listData.filter(l => l.is_default).length} Active Defaults
+                                                    </span>
+                                                    <span className="text-xs font-semibold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-xl">
+                                                        {listData.filter(l => l.is_active).length} Enabled
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                                            {paginatedData.map((lang, idx) => (
+                                                <div key={lang.language_code || idx} className={`p-4 rounded-2xl border transition-all ${
+                                                    lang.is_default
+                                                        ? 'bg-slate-900/90 border-indigo-500/30 shadow-sm'
+                                                        : lang.is_active
+                                                            ? 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                                                            : 'bg-slate-950/40 border-slate-900 opacity-60'
+                                                }`}>
+                                                    <div className="flex items-center justify-between gap-3 mb-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs uppercase border ${
+                                                                lang.is_default
+                                                                    ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30'
+                                                                    : 'bg-slate-800 text-slate-300 border-slate-700'
+                                                            }`}>
+                                                                {lang.language_code}
+                                                            </div>
+                                                            <div>
+                                                                <h5 className="font-bold text-slate-100 text-sm">{lang.language_name}</h5>
+                                                                <span className="text-[11px] text-slate-500 font-mono">Code: {lang.language_code}</span>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-1.5">
+                                                            {lang.is_default && (
+                                                                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                                                                    Primary ASR
+                                                                </span>
+                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleDeleteItem(lang)}
+                                                                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                                                                title={`Delete ${lang.language_name} (${lang.language_code})`}
+                                                            >
+                                                                <Icon name="trash-2" className="w-4 h-4" />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex items-center justify-between pt-3 border-t border-slate-800/80 text-xs">
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleToggleLanguageDefault(lang.language_code)}
+                                                                className={`px-3 py-1.5 rounded-xl font-semibold text-xs border transition-all flex items-center gap-1.5 ${
+                                                                    lang.is_default
+                                                                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25'
+                                                                        : 'bg-slate-800/80 text-slate-400 border-slate-700/60 hover:text-slate-200 hover:bg-slate-800'
+                                                                }`}
+                                                                title="Toggle whether this language is loaded by default in Live ASR"
+                                                            >
+                                                                <span className={`w-1.5 h-1.5 rounded-full ${lang.is_default ? 'bg-emerald-400' : 'bg-slate-500'}`}></span>
+                                                                {lang.is_default ? 'Listening by Default' : 'Standby'}
+                                                            </button>
+                                                        </div>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleToggleLanguageActive(lang.language_code)}
+                                                            className={`px-3 py-1.5 rounded-xl font-semibold text-xs border transition-all ${
+                                                                lang.is_active
+                                                                    ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/25'
+                                                                    : 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
+                                                            }`}
+                                                            title="Toggle whether this language is active in the campus directory"
+                                                        >
+                                                            {lang.is_active ? 'Enabled' : 'Disabled'}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
                                 ) : (
                                     <div className="bg-slate-900/80 border border-slate-800 rounded-2xl shadow-sm overflow-hidden backdrop-blur-sm">
@@ -2117,6 +2425,7 @@ function CampusMapTab() {
                                                             <th className="p-4 pl-6 font-semibold">Device</th>
                                                             <th className="p-4 font-semibold">IP Address</th>
                                                             <th className="p-4 font-semibold">Type</th>
+                                                            <th className="p-4 font-semibold">Authorized Roles</th>
                                                             <th className="p-4 font-semibold">Last Seen</th>
                                                             <th className="p-4 pr-6 text-right font-semibold">Actions</th>
                                                         </tr>
@@ -2136,6 +2445,23 @@ function CampusMapTab() {
                                                                 <td className="p-4 text-xs font-mono text-slate-400">{item.ip_address || 'N/A'}</td>
                                                                 <td className="p-4">
                                                                     <span className="px-2.5 py-1 bg-slate-800 border border-slate-700/50 text-slate-300 rounded-md font-bold text-[10px] tracking-wider uppercase">{item.device_type}</span>
+                                                                </td>
+                                                                <td className="p-4">
+                                                                    <div className="flex flex-wrap gap-1 max-w-xs">
+                                                                        {item.allowed_role_ids && item.allowed_role_ids.length > 0 ? (
+                                                                            item.allowed_role_ids.map(roleId => {
+                                                                                const roleObj = refs.roles?.find(r => r.role_id === roleId);
+                                                                                const roleName = roleObj ? roleObj.role_name : `Role ${roleId}`;
+                                                                                return (
+                                                                                    <span key={roleId} className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded text-[11px] font-medium">
+                                                                                        {roleName}
+                                                                                    </span>
+                                                                                );
+                                                                            })
+                                                                        ) : (
+                                                                            <span className="text-xs text-rose-400/80 italic font-mono">None (Deny-All)</span>
+                                                                        )}
+                                                                    </div>
                                                                 </td>
                                                                 <td className="p-4">
                                                                     {(() => {
@@ -2972,7 +3298,7 @@ function CampusMapTab() {
                                                     {recordingPhase === 'recording' && cameraStream && (
                                                         <div className='absolute bottom-3 left-3 right-3 pointer-events-none'>
                                                             <div className='bg-black/75 border border-white/15 backdrop-blur-md rounded-xl px-3 py-2 text-center shadow-lg'>
-                                                                <p className='text-sm font-bold text-white tracking-wide'>{curPose.label}</p>
+                                                                <p className='text-sm font-bold text-white tracking-wide'>{enrollFeedback || curPose.label}</p>
                                                             </div>
                                                         </div>
                                                     )}
@@ -2980,7 +3306,7 @@ function CampusMapTab() {
                                                     {/* ── LIVE / STANDBY badge ── */}
                                                     <div className='absolute top-3 left-3 flex items-center gap-1.5 bg-black/70 border border-white/10 px-2.5 py-1 rounded-lg text-[10px] font-bold'>
                                                         {recordingPhase === 'recording'
-                                                            ? <><span className='w-2 h-2 rounded-full bg-red-500 animate-ping'></span><span className='text-red-400'>REC</span></>
+                                                            ? <><span className='w-2 h-2 rounded-full bg-red-500 animate-ping'></span><span className='text-red-400'>CAPTURING</span></>
                                                             : cameraStream
                                                                 ? <><span className='w-2 h-2 rounded-full bg-emerald-500'></span><span className='text-emerald-400'>READY</span></>
                                                                 : <><span className='w-2 h-2 rounded-full bg-slate-600'></span><span className='text-slate-400'>NO CAMERA</span></>
@@ -2992,33 +3318,22 @@ function CampusMapTab() {
                                                 {(recordingPhase === 'recording' || recordingPhase === 'embedding') && (
                                                     <div className='space-y-1.5'>
                                                         <div className='flex justify-between text-[10px] font-mono font-bold text-slate-500'>
-                                                            <span>{recordingPhase === 'embedding' ? 'Embedding Face ID...' : 'Recording in progress...'}</span>
+                                                            <span>{recordingPhase === 'embedding' ? 'Embedding Face ID...' : 'Capturing front photo...'}</span>
                                                             <span>{phaseProgress}%</span>
                                                         </div>
                                                         <div className='w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800 shadow-inner'>
-                                                            <div className='h-full bg-gradient-to-r from-indigo-500 to-red-500 transition-all duration-200 rounded-full'
+                                                            <div className='h-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-200 rounded-full'
                                                                 style={{width:`${phaseProgress}%`}}></div>
                                                         </div>
                                                     </div>
                                                 )}
 
-                                                {/* ── Pose step progress dots (idle/ready state) ── */}
+                                                {/* ── Single front capture instructions (idle/ready state) ── */}
                                                 {(recordingPhase === 'idle' || recordingPhase === 'failed') && cameraStream && (
-                                                    <div className='bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-inner'>
-                                                        <p className='text-xs font-bold text-slate-400 uppercase tracking-wider'>Motion sequence to follow</p>
-                                                        <div className='flex items-center gap-1.5'>
-                                                            {GUIDE_POSES.map((p, i) => {
-                                                                const sym = {left:'←',right:'→',up:'↑',down:'↓'}[p.dir] || '●';
-                                                                return (
-                                                                    <div key={i} title={p.label}
-                                                                        className='flex-1 h-8 rounded-lg flex items-center justify-center text-sm font-bold bg-slate-900 border border-slate-800 text-slate-400 shadow-sm'>
-                                                                        {sym}
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                        <p className='text-xs text-slate-500 leading-relaxed'>
-                                                            When you press Record, follow the arrows on screen — turn your head slowly left, then right, then look up and gently down. The whole thing takes about 10 seconds.
+                                                    <div className='bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-2 shadow-inner'>
+                                                        <p className='text-xs font-bold text-slate-400 uppercase tracking-wider'>Front-Facing Photo Capture</p>
+                                                        <p className='text-xs text-slate-400 leading-relaxed'>
+                                                            Position your face in the center of the frame and look directly into the camera. Only a single front-facing image will be captured for Face ID enrollment.
                                                         </p>
                                                     </div>
                                                 )}
@@ -3028,9 +3343,9 @@ function CampusMapTab() {
                                                     <div className='flex items-start gap-3 bg-red-950/40 border border-red-900/40 rounded-2xl p-4 shadow-sm'>
                                                         <Icon name='alert-circle' className='w-4 h-4 text-red-400 shrink-0 mt-0.5'/>
                                                         <div>
-                                                            <p className='text-sm font-bold text-red-400'>Enrollment failed</p>
+                                                            <p className='text-sm font-bold text-red-400'>Capture failed</p>
                                                             <p className='text-xs text-red-400/80 mt-0.5 leading-relaxed'>{enrollFeedback}</p>
-                                                            <p className='text-xs text-slate-500 mt-1.5'>Try again — move your head more slowly and keep your face well-lit.</p>
+                                                            <p className='text-xs text-slate-500 mt-1.5'>Try again — look straight at the camera and ensure good lighting.</p>
                                                         </div>
                                                     </div>
                                                 )}
@@ -3050,8 +3365,8 @@ function CampusMapTab() {
                                                             </button>
                                                             <button type='button' onClick={startGuidedRecording}
                                                                 className='flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-lg shadow-indigo-900/30'>
-                                                                <Icon name='circle' className='w-3.5 h-3.5 fill-red-400 text-red-400'/>
-                                                                <span>{recordingPhase === 'failed' ? 'Record Again' : 'Start Recording'}</span>
+                                                                <Icon name='camera' className='w-4 h-4'/>
+                                                                <span>{recordingPhase === 'failed' ? 'Capture Again' : 'Capture Photo'}</span>
                                                             </button>
                                                         </>
                                                     ) : recordingPhase === 'countdown' ? (
@@ -3062,7 +3377,7 @@ function CampusMapTab() {
                                                             setRecordingPhase('failed');
                                                             setEnrollFeedback('Capture stopped before enrollment completed.');
                                                         }} className='flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-md shadow-red-900/20'>
-                                                            <Icon name='square' className='w-3.5 h-3.5 fill-white'/><span>Stop Early</span>
+                                                            <Icon name='square' className='w-3.5 h-3.5 fill-white'/><span>Cancel</span>
                                                         </button>
                                                     ) : null}
                                                 </div>

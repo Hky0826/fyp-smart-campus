@@ -146,8 +146,8 @@ Useful environment variables:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `EDGE_GUI_API_BASE_URL` | `http://127.0.0.1:8080` | Local edge API base URL |
-| `EDGE_GUI_CAMERA` | `EDGE_ACCESS_CAMERA` / `EDGE_CAMERA` / `/dev/video4` | Camera source |
-| `EDGE_GUI_CAMERA_FALLBACKS` | `/dev/video0,/dev/video1,/dev/video2,/dev/video3,/dev/video4,/dev/video5,0,1` | Extra camera sources tried when the primary source fails |
+| `EDGE_GUI_CAMERA` | `auto` (or `EDGE_ACCESS_CAMERA` / `EDGE_CAMERA`) | Camera source: `auto` (probes CSI IMX219 first, then V4L2), `csi`, `/dev/video4`, `0`, or RTSP URL |
+| `EDGE_GUI_CAMERA_FALLBACKS` | `csi,/dev/video4,/dev/video0,/dev/video1,/dev/video2,/dev/video3,0,1` | Extra camera sources tried when the primary source fails |
 | `EDGE_GUI_CAMERA_NO_FALLBACK` | unset | Set to `1` to try only `EDGE_GUI_CAMERA` |
 | `EDGE_GUI_CAMERA_WIDTH` | `1920` | Requested V4L2 camera width for numeric `/dev/video*` devices |
 | `EDGE_GUI_CAMERA_HEIGHT` | `1080` | Requested V4L2 camera height for numeric `/dev/video*` devices |
@@ -168,8 +168,17 @@ Useful environment variables:
 | `EDGE_AUDIO_MICROPHONE_DEVICE` | unset | ALSA/PortAudio microphone device used by the GUI voice loop |
 | `EDGE_AUDIO_RECORDING_BACKEND` | `alsa` on Linux | Recording backend, usually `alsa` on the edge board |
 | `EDGE_AUDIO_SPEAKER_DEVICE` | unset | ALSA/PortAudio output device for chatbot TTS playback |
+| `EDGE_GUI_WINDOWED` | `true` on Windows/macOS, `false` on Linux | Set to `1`/`true` to run in windowed simulation mode or pass `--windowed` |
+| `EDGE_GUI_FULLSCREEN` | `false` on Windows/macOS, `true` on Linux | Set to `1`/`true` to force fullscreen kiosk mode or pass `--fullscreen` |
+| `EDGE_GUI_WIDTH` | `800` | Windowed simulation width (or pass `--width <int>`) |
+| `EDGE_GUI_HEIGHT` | `480` | Windowed simulation height (or pass `--height <int>`) |
 | `EDGE_GUI_QT_BACKEND` | `software` on Linux | Qt Quick scene graph backend |
 | `EDGE_GUI_QPA_PLATFORM` | `linuxfb`, or `wayland` when `WAYLAND_DISPLAY` is set | Optional Qt platform override |
+
+> **Screen Simulation & Shortcuts**:
+> - When running on a development laptop (Windows/macOS), the GUI automatically opens in **windowed mode (800x480)** simulating the Raspberry Pi 7" touchscreen.
+> - Press **F11** to toggle between windowed simulation and fullscreen mode.
+> - Press **Esc** or **Ctrl+Q** or click **✕ Exit** to close the GUI.
 
 ## Microphone Setup
 

@@ -104,6 +104,15 @@ CREATE TABLE IF NOT EXISTS device_node_rbac (
     FOREIGN KEY (role_id) REFERENCES device_roles(role_id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
+-- Table 3.49: device_rbac (Device-level Access Control)
+CREATE TABLE IF NOT EXISTS device_rbac (
+    device_id TEXT NOT NULL,
+    role_id INTEGER NOT NULL,
+    last_synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (device_id, role_id),
+    FOREIGN KEY (role_id) REFERENCES device_roles(role_id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
 -- Local sync worker bookkeeping; not synced to the cloud database.
 CREATE TABLE IF NOT EXISTS sync_metadata (
     key TEXT PRIMARY KEY,
@@ -136,3 +145,6 @@ CREATE INDEX IF NOT EXISTS idx_device_surveillance_logs_timestamp
 
 CREATE INDEX IF NOT EXISTS idx_device_node_rbac_role_id
     ON device_node_rbac(role_id);
+
+CREATE INDEX IF NOT EXISTS idx_device_rbac_role_id
+    ON device_rbac(role_id);

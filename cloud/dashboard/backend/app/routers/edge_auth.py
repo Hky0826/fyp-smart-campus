@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import json
+import math
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
@@ -44,6 +45,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/edge-auth", tags=["Edge Device Authentication"])
 
 _TOKEN_EXPIRE_MINUTES = 120  # 2 hours, matching the admin token lifetime
+
+
+def _validated_pad_score(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise HTTPException(status_code=401, detail="A valid PAD score is required")
+    try:
+        score = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise HTTPException(status_code=401, detail="A valid PAD score is required")
+    threshold = settings.EDGE_ACCESS_PAD_THRESHOLD
+    if not math.isfinite(threshold) or not 0.0 < threshold <= 1.0:
+        raise RuntimeError("EDGE_ACCESS_PAD_THRESHOLD must be greater than 0 and no more than 1")
+    if not math.isfinite(score) or not 0.0 <= score <= 1.0 or score < threshold:
+        raise HTTPException(status_code=401, detail="PAD score is below the configured liveness threshold")
+    return score
 
 
 class EdgeTokenRequest(BaseModel):
@@ -147,13 +163,14 @@ def issue_edge_token(
     if not challenge or challenge.expires_at < datetime.utcnow():
         raise HTTPException(status_code=401, detail="Face-auth challenge is invalid or expired")
     assertion = body.assertion
+    pad_score = _validated_pad_score(assertion.get("pad_score"))
     required = {
         "challenge_id": body.challenge_id,
         "user_id": user.user_id,
         "match_passed": True,
         "liveness_passed": True,
     }
-    if any(assertion.get(key) != value for key, value in required.items()):
+    if any(assertion.get(key) != value for key, value in required.items()) or assertion.get("match_passed") is not True or assertion.get("liveness_passed") is not True:
         raise HTTPException(status_code=401, detail="Successful face match and liveness are required")
     if not verify_assertion_signature(decrypt_device_secret(device.device_secret_ciphertext), assertion, body.assertion_signature):
         raise HTTPException(status_code=401, detail="Invalid face-auth assertion")
@@ -171,7 +188,7 @@ def issue_edge_token(
             match_passed=True,
             liveness_passed=True,
             pad_model_version=str(assertion.get("pad_model_version", "unknown")),
-            pad_score=float(assertion.get("pad_score", 0.0)),
+            pad_score=pad_score,
             used_at=consumed_at,
         )
     )

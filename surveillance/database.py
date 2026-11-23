@@ -130,6 +130,17 @@ class SurveillanceUserRepository:
                     )
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS device_rbac (
+                        device_id TEXT NOT NULL,
+                        role_id INTEGER NOT NULL,
+                        last_synced_at TEXT,
+                        PRIMARY KEY (device_id, role_id),
+                        FOREIGN KEY (role_id) REFERENCES device_roles(role_id) ON DELETE CASCADE
+                    )
+                    """
+                )
                 conn.commit()
                 logger.info("Initialized surveillance database schema at %s", self.db_path)
             except Exception:

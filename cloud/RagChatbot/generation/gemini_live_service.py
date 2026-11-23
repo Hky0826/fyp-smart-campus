@@ -25,6 +25,10 @@ from google import genai
 from google.genai import types
 
 from RagChatbot.config import rag_settings
+from RagChatbot.gemini_client import (
+    generate_content_stream_with_retry,
+    generate_content_with_retry,
+)
 from RagChatbot.retrieval.ranking import RankedChunk
 
 logger = logging.getLogger(__name__)
@@ -149,7 +153,8 @@ def generate_response(
     )
 
     try:
-        response = client.models.generate_content(
+        response = generate_content_with_retry(
+            client=client,
             model=rag_settings.LLM_MODEL,
             contents=full_prompt,
             config=config,
@@ -244,7 +249,8 @@ def generate_response_stream(
     )
 
     try:
-        response_stream = client.models.generate_content_stream(
+        response_stream = generate_content_stream_with_retry(
+            client=client,
             model=rag_settings.LLM_MODEL,
             contents=full_prompt,
             config=config,

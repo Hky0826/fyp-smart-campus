@@ -3,12 +3,18 @@ import QtQuick.Controls
 
 ApplicationWindow {
     id: root
-    width: 800
-    height: 480
+    readonly property bool isWindowed: (typeof windowedMode !== "undefined") ? Boolean(windowedMode) : false
+    width: (typeof simulatedWidth !== "undefined" && simulatedWidth > 0) ? simulatedWidth : 800
+    height: (typeof simulatedHeight !== "undefined" && simulatedHeight > 0) ? simulatedHeight : 480
+    minimumWidth: isWindowed ? 400 : 0
+    minimumHeight: isWindowed ? 240 : 0
     visible: true
-    visibility: Window.FullScreen
+    visibility: isWindowed ? Window.Windowed : Window.FullScreen
+    flags: isWindowed ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
     color: "#020617"
-    title: "Edge Access Control"
+    title: isWindowed
+           ? "Edge Access Control (Raspberry Pi Screen Simulation - " + width + "x" + height + ")"
+           : "Edge Access Control"
     readonly property bool showAccessGlow: !accessController.chatExpanded
                                            && (accessController.mode === "access-granted"
                                                || accessController.mode === "access-denied")
@@ -20,6 +26,7 @@ ApplicationWindow {
         videoWidth: cameraController.videoWidth
         videoHeight: cameraController.videoHeight
         boxes: accessController.faceBoxes
+        preserveAspectFit: cameraController.preserveAspectFit
     }
 
     ChatbotView {
@@ -27,19 +34,28 @@ ApplicationWindow {
         anchors.fill: parent
         z: 20
         visible: accessController.chatExpanded
-        messages: accessController.messages
+        messages: accessController.committedMessages
+        partialText: chatbotController.partialText
+        transcribedText: chatbotController.transcribedText
         sessionName: accessController.sessionName
         presenceState: accessController.presenceState
         listening: chatbotController.listening
         busy: chatbotController.busy
+        speaking: chatbotController.speaking
+        assistantSpeaking: chatbotController.assistantSpeaking
+        ragStatus: chatbotController.ragStatus
+        currentNavigation: chatbotController.currentNavigation
+        citations: chatbotController.citations
         muted: chatbotController.muted
         errorText: accessController.chatError
         verifying: accessController.chatVerificationActive
+        userAudioLevel: chatbotController.userAudioLevel
+        assistantAudioLevel: chatbotController.assistantAudioLevel
         onCloseRequested: accessController.exitChat()
-        onPushToTalkStarted: chatbotController.startPushToTalk()
-        onPushToTalkStopped: chatbotController.stopPushToTalk()
-        onPushToTalkToggled: chatbotController.togglePushToTalk()
         onStopAnsweringRequested: chatbotController.stopAudioPlayback()
+        onToggleMuteRequested: accessController.toggleMute()
+        onDismissNavigationRequested: chatbotController.clearNavigation()
+        onOptionSelected: function(option) { accessController.sendMessage(option) }
     }
 
     ChatbotButton {
@@ -51,7 +67,53 @@ ApplicationWindow {
         visible: !accessController.chatExpanded
         enabled: cameraController.ready && !accessController.offline
         mode: accessController.mode
+        dwellProgress: accessController.dwellProgress
         onClicked: accessController.openChat()
+    }
+
+    Shortcut {
+        sequence: "Esc"
+        onActivated: Qt.quit()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Q"
+        onActivated: Qt.quit()
+    }
+
+    Shortcut {
+        sequence: "F11"
+        onActivated: {
+            root.visibility = (root.visibility === Window.FullScreen) ? Window.Windowed : Window.FullScreen
+        }
+    }
+
+    Button {
+        id: exitAppButton
+        text: "✕ Exit"
+        z: 120
+        visible: !accessController.chatExpanded
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.margins: 14
+        height: 36
+        font.pixelSize: 13
+        font.bold: true
+        contentItem: Text {
+            text: exitAppButton.text
+            font: exitAppButton.font
+            color: "#f87171"
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+        background: Rectangle {
+            color: exitAppButton.down ? "#450a0a" : (exitAppButton.hovered ? "#7f1d1d" : "#1e293b")
+            border.color: "#ef4444"
+            border.width: 1
+            radius: 8
+            opacity: 0.85
+        }
+        onClicked: Qt.quit()
     }
 
     SessionLockedOverlay {

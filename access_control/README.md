@@ -92,7 +92,7 @@ All parameters are configurable via `access_control/.env`. Key parameters includ
 
 | Setting | Default | Description |
 |---|---|---|
-| `EDGE_CAMERA` | `0` | Camera device index or RTSP stream URL |
+| `EDGE_CAMERA` | `auto` | Camera source: `auto` (auto-detects CSI IMX219 on RPi 5, falls back to V4L2), `csi`, `/dev/video4`, `0`, or RTSP URL |
 | `EDGE_ACCESS_DETECTOR_MODEL_PATH` | `models/access_control/face_detection_yunet_2023mar_int8bq.onnx` | Path to YuNet ONNX detection model |
 | `EDGE_ACCESS_EMBEDDING_MODEL_PATH` | `models/access_control/face_recognition_sface_2021dec.onnx` | Path to SFace ONNX recognition model |
 | `EDGE_ACCESS_DETECTION_THRESHOLD` | `0.60` | Detector confidence threshold |
@@ -100,6 +100,56 @@ All parameters are configurable via `access_control/.env`. Key parameters includ
 | `EDGE_ACCESS_REQUIRE_LIVENESS` | `true` | Enable motion/liveness anti-spoofing |
 | `EDGE_ACCESS_AUDIO_ENABLED` | `true` | Enable voice feedback & chatbot |
 | `EDGE_SYNC_CLOUD_URL` | `http://127.0.0.1:8000` | Central cloud database sync server |
+
+### Raspberry Pi 5 & CSI Camera Setup (IMX219)
+
+For Sony IMX219 cameras connected to Raspberry Pi 5 via MIPI CSI (`CAM0` or `CAM1`):
+1. Connect the 15-pin to 22-pin ribbon cable to either `CAM0` or `CAM1` (ensure contacts face the HDMI ports on Pi 5).
+2. Install the official Raspberry Pi camera library:
+   ```bash
+   sudo apt update && sudo apt install -y python3-picamera2
+   ```
+3. Verify sensor detection:
+   ```bash
+   rpicam-hello --list-cameras
+   ```
+4. Keep `EDGE_CAMERA=auto` (default) to automatically use the CSI camera, or set `EDGE_CAMERA=csi` to force CSI mode. If no CSI camera is attached, the system seamlessly falls back to USB / V4L2 `/dev/video*`.
+
+### Raspberry Pi 5 Relay & Magnetic Door Lock Setup
+
+When a registered face is positively verified, the module activates the GPIO relay to unlock a magnetic door lock for a configurable duration (default: 5.0 seconds).
+
+#### 1. Hardware Dependencies on Raspberry Pi 5 (RP1 GPIO)
+Raspberry Pi 5 requires `gpiozero` and `lgpio` (Debian Bookworm):
+```bash
+sudo apt update && sudo apt install -y python3-gpiozero python3-lgpio
+```
+
+#### 2. Physical Pinout Connection (Raspberry Pi 5 to Relay)
+Connect female-to-female jumper wires from the Raspberry Pi 40-pin header to the relay module:
+
+| Relay Module Pin | Raspberry Pi 5 Pin | Header Location | Description |
+|---|---|---|---|
+| **VCC** | **Pin 2** (or Pin 4) | Top-right outer pin | **5V Power** to relay coil/optocoupler |
+| **GND** | **Pin 6** (or Pin 9) | Third pin down on outer column | **Ground** common return |
+| **IN / Signal** | **Pin 11** | Sixth pin down on inner column | **BCM GPIO 17** (3.3V trigger signal) |
+
+#### 3. Magnetic Door Lock Fail-Safe Wiring
+Magnetic door locks are **Fail-Safe** (power cut = unlocked):
+1. External Power Supply (+) 12V/5V $\to$ Relay **`COM`** (Common).
+2. Relay **`NC`** (Normally Closed) $\to$ Magnetic Lock **(+)**.
+3. External Power Supply (-) $\to$ Magnetic Lock **(-)**.
+
+*(When idle, the circuit is closed and the magnet holds the door locked. When access is granted, the relay energizes, opening the `NC` contact and releasing the door magnet).*
+
+#### 4. Environment Configuration
+Configurable via `access_control/.env`:
+```bash
+EDGE_DOOR_RELAY_ENABLED=true
+EDGE_DOOR_RELAY_PIN=17
+EDGE_DOOR_UNLOCK_DURATION_SECONDS=5.0
+EDGE_DOOR_RELAY_ACTIVE_HIGH=false
+```
 
 ---
 

@@ -18,10 +18,12 @@ Security:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import datetime
 import json
 import os
+import time
 import logging
 import hashlib
 from collections import OrderedDict
@@ -29,7 +31,7 @@ from collections.abc import Iterator
 from threading import Lock, BoundedSemaphore
 from typing import AsyncIterator
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.concurrency import iterate_in_threadpool
@@ -40,8 +42,6 @@ from app.core.security import verify_content_admin
 from RagChatbot.config import rag_settings
 from RagChatbot.generation.audio_query_extractor import AudioQueryExtractionError
 from RagChatbot.generation.gemini_live_service import GeminiLiveError
-from RagChatbot.generation.response_validator import generate_audio_from_text_stream
-from RagChatbot.generation.response_validator import generate_audio_from_text
 from RagChatbot.schemas import (
     AudioChatResponse,
     ChatRequest,
@@ -51,10 +51,10 @@ from RagChatbot.schemas import (
     IngestionResponse,
 )
 from RagChatbot.services.audio_chat_service import process_audio_chat, process_audio_chat_stream
-from RagChatbot.services.greeting_audio_service import generate_greeting_audio
 from RagChatbot.services.chat_service import process_chat, process_chat_stream, process_public_smoke_chat
 from RagChatbot.services.ingestion_service import ingest_document
 from RagChatbot.security.auth_context import resolve_auth_context
+from RagChatbot.logging.timing_logger import cloud_timing
 from app.core.rate_limit import client_ip, enforce_limit
 
 logger = logging.getLogger(__name__)
@@ -87,26 +87,8 @@ def _greeting_text(full_name: str | None, given_name: str | None = None) -> str:
 
 
 def _cached_greeting_audio(text: str, given_name: str | None = None) -> str | None:
-    """Return cached greeting audio, synthesizing each unique greeting once."""
-    with _GREETING_AUDIO_CACHE_LOCK:
-        cached = _GREETING_AUDIO_CACHE.get(text)
-        if cached is not None:
-            _GREETING_AUDIO_CACHE.move_to_end(text)
-            return cached
-    try:
-        audio = generate_greeting_audio(text, given_name=given_name)
-    except Exception:
-        logger.warning("Greeting TTS failed; returning text greeting only.", exc_info=True)
-        return None
-    if not audio:
-        return None
-    encoded = base64.b64encode(audio).decode("ascii")
-    with _GREETING_AUDIO_CACHE_LOCK:
-        _GREETING_AUDIO_CACHE[text] = encoded
-        _GREETING_AUDIO_CACHE.move_to_end(text)
-        while len(_GREETING_AUDIO_CACHE) > _GREETING_AUDIO_CACHE_SIZE:
-            _GREETING_AUDIO_CACHE.popitem(last=False)
-    return encoded
+    """Deprecated. All spoken greeting audio is handled by Gemini Live."""
+    return None
 
 
 def _split_stream_text(text: str, max_chars: int = 240) -> Iterator[str]:
@@ -359,8 +341,14 @@ def chat(
     _enforce_ai_quota(request, bearer_token, body.device_id)
     if not _AI_JOB_LIMIT.acquire(blocking=False):
         raise HTTPException(status_code=503, detail="AI service is busy; retry later")
+    t0 = time.monotonic()
+    client_sent_at = request.headers.get("X-Client-Sent-At")
+    cloud_timing.log_receive("REST_CHAT_REQUEST", client_sent_at=client_sent_at, query=(body.query or "")[:60], device_id=body.device_id)
     try:
-        return process_chat(request=body, bearer_token=bearer_token, db=db)
+        resp = process_chat(request=body, bearer_token=bearer_token, db=db)
+        duration_ms = (time.monotonic() - t0) * 1000.0
+        cloud_timing.log_send("REST_CHAT_RESPONSE", duration_ms=duration_ms, status="ok")
+        return resp
     finally:
         _AI_JOB_LIMIT.release()
 
@@ -489,8 +477,11 @@ async def chat_audio(
     bearer_token = credentials.credentials if credentials else None
 
     # ── Call audio RAG pipeline ───────────────────────────────────────
+    t0 = time.monotonic()
+    client_sent_at = request.headers.get("X-Client-Sent-At")
+    cloud_timing.log_receive("REST_AUDIO_REQUEST", client_sent_at=client_sent_at, device_id=device_id, audio_bytes=len(audio_bytes))
     try:
-        return process_audio_chat(
+        resp = process_audio_chat(
             audio_bytes=audio_bytes,
             mime_type=mime_type,
             bearer_token=bearer_token,
@@ -498,6 +489,9 @@ async def chat_audio(
             session_id=session_id,
             db=db,
         )
+        duration_ms = (time.monotonic() - t0) * 1000.0
+        cloud_timing.log_send("REST_AUDIO_RESPONSE", duration_ms=duration_ms, status=getattr(resp, "status", "ok"))
+        return resp
     except AudioQueryExtractionError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -594,3 +588,382 @@ def ingest(
         message=result.message,
         status=result.status,
     )
+
+
+# ── Gemini Live Bi-Directional Duplex WebSocket Endpoint ───────────────────────
+
+_active_device_sessions: dict[str, Any] = {}
+_device_sessions_lock = asyncio.Lock()
+
+
+@router.websocket("/live/ws")
+async def live_websocket_chat(
+    websocket: WebSocket,
+    token: str | None = None,
+    device_id: str | None = None,
+    session_id: int | None = None,
+):
+    """
+    Bi-directional full-duplex WebSocket connection for real-time Gemini Live.
+    Streams continuous 16kHz PCM from microphone directly into Gemini Live,
+    invokes process_user_request for Fast-Path RAG, and streams 24kHz PCM audio back.
+    """
+    device_id = device_id or "ENTRY-A8F3D155"
+    await websocket.accept()
+    from app.core.database import SessionLocal
+    from RagChatbot.generation.live_session_manager import GeminiLiveSession
+    from RagChatbot.services.process_user_request import process_user_request
+
+    cloud_timing.log_event("CLOUD INTERNAL", "WS_CONNECT", device_id=device_id)
+
+    async with _device_sessions_lock:
+        existing_session = _active_device_sessions.get(device_id)
+        if existing_session is not None:
+            logger.info("Preempting existing Gemini Live session for device %s to prevent 409 Conflict", device_id)
+            try:
+                await existing_session.close()
+            except Exception as exc:
+                logger.debug("Error closing preempted session: %s", exc)
+            await asyncio.sleep(0.15)
+        live_session = GeminiLiveSession()
+        _active_device_sessions[device_id] = live_session
+
+    try:
+        await live_session.start()
+        await websocket.send_json({
+            "event": "ready",
+            "data": {
+                "status": "connected",
+                "model": rag_settings.LIVE_MODEL,
+                "input_sample_rate": rag_settings.LIVE_INPUT_SAMPLE_RATE,
+                "output_sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
+                "server_sent_at": cloud_timing.now_iso(),
+            }
+        })
+    except Exception as exc:
+        logger.error("Gemini Live WebSocket connection failed to start: %s", exc)
+        try:
+            await websocket.send_json({"event": "error", "data": {"message": str(exc)}})
+            await websocket.close()
+        except Exception:
+            pass
+        return
+
+    active = True
+    current_turn = [""]
+    turn_start_mono = [0.0]
+    first_audio_sent = [False]
+
+    async def on_transcript(transcript: str):
+        if active:
+            time_since_speech_end = (time.monotonic() - turn_start_mono[0]) * 1000.0 if turn_start_mono[0] > 0 else None
+            cloud_timing.log_internal(
+                "TRANSCRIPT",
+                turn_id=current_turn[0],
+                duration_ms=time_since_speech_end,
+                transcript=transcript[:60],
+            )
+            try:
+                server_ts = cloud_timing.now_iso()
+                await websocket.send_json({
+                    "event": "transcript",
+                    "data": {
+                        "text": transcript,
+                        "turn_id": current_turn[0],
+                        "server_sent_at": server_ts,
+                    }
+                })
+            except Exception:
+                pass
+
+    async def on_tool_call(call: dict[str, Any]) -> dict[str, Any]:
+        call_name = call.get("name")
+        if call_name == "exit_chat_session":
+            farewell = call.get("farewell_message") or "Thank you for visiting Quest International University. Have a wonderful day!"
+            server_ts = cloud_timing.now_iso()
+            cloud_timing.log_internal("EXIT_TOOL_CALL", turn_id=current_turn[0], farewell=farewell)
+            if active:
+                try:
+                    await websocket.send_json({
+                        "event": "exit_session",
+                        "data": {
+                            "farewell": farewell,
+                            "intent": "EXIT",
+                            "turn_id": current_turn[0],
+                            "server_sent_at": server_ts,
+                        }
+                    })
+                    await websocket.send_json({
+                        "event": "rag_complete",
+                        "data": {
+                            "route": "EXIT",
+                            "intent": "EXIT",
+                            "status": "ok",
+                            "answer": farewell,
+                            "turn_id": current_turn[0],
+                            "server_sent_at": server_ts,
+                        }
+                    })
+                except Exception:
+                    pass
+            return {"status": "ok", "route": "EXIT", "intent": "EXIT", "answer": farewell}
+
+        transcript = call.get("transcript", "")
+        t_tool_start = time.monotonic()
+        cloud_timing.log_internal("RAG_TOOL_CALL_START", turn_id=current_turn[0], query=transcript[:60])
+        if active:
+            try:
+                server_ts = cloud_timing.now_iso()
+                if transcript:
+                    await on_transcript(transcript)
+                await websocket.send_json({
+                    "event": "rag_status",
+                    "data": {
+                        "status": "searching",
+                        "query": transcript,
+                        "turn_id": current_turn[0],
+                        "server_sent_at": server_ts,
+                    }
+                })
+                await websocket.send_json({
+                    "event": "acoustic_bridge",
+                    "data": {
+                        "status": "searching",
+                        "phrase": "Checking university records for you...",
+                        "turn_id": current_turn[0],
+                        "server_sent_at": server_ts,
+                    },
+                })
+            except Exception:
+                pass
+
+        def _run_request():
+            with SessionLocal() as db:
+                return process_user_request(
+                    transcript=transcript,
+                    bearer_token=token,
+                    device_id=device_id,
+                    session_id=session_id,
+                    db=db,
+                    fast_voice=True,
+                )
+
+        result = await asyncio.to_thread(_run_request)
+        rag_dur_ms = (time.monotonic() - t_tool_start) * 1000.0
+        cloud_timing.log_internal(
+            "RAG_TOOL_CALL_COMPLETE",
+            turn_id=current_turn[0],
+            duration_ms=rag_dur_ms,
+            route=result.get("route"),
+            status=result.get("status"),
+            citations_count=len(result.get("citations", [])),
+        )
+        if active:
+            try:
+                server_ts = cloud_timing.now_iso()
+                rag_payload = {
+                    "route": result.get("route"),
+                    "intent": result.get("intent"),
+                    "status": result.get("status"),
+                    "citations": result.get("citations", []),
+                    "access_granted": result.get("access_granted", True),
+                    "options": result.get("options", []),
+                    "turn_id": current_turn[0],
+                    "server_sent_at": server_ts,
+                }
+                nav_data = result.get("navigation")
+                if nav_data:
+                    if isinstance(nav_data, dict):
+                        if "qr_session" not in nav_data and result.get("qr_session"):
+                            nav_data["qr_session"] = result["qr_session"]
+                        if "map_context" not in nav_data and result.get("map_context"):
+                            nav_data["map_context"] = result["map_context"]
+                        if "visualisations" not in nav_data and result.get("visualisations"):
+                            nav_data["visualisations"] = result["visualisations"]
+                    rag_payload["navigation"] = nav_data
+                await websocket.send_json({
+                    "event": "rag_complete",
+                    "data": rag_payload,
+                })
+                if nav_data:
+                    await websocket.send_json({
+                        "event": "navigation",
+                        "data": nav_data,
+                        "turn_id": current_turn[0],
+                        "server_sent_at": server_ts,
+                    })
+            except Exception:
+                pass
+        return result
+
+    async def on_audio(pcm_bytes: bytes):
+        if active and pcm_bytes:
+            server_ts = cloud_timing.now_iso()
+            if not first_audio_sent[0]:
+                first_audio_sent[0] = True
+                ttfa_cloud_ms = (time.monotonic() - turn_start_mono[0]) * 1000.0 if turn_start_mono[0] > 0 else None
+                cloud_timing.log_send(
+                    "FIRST_AUDIO_CHUNK",
+                    turn_id=current_turn[0],
+                    duration_ms=ttfa_cloud_ms,
+                    audio_bytes=len(pcm_bytes),
+                )
+            try:
+                await websocket.send_json({
+                    "event": "audio",
+                    "data": {
+                        "encoding": "pcm_s16le",
+                        "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
+                        "chunk": base64.b64encode(pcm_bytes).decode("ascii"),
+                        "turn_id": current_turn[0],
+                        "server_sent_at": server_ts,
+                    }
+                })
+            except Exception:
+                pass
+
+    async def on_output_transcript(text: str):
+        if active and text:
+            try:
+                server_ts = cloud_timing.now_iso()
+                await websocket.send_json({
+                    "event": "output_transcript",
+                    "data": {
+                        "text": text,
+                        "turn_id": current_turn[0],
+                        "server_sent_at": server_ts,
+                    }
+                })
+            except Exception:
+                pass
+
+    async def on_turn_complete():
+        if active:
+            total_cloud_ms = (time.monotonic() - turn_start_mono[0]) * 1000.0 if turn_start_mono[0] > 0 else None
+            cloud_timing.log_send(
+                "TURN_COMPLETE",
+                turn_id=current_turn[0],
+                duration_ms=total_cloud_ms,
+            )
+            try:
+                server_ts = cloud_timing.now_iso()
+                await websocket.send_json({
+                    "event": "turn_complete",
+                    "data": {
+                        "turn_id": current_turn[0],
+                        "server_sent_at": server_ts,
+                        "cloud_duration_ms": round(total_cloud_ms, 2) if total_cloud_ms is not None else None,
+                    }
+                })
+            except Exception:
+                pass
+
+    async def on_interrupted():
+        if active:
+            cloud_timing.log_receive("INTERRUPTED", turn_id=current_turn[0])
+            try:
+                await websocket.send_json({
+                    "event": "interrupted",
+                    "turn_id": current_turn[0],
+                    "server_sent_at": cloud_timing.now_iso(),
+                })
+            except Exception:
+                pass
+
+    receiver_task = asyncio.create_task(
+        live_session.receive_events(
+            on_audio=on_audio,
+            on_transcript=on_transcript,
+            on_tool_call=on_tool_call,
+            on_output_transcript=on_output_transcript,
+            on_turn_complete=on_turn_complete,
+            on_interrupted=on_interrupted,
+        ),
+        name="gemini-live-ws-receiver",
+    )
+
+    # Resolve user name for Gemini Live greeting if token or session is provided
+    resolved_name: str | None = None
+    if token:
+        try:
+            with SessionLocal() as db:
+                auth_ctx = resolve_auth_context(token, db)
+                if auth_ctx and auth_ctx.authenticated:
+                    resolved_name = auth_ctx.given_name or auth_ctx.full_name
+        except Exception as exc:
+            logger.debug("Could not resolve user context for live greeting: %s", exc)
+
+    # Greeting is triggered primarily when the client sends the explicit 'greet' event.
+    # A fallback task triggers it after 1.5s only if no greet event is received from the client.
+    greeting_scheduled = False
+
+    async def _fallback_greeting():
+        nonlocal greeting_scheduled
+        await asyncio.sleep(1.5)
+        if not greeting_scheduled and active and (session_id or token):
+            greeting_scheduled = True
+            await live_session.trigger_greeting(user_name=resolved_name)
+
+    fallback_greeting_task = asyncio.create_task(_fallback_greeting(), name="live-fallback-greeting")
+
+    try:
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+
+            if "bytes" in message and message["bytes"]:
+                await live_session.send_audio(message["bytes"])
+            elif "text" in message and message["text"]:
+                try:
+                    payload = json.loads(message["text"])
+                    event = payload.get("event")
+                    if event == "audio_chunk":
+                        b64_data = payload.get("data", {}).get("chunk")
+                        if b64_data:
+                            await live_session.send_audio(base64.b64decode(b64_data))
+                    elif event == "greet":
+                        greeting_scheduled = True
+                        client_name = payload.get("data", {}).get("user_name") or resolved_name
+                        asyncio.create_task(live_session.trigger_greeting(user_name=client_name))
+                    elif event in ("activity_end", "finish_turn"):
+                        turn_data = payload.get("data") or {}
+                        turn_id = turn_data.get("turn_id") or f"turn_{int(time.time()*1000)}"
+                        client_sent_at = turn_data.get("client_sent_at")
+                        speech_dur_ms = turn_data.get("speech_duration_ms")
+                        audio_bytes = turn_data.get("total_audio_bytes")
+
+                        current_turn[0] = turn_id
+                        turn_start_mono[0] = time.monotonic()
+                        first_audio_sent[0] = False
+
+                        cloud_timing.log_receive(
+                            "ACTIVITY_END",
+                            turn_id=turn_id,
+                            client_sent_at=client_sent_at,
+                            speech_duration_ms=speech_dur_ms,
+                            audio_bytes=audio_bytes,
+                        )
+                        await live_session.end_user_turn()
+                    elif event in ("client_barge_in", "interrupt"):
+                        cloud_timing.log_receive("BARGE_IN", turn_id=current_turn[0])
+                        await live_session.cancel_input()
+                except json.JSONDecodeError:
+                    pass
+    except WebSocketDisconnect:
+        logger.info("Gemini Live client disconnected normally.")
+    except Exception as exc:
+        logger.warning("Gemini Live WebSocket session ended: %s", exc)
+    finally:
+        active = False
+        fallback_greeting_task.cancel()
+        receiver_task.cancel()
+        cloud_timing.log_event("CLOUD INTERNAL", "WS_DISCONNECT", device_id=device_id)
+        async with _device_sessions_lock:
+            if _active_device_sessions.get(device_id) is live_session:
+                _active_device_sessions.pop(device_id, None)
+        try:
+            await live_session.close()
+        except Exception:
+            pass
+

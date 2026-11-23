@@ -454,6 +454,39 @@ class ChatbotQueryResponse(ChatbotQueryBase):
     query_id: int
     timestamp: datetime.datetime
 
+# ── Speech Adaptation & Supported Languages Schemas ───────────────────────
+class SpeechLanguageBase(BaseSchema):
+    language_code: str
+    language_name: str
+    is_default: bool = False
+    is_active: bool = True
+
+class SpeechLanguageCreate(SpeechLanguageBase):
+    pass
+
+class SpeechLanguageResponse(SpeechLanguageBase):
+    created_at: Optional[datetime.datetime] = None
+
+class SpeechAdaptationPhraseBase(BaseSchema):
+    phrase: str
+    language_category: str = "GENERAL"
+    description: Optional[str] = None
+    is_active: bool = True
+
+class SpeechAdaptationPhraseCreate(SpeechAdaptationPhraseBase):
+    pass
+
+class SpeechAdaptationPhraseUpdate(BaseSchema):
+    phrase: Optional[str] = None
+    language_category: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class SpeechAdaptationPhraseResponse(SpeechAdaptationPhraseBase):
+    phrase_id: int
+    created_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
+
 # ==========================================
 # Category 3: Infrastructure Schemas
 # ==========================================
@@ -464,6 +497,7 @@ class DeviceBase(BaseSchema):
     device_type: DeviceTypeEnum
     ip_address: Optional[str] = None
     is_active: bool = True
+    allowed_role_ids: List[int] = Field(default_factory=list)
 
 class DeviceCreate(BaseSchema):
     # The cloud assigns this identifier when a new device is provisioned.
@@ -475,6 +509,7 @@ class DeviceCreate(BaseSchema):
     device_type: DeviceTypeEnum
     ip_address: Optional[str] = None
     is_active: bool = True
+    allowed_role_ids: Optional[List[int]] = Field(default_factory=list)
 
 class DeviceUpdate(BaseSchema):
     device_name: Optional[str] = None
@@ -482,6 +517,7 @@ class DeviceUpdate(BaseSchema):
     device_type: Optional[DeviceTypeEnum] = None
     ip_address: Optional[str] = None
     is_active: Optional[bool] = None
+    allowed_role_ids: Optional[List[int]] = None
 
 class DeviceResponse(DeviceBase):
     last_heartbeat: Optional[datetime.datetime] = None
@@ -489,6 +525,15 @@ class DeviceResponse(DeviceBase):
     # Returned only by the provisioning endpoint, never persisted in the
     # response model for normal device reads.
     provisioned_secret: Optional[str] = None
+
+class DeviceRBACBase(BaseSchema):
+    device_id: str
+    role_id: int
+
+class DeviceRbacSyncResponse(BaseSchema):
+    device_id: str
+    role_id: int
+    last_synced_at: str
 
 class NodeRBACBase(BaseSchema):
     node_id: int

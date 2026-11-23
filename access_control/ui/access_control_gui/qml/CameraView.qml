@@ -7,12 +7,13 @@ Item {
     property int videoWidth: 0
     property int videoHeight: 0
     property var boxes: []
+    property bool preserveAspectFit: false
 
-    x: minimized ? 22 : 0
-    y: minimized ? 22 : 0
-    width: minimized ? Math.min(260, root.parent.width - 44) : root.parent.width
-    height: minimized ? Math.min(180, root.parent.height * 0.28) : root.parent.height
-    z: minimized ? 50 : 0
+    x: minimized ? 10 : 0
+    y: minimized ? 10 : 0
+    width: minimized ? Math.max(0, Math.min(200, root.parent.width * 0.25) - 20) : root.parent.width
+    height: minimized ? root.parent.height * 0.24 : root.parent.height
+    z: minimized ? 35 : 0
     clip: true
 
     Behavior on x { NumberAnimation { duration: 180 } }
@@ -25,7 +26,7 @@ Item {
         color: "#020617"
         radius: root.minimized ? 8 : 0
         border.width: root.minimized ? 2 : 0
-        border.color: "#dbeafe"
+        border.color: root.minimized ? "#06b6d4" : "transparent"
     }
 
     Image {
@@ -33,7 +34,7 @@ Item {
         anchors.fill: parent
         source: root.sourceUrl
         cache: false
-        fillMode: Image.PreserveAspectCrop
+        fillMode: root.preserveAspectFit ? Image.PreserveAspectFit : Image.PreserveAspectCrop
         mirror: true
         asynchronous: false
         smooth: true
@@ -58,9 +59,9 @@ Item {
             y: mapped.y
             width: mapped.width
             height: mapped.height
-            radius: 6
+            radius: root.minimized ? 4 : 6
             color: "transparent"
-            border.width: 3
+            border.width: root.minimized ? 2 : 3
             border.color: "#5eead4"
             visible: mapped.width > 0 && mapped.height > 0
         }
@@ -74,7 +75,9 @@ Item {
         var y1 = Number(box[1])
         var x2 = Number(box[2])
         var y2 = Number(box[3])
-        var scale = Math.max(root.width / root.videoWidth, root.height / root.videoHeight)
+        var scale = root.preserveAspectFit
+            ? Math.min(root.width / root.videoWidth, root.height / root.videoHeight)
+            : Math.max(root.width / root.videoWidth, root.height / root.videoHeight)
         var drawnWidth = root.videoWidth * scale
         var drawnHeight = root.videoHeight * scale
         var offsetX = (root.width - drawnWidth) / 2

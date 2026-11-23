@@ -5,7 +5,9 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -13,7 +15,7 @@ import numpy as np
 
 from .matching import FaceTemplate, count_templates_by_user
 from ..utils.sync_key import generate_sync_key
-from ..access_policy import AccessDecision, evaluate_access
+from ..access_policy import AccessDecision, configured_max_policy_age_seconds, evaluate_access
 
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,14 @@ class DeviceUserRepository:
 
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)
+        self._cached_templates: List[FaceTemplate] | None = None
+        self._cache_mtime: float = 0.0
+        self._cache_lock = threading.Lock()
+
+    def invalidate_cache(self) -> None:
+        with self._cache_lock:
+            self._cached_templates = None
+            self._cache_mtime = 0.0
 
     def _connect(self) -> sqlite3.Connection:
         if not self.db_path.exists():
@@ -69,7 +79,22 @@ class DeviceUserRepository:
         finally:
             conn.close()
 
-    def load_templates(self) -> List[FaceTemplate]:
+    def load_templates(self, force_reload: bool = False) -> List[FaceTemplate]:
+        with self._cache_lock:
+            try:
+                current_mtime = self.db_path.stat().st_mtime if self.db_path.exists() else 0.0
+            except OSError:
+                current_mtime = 0.0
+
+            if not force_reload and self._cached_templates is not None and current_mtime != 0.0 and current_mtime == self._cache_mtime:
+                return list(self._cached_templates)
+
+            templates = self._load_templates_from_db()
+            self._cached_templates = list(templates)
+            self._cache_mtime = current_mtime
+            return list(self._cached_templates)
+
+    def _load_templates_from_db(self) -> List[FaceTemplate]:
         conn = self._connect()
         try:
             columns = self._require_device_users(conn)
@@ -114,7 +139,7 @@ class DeviceUserRepository:
             logger.info("Loaded %s templates for user %s", count, user_id)
         return templates
 
-    def evaluate_access(self, user_id: int | str, node_id: int | None, now=None) -> AccessDecision:
+    def evaluate_access(self, user_id: int | str, node_id: int | None = None, now=None, device_id: Optional[str] = None) -> AccessDecision:
         """Evaluate the complete, locally cached authorization snapshot."""
         try:
             conn = self._connect()
@@ -130,9 +155,37 @@ class DeviceUserRepository:
             meta = {r[0]: r[1] for r in conn.execute("SELECT key, val FROM sync_metadata").fetchall()}
             configured_node = meta.get("cloud_node_id")
             effective_node = int(configured_node) if configured_node is not None else node_id
-            allowed_roles = [r[0] for r in conn.execute(
-                "SELECT role_id FROM device_node_rbac WHERE node_id = ?", (effective_node,)
-            ).fetchall()]
+
+            # Device RBAC check (primary)
+            configured_device = meta.get("cloud_device_id") or meta.get("device_id")
+            effective_device = device_id or configured_device or os.getenv("EDGE_SYNC_DEVICE_ID") or os.getenv("ACCESS_DEVICE_ID")
+            allowed_roles = None
+
+            try:
+                # Check if device_rbac table exists and has entries
+                rbac_count = conn.execute("SELECT COUNT(*) FROM device_rbac").fetchone()[0]
+                if rbac_count > 0:
+                    if effective_device:
+                        allowed_roles = [r[0] for r in conn.execute(
+                            "SELECT role_id FROM device_rbac WHERE device_id = ?", (str(effective_device),)
+                        ).fetchall()]
+                    else:
+                        dev_rows = conn.execute("SELECT DISTINCT device_id FROM device_rbac").fetchall()
+                        if len(dev_rows) == 1:
+                            allowed_roles = [r[0] for r in conn.execute(
+                                "SELECT role_id FROM device_rbac WHERE device_id = ?", (dev_rows[0][0],)
+                            ).fetchall()]
+                        else:
+                            allowed_roles = [r[0] for r in conn.execute("SELECT DISTINCT role_id FROM device_rbac").fetchall()]
+            except (sqlite3.OperationalError, sqlite3.DatabaseError):
+                pass
+
+            # Fallback to node_rbac for backwards compatibility if device_rbac is not populated
+            if allowed_roles is None:
+                allowed_roles = [r[0] for r in conn.execute(
+                    "SELECT role_id FROM device_node_rbac WHERE node_id = ?", (effective_node,)
+                ).fetchall()]
+
             policy_version = meta.get("policy_version")
             synced_at = meta.get("policy_synced_at")
             def parse(value):
@@ -140,11 +193,15 @@ class DeviceUserRepository:
                     return None
                 from datetime import datetime
                 return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+            max_age = configured_max_policy_age_seconds()
+
             return evaluate_access(
                 user_id=user_id, is_active=bool(row[0]), user_role_ids=user_roles,
                 allowed_role_ids=allowed_roles, node_id=effective_node,
                 policy_version=policy_version, policy_synced_at=parse(synced_at),
                 now=now, visitor_start=parse(row[1]), visitor_expiry=parse(row[2]),
+                max_age_seconds=max_age,
             )
         except (OSError, ValueError, TypeError, sqlite3.Error) as exc:
             logger.warning("Local authorization snapshot unavailable: %s", type(exc).__name__)

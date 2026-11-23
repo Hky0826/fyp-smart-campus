@@ -189,10 +189,10 @@ def apply_user_update(db: Session, user: User, user_data: dict):
 # Import the edge push helper from the downstream sync service
 try:
     import os as _os, sys as _sys
-    _sync_dir = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "..", "..", "sync", "cloud_to_edge"))
-    if _sync_dir not in _sys.path:
-        _sys.path.insert(0, _sync_dir)
-    from cloud_sync_service import push_sync_to_all_edges as _push_sync_to_all_edges
+    _cloud_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "..", ".."))
+    if _cloud_root not in _sys.path:
+        _sys.path.insert(0, _cloud_root)
+    from sync.cloud_to_edge.cloud_sync_service import push_sync_to_all_edges as _push_sync_to_all_edges
     _PUSH_SYNC_AVAILABLE = True
 except Exception as _e:
     import logging as _logging
@@ -250,14 +250,14 @@ def _replace_user_enrollment(
     if merge_existing:
         existing_images = db.query(UserImage).filter_by(user_id=user.user_id).all()
         for image_record in existing_images:
+            if image_record.template_name in crops:
+                continue
             image_path = service._file_path(image_record.image_path)
+            if not os.path.isfile(str(image_path)):
+                continue
             existing_crop = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-            if existing_crop is None or existing_crop.size == 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Enrollment failed: existing {image_record.template_name} image is unreadable",
-                )
-            enrollment_crops[image_record.template_name] = existing_crop
+            if existing_crop is not None and existing_crop.size > 0:
+                enrollment_crops[image_record.template_name] = existing_crop
         enrollment_crops.update(crops)
 
     try:
@@ -278,9 +278,12 @@ def _replace_user_enrollment(
 
     try:
         for pose, crop in enrollment_crops.items():
+            success, encoded_img = cv2.imencode(".jpg", crop)
+            if not success or encoded_img is None:
+                raise HTTPException(status_code=400, detail=f"Enrollment failed: {pose}: could not encode image")
             temp_path = f"{paths[pose]}.tmp"
-            if not cv2.imwrite(temp_path, crop):
-                raise HTTPException(status_code=400, detail=f"Enrollment failed: {pose}: could not save image")
+            with open(temp_path, "wb") as file:
+                file.write(encoded_img.tobytes())
             os.replace(temp_path, paths[pose])
         db.query(UserImage).filter_by(user_id=user.user_id).delete()
         db.query(UserFaceEmbedding).filter_by(user_id=user.user_id).delete()
@@ -308,19 +311,22 @@ def _replace_user_enrollment(
                     file.write(backups[path])
             elif os.path.exists(path):
                 os.unlink(path)
+            tmp_path = f"{path}.tmp"
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
         raise
 
 router = APIRouter(prefix="/iam", tags=["Identity & Access Management"])
 
 # ==========================================
-# ROLES CRUD (SUPER_ADMIN ONLY)
+# ROLES CRUD (SYSTEM_ADMIN or SUPER_ADMIN)
 # ==========================================
 @router.get("/roles", response_model=List[schemas.RoleResponse])
-def list_roles(db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def list_roles(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     return db.query(Role).all()
 
 @router.post("/roles", response_model=schemas.RoleResponse)
-def create_role(role_in: schemas.RoleCreate, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def create_role(role_in: schemas.RoleCreate, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     existing = db.query(Role).filter_by(role_name=role_in.role_name.upper()).first()
     if existing:
         raise HTTPException(status_code=400, detail="Role already exists")
@@ -331,7 +337,7 @@ def create_role(role_in: schemas.RoleCreate, db: Session = Depends(get_db), curr
     return role
 
 @router.put("/roles/{role_id}", response_model=schemas.RoleResponse)
-def update_role(role_id: int, role_in: schemas.RoleUpdate, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def update_role(role_id: int, role_in: schemas.RoleUpdate, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     role = db.query(Role).filter_by(role_id=role_id).first()
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")
@@ -351,7 +357,7 @@ def update_role(role_id: int, role_in: schemas.RoleUpdate, db: Session = Depends
     return role
 
 @router.delete("/roles/{role_id}")
-def delete_role(role_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def delete_role(role_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     role = db.query(Role).filter_by(role_id=role_id).first()
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")
@@ -924,14 +930,14 @@ def delete_visitor(visitor_id: str, db: Session = Depends(get_db), current_admin
     return {"detail": "Visitor profile deleted successfully"}
 
 # ==========================================
-# ADMINS PROFILE CRUD (SUPER_ADMIN ONLY)
+# ADMINS PROFILE CRUD (SYSTEM_ADMIN or SUPER_ADMIN)
 # ==========================================
 @router.get("/admins", response_model=List[schemas.AdminResponse])
-def list_admins(db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def list_admins(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     return db.query(Admin).all()
 
 @router.post("/admins", response_model=schemas.AdminResponse)
-def create_admin(admin_in: schemas.AdminCreate, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def create_admin(admin_in: schemas.AdminCreate, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     user_input = admin_in.user
     try:
         password = validate_strong_password(admin_in.password, name_parts=tuple(filter(None, (user_input.given_name if user_input else "", user_input.family_name if user_input else "", user_input.email if user_input else ""))))
@@ -1002,7 +1008,7 @@ def create_admin(admin_in: schemas.AdminCreate, db: Session = Depends(get_db), c
     return admin
 
 @router.put("/admins/{admin_id}", response_model=schemas.AdminResponse)
-def update_admin(admin_id: str, admin_in: schemas.AdminUpdate, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def update_admin(admin_id: str, admin_in: schemas.AdminUpdate, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     admin = db.query(Admin).filter_by(admin_id=admin_id).first()
     if not admin:
         raise HTTPException(status_code=404, detail="Admin not found")
@@ -1047,7 +1053,7 @@ def update_admin(admin_id: str, admin_in: schemas.AdminUpdate, db: Session = Dep
     return admin
 
 @router.delete("/admins/{admin_id}")
-def delete_admin(admin_id: str, db: Session = Depends(get_db), current_admin=Depends(verify_super_admin)):
+def delete_admin(admin_id: str, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     if admin_id == current_admin.admin_id:
         raise HTTPException(status_code=400, detail="Cannot delete your own admin account")
     admin = db.query(Admin).filter_by(admin_id=admin_id).first()
@@ -1067,7 +1073,7 @@ def upload_user_face_photo(
     file: UploadFile = File(...),
     pose: str = Form("front"),
     db: Session = Depends(get_db),
-    current_admin=Depends(verify_super_admin)
+    current_admin=Depends(verify_system_admin)
 ):
     valid_poses = {"front", "left_30", "right_30", "left_60", "right_60", "slightly_up", "low_light"}
     if pose not in valid_poses:
@@ -1155,7 +1161,7 @@ def download_user_face_image(
 def enroll_live_start(
     user_id: int,
     db: Session = Depends(get_db),
-    current_admin=Depends(verify_super_admin)
+    current_admin=Depends(verify_system_admin)
 ):
     user = db.query(User).filter_by(user_id=user_id).first()
     if not user:
@@ -1171,7 +1177,7 @@ async def enroll_live_frame(
     target_pose: str,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_admin=Depends(verify_super_admin)
+    current_admin=Depends(verify_system_admin)
 ):
     try:
         valid_poses = ["front", "left_30", "right_30", "left_60", "right_60", "slightly_up"]
@@ -1368,7 +1374,7 @@ async def enroll_live_frame(
 @router.get("/users/{user_id}/enroll-live/progress")
 def enroll_live_progress(
     user_id: int,
-    current_admin=Depends(verify_super_admin)
+    current_admin=Depends(verify_system_admin)
 ):
     return {"progress": enrollment_progress.get(user_id, 0)}
 
@@ -1378,7 +1384,7 @@ def enroll_live_complete(
     user_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_admin=Depends(verify_super_admin)
+    current_admin=Depends(verify_system_admin)
 ):
     enrollment_progress[user_id] = 0
     try:
@@ -1386,10 +1392,10 @@ def enroll_live_complete(
         if not session_data:
             raise HTTPException(status_code=400, detail="No active enrollment session. Start live enrollment first.")
 
-        required_poses = ["front", "left_30", "right_30", "left_60", "right_60", "slightly_up"]
+        required_poses = ["front"]
         missing = [p for p in required_poses if p not in session_data]
         if missing:
-            raise HTTPException(status_code=400, detail=f"Please complete all poses. Missing: {', '.join(missing)}")
+            raise HTTPException(status_code=400, detail="Please capture a front-facing image first.")
 
         user = db.query(User).filter_by(user_id=user_id).first()
         if not user:
@@ -1399,7 +1405,7 @@ def enroll_live_complete(
         low_light_crop = np.clip(front_crop.astype(np.float32) * 0.4, 0, 255).astype(np.uint8)
         session_data["low_light"] = low_light_crop
 
-        poses = ["front", "left_30", "right_30", "left_60", "right_60", "slightly_up", "low_light"]
+        poses = [p for p in ["front", "low_light"] if p in session_data]
         for idx, pose in enumerate(poses):
             # Update progress
             enrollment_progress[user_id] = int((idx + 1) / len(poses) * 100)
@@ -1412,7 +1418,7 @@ def enroll_live_complete(
             background_tasks.add_task(_push_sync_to_all_edges, db)
 
         return {
-            "detail": "Live multi-pose face enrollment completed successfully.",
+            "detail": "Live face enrollment completed successfully.",
             "face_enrolled": user.face_enrolled,
             "imagepath": user.imagepath
         }
@@ -1426,7 +1432,7 @@ async def enroll_user_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_admin=Depends(verify_super_admin)
+    current_admin=Depends(verify_system_admin)
 ):
     user = db.query(User).filter_by(user_id=user_id).first()
     if not user:
@@ -1585,7 +1591,7 @@ async def enroll_user_video(
 async def reembed_all_users(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_admin=Depends(verify_super_admin)
+    current_admin=Depends(verify_system_admin)
 ):
     try:
         from app.models.models import UserImage

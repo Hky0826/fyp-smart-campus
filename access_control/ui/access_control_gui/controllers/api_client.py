@@ -49,6 +49,9 @@ class KioskApiClient:
     def get_state(self) -> dict[str, Any]:
         return self._request_json("GET", "/kiosk/state")
 
+    def get_live_config(self) -> dict[str, Any]:
+        return self._request_json("GET", "/kiosk/chat/live-config")
+
     def get_database_status(self) -> dict[str, Any]:
         return self._request_json("GET", "/database/status")
 
@@ -92,7 +95,8 @@ class KioskApiClient:
         return self._request_json("POST", "/kiosk/chat/message", json_body={"query": query})
 
     def request_greeting_audio(self) -> dict[str, Any]:
-        return self._request_json("POST", "/kiosk/chat/greeting/audio")
+        """Deprecated stub. All spoken greeting audio is handled by Gemini Live."""
+        return {"audio_response": None, "sample_rate": 24000}
 
     def send_chat_audio(self, audio_bytes: bytes, mime_type: str = "audio/wav") -> dict[str, Any]:
         files = {"audio": ("chat-audio.wav", audio_bytes, mime_type)}

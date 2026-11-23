@@ -37,6 +37,13 @@ class ChatRequest(BaseModel):
             "Used to associate the query with an existing session."
         ),
     )
+    chat_history: Optional[List[dict[str, Any]]] = Field(
+        default=None,
+        description=(
+            "Recent turns in the active session: [{'user': '...', 'assistant': '...'}]. "
+            "Used for in-session pronoun resolution and multi-turn context retention."
+        ),
+    )
 
 
 class CitationSchema(BaseModel):
@@ -88,6 +95,7 @@ class ChatResponse(BaseModel):
     route_summary: Optional[dict[str, Any]] = None
     instructions: List[dict[str, Any]] = Field(default_factory=list)
     visualisation: Optional[dict[str, Any]] = None
+    options: List[str] = Field(default_factory=list)
 
 
 class IngestionRequest(BaseModel):
@@ -158,6 +166,7 @@ class AudioChatResponse(BaseModel):
     route_summary: Optional[dict[str, Any]] = None
     instructions: List[dict[str, Any]] = Field(default_factory=list)
     visualisation: Optional[dict[str, Any]] = None
+    options: List[str] = Field(default_factory=list)
 
 
 class ExtractedQuery(BaseModel):

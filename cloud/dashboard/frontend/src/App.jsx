@@ -86,7 +86,7 @@ function App() {
 
     // 6. Notification Hub Hook
     const notifications = useNotificationHub({
-        token: auth.token,
+        isAuthenticated: auth.isAuthenticated,
         navStartId: navigation.navStartId,
         navEndId: navigation.navEndId,
         navRoleId: navigation.navRoleId,
@@ -111,7 +111,7 @@ function App() {
 
     // ── Render ─────────────────────────────────────────────────────────────
     
-    if (!auth.token) {
+    if (!auth.isAuthenticated) {
         return <LoginScreen {...auth} />;
     }
 

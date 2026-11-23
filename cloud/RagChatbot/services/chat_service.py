@@ -176,22 +176,104 @@ def _navigation_intent(navigation_data: dict | None) -> str | None:
     return "NAVIGATIONAL"
 
 
-def _confirmed_navigation_label(query: str, db: Session, session_id: int | None) -> str | None:
-    """Resolve confirmations and short category choices from the latest prompt."""
-    if not session_id:
-        return None
+_ORDINAL_MAP: dict[str, int] = {
+    "1": 0, "one": 0, "first": 0, "the first": 0, "first one": 0, "the first one": 0,
+    "first option": 0, "option 1": 0, "option one": 0, "number 1": 0, "number one": 0,
+    "no 1": 0, "no. 1": 0, "choice 1": 0, "item 1": 0, "第一个": 0, "第1个": 0,
+    "yang pertama": 0, "pertama": 0, "nombor 1": 0, "ke-1": 0, "ke 1": 0,
+    "2": 1, "two": 1, "second": 1, "the second": 1, "second one": 1, "the second one": 1,
+    "second option": 1, "option 2": 1, "option two": 1, "number 2": 1, "number two": 1,
+    "no 2": 1, "no. 2": 1, "choice 2": 1, "item 2": 1, "第二个": 1, "第2个": 1,
+    "yang kedua": 1, "kedua": 1, "nombor 2": 1, "ke-2": 1, "ke 2": 1,
+    "3": 2, "three": 2, "third": 2, "the third": 2, "third one": 2, "the third one": 2,
+    "third option": 2, "option 3": 2, "option three": 2, "number 3": 2, "number three": 2,
+    "no 3": 2, "no. 3": 2, "choice 3": 2, "item 3": 2, "第三个": 2, "第3个": 2,
+    "yang ketiga": 2, "ketiga": 2, "nombor 3": 2, "ke-3": 2, "ke 3": 2,
+    "4": 3, "four": 3, "fourth": 3, "the fourth": 3, "fourth one": 3, "the fourth one": 3,
+    "option 4": 3, "number 4": 3, "no 4": 3, "第四个": 3, "第4个": 3,
+    "yang keempat": 3, "keempat": 3, "nombor 4": 3, "ke-4": 3,
+    "5": 4, "five": 4, "fifth": 4, "the fifth": 4, "fifth one": 4, "the fifth one": 4,
+    "option 5": 4, "number 5": 4, "no 5": 4, "第五个": 4, "第5个": 4,
+    "yang kelima": 4, "kelima": 4, "nombor 5": 4, "ke-5": 4,
+    "6": 5, "six": 5, "sixth": 5, "the sixth": 5, "option 6": 5, "number 6": 5,
+    "第六个": 5, "第6个": 5, "yang keenam": 5, "keenam": 5,
+}
 
+
+def _extract_candidates_from_response(response_text: str) -> list[str]:
+    """Extract candidate destination names from an assistant prompt."""
+    if not response_text:
+        return []
+    candidates: list[str] = []
+    # 1. "Did you mean <label>?"
+    match_single = re.search(r"(?:Did you mean|您是指|Adakah anda maksudkan)\s+(?P<label>[^?？]+)", response_text, flags=re.IGNORECASE)
+    if match_single:
+        candidates.append(match_single.group("label").strip())
+        return candidates
+
+    # 2. "Which place did you mean: <label1>, <label2>...?"
+    match_which = re.search(r"(?:Which place did you mean|Which one do you mean|Which one did you mean):\s*(?P<labels>[^.?？]+)", response_text, flags=re.IGNORECASE)
+    if match_which:
+        for item in match_which.group("labels").split(","):
+            cleaned = item.strip()
+            if cleaned:
+                candidates.append(cleaned)
+        if candidates:
+            return candidates
+
+    # 3. "I found these ...: <labels>. Which one..."
+    labels_match = re.search(r":\s*(?P<labels>[^.]+)\.\s*Which one", response_text, flags=re.IGNORECASE)
+    if labels_match:
+        for item in labels_match.group("labels").split(","):
+            cleaned = item.strip()
+            if cleaned:
+                candidates.append(cleaned)
+        if candidates:
+            return candidates
+
+    # 4. Numbered list: "1. Label\n2. Label"
+    numbered = re.findall(r"(?:^|\n)\s*(?:\d+\.|\(\d+\))\s*([^\n\r]+)", response_text)
+    if numbered:
+        return [item.strip() for item in numbered if item.strip()]
+
+    return candidates
+
+
+def _confirmed_navigation_label(
+    query: str,
+    db: Session,
+    session_id: int | None,
+    chat_history: list[dict[str, Any]] | None = None,
+) -> str | None:
+    """Resolve confirmations, ordinals, numbers, and short category choices from the latest prompt."""
     try:
-        from app.models.models import ChatbotQuery
+        response_text = ""
+        if session_id:
+            from app.models.models import ChatbotQuery
 
-        latest = (
-            db.query(ChatbotQuery)
-            .filter(ChatbotQuery.session_id == session_id)
-            .order_by(ChatbotQuery.timestamp.desc(), ChatbotQuery.query_id.desc())
-            .first()
-        )
-        response_text = str(getattr(latest, "response_text", "") or "")
-        affirmative = re.fullmatch(
+            latest = (
+                db.query(ChatbotQuery)
+                .filter(ChatbotQuery.session_id == session_id)
+                .order_by(ChatbotQuery.timestamp.desc(), ChatbotQuery.query_id.desc())
+                .first()
+            )
+            response_text = str(getattr(latest, "response_text", "") or "")
+
+        if not response_text and chat_history:
+            for msg in reversed(chat_history):
+                if msg.get("role") in ("assistant", "bot"):
+                    response_text = str(msg.get("content") or msg.get("answer") or msg.get("response_text") or "")
+                    if response_text:
+                        break
+
+        if not response_text:
+            return None
+
+        candidates = _extract_candidates_from_response(response_text)
+        cleaned_query = " ".join(str(query or "").casefold().split())
+
+        # Check affirmative ("yes", "yeah", "sure", etc.)
+        affirmative = bool(re.fullmatch(
             r"\s*(?:yes|yeah|yep|correct|right|that(?:'s| is) it|yes please|go ahead|proceed"
             r"|ya|betul|okay|ok"
             r"|是|对|好|没错|是的|好的|对的"
@@ -200,21 +282,30 @@ def _confirmed_navigation_label(query: str, db: Session, session_id: int | None)
             r")\s*[.!。！]?\s*",
             query,
             flags=re.IGNORECASE,
-        )
-        if affirmative:
-            match = re.match(
-                r"\s*(?:Did you mean|您是指|Adakah anda maksudkan)\s+(?P<label>[^?？]+)",
-                response_text,
-                flags=re.IGNORECASE,
-            )
-            if match:
-                return match.group("label").strip()
+        ))
+        if affirmative and candidates:
+            return candidates[0]
 
-        # A user commonly answers a category clarification with a short
-        # choice such as “men”, “women”, or “unisex”. Resolve that choice
-        # against the current catalog rather than manufacturing a fixed
-        # destination label. This keeps the continuation working if labels
-        # or facilities change.
+        # Check negative / cancellation
+        negative = bool(re.fullmatch(
+            r"\s*(?:no|nope|cancel|stop|neither|none|never mind|nevermind"
+            r"|不|不要|取消|算了"
+            r"|tidak|batal"
+            r")\s*[.!。！]?\s*",
+            query,
+            flags=re.IGNORECASE,
+        ))
+        if negative:
+            return None
+
+        # Check ordinal / number choice ("first one", "number 1", "option 2", "1", "2", etc.)
+        norm_ordinal = re.sub(r"[.!?。！]+$", "", cleaned_query).strip()
+        if norm_ordinal in _ORDINAL_MAP and candidates:
+            idx = _ORDINAL_MAP[norm_ordinal]
+            if 0 <= idx < len(candidates):
+                return candidates[idx]
+
+        # Check washroom category shortcuts ("men", "women", "unisex", etc.)
         if (
             re.fullmatch(
                 r"\s*(?:men|mens|male|women|womens|female|unisex|accessible"
@@ -230,17 +321,12 @@ def _confirmed_navigation_label(query: str, db: Session, session_id: int | None)
         ):
             from RagChatbot.services.map_service import _destination_matches, _normalise_label
 
-            # Prefer the candidate labels already shown to the user. This
-            # preserves the conversational contract and does not assume any
-            # particular washroom naming convention.
-            labels_match = re.search(r":\s*(?P<labels>[^.]+)\.\s*Which one", response_text, flags=re.IGNORECASE)
-            if labels_match:
+            if candidates:
                 requested = _normalise_label(query)
-                for candidate_label in labels_match.group("labels").split(","):
-                    candidate_label = candidate_label.strip()
-                    candidate_words = set(_normalise_label(candidate_label).split())
-                    if requested in candidate_words or requested == _normalise_label(candidate_label):
-                        return candidate_label or None
+                for cand in candidates:
+                    cand_words = set(_normalise_label(cand).split())
+                    if requested in cand_words or requested == _normalise_label(cand):
+                        return cand
 
             from RagChatbot.services.map_service import get_map_snapshot
 
@@ -249,8 +335,22 @@ def _confirmed_navigation_label(query: str, db: Session, session_id: int | None)
             if len(matches) == 1:
                 return str(getattr(matches[0], "label", "")).strip() or None
 
-        # For a catalog response, accept a short label choice verbatim. The
-        # navigation resolver still performs the final RBAC/catalog check.
+        # Check direct or partial match against candidates
+        if candidates:
+            from RagChatbot.services.map_service import _normalise_label
+            query_norm = _normalise_label(query)
+            # Strip leading "yes, " or "option " if user said "yes, Boardroom 1"
+            query_norm = re.sub(r"^(?:yes\s+|option\s+|choice\s+)", "", query_norm).strip()
+            for cand in candidates:
+                cand_norm = _normalise_label(cand)
+                if query_norm == cand_norm:
+                    return cand
+            for cand in candidates:
+                cand_norm = _normalise_label(cand)
+                if query_norm in cand_norm or cand_norm in query_norm:
+                    return cand
+
+        # Fallback: if short label matches verbatim in response text
         if len(str(query).split()) <= 5 and "which one" in response_text.casefold():
             labels_match = re.search(r":\s*(?P<labels>[^.]+)\.\s*Which one", response_text, flags=re.IGNORECASE)
             if labels_match:
@@ -308,8 +408,41 @@ def _verify_session(token: str, db: Session) -> tuple[int, int]:
         HTTPException 401: If the session is not found, revoked, or expired.
     """
     _, user_id, session = resolve_user_session(token, db)
-def _load_recent_chat_history(session_id: int | None, db: Session, limit: int = 3) -> list[dict[str, str]]:
-    """Load the most recent completed conversation turns for the active session."""
+def _load_recent_chat_history(
+    session_id: int | None,
+    db: Session,
+    limit: int = 3,
+    client_history: list[dict[str, Any]] | None = None,
+) -> list[dict[str, str]]:
+    """Load the most recent completed conversation turns for the active session.
+
+    Prefers client-supplied in-session history (e.g. from Kiosk or Web for guests/visitors),
+    falling back to database query by session_id if client_history is not provided.
+    """
+    if client_history and len(client_history) > 0:
+        history: list[dict[str, str]] = []
+        for turn in client_history[-limit:]:
+            u, a = None, None
+            if isinstance(turn, dict):
+                u = turn.get("user")
+                a = turn.get("assistant")
+                if not u and not a and "role" in turn:
+                    role = str(turn.get("role", "")).lower()
+                    content = str(turn.get("content", "")).strip()
+                    if role in ("user", "human"):
+                        u = content
+                    elif role in ("assistant", "model", "bot"):
+                        a = content
+            else:
+                u = getattr(turn, "user", None)
+                a = getattr(turn, "assistant", None)
+            u_str = str(u or "").strip()
+            a_str = str(a or "").strip()
+            if u_str or a_str:
+                history.append({"user": u_str, "assistant": a_str})
+        if history:
+            return history
+
     if not session_id or db is None:
         return []
     try:
@@ -339,19 +472,38 @@ def _condense_query_with_history(query: str, history: list[dict[str, str]]) -> s
     if not history or not getattr(rag_settings, "RAG_QUERY_REWRITE_ENABLED", True):
         return query
 
-    # Fast regex screening for pronouns / follow-up hints
+    # Fast regex screening for pronouns / follow-up hints (English, Malay, Chinese)
     needs_rewrite = bool(re.search(
-        r"\b(it|its|this|that|these|those|they|their|them|he|she|his|her|the course|the programme|the fee|the fees|the requirement|the requirements|cost|duration|where is it|what about|and for|how about)\b",
+        r"\b(it|its|this|that|these|those|they|their|them|he|she|his|her|"
+        r"the course|the programme|the fee|the fees|the requirement|the requirements|entry requirement|entry requirements|"
+        r"cost|duration|where is it|what about|and for|how about|tell me more|more details|"
+        r"dia|ia|ini|itu|tersebut|yuran|yurannya|syarat|syaratnya|kat mana|di mana|"
+        r"berapa|tempoh|program tersebut|kursus tersebut)\b|"
+        r"(这个|那个|其|它|他|她|学费|费用|录取条件|入学要求|在哪里|在哪|更多|多久)",
         query,
         re.IGNORECASE,
     ))
+    # If the query is very short (<= 4 words) and conversation history exists, it's very likely a follow-up
+    if not needs_rewrite and len(query.strip().split()) <= 4:
+        needs_rewrite = True
+
+    # If the query already specifies a concrete programme/degree entity, do not trigger a slow LLM rewrite:
+    if needs_rewrite and len(query.strip().split()) >= 5:
+        has_substantive_entity = bool(re.search(
+            r"\b(bachelor|diploma|master|phd|foundation|faculty|department|computer science|pharmacy|medicine|business|biotechnology|accounting|engineering)\b",
+            query,
+            re.IGNORECASE,
+        ))
+        if has_substantive_entity:
+            needs_rewrite = False
+
     if not needs_rewrite:
         return query
 
     try:
-        from RagChatbot.gemini_client import get_gemini_client
+        from RagChatbot.gemini_client import get_gemini_client, generate_content_with_retry
         client = get_gemini_client()
-        history_lines = [f"User: {h.get('user', '')}\nAssistant: {h.get('assistant', '')}" for h in history[-2:]]
+        history_lines = [f"User: {h.get('user', '')}\nAssistant: {h.get('assistant', '')}" for h in history[-3:]]
         prompt = (
             f"Conversation history:\n" + "\n".join(history_lines) + "\n\n"
             f"Rewrite this follow-up into a concise standalone search query for university document retrieval. "
@@ -359,7 +511,8 @@ def _condense_query_with_history(query: str, history: list[dict[str, str]]) -> s
             f"Follow-up: {query}\n"
             f"Standalone query:"
         )
-        response = client.models.generate_content(
+        response = generate_content_with_retry(
+            client=client,
             model=rag_settings.PLANNER_MODEL,
             contents=prompt,
             config={"temperature": 0.0, "max_output_tokens": 48},
@@ -453,6 +606,13 @@ def process_chat(
     else:
         allowed_levels = VISITOR_ACCESS_LEVELS
         logger.info("Chat: anonymous visitor allowed_levels=%s", allowed_levels)
+
+    # Load recent chat history (prefers client_history from request for visitors/kiosk, falls back to DB)
+    chat_history = _load_recent_chat_history(
+        session_id,
+        db,
+        client_history=getattr(request, "chat_history", None),
+    )
 
     # Fast-path intent routing & cache check:
     # 1. Check navigation confirmation & personal intent locally
@@ -627,44 +787,45 @@ def process_chat(
             )
 
         # Check full RAG response cache for direct university questions:
-        cache_key = _rag_cache_key(sanitized_query, allowed_levels)
-        with _RAG_RESPONSE_CACHE_LOCK:
-            if cache_key in _RAG_RESPONSE_CACHE:
-                cached_time, cached_res = _RAG_RESPONSE_CACHE[cache_key]
-                ttl = getattr(rag_settings, "RESPONSE_CACHE_TTL_SECONDS", 300.0)
-                if time.monotonic() - cached_time < ttl:
-                    _RAG_RESPONSE_CACHE.move_to_end(cache_key)
-                    logger.debug("RAG response cache hit for query: %.40s", sanitized_query)
-                    response_time_ms = int((time.monotonic() - start_time) * 1000)
-                    logged_query_id = log_chatbot_interaction(
-                        db,
-                        session_id=session_id,
-                        user_id=user_id,
-                        query_text=sanitized_query,
-                        response_text=cached_res.answer,
-                        retrieved_chunk_ids=[c.chunk_id for c in cached_res.citations],
-                        response_time_ms=response_time_ms,
-                    )
-                    query_id = logged_query_id if logged_query_id > 0 else None
-                    metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
-                    log_inference_metrics(
-                        request_type="text",
-                        user_id=user_id,
-                        session_id=session_id,
-                        query_text=sanitized_query,
-                        metrics=metrics,
-                        status="ok" if cached_res.access_granted else "no_access",
-                    )
-                    return ChatResponse(
-                        answer=cached_res.answer,
-                        citations=cached_res.citations,
-                        access_granted=cached_res.access_granted,
-                        status_message=cached_res.status_message,
-                        response_time_ms=response_time_ms,
-                        query_id=query_id,
-                    )
-                else:
-                    del _RAG_RESPONSE_CACHE[cache_key]
+        if not chat_history:
+            cache_key = _rag_cache_key(sanitized_query, allowed_levels)
+            with _RAG_RESPONSE_CACHE_LOCK:
+                if cache_key in _RAG_RESPONSE_CACHE:
+                    cached_time, cached_res = _RAG_RESPONSE_CACHE[cache_key]
+                    ttl = getattr(rag_settings, "RESPONSE_CACHE_TTL_SECONDS", 300.0)
+                    if time.monotonic() - cached_time < ttl:
+                        _RAG_RESPONSE_CACHE.move_to_end(cache_key)
+                        logger.debug("RAG response cache hit for query: %.40s", sanitized_query)
+                        response_time_ms = int((time.monotonic() - start_time) * 1000)
+                        logged_query_id = log_chatbot_interaction(
+                            db,
+                            session_id=session_id,
+                            user_id=user_id,
+                            query_text=sanitized_query,
+                            response_text=cached_res.answer,
+                            retrieved_chunk_ids=[c.chunk_id for c in cached_res.citations],
+                            response_time_ms=response_time_ms,
+                        )
+                        query_id = logged_query_id if logged_query_id > 0 else None
+                        metrics.total_inference_ms = (time.monotonic() - start_time) * 1000.0
+                        log_inference_metrics(
+                            request_type="text",
+                            user_id=user_id,
+                            session_id=session_id,
+                            query_text=sanitized_query,
+                            metrics=metrics,
+                            status="ok" if cached_res.access_granted else "no_access",
+                        )
+                        return ChatResponse(
+                            answer=cached_res.answer,
+                            citations=cached_res.citations,
+                            access_granted=cached_res.access_granted,
+                            status_message=cached_res.status_message,
+                            response_time_ms=response_time_ms,
+                            query_id=query_id,
+                        )
+                    else:
+                        del _RAG_RESPONSE_CACHE[cache_key]
 
     else:
         # Complex turn: LLM planner for structured tool dispatch (navigation, personal, unclear)
@@ -674,6 +835,7 @@ def process_chat(
                 context=context,
                 db=db,
                 confirmation_context=confirmation_context,
+                chat_history=chat_history,
             )
         metrics.prompt_classification_ms += timer.elapsed_ms
 
@@ -730,77 +892,41 @@ def process_chat(
                 authentication_required=planned.authentication_required,
             )
 
-    chat_history = _load_recent_chat_history(session_id, db)
     search_query = _condense_query_with_history(sanitized_query, chat_history)
 
-# Step 4: Embed the query
+    # Step 4-8: Execute through Fast RAG engine
     with StageTimer() as timer:
-        try:
-            query_embedding = embed_text(search_query)
-        except RuntimeError as exc:
-            logger.error("Embedding failed for user_id=%s: %s", user_id, exc)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Embedding service is temporarily unavailable. Please try again later.",
-            )
-    metrics.embedding_return_ms += timer.elapsed_ms
-
-# Steps 5-6: Retrieve and re-rank authorized chunks
-    with StageTimer() as timer:
-        ranked_chunks = retrieve_chunks(
-            query_embedding=query_embedding,
-            allowed_access_levels=allowed_levels,
-            db=db,
-            query_text=search_query,
-            category=getattr(route, "category_hint", None),
-            faculty_code=getattr(route, "faculty_hint", None),
-            is_broad_overview=getattr(route, "is_broad_overview", False),
+        from RagChatbot.generation.live_fast_rag import live_fast_rag
+        from RagChatbot.gemini_client import in_flight_deduplicator
+        dedup_key = f"fast_rag:{tuple(sorted(allowed_levels))}:{search_query.strip().lower()}"
+        fast_res = in_flight_deduplicator.execute(
+            dedup_key,
+            lambda: live_fast_rag.process_voice_query(
+                query=sanitized_query,
+                auth_context=context,
+                db=db,
+                chat_history=chat_history,
+                search_query=search_query,
+            ),
         )
-    metrics.embedding_db_search_ms += timer.elapsed_ms
-
-# Step 7: Generate answer
-    with StageTimer() as timer:
-        if not ranked_chunks:
-            if not bearer_token and _has_relevant_protected_chunks(query_embedding, db):
-                answer = get_translated("auth_required", detected_lang)
-                access_granted = False
-                status_message = get_translated("auth_required_status", detected_lang)
-            else:
-                answer = get_translated("no_access", detected_lang)
-                access_granted = False
-                status_message = get_translated("no_access_status", detected_lang)
-        else:
-            try:
-                chat_history = []
-                if session_id:
-                    from app.models.models import ChatbotQuery
-                    recent_queries = (
-                        db.query(ChatbotQuery)
-                        .filter(ChatbotQuery.session_id == session_id)
-                        .filter(ChatbotQuery.response_text.isnot(None))
-                        .order_by(ChatbotQuery.timestamp.desc())
-                        .limit(3)
-                        .all()
-                    )
-                    for q in reversed(recent_queries):
-                        chat_history.append({
-                            "user": q.query_text,
-                            "assistant": q.response_text
-                        })
-
-                answer = generate_answer(sanitized_query, ranked_chunks, chat_history=chat_history, user_context=context)
-                access_granted = True
-                status_message = None
-            except RuntimeError as exc:
-                logger.error("LLM generation failed for user_id=%s: %s", user_id, exc)
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Answer generation is temporarily unavailable. Please try again later.",
-                )
     metrics.rag_ms += timer.elapsed_ms
 
-    # Step 8: Build citation objects
-    citations: List[CitationSchema] = [_make_citation(chunk) for chunk in ranked_chunks]
+    answer = fast_res.get("answer", "")
+    access_granted = True
+    status_message = fast_res.get("status", "ok")
+    citations: List[CitationSchema] = [
+        CitationSchema(
+            chunk_id=s.get("chunk_id", 0),
+            document_id=s.get("document_id", 0),
+            document_title=s.get("document_title", ""),
+            chunk_index=0,
+            access_level=s.get("access_level", "PUBLIC"),
+            excerpt=s.get("section_path", ""),
+        )
+        for s in fast_res.get("sources", [])
+        if isinstance(s, dict)
+    ]
+    ranked_chunks = []
 
     total_elapsed = time.monotonic() - start_time
     response_time_ms = int(total_elapsed * 1000)
@@ -845,7 +971,7 @@ def process_chat(
         query_id=query_id,
     )
 
-    if access_granted:
+    if access_granted and not chat_history and search_query == sanitized_query:
         cache_key = _rag_cache_key(sanitized_query, allowed_levels)
         with _RAG_RESPONSE_CACHE_LOCK:
             _RAG_RESPONSE_CACHE[cache_key] = (time.monotonic(), response)
@@ -907,6 +1033,13 @@ def process_chat_stream(
     user_id, session_id = context.user_id, context.session_id
     allowed_levels = get_allowed_access_levels_for_user(user_id, db) if (context.authenticated and user_id is not None) else VISITOR_ACCESS_LEVELS
 
+    # Load recent chat history (prefers client_history from request for visitors/kiosk, falls back to DB)
+    chat_history = _load_recent_chat_history(
+        session_id,
+        db,
+        client_history=getattr(request, "chat_history", None),
+    )
+
     # Step 2.5: Fast-path routing & cache check
     confirmation_context = _confirmed_navigation_label(sanitized_query, db, session_id)
     personal_intent_result = parse_personal_intent(sanitized_query)
@@ -940,30 +1073,33 @@ def process_chat_stream(
             yield _sse_event("done", fast_resp.model_dump(mode="json"))
             return
 
-        # Check response cache
-        cache_key = _rag_cache_key(sanitized_query, allowed_levels)
-        with _RAG_RESPONSE_CACHE_LOCK:
-            if cache_key in _RAG_RESPONSE_CACHE:
-                cached_time, cached_res = _RAG_RESPONSE_CACHE[cache_key]
-                ttl = getattr(rag_settings, "RESPONSE_CACHE_TTL_SECONDS", 300.0)
-                if time.monotonic() - cached_time < ttl:
-                    _RAG_RESPONSE_CACHE.move_to_end(cache_key)
-                    response_time_ms = int((time.monotonic() - start_time) * 1000)
-                    logged = log_chatbot_interaction(
-                        db, session_id=session_id, user_id=user_id, query_text=sanitized_query,
-                        response_text=cached_res.answer, retrieved_chunk_ids=[c.chunk_id for c in cached_res.citations],
-                        response_time_ms=response_time_ms,
-                    )
-                    query_id = _safe_query_id(logged)
-                    done_resp = ChatResponse(
-                        answer=cached_res.answer, citations=cached_res.citations,
-                        access_granted=cached_res.access_granted, status_message=cached_res.status_message,
-                        response_time_ms=response_time_ms, query_id=query_id,
-                    )
-                    for chunk in _split_stream_text(done_resp.answer):
-                        yield _sse_event("chunk", {"text": chunk})
-                    yield _sse_event("done", done_resp.model_dump(mode="json"))
-                    return
+        # Check response cache (only for standalone queries without active conversation context)
+        if not chat_history:
+            cache_key = _rag_cache_key(sanitized_query, allowed_levels)
+            with _RAG_RESPONSE_CACHE_LOCK:
+                if cache_key in _RAG_RESPONSE_CACHE:
+                    cached_time, cached_res = _RAG_RESPONSE_CACHE[cache_key]
+                    ttl = getattr(rag_settings, "RESPONSE_CACHE_TTL_SECONDS", 300.0)
+                    if time.monotonic() - cached_time < ttl:
+                        _RAG_RESPONSE_CACHE.move_to_end(cache_key)
+                        response_time_ms = int((time.monotonic() - start_time) * 1000)
+                        logged = log_chatbot_interaction(
+                            db, session_id=session_id, user_id=user_id, query_text=sanitized_query,
+                            response_text=cached_res.answer, retrieved_chunk_ids=[c.chunk_id for c in cached_res.citations],
+                            response_time_ms=response_time_ms,
+                        )
+                        query_id = _safe_query_id(logged)
+                        done_resp = ChatResponse(
+                            answer=cached_res.answer, citations=cached_res.citations,
+                            access_granted=cached_res.access_granted, status_message=cached_res.status_message,
+                            response_time_ms=response_time_ms, query_id=query_id,
+                        )
+                        for chunk in _split_stream_text(done_resp.answer):
+                            yield _sse_event("chunk", {"text": chunk})
+                        yield _sse_event("done", done_resp.model_dump(mode="json"))
+                        return
+                    else:
+                        del _RAG_RESPONSE_CACHE[cache_key]
     else:
         # Fallback to standard execution for navigation / personal
         resp = process_chat(request, bearer_token, db)
@@ -972,7 +1108,6 @@ def process_chat_stream(
         yield _sse_event("done", resp.model_dump(mode="json"))
         return
 
-    chat_history = _load_recent_chat_history(session_id, db)
     search_query = _condense_query_with_history(sanitized_query, chat_history)
 
     # Step 4: Embed query
@@ -1021,20 +1156,6 @@ def process_chat_stream(
             yield _sse_event("chunk", {"text": chunk})
         yield _sse_event("done", resp.model_dump(mode="json"))
         return
-
-    chat_history = []
-    if session_id:
-        from app.models.models import ChatbotQuery
-        recent_queries = (
-            db.query(ChatbotQuery)
-            .filter(ChatbotQuery.session_id == session_id)
-            .filter(ChatbotQuery.response_text.isnot(None))
-            .order_by(ChatbotQuery.timestamp.desc())
-            .limit(3)
-            .all()
-        )
-        for q in reversed(recent_queries):
-            chat_history.append({"user": q.query_text, "assistant": q.response_text})
 
     generated_tokens: list[str] = []
     first_token_recorded = False
@@ -1094,13 +1215,14 @@ def process_chat_stream(
         query_id=query_id,
     )
 
-    cache_key = _rag_cache_key(sanitized_query, allowed_levels)
-    with _RAG_RESPONSE_CACHE_LOCK:
-        _RAG_RESPONSE_CACHE[cache_key] = (time.monotonic(), final_resp)
-        _RAG_RESPONSE_CACHE.move_to_end(cache_key)
-        max_size = getattr(rag_settings, "RESPONSE_CACHE_SIZE", 256)
-        while len(_RAG_RESPONSE_CACHE) > max_size:
-            _RAG_RESPONSE_CACHE.popitem(last=False)
+    if not chat_history and search_query == sanitized_query:
+        cache_key = _rag_cache_key(sanitized_query, allowed_levels)
+        with _RAG_RESPONSE_CACHE_LOCK:
+            _RAG_RESPONSE_CACHE[cache_key] = (time.monotonic(), final_resp)
+            _RAG_RESPONSE_CACHE.move_to_end(cache_key)
+            max_size = getattr(rag_settings, "RESPONSE_CACHE_SIZE", 256)
+            while len(_RAG_RESPONSE_CACHE) > max_size:
+                _RAG_RESPONSE_CACHE.popitem(last=False)
 
     yield _sse_event("done", final_resp.model_dump(mode="json"))
 

@@ -2061,12 +2061,19 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
         }
 
         // 8. Device Configuration Form
-        function DeviceForm({ item, nodes, onSubmit, onCancel }) {
+        function DeviceForm({ item, nodes, roles = [], onSubmit, onCancel }) {
             const [deviceId, setDeviceId] = useState(item?.device_id || "");
             const [deviceName, setDeviceName] = useState(item?.device_name || "");
             const [nodeId, setNodeId] = useState(item?.node_id || "");
             const [deviceType, setDeviceType] = useState(item?.device_type || "KIOSK");
             const [ipAddress, setIpAddress] = useState(item?.ip_address || "");
+            const [allowedRoleIds, setAllowedRoleIds] = useState(item?.allowed_role_ids || []);
+
+            const toggleRole = (roleId) => {
+                setAllowedRoleIds(prev =>
+                    prev.includes(roleId) ? prev.filter(id => id !== roleId) : [...prev, roleId]
+                );
+            };
 
             const handleSubmit = (e) => {
                 onSubmit(e, {
@@ -2075,7 +2082,8 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     node_id: parseInt(nodeId),
                     device_type: deviceType,
                     ip_address: ipAddress || null,
-                    is_active: true
+                    is_active: true,
+                    allowed_role_ids: allowedRoleIds
                 });
             };
 
@@ -2116,6 +2124,34 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                                 <option value="OFFICE">OFFICE</option>
                                 <option value="OTHER">OTHER</option>
                             </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Authorized Roles (Device RBAC)</label>
+                        <p className="text-[11px] text-slate-500 mb-2">Select which roles are permitted access on this physical device. If none selected, access will be denied.</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                            {roles && roles.length > 0 ? (
+                                roles.map(r => {
+                                    const isChecked = allowedRoleIds.includes(r.role_id);
+                                    return (
+                                        <label key={r.role_id} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer border transition-all text-xs select-none ${
+                                            isChecked 
+                                                ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 font-medium' 
+                                                : 'border-slate-800 text-slate-400 hover:bg-slate-900/50 hover:text-slate-300'
+                                        }`}>
+                                            <input
+                                                type="checkbox"
+                                                checked={isChecked}
+                                                onChange={() => toggleRole(r.role_id)}
+                                                className="rounded border-slate-700 text-emerald-500 focus:ring-emerald-500/20 bg-slate-900"
+                                            />
+                                            <span>{r.role_name}</span>
+                                        </label>
+                                    );
+                                })
+                            ) : (
+                                <p className="text-xs text-slate-500 col-span-full">No roles loaded.</p>
+                            )}
                         </div>
                     </div>
                     <div>
@@ -2162,6 +2198,46 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
                     <div className="flex justify-end gap-3 mt-6">
                         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
                         <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300">Grant Clearance</button>
+                    </div>
+                </form>
+            );
+        }
+
+        // 9b. Edge RBAC Form
+        function EdgeRBACForm({ edges = [], roles = [], onSubmit, onCancel }) {
+            const [edgeId, setEdgeId] = useState("");
+            const [roleId, setRoleId] = useState("");
+
+            const handleSubmit = (e) => {
+                onSubmit(e, {
+                    edge_id: parseInt(edgeId),
+                    role_id: parseInt(roleId)
+                });
+            };
+
+            return (
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Select Campus Path (Edge)</label>
+                        <select required value={edgeId} onChange={e => setEdgeId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500">
+                            <option value="">Select Path / Edge</option>
+                            {edges.map(ed => (
+                                <option key={ed.edge_id} value={ed.edge_id}>
+                                    Edge #{ed.edge_id} (Node {ed.source_node_id} &rarr; Node {ed.destination_node_id}) {ed.weight_distance ? `[${ed.weight_distance}m]` : ''}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Granted Role clearance level</label>
+                        <select required value={roleId} onChange={e => setRoleId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500">
+                            <option value="">Select Role</option>
+                            {roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
+                        </select>
+                    </div>
+                    <div className="flex justify-end gap-3 mt-6">
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
+                        <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300">Grant Path Clearance</button>
                     </div>
                 </form>
             );
@@ -2708,6 +2784,239 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
             );
         }
 
+        // 18. Acronym & Translations Form (simplified from SpeechAdaptationPhraseForm)
+        function SpeechAdaptationPhraseForm({ item, onSubmit, onCancel }) {
+            const isEdit = !!item;
+            const [acronym, setAcronym] = useState(item?.phrase || "");
+            
+            // Parse existing translations from description JSON or text
+            const parseInitialTranslations = () => {
+                if (!item?.description) return [{ id: 1, lang: "en", text: "" }];
+                try {
+                    const parsed = JSON.parse(item.description);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        return parsed.map((t, idx) => ({
+                            id: idx + 1,
+                            lang: t.lang || "en",
+                            text: t.text || (typeof t === "string" ? t : "")
+                        }));
+                    }
+                    if (typeof parsed === "object" && parsed !== null) {
+                        return Object.entries(parsed).map(([lang, text], idx) => ({
+                            id: idx + 1,
+                            lang,
+                            text: String(text)
+                        }));
+                    }
+                } catch (e) {
+                    return [{ id: 1, lang: "en", text: item.description }];
+                }
+                return [{ id: 1, lang: "en", text: "" }];
+            };
+
+            const [translations, setTranslations] = useState(parseInitialTranslations);
+
+            const handleAddRow = () => {
+                setTranslations(prev => [...prev, { id: Date.now(), lang: "en", text: "" }]);
+            };
+
+            const handleRemoveRow = (id) => {
+                setTranslations(prev => {
+                    if (prev.length <= 1) return [{ id: Date.now(), lang: "en", text: "" }];
+                    return prev.filter(row => row.id !== id);
+                });
+            };
+
+            const handleUpdateRow = (id, field, value) => {
+                setTranslations(prev => prev.map(row => row.id === id ? { ...row, [field]: value } : row));
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                const cleanAcronym = acronym.trim();
+                if (!cleanAcronym) return;
+
+                const validTranslations = translations
+                    .map(t => ({ lang: t.lang, text: t.text.trim() }))
+                    .filter(t => t.text.length > 0);
+
+                onSubmit(e, {
+                    phrase: cleanAcronym,
+                    language_category: "ACRONYM",
+                    description: validTranslations.length > 0 ? JSON.stringify(validTranslations) : null,
+                    is_active: true
+                });
+            };
+
+            return (
+                <form onSubmit={handleSubmit} className="space-y-5">
+                    <div>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Acronym</label>
+                        <input
+                            type="text"
+                            required
+                            value={acronym}
+                            onChange={e => setAcronym(e.target.value)}
+                            placeholder="e.g. FOCS, QIU, PTPTN, LIB"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-bold tracking-wide"
+                        />
+                        <p className="text-[11px] text-slate-500 mt-1">Short acronym, abbreviation, or keyword.</p>
+                    </div>
+
+                    <div>
+                        <div className="flex items-center justify-between mb-2">
+                            <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider">Translations</label>
+                            <span className="text-[11px] text-slate-500">List all language translations for this acronym</span>
+                        </div>
+
+                        <div className="space-y-2.5">
+                            {translations.map((row, idx) => (
+                                <div key={row.id || idx} className="flex items-center gap-2">
+                                    <select
+                                        value={row.lang}
+                                        onChange={e => handleUpdateRow(row.id, 'lang', e.target.value)}
+                                        className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-200 focus:outline-none focus:border-indigo-500 shrink-0 w-36"
+                                    >
+                                        <option value="en">English (EN)</option>
+                                        <option value="ms">Bahasa Melayu (MS)</option>
+                                        <option value="zh">Chinese (ZH)</option>
+                                        <option value="ta">Tamil (TA)</option>
+                                        <option value="yue">Cantonese (YUE)</option>
+                                        <option value="ar">Arabic (AR)</option>
+                                    </select>
+                                    <input
+                                        type="text"
+                                        value={row.text}
+                                        onChange={e => handleUpdateRow(row.id, 'text', e.target.value)}
+                                        placeholder="e.g. Faculty of Computing and Science"
+                                        className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => handleRemoveRow(row.id)}
+                                        className="p-2 text-slate-500 hover:text-rose-400 transition-colors rounded-lg hover:bg-rose-500/10"
+                                        title="Remove this translation"
+                                    >
+                                        <Icon name="trash-2" className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={handleAddRow}
+                            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
+                        >
+                            <Icon name="plus" className="w-3.5 h-3.5" />
+                            <span>Add another translation</span>
+                        </button>
+                    </div>
+
+                    <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-800">
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
+                        <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all duration-300">
+                            {isEdit ? "Update Acronym" : "Add Acronym"}
+                        </button>
+                    </div>
+                </form>
+            );
+        }
+
+        // 19. Speech Language Form
+        function SpeechLanguageForm({ item, onSubmit, onCancel }) {
+            const isEdit = !!item;
+            const [languageName, setLanguageName] = useState(item?.language_name || "");
+            const [languageCode, setLanguageCode] = useState(item?.language_code || "");
+            const [isDefault, setIsDefault] = useState(item?.is_default || false);
+            const [isActive, setIsActive] = useState(item?.is_active ?? true);
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                const code = languageCode.trim().toLowerCase();
+                const name = languageName.trim();
+                if (!code || !name) return;
+
+                onSubmit(e, {
+                    language_code: code,
+                    language_name: name,
+                    is_default: isDefault,
+                    is_active: isActive
+                });
+            };
+
+            return (
+                <form onSubmit={handleSubmit} className="space-y-5">
+                    <div>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Language Name</label>
+                        <input
+                            type="text"
+                            required
+                            value={languageName}
+                            onChange={e => setLanguageName(e.target.value)}
+                            placeholder="e.g. Japanese, Korean, German, Spanish"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-medium"
+                        />
+                        <p className="text-[11px] text-slate-500 mt-1">Common or official name of the language.</p>
+                    </div>
+
+                    <div>
+                        <label className="block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">Language Code (BCP-47)</label>
+                        <input
+                            type="text"
+                            required
+                            disabled={isEdit}
+                            value={languageCode}
+                            onChange={e => setLanguageCode(e.target.value)}
+                            placeholder="e.g. ja, ko, de, es, vi, fr"
+                            maxLength={10}
+                            className={`w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-mono ${isEdit ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        />
+                        <p className="text-[11px] text-slate-500 mt-1">Standard 2-letter or 3-letter BCP-47 / ISO code (e.g. ja, ko, de).</p>
+                    </div>
+
+                    <div className="pt-2 space-y-3">
+                        <label className="flex items-start gap-3 cursor-pointer select-none group">
+                            <input
+                                type="checkbox"
+                                checked={isDefault}
+                                onChange={e => {
+                                    setIsDefault(e.target.checked);
+                                    if (e.target.checked) setIsActive(true);
+                                }}
+                                className="mt-1 rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900"
+                            />
+                            <div>
+                                <span className="text-xs font-bold text-slate-200 group-hover:text-indigo-300 transition-colors">Listen by Default</span>
+                                <p className="text-[11px] text-slate-500 leading-snug">Pre-load this language into the speech recognition hypothesis hints at the start of every session.</p>
+                            </div>
+                        </label>
+
+                        <label className="flex items-start gap-3 cursor-pointer select-none group">
+                            <input
+                                type="checkbox"
+                                checked={isActive}
+                                disabled={isDefault}
+                                onChange={e => setIsActive(e.target.checked)}
+                                className="mt-1 rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900 disabled:opacity-50"
+                            />
+                            <div>
+                                <span className="text-xs font-bold text-slate-200 group-hover:text-indigo-300 transition-colors">Active in Campus Directory</span>
+                                <p className="text-[11px] text-slate-500 leading-snug">Mark as an officially active and supported language across the campus system.</p>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-800">
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
+                        <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all duration-300">
+                            {isEdit ? "Update Language" : "Add Language"}
+                        </button>
+                    </div>
+                </form>
+            );
+        }
+
 window.UserForm = UserForm;
 window.StudentForm = StudentForm;
 window.LecturerForm = LecturerForm;
@@ -2717,6 +3026,7 @@ window.AdminForm = AdminForm;
 window.DocumentForm = DocumentForm;
 window.DeviceForm = DeviceForm;
 window.NodeRBACForm = NodeRBACForm;
+window.EdgeRBACForm = EdgeRBACForm;
 window.CourseForm = CourseForm;
 window.EnrollmentForm = EnrollmentForm;
 window.TimetableForm = TimetableForm;
@@ -2725,3 +3035,5 @@ window.RoleForm = RoleForm;
 window.FacultyForm = FacultyForm;
 window.DepartmentForm = DepartmentForm;
 window.ProgrammeForm = ProgrammeForm;
+window.SpeechAdaptationPhraseForm = SpeechAdaptationPhraseForm;
+window.SpeechLanguageForm = SpeechLanguageForm;

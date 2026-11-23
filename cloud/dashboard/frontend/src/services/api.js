@@ -10,7 +10,7 @@ export const authAxios = axios.create({
 
 // Auto-inject CSRF and session headers on every request
 authAxios.interceptors.request.use(config => {
-    const currentToken = localStorage.getItem('adminToken') || localStorage.getItem('token') || 'dashboard-admin-session';
+    const currentToken = localStorage.getItem('adminToken') || localStorage.getItem('token');
     if (currentToken) {
         config.headers['Authorization'] = `Bearer ${currentToken}`;
     }

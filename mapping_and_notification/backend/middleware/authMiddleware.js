@@ -5,21 +5,18 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    if (!token) return res.status(401).json({ message: "Access Denied. No token provided." });
+    const match = typeof authHeader === 'string' && authHeader.match(/^Bearer ([^\s]+)$/i);
+    if (!match || !JWT_SECRET) return res.status(401).json({ message: "Access Denied. Valid bearer token required." });
 
-    if (token === 'dashboard-admin-session' || token === 'authenticated-admin-session' || token.startsWith('active-admin')) {
-        req.user = { adminName: 'System Administrator', role: 'SUPER_ADMIN' };
-        return next();
-    }
-
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) {
-            // Fallback for internal dashboard tokens
-            req.user = { adminName: 'System Administrator', role: 'SUPER_ADMIN' };
-            return next();
+    jwt.verify(match[1], JWT_SECRET, { algorithms: ['HS256'] }, (err, user) => {
+        if (err || !user || typeof user !== 'object' || !Number.isFinite(user.exp) || user.exp * 1000 <= Date.now()) {
+            return res.status(401).json({ message: "Access Denied. Invalid or expired token." });
         }
-        req.user = user;
+        const role = user.role || user.type || user.admin_type;
+        if (!['SUPER_ADMIN', 'SYSTEM_ADMIN', 'CONTENT_ADMIN'].includes(role)) {
+            return res.status(403).json({ message: "Access Denied. Administrator role required." });
+        }
+        req.user = { ...user, role };
         next();
     });
 };

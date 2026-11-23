@@ -142,7 +142,7 @@ def verify_system_admin(admin: Admin = Depends(get_current_admin)):
     return admin
 
 def verify_content_admin(admin: Admin = Depends(get_current_admin)):
-    if admin.admin_type not in ["SUPER_ADMIN", "CONTENT_ADMIN"]:
+    if admin.admin_type not in ["SUPER_ADMIN", "SYSTEM_ADMIN", "CONTENT_ADMIN"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Unprivileged access: CONTENT_ADMIN level required"

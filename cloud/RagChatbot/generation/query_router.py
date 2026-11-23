@@ -39,6 +39,23 @@ _GREETING_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_EXIT_PATTERN = re.compile(
+    r"^(?:"
+    r"(?:please\s+)?(?:exit|quit|close|leave|end|finish|terminate|stop)(?:\s+(?:the\s+)?(?:chat|chatbot|session|app|interface|conversation|screen))?(?:\s+please)?"
+    r"|(?:goodbye|bye|bye\s*bye|bye-bye|see\s+you|farewell|cya)(?:\s+please)?"
+    r"|(?:thank\s+you|thanks)(?:,\s*|\s+)(?:that['’]?s\s+all|that\s+is\s+all|that['’]?ll\s+be\s+all|all\s+good|i['’]?m\s+good|i['’]?m\s+done)(?:\s+(?:for\s+now|today))?"
+    r"|(?:that['’]?s\s+all|thats\s+all|that\s+is\s+all|that['’]?ll\s+be\s+all)(?:,\s*|\s+)(?:thank\s+you|thanks)"
+    r"|(?:that['’]?s\s+all|thats\s+all|that\s+is\s+all|that['’]?ll\s+be\s+all)(?:\s+(?:for\s+now|today))?"
+    r"|(?:i['’]?m\s+done|i\s+am\s+done|all\s+done|nothing\s+else|no\s+more\s+questions)"
+    r"|(?:tolong\s+)?(?:keluar|tutup|tutup\s+chat|tutup\s+sesi|tamat|selesai|selamat\s+tinggal|henti)(?:\s+tolong)?"
+    r"|(?:terima\s+kasih\s+itu\s+sahaja|itu\s+sahaja|itu\s+je|terima\s+kasih\s+itu\s+je|tak\s+ada\s+apa\s+lagi)"
+    r"|(?:请)?(?:退出|退出聊天|退出程序|关闭|关闭聊天|结束|结束对话|再见|拜拜|走了)"
+    r"|(?:谢谢[，,\s]*这样就好|就这样|就这样了|没事了|没有问题了|好了谢谢|好了)"
+    r"|(?:வெளியேறு|முடி|பை|நன்றி\s+அவ்வளவுதான்)"
+    r")[.!。！？]*$",
+    re.IGNORECASE,
+)
+
 _CAPABILITY_PATTERN = re.compile(
     r"\b(what\s+can\s+you\s+do|how\s+can\s+you\s+help|what\s+are\s+your\s+capabilities|what\s+do\s+you\s+know|features)\b",
     re.IGNORECASE,
@@ -55,7 +72,16 @@ _NAVIGATION_HINT_PATTERN = re.compile(
 )
 
 _BROAD_OVERVIEW_PATTERN = re.compile(
-    r"\b(what\s+(?:programmes?|courses?|degrees?|faculties|schools?|scholarships?)\s+(?:are|do\s+you)\s+(?:offered|available|have)|list\s+all|overview\s+of|all\s+(?:degree|undergraduate|postgraduate|programmes?|faculties)|what\s+can\s+i\s+study)\b",
+    r"\b("
+    r"what\s+(?:are\s+(?:the\s+)?)?(?:programmes?|programs?|courses?|degrees?|faculties|schools?|scholarships?)"
+    r"|what\s+(?:programmes?|programs?|courses?|degrees?|faculties|schools?|scholarships?)\s+(?:are|do\s+you)\s*(?:offered|available|have)?"
+    r"|list\s+(?:all|some|the)?\s*(?:of\s+the\s+)?(?:programmes?|programs?|courses?|degrees?|faculties|schools?|scholarships?)"
+    r"|overview\s+of\s+(?:the\s+)?(?:programmes?|programs?|courses?|degrees?|faculties|schools?)"
+    r"|all\s+(?:degree|undergraduate|postgraduate|programmes?|programs?|faculties|courses?)"
+    r"|what\s+can\s+i\s+study"
+    r"|tell\s+me\s+about\s+(?:the\s+)?(?:programmes?|programs?|courses?|degrees?)"
+    r"|(?:programmes?|programs?)\s+(?:and|or)\s+courses?"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -63,6 +89,41 @@ _CATEGORY_FEES_PATTERN = re.compile(r"\b(fees?|tuition|scholarships?|financial\s
 _CATEGORY_ADMISSIONS_PATTERN = re.compile(r"\b(entry\s+requirements?|requirements?|eligibility|intakes?|apply|admission|deadline|qualifications?)\b", re.IGNORECASE)
 _CATEGORY_POLICIES_PATTERN = re.compile(r"\b(polic(?:y|ies)|plagiarism|appeals?|disciplinary|grading|attendance|deferment|withdrawal)\b", re.IGNORECASE)
 _CATEGORY_FACILITIES_PATTERN = re.compile(r"\b(facilit(?:y|ies)|hostel|accommodation|library|lab|laboratory|parking|bus|transport)\b", re.IGNORECASE)
+_CATEGORY_ACADEMIC_PATTERN = re.compile(r"\b(programmes?|programs?|courses?|degrees?|curriculum|diplomas?|majors?|study|fields?\s+of\s+study|syllabus)\b", re.IGNORECASE)
+
+_MATH_ARITHMETIC_PATTERN = re.compile(
+    r"^\s*(?:what\s+is\s+|calculate\s+|evaluate\s+)?(?:\(?\s*-?\d+(?:\.\d+)?\s*\)?\s*[\+\-\*\/x×÷\^]\s*)+\(?\s*-?\d+(?:\.\d+)?\s*\)?\s*\??\s*$",
+    re.IGNORECASE,
+)
+
+_MATH_KEYWORDS_PATTERN = re.compile(
+    r"\b("
+    r"math(?:s|ematics)?\s+(?:questions?|problems?|homework|equations?)"
+    r"|can\s+you\s+(?:do|answer|solve)\s+(?:my\s+)?math\b"
+    r"|answer\s+(?:a\s+)?math\s+question"
+    r"|solve\s+[-0-9a-z\s\(\)\+\*\/\^\.]*=[^?]*"
+    r"|solve\s+for\s+[a-z]"
+    r"|solve\s+(?:the\s+)?(?:equation|algebra|calculus|trigonometry|quadratic)"
+    r"|calculate\s+(?:the\s+)?(?:square\s+root|derivative|integral|sum|product|difference|logarithm)\s+of"
+    r"|what\s+is\s+(?:the\s+)?(?:square\s+root|derivative|integral)\s+of"
+    r"|\d+\s*(?:plus|minus|times|multiplied\s+by|divided\s+by)\s*\d+"
+    r")",
+    re.IGNORECASE,
+)
+
+_CAMPUS_CONTEXT_PATTERN = re.compile(
+    r"\b("
+    r"admission|admissions|entry|requirement|requirements|eligibility|intake|intakes|deadline"
+    r"|spm|stpm|uec|igcse|o-level|a-level|foundation|matriculation"
+    r"|fee|fees|tuition|cost|scholarship|scholarships|discount|ptptn|financial"
+    r"|course|courses|programme|programmes|degree|degrees|diploma|diplomas|bachelor|master|masters|phd"
+    r"|faculty|faculties|department|school|subject|subjects|credit|credits|grade|grades|grading|gpa|cgpa"
+    r"|mark|marks|passing|exam|examination|assessment|attendance|timetable|schedule|lecture|lecturer|student"
+    r"|campus|university|qiu|quest|hostel|accommodation|library|lab|canteen|toilet|room|building"
+    r"|focs|fohs|fest|fobp"
+    r")\b",
+    re.IGNORECASE,
+)
 
 _FACULTY_PATTERNS = {
     "FOCS": re.compile(r"\b(computer\s+science|computing|software|information\s+technology|it\b|bcs|bit)\b", re.IGNORECASE),
@@ -71,7 +132,117 @@ _FACULTY_PATTERNS = {
     "FOBP": re.compile(r"\b(business|finance|accountancy|accounting|bba|management)\b", re.IGNORECASE),
 }
 
-_ROUTE_CATEGORIES = {"GREETING", "CAPABILITY", "NAVIGATIONAL", "OUT_OF_SCOPE", "UNCLEAR", "UNIVERSITY_INFO"}
+_LANGUAGE_NAME_TO_CODE: dict[str, tuple[str, str]] = {
+    # English names
+    "english": ("en", "English"),
+    "chinese": ("zh", "Chinese"),
+    "mandarin": ("zh", "Mandarin"),
+    "cantonese": ("yue", "Cantonese"),
+    "malay": ("ms", "Malay"),
+    "bahasa melayu": ("ms", "Bahasa Melayu"),
+    "bahasa malaysia": ("ms", "Bahasa Melayu"),
+    "bahasa inggeris": ("en", "English"),
+    "bahasa cina": ("zh", "Chinese"),
+    "bahasa tamil": ("ta", "Tamil"),
+    "bahasa arab": ("ar", "Arabic"),
+    "bahasa jepun": ("ja", "Japanese"),
+    "bahasa korea": ("ko", "Korean"),
+    "tamil": ("ta", "Tamil"),
+    "arabic": ("ar", "Arabic"),
+    "japanese": ("ja", "Japanese"),
+    "korean": ("ko", "Korean"),
+    "french": ("fr", "French"),
+    "german": ("de", "German"),
+    "hindi": ("hi", "Hindi"),
+    "spanish": ("es", "Spanish"),
+    "indonesian": ("id", "Indonesian"),
+    "russian": ("ru", "Russian"),
+    "italian": ("it", "Italian"),
+    "thai": ("th", "Thai"),
+    "vietnamese": ("vi", "Vietnamese"),
+    # Chinese names
+    "华语": ("zh", "Chinese"),
+    "中文": ("zh", "Chinese"),
+    "普通话": ("zh", "Chinese"),
+    "国语": ("zh", "Chinese"),
+    "广东话": ("yue", "Cantonese"),
+    "粤语": ("yue", "Cantonese"),
+    "白话": ("yue", "Cantonese"),
+    "英文": ("en", "English"),
+    "英语": ("en", "English"),
+    "马来语": ("ms", "Malay"),
+    "马来文": ("ms", "Malay"),
+    "日文": ("ja", "Japanese"),
+    "日语": ("ja", "Japanese"),
+    "韩文": ("ko", "Korean"),
+    "韩语": ("ko", "Korean"),
+    "阿拉伯语": ("ar", "Arabic"),
+    "淡米尔语": ("ta", "Tamil"),
+    "泰米尔语": ("ta", "Tamil"),
+    "法语": ("fr", "French"),
+    "德语": ("de", "German"),
+    "西班牙语": ("es", "Spanish"),
+}
+
+_LANG_SWITCH_EN_PATTERN = re.compile(
+    r"^(?:(?:can|could)\s+(?:we|you)\s+|please\s+|let'?s\s+)?(?:speak|converse|talk|switch\s+to)\s+(?:in\s+)?([a-z\s]+?)(?:\s+please)?[.?!]*$",
+    re.IGNORECASE,
+)
+_LANG_SWITCH_PLEASE_PATTERN = re.compile(
+    r"^([a-z\s]+)\s+please[.?!]*$",
+    re.IGNORECASE,
+)
+_LANG_SWITCH_MS_PATTERN = re.compile(
+    r"^(?:boleh\s+)?(?:cakap|guna|tukar\s+(?:ke|kepada)|bercakap)\s+(?:dalam\s+)?bahasa\s+([a-z\s]+?)(?:\s+tak|\s+boleh)?[.?!]*$",
+    re.IGNORECASE,
+)
+_LANG_SWITCH_ZH_PATTERN = re.compile(
+    r"^(?:可以)?(?:用|讲|说|换成|切换(?:成|到)?)\s*(华语|中文|普通话|国语|广东话|粤语|白话|英文|英语|马来语|马来文|日文|日语|韩文|韩语|阿拉伯语|淡米尔语|泰米尔语|法语|德语|西班牙语)\s*(?:交流|沟通|吗|吧|好吗|可以吗)?[.?!]*$",
+)
+
+
+def detect_language_switch(query: str) -> Optional[tuple[str, str]]:
+    """Detect voice or text requests to switch conversation language.
+    Returns (language_code, language_name) if matched, else None.
+    """
+    clean = query.strip()
+    if not clean:
+        return None
+
+    # Check English/Latin patterns
+    m = _LANG_SWITCH_EN_PATTERN.match(clean)
+    if m:
+        target = m.group(1).strip().lower()
+        if target in _LANGUAGE_NAME_TO_CODE:
+            return _LANGUAGE_NAME_TO_CODE[target]
+
+    m_please = _LANG_SWITCH_PLEASE_PATTERN.match(clean)
+    if m_please:
+        target = m_please.group(1).strip().lower()
+        if target in _LANGUAGE_NAME_TO_CODE:
+            return _LANGUAGE_NAME_TO_CODE[target]
+
+    # Check Malay patterns
+    m_ms = _LANG_SWITCH_MS_PATTERN.match(clean)
+    if m_ms:
+        target_sub = f"bahasa {m_ms.group(1).strip().lower()}"
+        if target_sub in _LANGUAGE_NAME_TO_CODE:
+            return _LANGUAGE_NAME_TO_CODE[target_sub]
+        raw_target = m_ms.group(1).strip().lower()
+        if raw_target in _LANGUAGE_NAME_TO_CODE:
+            return _LANGUAGE_NAME_TO_CODE[raw_target]
+
+    # Check Chinese patterns
+    m_zh = _LANG_SWITCH_ZH_PATTERN.match(clean)
+    if m_zh:
+        target_zh = m_zh.group(1).strip()
+        if target_zh in _LANGUAGE_NAME_TO_CODE:
+            return _LANGUAGE_NAME_TO_CODE[target_zh]
+
+    return None
+
+
+_ROUTE_CATEGORIES = {"GREETING", "CAPABILITY", "NAVIGATIONAL", "OUT_OF_SCOPE", "UNCLEAR", "UNIVERSITY_INFO", "LANGUAGE_SWITCH", "EXIT"}
 _ROUTER_SYSTEM_PROMPT = """Classify the user's request into exactly one category.
 
 Use NAVIGATIONAL when the user wants to find, reach, visit, or get directions to a
@@ -106,6 +277,8 @@ def _extract_facets_from_query(query: str) -> tuple[Optional[str], Optional[str]
         category_hint = "POLICIES"
     elif _CATEGORY_FACILITIES_PATTERN.search(query):
         category_hint = "FACILITIES"
+    elif _CATEGORY_ACADEMIC_PATTERN.search(query):
+        category_hint = "ACADEMIC"
 
     faculty_hint = None
     for fac_code, pat in _FACULTY_PATTERNS.items():
@@ -158,11 +331,13 @@ def _llm_navigation_fallback(query: str, destinations: list[tuple[str, str]]) ->
         return None
 
     try:
-        client = get_gemini_client()
+        from RagChatbot.gemini_client import generate_content_with_retry
+        client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
         destination_context = "\n".join(
             f"- {label} ({node_type})" for label, node_type in destinations
         ) or "- No destination catalog is available"
-        response = client.models.generate_content(
+        response = generate_content_with_retry(
+            client=client,
             model=rag_settings.LLM_MODEL,
             contents=(
                 f"Known navigable destinations from the nodes table:\n{destination_context}\n\n"
@@ -222,16 +397,36 @@ def classify_query(query: str, db=None) -> RouteClassification:
         )
 
     cat_hint, fac_hint, is_broad = _extract_facets_from_query(clean_query)
+ 
+    # 0. EXIT Fast-Path
+    if _EXIT_PATTERN.match(clean_query):
+        logger.info("Local Regex Router classified '%s' as EXIT (0 LLM calls)", query)
+        return RouteClassification(category="EXIT")
 
     # 1. GREETING Fast-Path
     if _GREETING_PATTERN.match(clean_query):
         logger.info("Local Regex Router classified '%s' as GREETING (0 LLM calls)", query)
         return RouteClassification(category="GREETING")
 
+    # 1.5. LANGUAGE_SWITCH Fast-Path
+    lang_switch = detect_language_switch(clean_query)
+    if lang_switch:
+        lang_code, lang_name = lang_switch
+        logger.info("Local Regex Router classified '%s' as LANGUAGE_SWITCH (%s, 0 LLM calls)", query, lang_code)
+        return RouteClassification(
+            category="LANGUAGE_SWITCH",
+            category_hint=lang_code,
+        )
+
     # 2. CAPABILITY Fast-Path
     if _CAPABILITY_PATTERN.search(clean_query):
         logger.info("Local Regex Router classified '%s' as CAPABILITY (0 LLM calls)", query)
         return RouteClassification(category="CAPABILITY")
+
+    # 2.5. OUT_OF_SCOPE Fast-Path: Math, Arithmetic, and Non-Campus Calculations (0 LLM calls)
+    if (_MATH_ARITHMETIC_PATTERN.search(clean_query) or _MATH_KEYWORDS_PATTERN.search(clean_query)) and not _CAMPUS_CONTEXT_PATTERN.search(clean_query):
+        logger.info("Local Regex Router classified '%s' as OUT_OF_SCOPE (math/calculation detected)", query)
+        return RouteClassification(category="OUT_OF_SCOPE")
 
     # 3. NAVIGATIONAL Fast-Path
     from RagChatbot.services.map_service import is_navigation_query

@@ -5,6 +5,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import math
+import os
 import sqlite3
 import threading
 import time
@@ -64,11 +66,20 @@ class EdgeAuthToken:
 class EdgeAuthTokenClient:
     """Requests user-scoped JWTs after local face recognition succeeds."""
 
-    def __init__(self, cloud_url: str, device_id: str, device_secret: str = "", timeout_seconds: float = 8.0, allow_insecure_loopback: bool = False) -> None:
+    def __init__(self, cloud_url: str, device_id: str, device_secret: str = "", timeout_seconds: float | None = None, allow_insecure_loopback: bool = False, pad_threshold: float = 0.75) -> None:
         self.cloud_url = cloud_url.rstrip("/")
         self.device_id = device_id
         self.device_secret = device_secret
-        self.timeout_seconds = timeout_seconds
+        if timeout_seconds is None:
+            try:
+                self.timeout_seconds = float(os.getenv("EDGE_AUTH_TIMEOUT_SECONDS", "3.0"))
+            except ValueError:
+                self.timeout_seconds = 3.0
+        else:
+            self.timeout_seconds = float(timeout_seconds)
+        if not math.isfinite(pad_threshold) or not 0.0 < pad_threshold <= 1.0:
+            raise ValueError("PAD threshold must be greater than 0 and no more than 1")
+        self.pad_threshold = pad_threshold
         validate_cloud_url(self.cloud_url, allow_insecure_loopback=allow_insecure_loopback)
         self.challenge_endpoint = f"{self.cloud_url}/api/edge-auth/challenge"
         self.endpoint = f"{self.cloud_url}/api/edge-auth/token"
@@ -83,6 +94,11 @@ class EdgeAuthTokenClient:
 
     def issue_token(self, user_id: int | str, pad_score: float = 0.0, pad_model_version: str = "edge-supplemental") -> EdgeAuthToken:
         user_id = int(user_id)
+        if isinstance(pad_score, bool) or not isinstance(pad_score, (int, float)):
+            raise ValueError("A numeric PAD score is required")
+        pad_score = float(pad_score)
+        if not math.isfinite(pad_score) or not 0.0 <= pad_score <= 1.0 or pad_score < self.pad_threshold:
+            raise ValueError("A valid PAD score at or above the configured threshold is required")
         challenge_response = self._post_signed(self.challenge_endpoint, {"user_id": user_id})
         if challenge_response.status_code >= 400:
             raise RuntimeError(self._error_message(challenge_response))
@@ -92,8 +108,8 @@ class EdgeAuthTokenClient:
             "challenge_id": challenge_id,
             "user_id": user_id,
             "match_passed": True,
-            "liveness_passed": True,
-            "pad_score": float(pad_score),
+            "liveness_passed": pad_score >= self.pad_threshold,
+            "pad_score": pad_score,
             "pad_model_version": str(pad_model_version),
         }
         payload = {
@@ -127,6 +143,7 @@ class AccessControlAudioCoordinator:
             config.sync_device_id,
             config.sync_device_secret,
             allow_insecure_loopback=config.allow_insecure_loopback,
+            pad_threshold=config.pad_threshold,
         )
         self._lock = threading.Lock()
         self._authenticated_token: EdgeAuthToken | None = None
@@ -182,10 +199,16 @@ class AccessControlAudioCoordinator:
         user_id = result.get("user_id")
         if user_id is None:
             return
-        if not self._should_attempt_authenticated_token(int(user_id)):
+        if not self._should_attempt_authenticated_token(user_id):
             return
+        pad_score = float(result.get("pad_score") or 0.0)
+        pad_model_version = str(result.get("pad_model_version") or "minifasnet-v2")
         try:
-            token = self.token_client.issue_token(user_id)
+            token = self.token_client.issue_token(
+                user_id,
+                pad_score=pad_score,
+                pad_model_version=pad_model_version,
+            )
         except Exception as exc:
             logger.warning("Face matched user %s, but JWT issuance failed: %s", user_id, exc)
             return
@@ -217,8 +240,12 @@ class AccessControlAudioCoordinator:
 
     def _run_audio(self) -> None:
         try:
-            from edge.audio_io.config import AudioIOConfig
-            from edge.audio_io.main import AudioInteractionPipeline
+            try:
+                from access_control.audio_io.config import AudioIOConfig
+                from access_control.audio_io.main import AudioInteractionPipeline
+            except ImportError:
+                from edge.audio_io.config import AudioIOConfig
+                from edge.audio_io.main import AudioInteractionPipeline
 
             audio_config = AudioIOConfig(
                 cloud_api_url=f"{self.config.sync_cloud_url.rstrip('/')}/api/chatbot/chat/audio",
@@ -276,23 +303,24 @@ class AccessControlAudioCoordinator:
                 conn.close()
         return int(row[0]) if row else None
 
-    def _should_attempt_authenticated_token(self, user_id: int) -> bool:
+    def _should_attempt_authenticated_token(self, user_id: int | str) -> bool:
         with self._lock:
             now = time.monotonic()
-            last_attempt = self._last_token_attempts.get(user_id, 0.0)
+            key = str(user_id)
+            last_attempt = self._last_token_attempts.get(key, 0.0)
             if now - last_attempt < self.config.audio_token_retry_seconds:
                 return False
 
             token = self._authenticated_token
-            if token is None or token.user_id != user_id:
-                self._last_token_attempts[user_id] = now
+            if token is None or str(token.user_id) != key:
+                self._last_token_attempts[key] = now
                 return True
             if not token.is_fresh():
-                self._last_token_attempts[user_id] = now
+                self._last_token_attempts[key] = now
                 return True
             elapsed = now - self._last_authenticated_refresh
             if elapsed >= self.config.audio_token_refresh_seconds:
-                self._last_token_attempts[user_id] = now
+                self._last_token_attempts[key] = now
                 return True
             return False
 
