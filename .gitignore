@@ -231,3 +231,8 @@ scripts/
 !.gitignore
 !.gitkeep
 !**/.gitkeep
+!.github/
+!.github/**
+!.pre-commit-config.yaml
+!.gcloudignore
+!pytest.ini

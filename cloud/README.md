@@ -171,7 +171,7 @@ python cloud\dashboard\backend\app\db_init.py
 
 ### F. Dashboard Frontend Build (Optional)
 
-The pre-built dashboard frontend static files reside in `cloud/dashboard/frontend/dist` and are served automatically by FastAPI under `/dashboard/`.
+The pre-built dashboard frontend static files reside in `cloud/dashboard/backend/app/static/vite` and are served automatically by FastAPI under `/dashboard/`.
 
 If you modify frontend code inside `cloud/dashboard/frontend`, rebuild the frontend assets:
 
@@ -232,17 +232,23 @@ If running manually without the PowerShell script, execute the following steps f
    ```
 3. **Start FastAPI Uvicorn Server**:
    ```powershell
+   $env:PYTHONPATH = "$PWD\cloud\dashboard\backend;$PWD\cloud"
    python -m uvicorn cloud.dashboard.backend.app.main:app --host 0.0.0.0 --port 8000 --reload
    ```
 4. **Start Mapping & Navigation Microservice (Node.js)**:
    ```powershell
-   cd cloud\mapping_microservice
+   cd mapping_and_notification\backend
    npm start
    ```
-5. **(Optional) Start Notification Worker (Node.js)**:
+5. **(Optional) Start Notification Consumer Worker (Node.js)**:
    ```powershell
-   cd cloud\mapping_microservice
-   npm run worker
+   cd mapping_and_notification\backend
+   npm run consumer
+   ```
+6. **Start Python AI Microservice (port 8001)**:
+   ```powershell
+   cd mapping_and_notification\ai-services
+   python -m uvicorn src.main:app --host 127.0.0.1 --port 8001
    ```
 
 ---

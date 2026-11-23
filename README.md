@@ -29,8 +29,10 @@ Before retiring the legacy runtime, run the read-only cutover check:
 ## Workspace Directory Structure
 
 * **cloud/**: Central server components (Dashboard API backend, RAG Chatbot, and Database Synchronization Routers).
+* **mapping_and_notification/**: Node.js mapping/notification API & RabbitMQ worker (`backend/`), React kiosk frontend (`frontend/`), and FastAPI wall-detection / floorplan analysis service (`ai-services/`).
+* **surveillance/**: Multi-camera YOLOX + ArcFace surveillance pipeline.
 * **access_control/**: Local access-control device components.
-* **access_control/facial_recognition/**: Hailo face-recognition, access-control, surveillance, SQLite sync, Docker, and local facial API code.
+* **access_control/facial_recognition/**: Hailo face-recognition, access-control, SQLite sync, Docker, and local facial API code.
 * **access_control/audio_io/**: Audio activation, speech recording, cloud Gemini Live/RAG client, and local playback.
 
 ---
@@ -40,7 +42,7 @@ Before retiring the legacy runtime, run the read-only cutover check:
 Before connecting an edge kiosk device to the cloud central server, you must seed and configure the structural database entities using the cloud administrative dashboard. If these prerequisites are not configured, the synchronization worker will not run correctly, and offline authentications will fail.
 
 ### 1. Seed Security Roles (`roles` table)
-Seed your campus database with core security classifications in the `roles` table (e.g., `role_id = 1` for `STUDENT`, `role_id = 2` for `LECTURER`). 
+Seed your campus database with core security classifications in the `roles` table (e.g., `role_id = 1` for `ADMIN`, `role_id = 2` for `STAFF`, `role_id = 3` for `LECTURER`, `role_id = 4` for `STUDENT`, `role_id = 5` for `VISITOR`). 
 * *Sync Impact*: These definitions are synced downstream to the SQLite `device_roles` table to establish category relations.
 
 ### 2. Define Physical Node Maps (`nodes` and `devices` tables)
@@ -50,7 +52,7 @@ Seed your campus database with core security classifications in the `roles` tabl
 
 ### 3. Establish Location Entitlements (`node_rbac` table)
 Map location entry policies in the `node_rbac` table, binding allowed security roles to physical campus nodes:
-* Example: Insert a mapping granting `role_id = 1` (STUDENT) access to `node_id = 5` (Block A Entrance).
+* Example: Insert a mapping granting `role_id = 4` (STUDENT) access to `node_id = 5` (Block A Entrance).
 * *Sync Impact*: The downstream poller queries these rules and writes them to SQLite `device_node_rbac`. When a user presents their face, the edge device checks this local table to verify if the user's security role is authorized to enter through that node.
 
 ### 4. Enroll User Profiles (`users` table)

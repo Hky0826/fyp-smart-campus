@@ -1,0 +1,43 @@
+# Virtual environments and local Python caches
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.pytest-tmp/
+
+# Node modules
+**/node_modules/
+.npm/
+
+# Git and IDE configurations
+.git/
+.github/
+.vscode/
+.agents/
+.codex/
+.docx_work/
+.docx_ch4_work/
+.docx_commercial_work/
+.serena/
+.opencode/
+
+# Large database dumps and binary docs
+*.sql
+*.docx
+*.db
+Dump_SmartCampusDB/
+Dump_SmartCampusDB.sql
+data.sql
+database.docx
+dumps/
+documents/
+floorplan/
+runtime-data/
+scratch/
+surveillance/
+access_control/
+
+# Logs
+*.log

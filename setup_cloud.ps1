@@ -73,10 +73,22 @@ if (Test-Path -LiteralPath $cloudReqs) {
     Write-Warn "cloud\requirements.txt not found! Skipping package installation."
 }
 
+$aiVenvPython = Join-Path $repoRoot "mapping_and_notification\ai-services\venv\Scripts\python.exe"
 $aiReqs = Join-Path $repoRoot "mapping_and_notification\ai-services\requirements.txt"
-if (Test-Path -LiteralPath $aiReqs) {
-    Write-Info "Installing AI microservice dependencies from mapping_and_notification\ai-services\requirements.txt..."
+if (Test-Path -LiteralPath $aiVenvPython) {
+    if (Test-Path -LiteralPath $aiReqs) {
+        Write-Info "Installing AI microservice dependencies into mapping_and_notification\ai-services\venv..."
+        & $aiVenvPython -m pip install -r $aiReqs --quiet
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "Failed to install some AI microservice dependencies in ai-services\venv."
+        }
+    }
+} elseif (Test-Path -LiteralPath $aiReqs) {
+    Write-Info "Ensuring Python-3.14-compatible core AI service packages in .venv..."
     & $python -m pip install structlog pydantic-settings python-multipart pyyaml scipy --quiet
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Failed to install one or more optional AI microservice dependencies in .venv."
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -281,7 +293,7 @@ if ($dbTest.TcpTestSucceeded) {
 if (-not $SkipFrontendBuild) {
     Write-Step "Checking Dashboard Frontend Assets..."
     $frontendDir = Join-Path $repoRoot "cloud\dashboard\frontend"
-    $distDir = Join-Path $frontendDir "dist"
+    $viteIndexFile = Join-Path $repoRoot "cloud\dashboard\backend\app\static\vite\index.html"
     
     if (Get-Command npm -ErrorAction SilentlyContinue) {
         # Mapping Microservice setup
@@ -312,12 +324,14 @@ if (-not $SkipFrontendBuild) {
             }
         }
 
-        if (-not (Test-Path -LiteralPath $distDir)) {
+        if (-not (Test-Path -LiteralPath $viteIndexFile)) {
             Write-Info "Building dashboard frontend static assets (npm run build)..."
             Push-Location $frontendDir
             try {
                 npm install --quiet
+                if ($LASTEXITCODE -ne 0) { throw "npm install exited with $LASTEXITCODE" }
                 npm run build
+                if ($LASTEXITCODE -ne 0) { throw "npm run build exited with $LASTEXITCODE" }
                 Write-Info "Dashboard frontend assets built successfully."
             } catch {
                 Write-Warn "Frontend build encountered warnings/errors, but pre-built fallback may exist."
@@ -325,7 +339,7 @@ if (-not $SkipFrontendBuild) {
                 Pop-Location
             }
         } else {
-            Write-Info "Frontend build directory exists at cloud\dashboard\frontend\dist."
+            Write-Info "Frontend build exists at cloud\dashboard\backend\app\static\vite."
         }
     } else {
         Write-Info "Node.js / npm not found on PATH. Using existing static dashboard build."
@@ -336,7 +350,9 @@ if (-not $SkipFrontendBuild) {
     $backendUploads = Join-Path $repoRoot "mapping_and_notification\backend\uploads"
     if (Test-Path -LiteralPath $floorplanSource) {
         if (-not (Test-Path -LiteralPath $backendUploads)) { New-Item -ItemType Directory -Path $backendUploads -Force | Out-Null }
-        Copy-Item -Path (Join-Path $floorplanSource "*.jpeg") -Destination $backendUploads -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $floorplanSource -File |
+            Where-Object { $_.Extension -match '^\.(jpe?g|png|webp)$' } |
+            Copy-Item -Destination $backendUploads -Force -ErrorAction SilentlyContinue
     }
 }
 

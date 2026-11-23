@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: sensitive-artifact-scan
+        name: reject sensitive runtime artifacts
+        entry: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/security_scan.ps1
+        language: system
+        pass_filenames: false

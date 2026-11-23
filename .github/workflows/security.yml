@@ -1,0 +1,41 @@
+name: security
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  dependency-and-sensitive-file-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip pip-audit cyclonedx-bom
+      - run: pip-audit -r cloud/requirements.txt
+      - run: cyclonedx-py requirements cloud/requirements-prod.txt --output-format json --output-file sbom-python.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+        working-directory: cloud/dashboard/frontend
+      - run: npm audit --audit-level=high
+        working-directory: cloud/dashboard/frontend
+      - run: npm run lint
+        working-directory: cloud/dashboard/frontend
+      - name: Reject sensitive artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          forbidden='(^|/)(.*\.db(-wal|-shm)?|.*\.sqlite3?|Dump[^/]*/|snapshots/|.*\.sql$|.*\.log$)'
+          if git ls-files | grep -E "$forbidden"; then
+            echo "Sensitive runtime artifacts are tracked" >&2
+            exit 1
+          fi
+          if git grep -n -I -E 'admin123|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY' -- ':!issues.md' ':!issues_1.md'; then
+            echo "Potential credential material found" >&2
+            exit 1
+          fi
