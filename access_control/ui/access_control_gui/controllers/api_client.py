@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Callable
@@ -17,7 +18,7 @@ import requests
 
 
 def get_default_api_base_url() -> str:
-    port = os.getenv("ACCESS_API_PORT") or os.getenv("EDGE_SYNC_LOCAL_PORT") or "8080"
+    port = os.getenv("ACCESS_API_PORT") or "8080"
     return f"http://127.0.0.1:{port}"
 
 
@@ -44,7 +45,19 @@ class KioskApiClient:
             or get_default_api_base_url()
         )
         self.base_url = configured.rstrip("/")
-        self._session = requests.Session()
+        self._session_local = threading.local()
+
+    @property
+    def _session(self) -> requests.Session:
+        sess = getattr(self._session_local, "session", None)
+        if sess is None:
+            sess = requests.Session()
+            self._session_local.session = sess
+        return sess
+
+    @_session.setter
+    def _session(self, value: requests.Session) -> None:
+        self._session_local.session = value
 
     def get_state(self) -> dict[str, Any]:
         return self._request_json("GET", "/kiosk/state")

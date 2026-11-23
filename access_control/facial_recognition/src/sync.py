@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
-from ..setup_sqlite import backfill_missing_sync_keys, initialize_sqlite_database, migrate_legacy_schema, table_columns
+from ..setup_sqlite import backfill_missing_sync_keys, connect_edge_sqlite, initialize_sqlite_database, migrate_legacy_schema, table_columns
 from .utils.sync_key import generate_sync_key
 from .device_signing import signed_headers, validate_cloud_url
 
@@ -43,19 +43,14 @@ class SQLiteEdgeDB:
 
     def _get_connection(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        if self.encryption_key:
-            try:
-                from pysqlcipher3 import dbapi2 as encrypted_sqlite
-            except ImportError as exc:
-                raise RuntimeError("pysqlcipher3 is required when EDGE_DB_ENCRYPTION_KEY is configured") from exc
-            conn = encrypted_sqlite.connect(str(self.db_path))
-            escaped_key = self.encryption_key.replace("'", "''")
-            conn.execute(f"PRAGMA key = '{escaped_key}'")
-        else:
-            conn = sqlite3.connect(str(self.db_path))
-        conn.execute("PRAGMA journal_mode = WAL;")
-        conn.execute("PRAGMA foreign_keys = ON;")
-        return conn
+        return connect_edge_sqlite(
+            self.db_path,
+            encryption_key=self.encryption_key,
+            foreign_keys=True,
+            wal_mode=True,
+            busy_timeout_ms=5000,
+            row_factory=None,
+        )
 
     def initialize_schema(self) -> None:
         with self.lock:
@@ -274,12 +269,12 @@ class SQLiteEdgeDB:
             conn = self._get_connection()
             cursor = conn.cursor()
             try:
-                # Mappings reference roles, so clear them before replacing the
-                # role table.  The downstream worker uses the combined atomic
-                # method below when applying a server snapshot.
-                cursor.execute("DELETE FROM device_user_roles")
-                cursor.execute("DELETE FROM device_roles")
+                # Upsert roles first and prune only stale role IDs so ON DELETE CASCADE
+                # does not wipe valid device_rbac / device_node_rbac / device_user_roles rows.
+                role_ids: list[int] = []
                 for role in roles:
+                    role_id = int(role["role_id"])
+                    role_ids.append(role_id)
                     cursor.execute(
                         """
                         INSERT INTO device_roles (role_id, role_name, last_synced_at)
@@ -288,8 +283,13 @@ class SQLiteEdgeDB:
                             role_name=excluded.role_name,
                             last_synced_at=CURRENT_TIMESTAMP
                         """,
-                        (role["role_id"], role["role_name"]),
+                        (role_id, role["role_name"]),
                     )
+                if role_ids:
+                    placeholders = ", ".join("?" for _ in role_ids)
+                    cursor.execute(f"DELETE FROM device_roles WHERE role_id NOT IN ({placeholders})", role_ids)
+                else:
+                    cursor.execute("DELETE FROM device_roles")
                 conn.commit()
                 logger.info("Processed delta update for %s roles", len(roles))
             except Exception:
@@ -340,22 +340,35 @@ class SQLiteEdgeDB:
         self,
         roles: List[Dict[str, Any]],
         user_roles: List[Dict[str, Any]],
+        rbac: Optional[List[Dict[str, Any]]] = None,
+        device_rbac: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
-        """Atomically replace roles and all user-role mappings."""
+        """Atomically replace roles, user-role mappings, and optional RBAC tables."""
         with self.lock:
             conn = self._get_connection()
             cursor = conn.cursor()
             try:
-                cursor.execute("DELETE FROM device_user_roles")
-                cursor.execute("DELETE FROM device_roles")
+                role_ids: list[int] = []
                 for role in roles:
+                    role_id = int(role["role_id"])
+                    role_ids.append(role_id)
                     cursor.execute(
                         """
                         INSERT INTO device_roles (role_id, role_name, last_synced_at)
                         VALUES (?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(role_id) DO UPDATE SET
+                            role_name=excluded.role_name,
+                            last_synced_at=CURRENT_TIMESTAMP
                         """,
-                        (role["role_id"], role["role_name"]),
+                        (role_id, role["role_name"]),
                     )
+                if role_ids:
+                    placeholders = ", ".join("?" for _ in role_ids)
+                    cursor.execute(f"DELETE FROM device_roles WHERE role_id NOT IN ({placeholders})", role_ids)
+                else:
+                    cursor.execute("DELETE FROM device_roles")
+
+                cursor.execute("DELETE FROM device_user_roles")
                 saved_count = 0
                 for user_role in user_roles:
                     cursor.execute(
@@ -373,6 +386,29 @@ class SQLiteEdgeDB:
                         ),
                     )
                     saved_count += cursor.rowcount
+
+                if rbac is not None:
+                    cursor.execute("DELETE FROM device_node_rbac")
+                    for entry in rbac:
+                        cursor.execute(
+                            """
+                            INSERT INTO device_node_rbac (node_id, role_id, last_synced_at)
+                            VALUES (?, ?, CURRENT_TIMESTAMP)
+                            """,
+                            (entry["node_id"], entry["role_id"]),
+                        )
+
+                if device_rbac is not None:
+                    cursor.execute("DELETE FROM device_rbac")
+                    for entry in device_rbac:
+                        cursor.execute(
+                            """
+                            INSERT INTO device_rbac (device_id, role_id, last_synced_at)
+                            VALUES (?, ?, CURRENT_TIMESTAMP)
+                            """,
+                            (entry["device_id"], entry["role_id"]),
+                        )
+
                 conn.commit()
                 logger.info("Replaced authorization snapshot: %s roles, %s assignments", len(roles), saved_count)
             except Exception:
@@ -928,10 +964,9 @@ class DownstreamSyncWorker:
             self.db.save_authorization_snapshot(
                 data.get("roles", []),
                 data.get("user_roles", data.get("device_user_roles", [])),
+                rbac=data.get("node_rbac", []),
+                device_rbac=data.get("device_rbac") if "device_rbac" in data else None,
             )
-            self.db.save_rbac_delta(data.get("node_rbac", []))
-            if "device_rbac" in data:
-                self.db.save_device_rbac_delta(data.get("device_rbac", []))
             self.db.save_policy_metadata(
                 node_id=data.get("node_id"),
                 policy_version=data.get("policy_version"),

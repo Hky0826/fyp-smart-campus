@@ -16,6 +16,7 @@ from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
 
+from .tracking import best_matching_track_id
 from .types import DetectedFace
 
 logger = logging.getLogger(__name__)
@@ -251,12 +252,15 @@ class PresenceDetector:
 
         # Critical authentication transition check (e.g. door grant hold)
         if is_auth_transition:
+            if self._state != PresenceState.COOLDOWN:
+                self._state = PresenceState.IDLE
+            self._reset_dwell()
             return PresenceStatus(
                 state=self._state,
                 dwell_progress=0.0,
                 dwell_seconds=0.0,
-                candidate_bbox=self._candidate_bbox,
-                candidate_track_id=self._candidate_track_id,
+                candidate_bbox=None,
+                candidate_track_id=None,
             )
 
         # Evaluate candidate faces
@@ -289,10 +293,10 @@ class PresenceDetector:
         zone_cx = (zx1 + zx2) * 0.5
         zone_cy = (zy1 + zy2) * 0.5
 
-        for idx, face in enumerate(faces):
+        for face in faces:
             track_id = face.track_id
-            if track_id is None and tracks and idx < len(tracks):
-                track_id = getattr(tracks[idx], "track_id", None)
+            if track_id is None and tracks:
+                track_id = best_matching_track_id(face.bbox, tracks)
 
             x1, y1, x2, y2 = [float(v) for v in face.bbox]
             cx_norm = ((x1 + x2) * 0.5) / max(float(frame_w), 1.0)

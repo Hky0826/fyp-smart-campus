@@ -142,6 +142,9 @@ class _LiveDuplexWorker(QThread):
         self._audio_play_queue: asyncio.Queue[bytes | None] | None = None
         self._ws: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._session_ready = False
+        self._pending_greeting_requested = False
+        self._pending_greeting_user: str | None = None
 
     def run(self) -> None:
         self._stop_requested.clear()
@@ -213,6 +216,8 @@ class _LiveDuplexWorker(QThread):
                 pcm_bytes = (samples * self._mic_gain).clip(-32768, 32767).astype(np.int16).tobytes()
             loop.call_soon_threadsafe(mic_queue.put_nowait, pcm_bytes)
 
+        mic_stream = None
+        output_stream = None
         try:
             mic_stream = sd.RawInputStream(
                 samplerate=16000,
@@ -228,8 +233,16 @@ class _LiveDuplexWorker(QThread):
                 blocksize=2400,
             )
         except Exception as exc:
+            for stream in (mic_stream, output_stream):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
             logger.error("Failed to initialize audio devices: %s", exc)
             self.errorOccurred.emit(f"Audio device error: {exc}")
+            self._loop = None
+            self._audio_play_queue = None
             return
 
         try:
@@ -323,8 +336,17 @@ class _LiveDuplexWorker(QThread):
 
                             if event in ("session_ready", "ready"):
                                 session_ready[0] = True
+                                self._session_ready = True
                                 self.listeningChanged.emit(True)
                                 edge_timing.log_receive("WS_READY", turn_id=msg_turn_id, server_sent_at=server_sent_at)
+                                if self._pending_greeting_requested:
+                                    greet_user = self._pending_greeting_user
+                                    self._pending_greeting_requested = False
+                                    self._pending_greeting_user = None
+                                    try:
+                                        await ws.send(json.dumps({"event": "greet", "data": {"user_name": greet_user}}))
+                                    except Exception as exc:
+                                        logger.debug("Failed to send deferred greet event: %s", exc)
                             elif event in ("user_transcript", "transcript"):
                                 text = data.get("text", "")
                                 if text:
@@ -582,21 +604,51 @@ class _LiveDuplexWorker(QThread):
                 await mic_queue.put(None)
                 if self._audio_play_queue:
                     await self._audio_play_queue.put(None)
+                await asyncio.gather(player_task, receiver_task, sender_task, return_exceptions=True)
         except Exception as exc:
             if not self._stop_requested.is_set():
                 logger.error("Duplex session error: %s", exc)
                 self.errorOccurred.emit(str(exc))
+        finally:
+            self._session_ready = False
+            self._ws = None
+            self._loop = None
+            self._audio_play_queue = None
+            for stream in (mic_stream, output_stream):
+                if stream is not None:
+                    try:
+                        stream.stop()
+                    except Exception:
+                        pass
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
 
     def stop(self) -> None:
         self._stop_requested.set()
 
     def stop_audio_playback(self) -> None:
-        if self._audio_play_queue:
-            while not self._audio_play_queue.empty():
+        play_queue = self._audio_play_queue
+        loop = self._loop
+
+        def _drain_queue() -> None:
+            if play_queue is None:
+                return
+            while not play_queue.empty():
                 try:
-                    self._audio_play_queue.get_nowait()
+                    play_queue.get_nowait()
                 except Exception:
                     break
+
+        if play_queue is not None:
+            if loop is not None and not loop.is_closed():
+                try:
+                    loop.call_soon_threadsafe(_drain_queue)
+                except Exception:
+                    pass
+            else:
+                _drain_queue()
         self.busyChanged.emit(False)
         commit_fn = getattr(self, "_commit_in_flight_fn", None)
         if callable(commit_fn):
@@ -616,14 +668,17 @@ class _LiveDuplexWorker(QThread):
                 pass
 
     def send_greeting(self, user_name: str | None = None) -> None:
-        if self._ws and self._loop:
+        if self._ws and self._loop and self._session_ready and not self._loop.is_closed():
             try:
                 payload = json.dumps({"event": "greet", "data": {"user_name": user_name}})
                 self._loop.call_soon_threadsafe(
                     lambda: asyncio.create_task(self._ws.send(payload))
                 )
+                return
             except Exception as exc:
                 logger.debug("Failed to send greet event over WebSocket: %s", exc)
+        self._pending_greeting_user = user_name
+        self._pending_greeting_requested = True
 
 
 class ChatbotController(QObject):

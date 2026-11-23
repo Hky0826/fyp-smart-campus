@@ -94,10 +94,12 @@ class AudioPlayer:
                 logger.warning("Empty audio array, skipping playback")
                 return
 
-            sd.play(audio_array, samplerate=self.sample_rate)
+            sd.play(audio_array, samplerate=self.sample_rate, device=self.config.speaker_device)
             sd.wait()  # Block until playback is finished
             logger.info("Played %d PCM samples at %d Hz", audio_array.size, self.sample_rate)
         except Exception as exc:
+            if self._stop_requested.is_set():
+                return
             raise AudioPlaybackError(f"Failed to play PCM audio: {exc}") from exc
 
     def _play_pcm_alsa(self, pcm_bytes: bytes) -> None:
@@ -134,6 +136,8 @@ class AudioPlayer:
             ) from exc
 
         if result.returncode != 0:
+            if self._stop_requested.is_set():
+                return
             stderr = result.stderr.decode(errors="ignore").strip()
             raise AudioPlaybackError(f"ALSA playback failed: {stderr or 'aplay exited with an error'}")
 
@@ -162,6 +166,7 @@ class AudioPlayer:
                 samplerate=self.sample_rate,
                 channels=1,
                 dtype="int16",
+                device=self.config.speaker_device,
             ) as stream:
                 with self._state_lock:
                     self._active_stream = stream
@@ -182,6 +187,8 @@ class AudioPlayer:
                         samples += block.size
             logger.info("Streamed %d PCM samples at %d Hz", samples, self.sample_rate)
         except Exception as exc:
+            if self._stop_requested.is_set():
+                return
             raise AudioPlaybackError(f"Failed to stream PCM audio: {exc}") from exc
         finally:
             with self._state_lock:
@@ -250,6 +257,8 @@ class AudioPlayer:
                 self._active_process = None
 
         if return_code != 0:
+            if self._stop_requested.is_set():
+                return
             message = stderr.decode(errors="ignore").strip()
             raise AudioPlaybackError(f"ALSA streaming playback failed: {message or 'aplay exited with an error'}")
 
@@ -291,18 +300,22 @@ class AudioPlayer:
                     frames = wf.readframes(wf.getnframes())
                     rate = wf.getframerate()
                     audio_array = np.frombuffer(frames, dtype=np.int16)
-                sd.play(audio_array, samplerate=rate)
+                sd.play(audio_array, samplerate=rate, device=self.config.speaker_device)
                 sd.wait()
                 logger.info("Played WAV file: %s", path)
             except Exception as exc:
+                if self._stop_requested.is_set():
+                    return
                 raise AudioPlaybackError(f"Failed to play WAV file {path}: {exc}") from exc
         else:
             try:
                 data, samplerate = sf.read(str(path), dtype="int16")
-                sd.play(data, samplerate=samplerate)
+                sd.play(data, samplerate=samplerate, device=self.config.speaker_device)
                 sd.wait()
                 logger.info("Played WAV file: %s", path)
             except Exception as exc:
+                if self._stop_requested.is_set():
+                    return
                 raise AudioPlaybackError(f"Failed to play WAV file {path}: {exc}") from exc
 
     def play_and_cleanup(self, audio_path: str | Path) -> None:
@@ -337,6 +350,8 @@ class AudioPlayer:
             ) from exc
 
         if result.returncode != 0:
+            if self._stop_requested.is_set():
+                return
             stderr = result.stderr.decode(errors="ignore").strip()
             raise AudioPlaybackError(f"ALSA WAV playback failed: {stderr or 'aplay exited with an error'}")
 

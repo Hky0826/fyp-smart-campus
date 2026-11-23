@@ -16,6 +16,7 @@ from typing import Any
 
 import requests
 
+from ...setup_sqlite import connect_edge_sqlite
 from ..config import AccessControlConfig
 from ..device_signing import sign_assertion, signed_headers, validate_cloud_url
 
@@ -240,12 +241,8 @@ class AccessControlAudioCoordinator:
 
     def _run_audio(self) -> None:
         try:
-            try:
-                from access_control.audio_io.config import AudioIOConfig
-                from access_control.audio_io.main import AudioInteractionPipeline
-            except ImportError:
-                from edge.audio_io.config import AudioIOConfig
-                from edge.audio_io.main import AudioInteractionPipeline
+            from access_control.audio_io.config import AudioIOConfig
+            from access_control.audio_io.main import AudioInteractionPipeline
 
             audio_config = AudioIOConfig(
                 cloud_api_url=f"{self.config.sync_cloud_url.rstrip('/')}/api/chatbot/chat/audio",
@@ -276,7 +273,7 @@ class AccessControlAudioCoordinator:
             return None
         conn: sqlite3.Connection | None = None
         try:
-            conn = sqlite3.connect(str(db_path))
+            conn = connect_edge_sqlite(db_path, foreign_keys=True, row_factory=None)
             tables = {
                 row[0]
                 for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
@@ -295,7 +292,7 @@ class AccessControlAudioCoordinator:
                 LIMIT 1
                 """
             ).fetchone()
-        except sqlite3.Error as exc:
+        except (sqlite3.Error, RuntimeError) as exc:
             logger.warning("Could not inspect local visitor user cache: %s", exc)
             return None
         finally:

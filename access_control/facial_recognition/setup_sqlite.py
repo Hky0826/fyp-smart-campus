@@ -146,14 +146,45 @@ def migrate_legacy_schema(cursor: sqlite3.Cursor) -> None:
         )
 
 
+def connect_edge_sqlite(
+    db_path: str | Path,
+    encryption_key: str = "",
+    *,
+    foreign_keys: bool = True,
+    wal_mode: bool = False,
+    busy_timeout_ms: int = 5000,
+    row_factory: Optional[object] = sqlite3.Row,
+) -> sqlite3.Connection:
+    """Open an edge SQLite or SQLCipher connection with consistent pragmas."""
+    resolved_path = Path(db_path)
+    resolved_key = encryption_key or os.getenv("EDGE_DB_ENCRYPTION_KEY", "")
+    if resolved_key:
+        try:
+            from pysqlcipher3 import dbapi2 as encrypted_sqlite
+        except ImportError as exc:
+            raise RuntimeError("pysqlcipher3 is required when EDGE_DB_ENCRYPTION_KEY is configured") from exc
+        conn = encrypted_sqlite.connect(str(resolved_path))
+        escaped_key = resolved_key.replace("'", "''")
+        conn.execute(f"PRAGMA key = '{escaped_key}'")
+    else:
+        conn = sqlite3.connect(str(resolved_path))
+
+    if row_factory is not None:
+        conn.row_factory = row_factory
+    conn.execute(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
+    if wal_mode:
+        conn.execute("PRAGMA journal_mode = WAL")
+    if foreign_keys:
+        conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
 def initialize_sqlite_database(db_path: Optional[str | Path] = None) -> Path:
     resolved_path = Path(db_path).expanduser() if db_path is not None else default_database_path()
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(str(resolved_path))
+    conn = connect_edge_sqlite(resolved_path, wal_mode=True, row_factory=None)
     try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         migrate_legacy_schema(conn.cursor())
         conn.commit()

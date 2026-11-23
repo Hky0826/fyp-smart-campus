@@ -38,6 +38,8 @@ ApplicationWindow {
         partialText: chatbotController.partialText
         transcribedText: chatbotController.transcribedText
         sessionName: accessController.sessionName
+        roleLabel: accessController.roleLabel
+        confidenceText: accessController.confidenceText
         presenceState: accessController.presenceState
         listening: chatbotController.listening
         busy: chatbotController.busy

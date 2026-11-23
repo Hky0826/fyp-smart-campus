@@ -105,6 +105,10 @@ class IdentityManager:
         """Clear all active identities."""
         self._identities.clear()
 
+    def invalidate_track(self, track_id: int) -> None:
+        """Remove any cached identity state for a specific track ID."""
+        self._identities.pop(track_id, None)
+
     def get_identity(self, track_id: int) -> Optional[TrackIdentity]:
         """Get identity record for track if it exists."""
         return self._identities.get(track_id)

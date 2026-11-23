@@ -23,6 +23,8 @@ def configured_max_policy_age_seconds() -> int | None:
     """Return the supported override, or None when it is malformed/unsafe."""
     value = os.getenv("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS")
     if value is None:
+        value = os.getenv("EDGE_ACCESS_POLICY_MAX_AGE_SECONDS")
+    if value is None:
         return DEFAULT_MAX_POLICY_AGE_SECONDS
     try:
         seconds = int(value)

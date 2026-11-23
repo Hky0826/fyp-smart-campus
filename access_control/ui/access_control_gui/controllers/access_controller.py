@@ -6,6 +6,7 @@ import datetime as dt
 import logging
 import os
 import re
+import threading
 import time
 from typing import Any, Callable
 
@@ -76,20 +77,29 @@ class _StateEventsWorker(QThread):
         super().__init__()
         self._api = api
         self._running = False
+        self._stop_event = threading.Event()
 
     def run(self) -> None:
         self._running = True
-        try:
-            for state in self._api.stream_states():
-                if not self._running:
-                    break
-                self.stateReceived.emit(state)
-        except Exception as exc:  # pragma: no cover - runtime behavior
-            if self._running:
-                self.errorOccurred.emit(str(exc))
+        self._stop_event.clear()
+        backoff_sec = 1.0
+        while self._running and not self._stop_event.is_set():
+            try:
+                for state in self._api.stream_states():
+                    if not self._running or self._stop_event.is_set():
+                        break
+                    backoff_sec = 1.0
+                    self.stateReceived.emit(state)
+            except Exception as exc:  # pragma: no cover - runtime behavior
+                if self._running and not self._stop_event.is_set():
+                    self.errorOccurred.emit(str(exc))
+            if not self._running or self._stop_event.wait(backoff_sec):
+                break
+            backoff_sec = min(backoff_sec * 2.0, 10.0)
 
     def stop(self) -> None:
         self._running = False
+        self._stop_event.set()
 
 
 class AccessController(QObject):
@@ -175,12 +185,19 @@ class AccessController(QObject):
 
     @Slot()
     def stop(self) -> None:
+        self._tick_timer.stop()
+        self._frame_timer.stop()
+        self._refresh_timer.stop()
         self._chatbot.shutdown()
         if self._events_worker:
+            self._events_worker.stop()
             if self._events_worker.isRunning():
-                self._events_worker.stop()
                 self._events_worker.wait(1000)
             self._events_worker = None
+        for worker in list(self._workers):
+            if worker.isRunning():
+                worker.wait(1000)
+        self._workers.clear()
 
     @Slot()
     def refreshState(self) -> None:
@@ -448,8 +465,8 @@ class AccessController(QObject):
         if name == "state":
             self._offline = True
         elif name == "chat-verify-frame":
-            if _status_code == 401 and self._chat_expanded:
-                self._chat_error = ""
+            if _status_code in (400, 401) and self._chat_expanded:
+                self._chat_error = message if _status_code == 400 else ""
                 self._set_chat_verification_active(True)
                 retry_chat_verification = True
             else:
@@ -752,7 +769,33 @@ class AccessController(QObject):
 
     def _get_session_name(self) -> str:
         session = self._session or {}
-        return str(session.get("full_name") or session.get("email") or "Visitor")
+        return str(
+            session.get("full_name")
+            or session.get("given_name")
+            or session.get("display_name")
+            or session.get("email")
+            or "Visitor"
+        )
+
+    def _get_role_label(self) -> str:
+        session = self._session or {}
+        roles = [str(role).strip().upper() for role in (session.get("roles") or []) if str(role).strip()]
+        return " / ".join(roles) if roles else "VISITOR"
+
+    def _get_confidence_text(self) -> str:
+        sim = (self._attempt or {}).get("similarity")
+        if sim is None:
+            sim = (self._session or {}).get("similarity")
+        if sim is None:
+            return ""
+        try:
+            value = float(sim)
+        except (TypeError, ValueError):
+            return ""
+        if value <= 1.0:
+            value *= 100.0
+        pct = max(0, min(100, round(value)))
+        return f"{pct}%"
 
     def _get_presence_state(self) -> str:
         session = self._session or {}
@@ -821,6 +864,8 @@ class AccessController(QObject):
     messages = Property("QVariantList", _get_messages, notify=messagesChanged)
     committedMessages = Property("QVariantList", _get_committed_messages, notify=committedMessagesChanged)
     sessionName = Property(str, _get_session_name, notify=stateChanged)
+    roleLabel = Property(str, _get_role_label, notify=stateChanged)
+    confidenceText = Property(str, _get_confidence_text, notify=stateChanged)
     presenceState = Property(str, _get_presence_state, notify=stateChanged)
     accessTitle = Property(str, _get_access_title, notify=modeChanged)
     accessSubtitle = Property(str, _get_access_subtitle, notify=modeChanged)

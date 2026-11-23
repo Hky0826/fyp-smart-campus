@@ -59,8 +59,8 @@ _RETRY_AUTHENTICATION_RESULTS = {
 
 
 class KioskTimingConfig(BaseModel):
-    owner_missing_grace_seconds: int = Field(default=10)
-    owner_absent_lock_seconds: int = Field(default=10)
+    owner_missing_grace_seconds: int = Field(default=3)
+    owner_absent_lock_seconds: int = Field(default=3)
     owner_absent_terminate_seconds: int = Field(default=10)
     access_result_hold_seconds: int = Field(default=4)
 
@@ -296,10 +296,11 @@ class KioskStateStore:
             attempt.detected_user_id = detected_user_id
             if granted:
                 attempt.access_decision = "GRANTED"
-                try:
-                    get_door_controller().unlock()
-                except Exception as exc:
-                    logger.error("Failed to unlock door on access granted: %s", exc)
+                if not result.get("cached"):
+                    try:
+                        get_door_controller().unlock()
+                    except Exception as exc:
+                        logger.error("Failed to unlock door on access granted: %s", exc)
             elif is_retry:
                 attempt.access_decision = "VERIFYING"
             elif authentication_result == AuthenticationResult.SYSTEM_ERROR.value:
@@ -639,7 +640,11 @@ def create_kiosk_router(
     async def events() -> StreamingResponse:
         async def stream():
             while True:
-                state = store.state(_cloud_status(chatbot_client), _sync_status(sync_status))
+                cloud, sync = await asyncio.gather(
+                    asyncio.to_thread(_cloud_status, chatbot_client),
+                    asyncio.to_thread(_sync_status, sync_status),
+                )
+                state = store.state(cloud, sync)
                 yield f"event: state\ndata: {state.model_dump_json()}\n\n"
                 await asyncio.sleep(2)
 
@@ -857,6 +862,18 @@ def create_kiosk_router(
                     async with client.stream(
                         "POST", cloud_url, json=payload, headers=headers, timeout=httpx.Timeout(60.0, connect=5.0)
                     ) as resp:
+                        if resp.status_code >= 400:
+                            err_body = (await resp.aread()).decode("utf-8", errors="replace").strip()
+                            err_msg = f"Cloud chat stream returned HTTP {resp.status_code}"
+                            if err_body:
+                                try:
+                                    detail = json.loads(err_body).get("detail")
+                                    if detail:
+                                        err_msg = str(detail)
+                                except Exception:
+                                    err_msg = f"{err_msg}: {err_body[:200]}"
+                            yield f"event: error\ndata: {json.dumps({'message': err_msg})}\n\n".encode("utf-8")
+                            return
                         async for line in resp.aiter_lines():
                             if not line:
                                 yield b"\n"
@@ -1025,6 +1042,18 @@ def create_kiosk_router(
                     async with client.stream(
                         "POST", cloud_url, data=data, headers=headers, files=files, timeout=httpx.Timeout(90.0, connect=5.0)
                     ) as resp:
+                        if resp.status_code >= 400:
+                            err_body = (await resp.aread()).decode("utf-8", errors="replace").strip()
+                            err_msg = f"Cloud audio stream returned HTTP {resp.status_code}"
+                            if err_body:
+                                try:
+                                    detail = json.loads(err_body).get("detail")
+                                    if detail:
+                                        err_msg = str(detail)
+                                except Exception:
+                                    err_msg = f"{err_msg}: {err_body[:200]}"
+                            yield json.dumps({"event": "error", "data": {"message": err_msg}}).encode("utf-8") + b"\n"
+                            return
                         async for line in resp.aiter_lines():
                             if line:
                                 logger.info("STREAM_DEBUG [%.3f]: Kiosk streaming proxy received line of length %d", time.time(), len(line))

@@ -227,7 +227,7 @@ def _resolve_model_path(path_str: str, default_path: Path) -> Path:
 @dataclass(frozen=True)
 class AccessControlConfig(RuntimeConfig):
     node_id: int | None = _optional_int_env("EDGE_ACCESS_NODE_ID", "ACCESS_NODE_ID")
-    policy_max_age_seconds: int = _int_env("EDGE_ACCESS_POLICY_MAX_AGE_SECONDS", 300)
+    policy_max_age_seconds: int = _int_env("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS", 300, "EDGE_ACCESS_POLICY_MAX_AGE_SECONDS")
     detector_model_path: Path = _resolve_model_path(
         _env_str("EDGE_ACCESS_DETECTOR_MODEL_PATH", "ACCESS_YUNET_MODEL", str(MODEL_ROOT / "access_control" / "face_detection_yunet_2023mar_int8bq.onnx")),
         MODEL_ROOT / "access_control" / "face_detection_yunet_2023mar_int8bq.onnx"

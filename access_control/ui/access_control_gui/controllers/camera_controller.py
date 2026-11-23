@@ -74,6 +74,7 @@ JPEG_QUALITY = 82
 DEFAULT_CAMERA_WIDTH = int(os.getenv("EDGE_CAMERA_WIDTH", os.getenv("EDGE_GUI_CAMERA_WIDTH", "1640")))
 DEFAULT_CAMERA_HEIGHT = int(os.getenv("EDGE_CAMERA_HEIGHT", os.getenv("EDGE_GUI_CAMERA_HEIGHT", "1232")))
 DEFAULT_CAMERA_FOURCC = "MJPG"
+DEFAULT_CAMERA_FALLBACKS = os.getenv("EDGE_GUI_CAMERA_FALLBACKS", "csi:0,4,0")
 
 
 def _camera_source(value: str) -> str | int:

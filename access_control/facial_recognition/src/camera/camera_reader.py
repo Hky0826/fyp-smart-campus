@@ -32,12 +32,12 @@ class CameraReader:
     def __init__(
         self,
         source: str = "auto",
-        width: int = DEFAULT_WIDTH,
-        height: int = DEFAULT_HEIGHT,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
     ) -> None:
         self.source = source
-        self.width = int(width)
-        self.height = int(height)
+        self.width = int(width) if width is not None else int(os.getenv("EDGE_CAMERA_WIDTH", "1280"))
+        self.height = int(height) if height is not None else int(os.getenv("EDGE_CAMERA_HEIGHT", "720"))
         self.cap = None
         self.active_source: Optional[str | int] = None
 

@@ -161,6 +161,8 @@ class FaceQualityChecker:
 
     @staticmethod
     def _sharpness_score(gray: np.ndarray) -> float:
+        if gray.ndim < 2 or gray.shape[0] < 2 or gray.shape[1] < 2:
+            return 0.0
         data = gray.astype(np.float32) / 255.0
         gx = np.diff(data, axis=1)
         gy = np.diff(data, axis=0)

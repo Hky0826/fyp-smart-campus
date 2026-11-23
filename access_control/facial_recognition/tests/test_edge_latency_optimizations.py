@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import unittest
 from pathlib import Path
@@ -28,7 +29,11 @@ class EdgeLatencyOptimizationTests(unittest.TestCase):
         self.assertEqual(config.spoof_history_size, 4)
 
     def test_camera_reader_defaults_to_720p(self):
-        reader = CameraReader()
+        env_without_camera_overrides = {
+            k: v for k, v in os.environ.items() if k not in {"EDGE_CAMERA_WIDTH", "EDGE_CAMERA_HEIGHT"}
+        }
+        with patch.dict(os.environ, env_without_camera_overrides, clear=True):
+            reader = CameraReader()
         self.assertEqual(reader.width, 1280)
         self.assertEqual(reader.height, 720)
 

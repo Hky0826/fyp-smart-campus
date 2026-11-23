@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, List, Optional, Sequence
 
 import numpy as np
 
@@ -51,6 +51,34 @@ def bbox_iou(a: np.ndarray, b: np.ndarray) -> float:
     area_b = max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
     union = area_a + area_b - intersection
     return 0.0 if union <= 0 else float(intersection / union)
+
+
+def best_matching_track_id(
+    bbox: np.ndarray | Sequence[float],
+    tracks: Sequence[Any] | None,
+    *,
+    min_iou: float = 0.1,
+) -> Optional[int]:
+    """Match a face bounding box to the track with the highest IoU."""
+    if not tracks:
+        return None
+    target_box = np.asarray(bbox, dtype=np.float32)
+    best_track_id: Optional[int] = None
+    best_iou = float(min_iou)
+    for track in tracks:
+        tid = getattr(track, "track_id", None)
+        if tid is None:
+            continue
+        track_box = getattr(track, "bbox", None)
+        if track_box is None:
+            track_box = getattr(track, "tlbr", None)
+        if track_box is None:
+            continue
+        iou = bbox_iou(target_box, np.asarray(track_box, dtype=np.float32))
+        if iou > best_iou:
+            best_iou = iou
+            best_track_id = tid
+    return best_track_id
 
 
 class FaceTracker:

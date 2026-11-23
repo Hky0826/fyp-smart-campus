@@ -161,6 +161,7 @@ class AudioRecorder:
 
         try:
             assert process.stdout is not None
+            remainder = b""
             for block_index in range(max_blocks):
                 if cancel_requested and cancel_requested():
                     break
@@ -170,7 +171,13 @@ class AudioRecorder:
                 if cancel_requested and cancel_requested():
                     break
 
-                frame = np.frombuffer(raw, dtype="<i2").copy()
+                data = remainder + raw
+                usable_len = len(data) - (len(data) % 2)
+                remainder = data[usable_len:]
+                if usable_len == 0:
+                    continue
+
+                frame = np.frombuffer(data[:usable_len], dtype="<i2").copy()
                 frames.append(frame)
                 rms = self._rms(frame)
 

@@ -46,6 +46,7 @@ class _LgpioDevice:
         opened_handle = None
         # On Raspberry Pi 5, RP1 pinctrl can be on gpiochip 15, 4, 0, or others
         for c in [15, 4, 0, 11, 12, 13, 14, 16]:
+            h = None
             try:
                 h = lgpio.gpiochip_open(c)
                 if self.open_drain:
@@ -58,6 +59,11 @@ class _LgpioDevice:
                 self.chip = c
                 break
             except Exception:
+                if h is not None:
+                    try:
+                        lgpio.gpiochip_close(h)
+                    except Exception:
+                        pass
                 continue
 
         if opened_handle is None:
@@ -86,12 +92,9 @@ class _LgpioDevice:
                 # To deactivate active-low relay: set pin to INPUT (High-Z) so no current can flow from 5V
                 try:
                     lgpio.gpio_free(self._handle, self.pin)
-                except Exception:
-                    pass
-                try:
-                    lgpio.gpio_claim_input(self._handle, self.pin)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("lgpio gpio_free before claim_input: %s", exc)
+                lgpio.gpio_claim_input(self._handle, self.pin)
             else:
                 val = 0 if self.active_high else 1
                 lgpio.gpio_write(self._handle, self.pin, val)
@@ -151,6 +154,7 @@ class DoorController:
         self._unlock_until = 0.0
         self._unlock_count = 0
         self._timer: Optional[threading.Timer] = None
+        self._timer_generation = 0
         self._device: Any = None
         self._is_simulated = False
 
@@ -234,28 +238,38 @@ class DoorController:
                 self._timer.cancel()
                 self._timer = None
 
+            self._timer_generation += 1
+            generation = self._timer_generation
             remaining = max(0.1, self._unlock_until - time.monotonic())
-            self._timer = threading.Timer(remaining, self._on_timer_expire)
+            self._timer = threading.Timer(remaining, self._on_timer_expire, args=(generation,))
             self._timer.daemon = True
             self._timer.start()
             return True
 
-    def _on_timer_expire(self) -> None:
+    def _on_timer_expire(self, generation: Optional[int] = None) -> None:
         with self._lock:
+            if generation is not None and generation != self._timer_generation:
+                return
             now = time.monotonic()
             if now < self._unlock_until - 0.05:
                 # Timer was extended while running
+                if self._timer is not None:
+                    self._timer.cancel()
+                self._timer_generation += 1
+                next_generation = self._timer_generation
                 remaining = max(0.1, self._unlock_until - now)
-                self._timer = threading.Timer(remaining, self._on_timer_expire)
+                self._timer = threading.Timer(remaining, self._on_timer_expire, args=(next_generation,))
                 self._timer.daemon = True
                 self._timer.start()
                 return
 
+            self._timer = None
             self._apply_lock()
 
     def lock(self) -> bool:
         """Immediately relock the door and cancel any pending auto-relock timer."""
         with self._lock:
+            self._timer_generation += 1
             if self._timer is not None:
                 self._timer.cancel()
                 self._timer = None
@@ -265,14 +279,15 @@ class DoorController:
         if self._state == DoorState.LOCKED:
             return True
 
-        self._state = DoorState.LOCKED
-        self._unlock_until = 0.0
         if self._device is not None:
             try:
                 self._device.off()
             except Exception as exc:
                 logger.error("Failed to deactivate relay on GPIO %d: %s", self.pin, exc)
+                return False
 
+        self._state = DoorState.LOCKED
+        self._unlock_until = 0.0
         logger.info(">>> DOOR LOCKED on GPIO %d <<<", self.pin)
         return True
 

@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
 from .matching import FaceTemplate, count_templates_by_user
+from ...setup_sqlite import connect_edge_sqlite
 from ..utils.sync_key import generate_sync_key
 from ..access_policy import AccessDecision, configured_max_policy_age_seconds, evaluate_access
 
@@ -45,23 +46,27 @@ class DeviceUserRepository:
     TEMPLATE_COLUMNS = ("template_name", "template", "pose", "pose_name", "view", "image_name")
     IDENTITY_COLUMNS = ("identity", "person_id", "email", "name", "display_name")
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, encryption_key: str = "") -> None:
         self.db_path = Path(db_path)
+        self.encryption_key = encryption_key
         self._cached_templates: List[FaceTemplate] | None = None
-        self._cache_mtime: float = 0.0
+        self._cache_stamp: tuple[int, int, int, int] | None = None
         self._cache_lock = threading.Lock()
 
     def invalidate_cache(self) -> None:
         with self._cache_lock:
             self._cached_templates = None
-            self._cache_mtime = 0.0
+            self._cache_stamp = None
 
     def _connect(self) -> sqlite3.Connection:
         if not self.db_path.exists():
             raise FileNotFoundError(f"SQLite database not found: {self.db_path}")
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        return conn
+        return connect_edge_sqlite(
+            self.db_path,
+            encryption_key=self.encryption_key,
+            foreign_keys=False,
+            row_factory=sqlite3.Row,
+        )
 
     def get_status(self) -> Dict[str, object]:
         conn = self._connect()
@@ -79,19 +84,33 @@ class DeviceUserRepository:
         finally:
             conn.close()
 
+    def _current_cache_stamp(self) -> tuple[int, int, int, int] | None:
+        if not self.db_path.exists():
+            return None
+        try:
+            db_stat = self.db_path.stat()
+            wal_path = self.db_path.with_name(f"{self.db_path.name}-wal")
+            if wal_path.exists():
+                wal_stat = wal_path.stat()
+                return (db_stat.st_mtime_ns, db_stat.st_size, wal_stat.st_mtime_ns, wal_stat.st_size)
+            return (db_stat.st_mtime_ns, db_stat.st_size, 0, 0)
+        except OSError:
+            return None
+
     def load_templates(self, force_reload: bool = False) -> List[FaceTemplate]:
         with self._cache_lock:
-            try:
-                current_mtime = self.db_path.stat().st_mtime if self.db_path.exists() else 0.0
-            except OSError:
-                current_mtime = 0.0
-
-            if not force_reload and self._cached_templates is not None and current_mtime != 0.0 and current_mtime == self._cache_mtime:
+            current_stamp = self._current_cache_stamp()
+            if (
+                not force_reload
+                and self._cached_templates is not None
+                and current_stamp is not None
+                and current_stamp == self._cache_stamp
+            ):
                 return list(self._cached_templates)
 
             templates = self._load_templates_from_db()
             self._cached_templates = list(templates)
-            self._cache_mtime = current_mtime
+            self._cache_stamp = current_stamp
             return list(self._cached_templates)
 
     def _load_templates_from_db(self) -> List[FaceTemplate]:
@@ -176,7 +195,7 @@ class DeviceUserRepository:
                                 "SELECT role_id FROM device_rbac WHERE device_id = ?", (dev_rows[0][0],)
                             ).fetchall()]
                         else:
-                            allowed_roles = [r[0] for r in conn.execute("SELECT DISTINCT role_id FROM device_rbac").fetchall()]
+                            allowed_roles = []
             except (sqlite3.OperationalError, sqlite3.DatabaseError):
                 pass
 

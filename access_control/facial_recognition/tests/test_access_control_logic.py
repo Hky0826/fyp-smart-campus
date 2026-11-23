@@ -236,6 +236,7 @@ class AccessControlLogicTests(unittest.TestCase):
             max_embedding_samples=3,
             min_stable_frames=1,
             min_stable_duration_ms=0,
+            pad_smooth_frames=1,
             snapshot_enabled=False,
         )
         pipeline = AccessControlPipeline(

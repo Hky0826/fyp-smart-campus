@@ -209,7 +209,9 @@ class AudioInteractionPipeline:
             return
 
         logger.info("Authentication required — triggering face auth flow")
-        # We can no longer do local TTS; just log and let the handler manage UI
+        if not self.auth_required_handler("auth_required"):
+            logger.info("Authentication handler did not complete authentication; skipping audio retry")
+            return
         if recording_path and recording_path.exists():
             try:
                 streamed_audio = False

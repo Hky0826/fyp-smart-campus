@@ -12,6 +12,8 @@ Item {
     property string partialText: ""
     property string transcribedText: ""
     property string sessionName: "Visitor"
+    property string roleLabel: "VISITOR"
+    property string confidenceText: ""
     property string presenceState: "UNKNOWN"
     readonly property bool ownerPresent: presenceState === "OWNER_PRESENT"
     property bool listening: false
@@ -160,13 +162,15 @@ Item {
                 anchors.margins: 6
                 radius: 3
                 color: "#0891b2" // Preview: bg-cyan-600
-                implicitWidth: 26
+                visible: root.confidenceText !== ""
+                implicitWidth: Math.max(26, confidenceLabel.implicitWidth + 8)
                 implicitHeight: 14
                 z: 40
 
                 Text {
+                    id: confidenceLabel
                     anchors.centerIn: parent
-                    text: "98%"
+                    text: root.confidenceText
                     color: "#ffffff"
                     font.pixelSize: 8
                     font.bold: true
@@ -237,7 +241,7 @@ Item {
                             Text {
                                 id: roleText
                                 anchors.centerIn: parent
-                                text: root.verifying ? "VERIFYING" : "STUDENT"
+                                text: root.verifying ? "VERIFYING" : root.roleLabel
                                 color: "#ffffff"
                                 font.pixelSize: 8
                                 font.bold: true
@@ -853,7 +857,6 @@ Item {
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
-                                    root.currentNavigation = null
                                     root.dismissNavigationRequested()
                                 }
                             }
@@ -1305,9 +1308,6 @@ Item {
                                             onClicked: {
                                                 var chosen = String(modelData || "")
                                                 root.optionSelected(chosen)
-                                                if (typeof accessController !== "undefined" && accessController) {
-                                                    accessController.sendMessage(chosen)
-                                                }
                                             }
                                         }
                                     }

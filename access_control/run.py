@@ -119,17 +119,18 @@ def main() -> int:
     ):
         raise ValueError("Remote edge API binding requires EDGE_REMOTE_API_ENABLED=true and an installation credential")
 
+    mode = args.mode.lower()
+    if mode in ("gui", "ui"):
+        os.environ.setdefault("ACCESS_API_PORT", str(requested_api_port))
+        from access_control.ui.access_control_gui.main import main as gui_main
+        print("Starting Access Control GUI...")
+        return gui_main()
+
     actual_api_port = find_available_port(requested_host, requested_api_port)
     if actual_api_port != requested_api_port:
         print(f"[Port Manager] API Port {requested_api_port} is occupied or restricted. Automatically bound to free port {actual_api_port}.")
 
     os.environ["ACCESS_API_PORT"] = str(actual_api_port)
-
-    mode = args.mode.lower()
-    if mode in ("gui", "ui"):
-        from access_control.ui.access_control_gui.main import main as gui_main
-        print("Starting Access Control GUI...")
-        return gui_main()
 
     if mode == "api":
         print(f"Starting Access Control API server at http://{requested_host}:{actual_api_port}...")

@@ -36,7 +36,7 @@ Item {
     Rectangle {
         anchors.centerIn: parent
         width: Math.min(760, parent.width - 36)
-        height: root.firstTimeSetup ? 760 : 290
+        height: Math.min(root.firstTimeSetup ? 760 : 290, parent.height - 24)
         radius: 10
         color: "#f8fafc"
 

@@ -8,6 +8,7 @@ import hmac
 import os
 import socket
 import sqlite3
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -30,6 +31,7 @@ from ..config import (
     persist_runtime_configuration,
 )
 from ..face.database import DeviceUserDatabaseError, DeviceUserRepository
+from ..hardware.door_controller import reset_door_controller
 from ..pipelines.access_control import build_pipeline as build_access_pipeline
 from ...setup_sqlite import initialize_sqlite_database
 from ..sync import SQLiteEdgeDB, SyncEngine
@@ -48,7 +50,18 @@ configure_logging("INFO")
 
 _sync_engine: SyncEngine | None = None
 
-app = FastAPI(title="Access Control Face Recognition API", version="0.1.0")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    start_sync_engine()
+    try:
+        yield
+    finally:
+        stop_sync_engine()
+        reset_door_controller()
+
+
+app = FastAPI(title="Access Control Face Recognition API", version="0.1.0", lifespan=_lifespan)
 
 _LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
@@ -167,7 +180,6 @@ app.include_router(
 )
 
 
-@app.on_event("startup")
 def start_sync_engine() -> None:
     """Start cloud sync for kiosk/API deployments."""
     global _sync_engine
@@ -195,7 +207,6 @@ def start_sync_engine() -> None:
     )
 
 
-@app.on_event("shutdown")
 def stop_sync_engine() -> None:
     global _sync_engine
     if _sync_engine is None:

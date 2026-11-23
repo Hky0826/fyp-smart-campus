@@ -181,6 +181,7 @@ class AccessControlIdentityPersistenceTests(unittest.TestCase):
             max_embedding_samples=3,
             min_stable_frames=1,
             min_stable_duration_ms=0,
+            pad_smooth_frames=1,
         )
 
         pipeline = AccessControlPipeline(
@@ -223,6 +224,7 @@ class AccessControlIdentityPersistenceTests(unittest.TestCase):
             max_embedding_samples=3,
             min_stable_frames=1,
             min_stable_duration_ms=0,
+            pad_smooth_frames=1,
         )
 
         pipeline = AccessControlPipeline(
@@ -269,6 +271,7 @@ class AccessControlIdentityPersistenceTests(unittest.TestCase):
             max_embedding_samples=1,
             min_stable_frames=1,
             min_stable_duration_ms=0,
+            pad_smooth_frames=1,
         )
 
         pipeline = AccessControlPipeline(

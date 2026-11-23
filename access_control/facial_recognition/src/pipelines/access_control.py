@@ -29,7 +29,7 @@ from ..face.spoofing import MotionSpoofDetector, SpoofResult
 from ..face.pad import load_pad, PADResult
 from ..face.association import IdentityManager, TrackIdentity
 from ..face.presence import PresenceConfig, PresenceDetector, PresenceStatus
-from ..face.tracking import FaceTracker, FaceTrackerConfig
+from ..face.tracking import FaceTracker, FaceTrackerConfig, best_matching_track_id
 from ..face.types import AuthenticationResult, DetectedFace
 from ..utils.logging import configure_logging
 from ..utils.timing import StageTimer
@@ -163,6 +163,7 @@ class AccessControlPipeline:
         self._last_recognition_finished_at: float | None = None
         self._active_track_id: int | None = None
         self._last_full_recognition_time = 0.0
+        self._lock = threading.RLock()
         self._cached_recognition_result: dict | None = None
         self._recognition_interval = 0.25
         self._pad_track_history: dict[int, deque[float]] = {}
@@ -188,6 +189,10 @@ class AccessControlPipeline:
         )
 
     def process_frame(self, frame: np.ndarray, target_user_id: Optional[str] = None) -> dict:
+        with self._lock:
+            return self._process_frame_locked(frame, target_user_id=target_user_id)
+
+    def _process_frame_locked(self, frame: np.ndarray, target_user_id: Optional[str] = None) -> dict:
         timer = StageTimer()
         timestamp = self._clock()
         try:
@@ -260,7 +265,28 @@ class AccessControlPipeline:
         if not self.identity_manager.should_recognize(track.track_id, timestamp=timestamp):
             identity_rec = self.identity_manager.get_identity(track.track_id)
             if identity_rec.cached_payload is not None:
-                result = dict(identity_rec.cached_payload)
+                cached = identity_rec.cached_payload
+                if cached.get("access_granted") and cached.get("user_id") is not None:
+                    policy_check = getattr(self.repository, "evaluate_access", None)
+                    if callable(policy_check):
+                        decision = policy_check(cached["user_id"], getattr(self.config, "node_id", None))
+                        if not decision.allowed:
+                            self.identity_manager.invalidate_track(track.track_id)
+                            denied = self._deny(
+                                "Access policy denied",
+                                face_count,
+                                AuthenticationResult.DENY_NO_MATCH,
+                                identity=cached.get("identity"),
+                                similarity=cached.get("similarity"),
+                                matched_template=cached.get("matched_template"),
+                                metrics=timer.metrics,
+                                bbox=bbox,
+                                bboxes=bboxes,
+                            )
+                            denied.update({"node_id": decision.node_id, "policy_version": decision.policy_version, "decision_reason": decision.reason})
+                            return with_presence(denied)
+                result = dict(cached)
+                result["cached"] = True
                 result["bbox"] = bbox
                 result["bboxes"] = bboxes
                 result["track_id"] = track.track_id
@@ -268,8 +294,33 @@ class AccessControlPipeline:
                 result["metrics"] = timer.metrics
                 return with_presence(result)
 
-        if self._cached_recognition_result is not None and (timestamp - self._last_full_recognition_time) < self._recognition_interval:
-            result = dict(self._cached_recognition_result)
+        if (
+            self._cached_recognition_result is not None
+            and self._cached_recognition_result.get("track_id") == track.track_id
+            and (timestamp - self._last_full_recognition_time) < self._recognition_interval
+        ):
+            cached = self._cached_recognition_result
+            if cached.get("access_granted") and cached.get("user_id") is not None:
+                policy_check = getattr(self.repository, "evaluate_access", None)
+                if callable(policy_check):
+                    decision = policy_check(cached["user_id"], getattr(self.config, "node_id", None))
+                    if not decision.allowed:
+                        self._cached_recognition_result = None
+                        denied = self._deny(
+                            "Access policy denied",
+                            face_count,
+                            AuthenticationResult.DENY_NO_MATCH,
+                            identity=cached.get("identity"),
+                            similarity=cached.get("similarity"),
+                            matched_template=cached.get("matched_template"),
+                            metrics=timer.metrics,
+                            bbox=bbox,
+                            bboxes=bboxes,
+                        )
+                        denied.update({"node_id": decision.node_id, "policy_version": decision.policy_version, "decision_reason": decision.reason})
+                        return with_presence(denied)
+            result = dict(cached)
+            result["cached"] = True
             result["bbox"] = bbox
             result["bboxes"] = bboxes
             timer.total()
@@ -336,7 +387,7 @@ class AccessControlPipeline:
                         effective_pad_state = "live" if effective_pad_score >= pad_result.threshold else "spoof"
                         logger.info("Access-control PAD smoothed: state=%s score=%.4f (samples=%d/%d)", effective_pad_state, effective_pad_score, len(history), self.config.pad_smooth_frames)
                     else:
-                        effective_pad_state = "live" if pad_result.state == "live" else "warming_up"
+                        effective_pad_state = "warming_up"
                         logger.info("Access-control PAD warming up: state=%s (samples=%d/%d)", effective_pad_state, len(history), self.config.pad_smooth_frames)
 
                 if self.config.pad_required and effective_pad_state == "warming_up":
@@ -550,6 +601,7 @@ class AccessControlPipeline:
                     pad_model_version=pad_version if self.config.pad_required else None,
                 ))
 
+            decision = None
             policy_check = getattr(self.repository, "evaluate_access", None)
             if callable(policy_check):
                 decision = policy_check(match.user_id, getattr(self.config, "node_id", None))
@@ -569,7 +621,6 @@ class AccessControlPipeline:
             )
 
             image_path = self._save_face_snapshot(frame, face)
-            decision = policy_check(match.user_id, getattr(self.config, "node_id", None)) if callable(policy_check) else None
             self._log_event(match.user_id, "SUCCESS", match.similarity, image_path=image_path, node_id=getattr(decision, "node_id", getattr(self.config, "node_id", None)), policy_version=getattr(decision, "policy_version", None), decision_reason=getattr(decision, "reason", "explicit_node_permission"))
             timer.total()
             return cache_and_return({
@@ -606,6 +657,10 @@ class AccessControlPipeline:
             self._mark_recognition_finished()
 
     def describe_faces(self, frame: np.ndarray, include_embeddings: bool = False, include_pad: bool = False) -> dict:
+        with self._lock:
+            return self._describe_faces_locked(frame, include_embeddings=include_embeddings, include_pad=include_pad)
+
+    def _describe_faces_locked(self, frame: np.ndarray, include_embeddings: bool = False, include_pad: bool = False) -> dict:
         """Return detected face boxes, optionally with embeddings and PAD liveness, without access gating."""
         timer = StageTimer()
         try:
@@ -625,8 +680,8 @@ class AccessControlPipeline:
         tracks = self.tracker.update(faces, timestamp)
         descriptions: list[dict[str, Any]] = []
 
-        for idx, face in enumerate(sorted(faces, key=lambda item: item.width() * item.height(), reverse=True)):
-            track_id = tracks[idx].track_id if idx < len(tracks) else None
+        for face in sorted(faces, key=lambda item: item.width() * item.height(), reverse=True):
+            track_id = best_matching_track_id(face.bbox, tracks)
             item: dict[str, Any] = {
                 "bbox": face.xyxy_int(),
                 "confidence": float(face.confidence),
