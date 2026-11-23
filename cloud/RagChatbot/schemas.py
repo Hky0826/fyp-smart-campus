@@ -167,6 +167,9 @@ class AudioChatResponse(BaseModel):
     instructions: List[dict[str, Any]] = Field(default_factory=list)
     visualisation: Optional[dict[str, Any]] = None
     options: List[str] = Field(default_factory=list)
+    response_scope: Optional[str] = None
+    personal_intent: Optional[str] = None
+    authentication_required: bool = False
 
 
 class ExtractedQuery(BaseModel):

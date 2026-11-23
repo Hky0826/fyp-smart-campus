@@ -177,7 +177,7 @@ async def update_document(
     elif allowed_roles is not None or access_level is not None:
         from RagChatbot.retrieval.vector_store import vector_store
         if vector_store.is_loaded:
-            vector_store.load_from_db(db)
+            vector_store.load_from_db(db, force_reload=True)
         
     return doc
 
@@ -205,7 +205,7 @@ def toggle_document_active(document_id: int, db: Session = Depends(get_db), curr
     if not doc.is_active:
         vector_store.remove_document(document_id)
     elif vector_store.is_loaded:
-        vector_store.load_from_db(db)
+        vector_store.load_from_db(db, force_reload=True)
     return {"detail": f"Document active status toggled. Active: {doc.is_active}"}
 
 @router.delete("/documents/{document_id}")

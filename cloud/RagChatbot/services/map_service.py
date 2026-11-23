@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 from types import SimpleNamespace
@@ -137,19 +137,26 @@ class GraphNodeSnapshot:
 @dataclass(frozen=True)
 class MapSnapshot:
     nodes: tuple[GraphNodeSnapshot, ...]
+    _embedding_index_cache: Any = field(default=None, init=False, repr=False, compare=False)
 
     def get_embedding_index(self):
         """Build or return cached normalized embedding matrix and associated nodes."""
+        if self._embedding_index_cache is not None:
+            return self._embedding_index_cache
         embedded_nodes = [node for node in self.nodes if getattr(node, "embedding", None)]
         if not embedded_nodes:
-            return None, ()
+            result = (None, ())
+            object.__setattr__(self, "_embedding_index_cache", result)
+            return result
         try:
             import numpy as np
             matrix = np.array([node.embedding for node in embedded_nodes], dtype=np.float32)
             norms = np.linalg.norm(matrix, axis=1, keepdims=True)
             norms[norms == 0] = 1.0
             matrix = matrix / norms
-            return matrix, tuple(embedded_nodes)
+            result = (matrix, tuple(embedded_nodes))
+            object.__setattr__(self, "_embedding_index_cache", result)
+            return result
         except Exception:
             return None, ()
 
@@ -157,6 +164,7 @@ class MapSnapshot:
 _MAP_SNAPSHOT_CACHE: MapSnapshot | None = None
 _MAP_SNAPSHOT_TIMESTAMP: float = 0.0
 _MAP_SNAPSHOT_TTL: float = 300.0  # 5 minutes
+_MAP_SNAPSHOT_LOCK = threading.Lock()
 _HTTP_CLIENT = httpx.Client(timeout=10.0)
 
 
@@ -164,14 +172,15 @@ def get_map_snapshot(db, force_refresh: bool = False) -> MapSnapshot:
     """Load lightweight node snapshot with RBAC permissions and precomputed embeddings from database (cached in RAM)."""
     global _MAP_SNAPSHOT_CACHE, _MAP_SNAPSHOT_TIMESTAMP
     now = time.monotonic()
-    if not force_refresh and _MAP_SNAPSHOT_CACHE is not None and (now - _MAP_SNAPSHOT_TIMESTAMP < _MAP_SNAPSHOT_TTL):
-        return _MAP_SNAPSHOT_CACHE
+    with _MAP_SNAPSHOT_LOCK:
+        if not force_refresh and _MAP_SNAPSHOT_CACHE is not None and (now - _MAP_SNAPSHOT_TIMESTAMP < _MAP_SNAPSHOT_TTL):
+            return _MAP_SNAPSHOT_CACHE
 
     if db is None:
         return MapSnapshot(())
-    from app.models.models import Node, NodeRBAC
+    from app.models.models import Floorplan, Node, NodeRBAC
 
-    query = db.query(Node).options(joinedload(Node.floorplan))
+    query = db.query(Node).options(joinedload(Node.floorplan).joinedload(Floorplan.building))
     if hasattr(Node, "node_embedding"):
         query = query.options(joinedload(Node.node_embedding))
 
@@ -181,7 +190,7 @@ def get_map_snapshot(db, force_refresh: bool = False) -> MapSnapshot:
 
     ids = [n.node_id for n in db_nodes]
     node_roles: dict[int, set[str]] = {}
-    for row in db.query(NodeRBAC).filter(NodeRBAC.node_id.in_(ids)).all():
+    for row in db.query(NodeRBAC).options(joinedload(NodeRBAC.role)).filter(NodeRBAC.node_id.in_(ids)).all():
         node_roles.setdefault(row.node_id, set()).add(str(getattr(row.role, "role_name", "")).upper())
 
     nodes = tuple(
@@ -201,9 +210,11 @@ def get_map_snapshot(db, force_refresh: bool = False) -> MapSnapshot:
         )
         for n in db_nodes
     )
-    _MAP_SNAPSHOT_CACHE = MapSnapshot(nodes)
-    _MAP_SNAPSHOT_TIMESTAMP = now
-    return _MAP_SNAPSHOT_CACHE
+    snapshot = MapSnapshot(nodes)
+    with _MAP_SNAPSHOT_LOCK:
+        _MAP_SNAPSHOT_CACHE = snapshot
+        _MAP_SNAPSHOT_TIMESTAMP = time.monotonic()
+    return snapshot
 
 
 def _normalise_label(value: str) -> str:
@@ -400,7 +411,7 @@ def is_navigation_query(query: str, *, db=None) -> bool:
     try:
         snapshot = get_map_snapshot(db)
         dest = _destination_text(cleaned)
-        return bool(_destination_matches(snapshot.nodes, dest) or _semantic_destination_matches(snapshot, cleaned))
+        return bool(_destination_matches(snapshot.nodes, dest))
     except Exception:
         return False
 
@@ -419,41 +430,14 @@ def _candidate_data(node) -> dict:
 
 
 def _ensure_mapping_microservice() -> bool:
-    """Check if mapping microservice on port 5000 is listening; if not, spawn it automatically."""
+    """Check if the mapping microservice health endpoint responds."""
     url = MAPPING_MICROSERVICE_URL.rstrip('/')
-    headers = {"x-api-key": NAVIGATION_API_KEY}
     try:
-        with httpx.Client(timeout=0.6) as client:
-            resp = client.post(f"{url}/navigate", json={}, headers=headers)
-            if resp.status_code < 500:
-                return True
+        with httpx.Client(timeout=1.0) as client:
+            resp = client.get(f"{url}/health")
+            return resp.status_code < 500
     except Exception:
-        pass
-
-    repo_root = Path(__file__).resolve().parents[3]
-    node_dir = repo_root / "mapping_and_notification" / "backend"
-    index_file = node_dir / "index.js"
-    if index_file.exists():
-        try:
-            subprocess.Popen(
-                ["node", "index.js"],
-                cwd=str(node_dir),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            for _ in range(6):
-                time.sleep(0.5)
-                try:
-                    with httpx.Client(timeout=0.6) as client:
-                        resp = client.post(f"{url}/navigate", json={}, headers=headers)
-                        if resp.status_code < 500:
-                            return True
-                except Exception:
-                    continue
-        except Exception:
-            pass
-    return False
+        return False
 
 
 def _call_route_microservice(*, destination_node_id: int, start_node_id: int | None, roles: list[str] | tuple[str, ...]) -> dict:

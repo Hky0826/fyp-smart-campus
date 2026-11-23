@@ -58,6 +58,8 @@ from RagChatbot.retrieval.retriever import retrieve_chunks
 from RagChatbot.schemas import AudioChatResponse, CitationSchema
 from RagChatbot.security.audit_logger import log_access_denied, log_chatbot_interaction, log_personal_interaction
 from RagChatbot.security.prompt_guard import check_query
+from RagChatbot.utils.language_detection import detect_query_language
+from RagChatbot.utils.translations import get_capabilities_translated, get_translated
 from RagChatbot.security.rbac import get_allowed_access_levels_for_user
 from RagChatbot.security.auth_context import resolve_auth_context
 from RagChatbot.generation import llm_planner

@@ -155,11 +155,12 @@ def rerank_chunks(
                 raw_emb = row.chunk_embedding
                 if isinstance(raw_emb, str):
                     chunk_vec: List[float] = json.loads(raw_emb)
+                    score = cosine_similarity(query_embedding, chunk_vec)
                 elif isinstance(raw_emb, list):
                     chunk_vec = raw_emb
+                    score = cosine_similarity(query_embedding, chunk_vec)
                 else:
                     score = 0.50
-                score = cosine_similarity(query_embedding, chunk_vec)
             else:
                 score = 0.60
 
@@ -172,6 +173,8 @@ def rerank_chunks(
                     parsed_tags = []
             elif isinstance(raw_tags, list):
                 parsed_tags = raw_tags
+            else:
+                parsed_tags = []
             raw_roles = getattr(row, "allowed_roles", None)
             if isinstance(raw_roles, str):
                 try:
@@ -207,7 +210,7 @@ def rerank_chunks(
 
     scored.sort(key=lambda item: item.similarity_score, reverse=True)
 
-    if getattr(rag_settings, "RAG_CROSS_RERANKING_ENABLED", False) and query_text and len(scored) > 1:
+    if getattr(rag_settings, "RAG_RERANKER_ENABLED", getattr(rag_settings, "RAG_CROSS_RERANKING_ENABLED", False)) and query_text and len(scored) > 1:
         return _llm_cross_rerank(query_text=query_text, candidates=scored, top_k=top_k)
 
     return scored[:top_k]

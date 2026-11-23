@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import re
+import threading
 import time
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional, Set
@@ -65,6 +66,7 @@ class InMemoryVectorStore:
     def __init__(self):
         if self._initialized:
             return
+        self._lock = threading.RLock()
         self.chunk_ids = np.array([], dtype=np.int64)
         self.access_levels = np.array([], dtype=object)
         self.allowed_roles: list[Set[str]] = []
@@ -82,8 +84,41 @@ class InMemoryVectorStore:
         self._initialized = True
         self.is_loaded = False
 
+    def _save_disk_cache(self) -> None:
+        if len(self.chunk_ids) == 0:
+            try:
+                _CACHE_FILE.unlink(missing_ok=True)
+            except Exception as e:
+                logger.debug("Could not remove empty vector disk cache: %s", e)
+            return
+        try:
+            np.savez_compressed(
+                _CACHE_FILE,
+                chunk_ids=self.chunk_ids,
+                access_levels=self.access_levels,
+                allowed_roles=np.array(self.allowed_roles, dtype=object),
+                document_ids=self.document_ids,
+                categories=self.categories,
+                faculty_codes=self.faculty_codes,
+                target_audiences=self.target_audiences,
+                chunk_types=self.chunk_types,
+                parent_chunk_ids=self.parent_chunk_ids,
+                section_paths=np.array(self.section_paths, dtype=object),
+                entity_tags=np.array(self.entity_tags, dtype=object),
+                chunk_texts=np.array(self.chunk_texts, dtype=object),
+                tokenized_chunks=np.array(self.tokenized_chunks, dtype=object),
+                embeddings=self.embeddings,
+            )
+            logger.info("Cached %d vector chunks to %s for fast reloads.", len(self.chunk_ids), _CACHE_FILE.name)
+        except Exception as e:
+            logger.debug("Could not write vector disk cache: %s", e)
+
     def load_from_db(self, db: Session, force_reload: bool = False):
         """Loads all active chunk embeddings, texts, and metadata facets from disk cache or DB."""
+        with self._lock:
+            self._load_from_db_unlocked(db, force_reload=force_reload)
+
+    def _load_from_db_unlocked(self, db: Session, force_reload: bool = False):
         if not force_reload and _CACHE_FILE.exists():
             try:
                 t0 = time.time()
@@ -239,27 +274,7 @@ class InMemoryVectorStore:
             self.tokenized_chunks = tokenized_chunks
             self.embeddings = np.array(embeddings, dtype=np.float32)
             logger.info("Successfully loaded %d active document chunk embeddings into memory.", len(embeddings))
-            try:
-                np.savez_compressed(
-                    _CACHE_FILE,
-                    chunk_ids=self.chunk_ids,
-                    access_levels=self.access_levels,
-                    allowed_roles=np.array(self.allowed_roles, dtype=object),
-                    document_ids=self.document_ids,
-                    categories=self.categories,
-                    faculty_codes=self.faculty_codes,
-                    target_audiences=self.target_audiences,
-                    chunk_types=self.chunk_types,
-                    parent_chunk_ids=self.parent_chunk_ids,
-                    section_paths=np.array(self.section_paths, dtype=object),
-                    entity_tags=np.array(self.entity_tags, dtype=object),
-                    chunk_texts=np.array(self.chunk_texts, dtype=object),
-                    tokenized_chunks=np.array(self.tokenized_chunks, dtype=object),
-                    embeddings=self.embeddings,
-                )
-                logger.info("Cached %d vector chunks to %s for fast reloads.", len(self.chunk_ids), _CACHE_FILE.name)
-            except Exception as e:
-                logger.debug("Could not write vector disk cache: %s", e)
+            self._save_disk_cache()
         else:
             self._reset_empty()
 
@@ -267,20 +282,21 @@ class InMemoryVectorStore:
         logger.info("Hybrid faceted store loaded with %d chunks.", len(self.chunk_ids))
 
     def _reset_empty(self):
-        self.chunk_ids = np.array([], dtype=np.int64)
-        self.access_levels = np.array([], dtype=object)
-        self.allowed_roles = []
-        self.document_ids = np.array([], dtype=np.int64)
-        self.categories = np.array([], dtype=object)
-        self.faculty_codes = np.array([], dtype=object)
-        self.target_audiences = np.array([], dtype=object)
-        self.chunk_types = np.array([], dtype=object)
-        self.parent_chunk_ids = np.array([], dtype=np.int64)
-        self.section_paths = []
-        self.entity_tags = []
-        self.chunk_texts = []
-        self.tokenized_chunks = []
-        self.embeddings = np.array([], dtype=np.float32).reshape(0, 0)
+        with self._lock:
+            self.chunk_ids = np.array([], dtype=np.int64)
+            self.access_levels = np.array([], dtype=object)
+            self.allowed_roles = []
+            self.document_ids = np.array([], dtype=np.int64)
+            self.categories = np.array([], dtype=object)
+            self.faculty_codes = np.array([], dtype=object)
+            self.target_audiences = np.array([], dtype=object)
+            self.chunk_types = np.array([], dtype=object)
+            self.parent_chunk_ids = np.array([], dtype=np.int64)
+            self.section_paths = []
+            self.entity_tags = []
+            self.chunk_texts = []
+            self.tokenized_chunks = []
+            self.embeddings = np.array([], dtype=np.float32).reshape(0, 0)
 
     def add_chunk(
         self,
@@ -303,88 +319,97 @@ class InMemoryVectorStore:
         toks = _tokenize(chunk_text)
         tags = entity_tags or []
         roles = _parse_roles(allowed_roles, access_level)
-        
-        if len(self.chunk_ids) == 0:
-            self.chunk_ids = np.array([chunk_id], dtype=np.int64)
-            self.access_levels = np.array([access_level], dtype=object)
-            self.allowed_roles = [roles]
-            self.document_ids = np.array([document_id if document_id is not None else -1], dtype=np.int64)
-            self.categories = np.array([category], dtype=object)
-            self.faculty_codes = np.array([faculty_code], dtype=object)
-            self.target_audiences = np.array([target_audience], dtype=object)
-            self.chunk_types = np.array([chunk_type], dtype=object)
-            self.parent_chunk_ids = np.array([parent_chunk_id], dtype=np.int64)
-            self.section_paths = [section_path]
-            self.entity_tags = [tags]
-            self.chunk_texts = [chunk_text]
-            self.tokenized_chunks = [toks]
-            self.embeddings = emb_arr
-        else:
-            self.chunk_ids = np.append(self.chunk_ids, chunk_id)
-            self.access_levels = np.append(self.access_levels, access_level)
-            self.allowed_roles.append(roles)
-            self.document_ids = np.append(self.document_ids, document_id if document_id is not None else -1)
-            self.categories = np.append(self.categories, category)
-            self.faculty_codes = np.append(self.faculty_codes, faculty_code)
-            self.target_audiences = np.append(self.target_audiences, target_audience)
-            self.chunk_types = np.append(self.chunk_types, chunk_type)
-            self.parent_chunk_ids = np.append(self.parent_chunk_ids, parent_chunk_id)
-            self.section_paths.append(section_path)
-            self.entity_tags.append(tags)
-            self.chunk_texts.append(chunk_text)
-            self.tokenized_chunks.append(toks)
-            self.embeddings = np.vstack([self.embeddings, emb_arr])
+
+        with self._lock:
+            if len(self.chunk_ids) == 0:
+                self.chunk_ids = np.array([chunk_id], dtype=np.int64)
+                self.access_levels = np.array([access_level], dtype=object)
+                self.allowed_roles = [roles]
+                self.document_ids = np.array([document_id if document_id is not None else -1], dtype=np.int64)
+                self.categories = np.array([category], dtype=object)
+                self.faculty_codes = np.array([faculty_code], dtype=object)
+                self.target_audiences = np.array([target_audience], dtype=object)
+                self.chunk_types = np.array([chunk_type], dtype=object)
+                self.parent_chunk_ids = np.array([parent_chunk_id], dtype=np.int64)
+                self.section_paths = [section_path]
+                self.entity_tags = [tags]
+                self.chunk_texts = [chunk_text]
+                self.tokenized_chunks = [toks]
+                self.embeddings = emb_arr
+            else:
+                self.chunk_ids = np.append(self.chunk_ids, chunk_id)
+                self.access_levels = np.append(self.access_levels, access_level)
+                self.allowed_roles.append(roles)
+                self.document_ids = np.append(self.document_ids, document_id if document_id is not None else -1)
+                self.categories = np.append(self.categories, category)
+                self.faculty_codes = np.append(self.faculty_codes, faculty_code)
+                self.target_audiences = np.append(self.target_audiences, target_audience)
+                self.chunk_types = np.append(self.chunk_types, chunk_type)
+                self.parent_chunk_ids = np.append(self.parent_chunk_ids, parent_chunk_id)
+                self.section_paths.append(section_path)
+                self.entity_tags.append(tags)
+                self.chunk_texts.append(chunk_text)
+                self.tokenized_chunks.append(toks)
+                self.embeddings = np.vstack([self.embeddings, emb_arr])
 
     def remove_document(self, document_id: int) -> None:
         """Remove every indexed vector and text belonging to a document."""
-        if len(self.chunk_ids) == 0:
-            return
-        keep_mask = self.document_ids != document_id
-        keep_indices = np.where(keep_mask)[0].tolist()
+        with self._lock:
+            if len(self.chunk_ids) == 0:
+                return
+            keep_mask = self.document_ids != document_id
+            if bool(np.all(keep_mask)):
+                return
+            keep_indices = np.where(keep_mask)[0].tolist()
 
-        self.chunk_ids = self.chunk_ids[keep_mask]
-        self.access_levels = self.access_levels[keep_mask]
-        self.allowed_roles = [self.allowed_roles[i] for i in keep_indices]
-        self.document_ids = self.document_ids[keep_mask]
-        self.categories = self.categories[keep_mask]
-        self.faculty_codes = self.faculty_codes[keep_mask]
-        self.target_audiences = self.target_audiences[keep_mask]
-        self.chunk_types = self.chunk_types[keep_mask]
-        self.parent_chunk_ids = self.parent_chunk_ids[keep_mask]
-        self.section_paths = [self.section_paths[i] for i in keep_indices]
-        self.entity_tags = [self.entity_tags[i] for i in keep_indices]
-        self.chunk_texts = [self.chunk_texts[i] for i in keep_indices]
-        self.tokenized_chunks = [self.tokenized_chunks[i] for i in keep_indices]
-        self.embeddings = self.embeddings[keep_mask] if self.embeddings.size else self.embeddings
+            self.chunk_ids = self.chunk_ids[keep_mask]
+            self.access_levels = self.access_levels[keep_mask]
+            self.allowed_roles = [self.allowed_roles[i] for i in keep_indices]
+            self.document_ids = self.document_ids[keep_mask]
+            self.categories = self.categories[keep_mask]
+            self.faculty_codes = self.faculty_codes[keep_mask]
+            self.target_audiences = self.target_audiences[keep_mask]
+            self.chunk_types = self.chunk_types[keep_mask]
+            self.parent_chunk_ids = self.parent_chunk_ids[keep_mask]
+            self.section_paths = [self.section_paths[i] for i in keep_indices]
+            self.entity_tags = [self.entity_tags[i] for i in keep_indices]
+            self.chunk_texts = [self.chunk_texts[i] for i in keep_indices]
+            self.tokenized_chunks = [self.tokenized_chunks[i] for i in keep_indices]
+            self.embeddings = self.embeddings[keep_mask] if self.embeddings.size else self.embeddings
+            if self.is_loaded and _CACHE_FILE.exists():
+                self._save_disk_cache()
 
     def replace_document(self, document_id: int, chunks: list[tuple]) -> None:
         """Replace document chunks in memory."""
-        self.remove_document(document_id)
-        for item in chunks:
-            if len(item) == 4:
-                chunk_id, access_level, embedding, c_text = item
-                meta = {}
-            elif len(item) >= 5:
-                chunk_id, access_level, embedding, c_text, meta = item[:5]
-            else:
-                chunk_id, access_level, embedding = item[:3]
-                c_text = ""
-                meta = {}
-            self.add_chunk(
-                chunk_id=chunk_id,
-                access_level=access_level,
-                embedding=embedding,
-                document_id=document_id,
-                chunk_text=c_text,
-                category=meta.get("category", "GENERAL"),
-                faculty_code=meta.get("faculty_code", ""),
-                target_audience=meta.get("target_audience", "ALL"),
-                chunk_type=meta.get("chunk_type", "DETAIL"),
-                parent_chunk_id=meta.get("parent_chunk_id", -1),
-                section_path=meta.get("section_path", ""),
-                entity_tags=meta.get("entity_tags", []),
-                allowed_roles=meta.get("allowed_roles", ["VISITOR"]),
-            )
+        with self._lock:
+            self.remove_document(document_id)
+            for item in chunks:
+                if len(item) == 4:
+                    chunk_id, access_level, embedding, c_text = item
+                    meta = {}
+                elif len(item) >= 5:
+                    chunk_id, access_level, embedding, c_text, meta = item[:5]
+                else:
+                    chunk_id, access_level, embedding = item[:3]
+                    c_text = ""
+                    meta = {}
+                self.add_chunk(
+                    chunk_id=chunk_id,
+                    access_level=access_level,
+                    embedding=embedding,
+                    document_id=document_id,
+                    chunk_text=c_text,
+                    category=meta.get("category", "GENERAL"),
+                    faculty_code=meta.get("faculty_code", ""),
+                    target_audience=meta.get("target_audience", "ALL"),
+                    chunk_type=meta.get("chunk_type", "DETAIL"),
+                    parent_chunk_id=meta.get("parent_chunk_id", -1),
+                    section_path=meta.get("section_path", ""),
+                    entity_tags=meta.get("entity_tags", []),
+                    allowed_roles=meta.get("allowed_roles", ["VISITOR"]),
+                )
+            if self.is_loaded and _CACHE_FILE.exists():
+                self._save_disk_cache()
 
     def replace_document_hierarchical(self, document_id: int, chunks: list[tuple]) -> None:
         """Atomically replace document chunks with hierarchical metadata in memory."""
@@ -438,29 +463,30 @@ class InMemoryVectorStore:
         prefer_summary: bool = False,
     ) -> list[tuple[int, float]]:
         """Search top_k (chunk_id, cosine_similarity_score) with RBAC and facet pre-filtering."""
-        if len(self.chunk_ids) == 0:
-            return []
+        with self._lock:
+            if len(self.chunk_ids) == 0:
+                return []
 
-        mask = self._build_filter_mask(
-            allowed_access_levels,
-            category=category,
-            faculty_code=faculty_code,
-            target_audience=target_audience,
-            chunk_types=chunk_types,
-        )
-        valid_indices = np.where(mask)[0]
-
-        # Fallback to general RBAC if facet yielded no results
-        if len(valid_indices) == 0 and (category or faculty_code or chunk_types):
-            mask = self._build_filter_mask(allowed_access_levels)
+            mask = self._build_filter_mask(
+                allowed_access_levels,
+                category=category,
+                faculty_code=faculty_code,
+                target_audience=target_audience,
+                chunk_types=chunk_types,
+            )
             valid_indices = np.where(mask)[0]
 
-        if len(valid_indices) == 0:
-            return []
+            # Fallback to general RBAC if facet yielded no results
+            if len(valid_indices) == 0 and (category or faculty_code or chunk_types):
+                mask = self._build_filter_mask(allowed_access_levels)
+                valid_indices = np.where(mask)[0]
 
-        valid_embeddings = self.embeddings[valid_indices]
-        valid_chunk_ids = self.chunk_ids[valid_indices]
-        valid_chunk_types = self.chunk_types[valid_indices]
+            if len(valid_indices) == 0:
+                return []
+
+            valid_embeddings = self.embeddings[valid_indices]
+            valid_chunk_ids = self.chunk_ids[valid_indices]
+            valid_chunk_types = self.chunk_types[valid_indices]
 
         q_emb = np.array(query_embedding, dtype=np.float32)
         norms_valid = np.linalg.norm(valid_embeddings, axis=1)
@@ -493,91 +519,90 @@ class InMemoryVectorStore:
         prefer_summary: bool = False,
     ) -> list[tuple[int, float]]:
         """In-memory BM25-style lexical keyword matching with multi-role filtering."""
-        if len(self.chunk_ids) == 0 or not query_text.strip():
-            return []
+        with self._lock:
+            if len(self.chunk_ids) == 0 or not query_text.strip():
+                return []
 
-        query_tokens = _tokenize(query_text)
-        if not query_tokens:
-            return []
+            query_tokens = _tokenize(query_text)
+            if not query_tokens:
+                return []
 
-        # Expand academic query synonyms (e.g. course -> programme)
-        expanded_tokens = list(query_tokens)
-        synonyms_map = {
-            "course": ["programme", "programmes", "degree"],
-            "courses": ["programmes", "programme", "degrees"],
-            "degree": ["programme", "programmes", "course"],
-            "degrees": ["programmes", "courses"],
-        }
-        for tok in query_tokens:
-            if tok in synonyms_map:
-                for syn in synonyms_map[tok]:
-                    if syn not in expanded_tokens:
-                        expanded_tokens.append(syn)
-        query_tokens = expanded_tokens
+            # Expand academic query synonyms (e.g. course -> programme)
+            expanded_tokens = list(query_tokens)
+            synonyms_map = {
+                "course": ["programme", "programmes", "degree"],
+                "courses": ["programmes", "programme", "degrees"],
+                "degree": ["programme", "programmes", "course"],
+                "degrees": ["programmes", "courses"],
+            }
+            for tok in query_tokens:
+                if tok in synonyms_map:
+                    for syn in synonyms_map[tok]:
+                        if syn not in expanded_tokens:
+                            expanded_tokens.append(syn)
+            query_tokens = expanded_tokens
 
-        mask = self._build_filter_mask(
-            allowed_access_levels,
-            category=category,
-            faculty_code=faculty_code,
-            target_audience=target_audience,
-            chunk_types=chunk_types,
-        )
-        valid_indices = np.where(mask)[0]
-        if len(valid_indices) == 0:
-            mask = self._build_filter_mask(allowed_access_levels)
+            mask = self._build_filter_mask(
+                allowed_access_levels,
+                category=category,
+                faculty_code=faculty_code,
+                target_audience=target_audience,
+                chunk_types=chunk_types,
+            )
             valid_indices = np.where(mask)[0]
+            if len(valid_indices) == 0:
+                mask = self._build_filter_mask(allowed_access_levels)
+                valid_indices = np.where(mask)[0]
 
-        if len(valid_indices) == 0:
-            return []
+            if len(valid_indices) == 0:
+                return []
 
-        k1 = 1.5
-        b = 0.75
+            k1 = 1.5
+            b = 0.75
 
-        total_docs = len(valid_indices)
-        avg_doc_len = (
-            sum(len(self.tokenized_chunks[i]) for i in valid_indices) / total_docs
-            if total_docs > 0
-            else 1.0
-        ) or 1.0
+            total_docs = len(valid_indices)
+            avg_doc_len = (
+                sum(len(self.tokenized_chunks[i]) for i in valid_indices) / total_docs
+                if total_docs > 0
+                else 1.0
+            ) or 1.0
 
-        doc_freqs: dict[str, int] = {}
-        for q_token in set(query_tokens):
-            df = sum(1 for i in valid_indices if q_token in set(self.tokenized_chunks[i]))
-            doc_freqs[q_token] = df
+            doc_freqs: dict[str, int] = {}
+            for q_token in set(query_tokens):
+                df = sum(1 for i in valid_indices if q_token in set(self.tokenized_chunks[i]))
+                doc_freqs[q_token] = df
 
-        scores: list[tuple[int, float]] = []
-        for i in valid_indices:
-            chunk_id = int(self.chunk_ids[i])
-            toks = self.tokenized_chunks[i]
-            doc_len = len(toks)
-            
-            phrase_bonus = 0.0
-            if len(query_tokens) > 1 and query_text.lower() in self.chunk_texts[i].lower():
-                phrase_bonus = 3.0
+            scores: list[tuple[int, float]] = []
+            for i in valid_indices:
+                chunk_id = int(self.chunk_ids[i])
+                toks = self.tokenized_chunks[i]
+                doc_len = len(toks)
+                
+                phrase_bonus = 0.0
+                if len(query_tokens) > 1 and query_text.lower() in self.chunk_texts[i].lower():
+                    phrase_bonus = 3.0
 
-            # Prefer summary bonus
-            if prefer_summary and self.chunk_types[i] == "SUMMARY":
-                phrase_bonus += 2.0
+                chunk_score = phrase_bonus
+                tf_map: dict[str, int] = {}
+                for t in toks:
+                    tf_map[t] = tf_map.get(t, 0) + 1
 
-            chunk_score = phrase_bonus
-            tf_map: dict[str, int] = {}
-            for t in toks:
-                tf_map[t] = tf_map.get(t, 0) + 1
+                for q_token in query_tokens:
+                    tf = tf_map.get(q_token, 0)
+                    if tf == 0:
+                        continue
+                    df = doc_freqs.get(q_token, 0)
+                    idf = math.log(1.0 + (total_docs - df + 0.5) / (df + 0.5))
+                    term_score = idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (doc_len / avg_doc_len)))
+                    chunk_score += term_score
 
-            for q_token in query_tokens:
-                tf = tf_map.get(q_token, 0)
-                if tf == 0:
-                    continue
-                df = doc_freqs.get(q_token, 0)
-                idf = math.log(1.0 + (total_docs - df + 0.5) / (df + 0.5))
-                term_score = idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (doc_len / avg_doc_len)))
-                chunk_score += term_score
+                if chunk_score > 0.0:
+                    if prefer_summary and self.chunk_types[i] == "SUMMARY":
+                        chunk_score += 2.0
+                    scores.append((chunk_id, float(chunk_score)))
 
-            if chunk_score > 0.0:
-                scores.append((chunk_id, float(chunk_score)))
-
-        scores.sort(key=lambda item: item[1], reverse=True)
-        return scores[:top_k]
+            scores.sort(key=lambda item: item[1], reverse=True)
+            return scores[:top_k]
 
     def search_hybrid_with_scores(
         self,
@@ -594,27 +619,28 @@ class InMemoryVectorStore:
         prefer_summary: bool = False,
     ) -> list[tuple[int, float]]:
         """Parallel dense & BM25 search with Reciprocal Rank Fusion (RRF) and multi-role RBAC."""
-        candidate_pool = max(top_k * 2, 20)
-        dense_results = self.search_with_scores(
-            query_embedding,
-            allowed_access_levels,
-            candidate_pool,
-            category=category,
-            faculty_code=faculty_code,
-            target_audience=target_audience,
-            chunk_types=chunk_types,
-            prefer_summary=prefer_summary,
-        )
-        lexical_results = self.search_lexical(
-            query_text,
-            allowed_access_levels,
-            candidate_pool,
-            category=category,
-            faculty_code=faculty_code,
-            target_audience=target_audience,
-            chunk_types=chunk_types,
-            prefer_summary=prefer_summary,
-        )
+        with self._lock:
+            candidate_pool = max(top_k * 2, 20)
+            dense_results = self.search_with_scores(
+                query_embedding,
+                allowed_access_levels,
+                candidate_pool,
+                category=category,
+                faculty_code=faculty_code,
+                target_audience=target_audience,
+                chunk_types=chunk_types,
+                prefer_summary=prefer_summary,
+            )
+            lexical_results = self.search_lexical(
+                query_text,
+                allowed_access_levels,
+                candidate_pool,
+                category=category,
+                faculty_code=faculty_code,
+                target_audience=target_audience,
+                chunk_types=chunk_types,
+                prefer_summary=prefer_summary,
+            )
 
         if not dense_results and not lexical_results:
             return []

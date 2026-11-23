@@ -158,22 +158,19 @@ async def _read_valid_audio_upload(audio: UploadFile) -> tuple[bytes, str]:
         chunks.append(chunk)
         total += len(chunk)
         if total > limit:
-            break
-    audio_bytes = b"".join(chunks) if total <= limit else b""
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Audio file exceeds the maximum allowed size of "
+                    f"{rag_settings.AUDIO_MAX_UPLOAD_BYTES} bytes."
+                ),
+            )
+    audio_bytes = b"".join(chunks)
 
     if not audio_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded audio file is empty.",
-        )
-
-    if len(audio_bytes) > rag_settings.AUDIO_MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Audio file exceeds the maximum allowed size of "
-                f"{rag_settings.AUDIO_MAX_UPLOAD_BYTES} bytes."
-            ),
         )
 
     return audio_bytes, audio.content_type or "audio/wav"
@@ -429,7 +426,7 @@ def chat_stream(
     response_model=AudioChatResponse,
     summary="Submit audio query from edge device to the RAG chatbot",
 )
-async def chat_audio(
+def chat_audio(
     request: Request,
     audio: UploadFile = File(...),
     device_id: str | None = Form(None),
@@ -453,20 +450,28 @@ async def chat_audio(
             detail="Invalid audio upload.",
         )
 
-    audio_bytes = await audio.read()
+    limit = rag_settings.AUDIO_MAX_UPLOAD_BYTES
+    chunks = []
+    total = 0
+    while total <= limit:
+        chunk = audio.file.read(min(1024 * 1024, limit - total + 1))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Audio file exceeds the maximum allowed size of {rag_settings.AUDIO_MAX_UPLOAD_BYTES} bytes."
+                ),
+            )
+    audio_bytes = b"".join(chunks)
 
     if not audio_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded audio file is empty.",
-        )
-
-    if len(audio_bytes) > rag_settings.AUDIO_MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Audio file exceeds the maximum allowed size of {rag_settings.AUDIO_MAX_UPLOAD_BYTES} bytes."
-            ),
         )
 
     # ── Determine MIME type ───────────────────────────────────────────

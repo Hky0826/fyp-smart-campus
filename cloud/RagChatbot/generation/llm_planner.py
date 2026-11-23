@@ -385,7 +385,7 @@ def execute_planned_turn(
     except (PlannerUnavailable, PlannerInvalid) as exc:
         logger.warning("Shared planner unavailable; using safe deterministic fallback: %s: %s", type(exc).__name__, str(exc)[:240])
         planned = _fallback_plan(query, context, db)
-    if planned.route in {"GREETING", "CAPABILITY", "UNCLEAR", "OUT_OF_SCOPE"}:
+    if not planned.safe or planned.route in {"GREETING", "CAPABILITY", "UNCLEAR", "OUT_OF_SCOPE"}:
         return _fixed_operation(planned, context=context, query=query)
     if not planned.tool_call:
         raise PlannerInvalid("operation route has no tool")

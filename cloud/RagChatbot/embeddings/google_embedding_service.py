@@ -14,9 +14,10 @@ import logging
 from threading import Lock
 from typing import List
 
-import google.generativeai as genai
+from google.genai import types
 
 from RagChatbot.config import rag_settings
+from RagChatbot.gemini_client import call_with_retry, get_gemini_client
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +25,31 @@ _EMBEDDING_CACHE: OrderedDict[str, List[float]] = OrderedDict()
 _EMBEDDING_CACHE_LOCK = Lock()
 
 
-def _configure_client() -> None:
-    """Configure the Google AI client (idempotent)."""
-    genai.configure(api_key=rag_settings.GOOGLE_API_KEY)
+def _configure_client():
+    """Return the singleton Google GenAI client."""
+    return get_gemini_client()
 
 
 def clear_embedding_cache() -> None:
     """Clear all cached query embeddings."""
     with _EMBEDDING_CACHE_LOCK:
         _EMBEDDING_CACHE.clear()
+
+
+def _extract_single_embedding(result: object) -> List[float]:
+    if isinstance(result, dict):
+        return list(result.get("embedding") or [])
+    embeddings = getattr(result, "embeddings", None) or []
+    if not embeddings:
+        return []
+    return list(getattr(embeddings[0], "values", None) or [])
+
+
+def _extract_batch_embeddings(result: object) -> List[List[float]]:
+    if isinstance(result, dict):
+        return [list(item) for item in (result.get("embedding") or [])]
+    embeddings = getattr(result, "embeddings", None) or []
+    return [list(getattr(item, "values", None) or []) for item in embeddings]
 
 
 def embed_text(text: str) -> List[float]:
@@ -63,15 +80,17 @@ def embed_text(text: str) -> List[float]:
             logger.debug("Embedding cache hit for query: %.40s", text)
             return list(cached)
 
-    _configure_client()
+    client = get_gemini_client()
 
     try:
-        result = genai.embed_content(
-            model=f"models/{rag_settings.EMBEDDING_MODEL}",
-            content=text,
-            task_type="retrieval_query",
+        result = call_with_retry(
+            client.models.embed_content,
+            model=rag_settings.EMBEDDING_MODEL,
+            contents=text,
+            config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY"),
+            max_retries=2,
         )
-        embedding: List[float] = result["embedding"]
+        embedding: List[float] = _extract_single_embedding(result)
         logger.debug(
             "Embedded query (len=%d chars) -> vector dim=%d",
             len(text),
@@ -111,15 +130,17 @@ def embed_document_chunk(chunk_text: str) -> List[float]:
     if not chunk_text or not chunk_text.strip():
         raise ValueError("Cannot embed empty chunk text.")
 
-    _configure_client()
+    client = get_gemini_client()
 
     try:
-        result = genai.embed_content(
-            model=f"models/{rag_settings.EMBEDDING_MODEL}",
-            content=chunk_text,
-            task_type="retrieval_document",
+        result = call_with_retry(
+            client.models.embed_content,
+            model=rag_settings.EMBEDDING_MODEL,
+            contents=chunk_text,
+            config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
+            max_retries=2,
         )
-        return result["embedding"]
+        return _extract_single_embedding(result)
     except Exception as exc:
         logger.error("Google document embedding API call failed: %s", exc)
         raise RuntimeError(f"Document embedding generation failed: {exc}") from exc
@@ -133,18 +154,20 @@ def embed_document_chunks_batch(chunk_texts: List[str], batch_size: int = 50) ->
     if not chunk_texts:
         return []
 
-    _configure_client()
+    client = get_gemini_client()
     embeddings: List[List[float]] = []
 
     for i in range(0, len(chunk_texts), batch_size):
         batch = chunk_texts[i:i + batch_size]
         try:
-            result = genai.embed_content(
-                model=f"models/{rag_settings.EMBEDDING_MODEL}",
-                content=batch,
-                task_type="retrieval_document",
+            result = call_with_retry(
+                client.models.embed_content,
+                model=rag_settings.EMBEDDING_MODEL,
+                contents=batch,
+                config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
+                max_retries=2,
             )
-            batch_embs = result.get("embedding", [])
+            batch_embs = _extract_batch_embeddings(result)
             embeddings.extend(batch_embs)
             logger.debug("Batch embedded %d chunks (total so far: %d)", len(batch), len(embeddings))
         except Exception as exc:

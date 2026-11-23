@@ -325,8 +325,8 @@ class GeminiLiveSession:
                 if elapsed < 0.2:
                     await asyncio.sleep(0.2 - elapsed)
 
-            active_lang_codes = self._active_language_codes or _load_active_speech_languages()
-            adaptation_phrases = _load_speech_adaptation_phrases()
+            active_lang_codes = self._active_language_codes or await asyncio.to_thread(_load_active_speech_languages)
+            adaptation_phrases = await asyncio.to_thread(_load_speech_adaptation_phrases)
 
             config = {
                 "response_modalities": ["AUDIO"],
@@ -523,8 +523,8 @@ class GeminiLiveSession:
 
                 elif event_type == "tool_call":
                     calls = event.get("calls") or []
-                    if calls:
-                        call = dict(calls[0])
+                    for raw_call in calls:
+                        call = dict(raw_call)
                         call_name = call.get("name") or "process_campus_request"
                         args = call.get("args") or {}
                         if call_name == "set_session_language":
@@ -568,7 +568,16 @@ class GeminiLiveSession:
                                     res = on_transcript(self._transcript)
                                     if asyncio.iscoroutine(res):
                                         await res
-                            result = await on_tool_call(call)
+                            try:
+                                result = await on_tool_call(call)
+                            except Exception as exc:
+                                logger.warning("Live tool call failed name=%s: %s", call_name, exc)
+                                result = {
+                                    "answer": "I could not process that request right now.",
+                                    "status": "error",
+                                    "sources": [],
+                                    "route": "UNIVERSITY_INFO",
+                                }
                             answer_text = (
                                 result.get("answer")
                                 or result.get("response_text")
@@ -992,7 +1001,10 @@ class GeminiLiveSession:
                 except Exception as exc:
                     if not self.is_connected:
                         break
-                    logger.debug("Gemini Live receive iteration notice: %s", exc)
+                    if isinstance(exc, TypeError) and "__aiter__" in str(exc):
+                        break
+                    logger.warning("Gemini Live receive iteration error: %s", exc)
+                    await self._events.put({"type": "error", "message": "Live session disconnected"})
                     break
                 if is_mock:
                     break

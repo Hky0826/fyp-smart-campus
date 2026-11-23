@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from RagChatbot.gemini_client import reset_gemini_client
 from RagChatbot.personalisation.schemas import AuthenticatedChatContext
 from RagChatbot.retrieval.ranking import RankedChunk
 from RagChatbot.services import process_user_request as request_module
@@ -16,8 +17,10 @@ from RagChatbot.services.chat_service import clear_rag_response_cache
 @pytest.fixture(autouse=True)
 def clean_cache():
     clear_rag_response_cache()
+    reset_gemini_client()
     yield
     clear_rag_response_cache()
+    reset_gemini_client()
 
 
 def _flash_response(route: str = "UNIVERSITY_INFO", intent: str = "ADMISSIONS"):

@@ -408,6 +408,26 @@ def _verify_session(token: str, db: Session) -> tuple[int, int]:
         HTTPException 401: If the session is not found, revoked, or expired.
     """
     _, user_id, session = resolve_user_session(token, db)
+    return user_id, int(session.session_id)
+
+
+def _normalize_cached_citations(raw_citations: Any) -> List[CitationSchema]:
+    normalized: List[CitationSchema] = []
+    for item in raw_citations or ():
+        if isinstance(item, CitationSchema):
+            normalized.append(item)
+        elif isinstance(item, dict):
+            normalized.append(
+                CitationSchema(
+                    chunk_id=int(item.get("chunk_id", 0) or 0),
+                    document_id=int(item.get("document_id", 0) or 0),
+                    document_title=str(item.get("document_title", "") or ""),
+                    chunk_index=int(item.get("chunk_index", 0) or 0),
+                    access_level=str(item.get("access_level", "PUBLIC") or "PUBLIC"),
+                    excerpt=str(item.get("excerpt") or item.get("section_path") or ""),
+                )
+            )
+    return normalized
 def _load_recent_chat_history(
     session_id: int | None,
     db: Session,
@@ -797,13 +817,14 @@ def process_chat(
                         _RAG_RESPONSE_CACHE.move_to_end(cache_key)
                         logger.debug("RAG response cache hit for query: %.40s", sanitized_query)
                         response_time_ms = int((time.monotonic() - start_time) * 1000)
+                        cached_citations = _normalize_cached_citations(cached_res.citations)
                         logged_query_id = log_chatbot_interaction(
                             db,
                             session_id=session_id,
                             user_id=user_id,
                             query_text=sanitized_query,
                             response_text=cached_res.answer,
-                            retrieved_chunk_ids=[c.chunk_id for c in cached_res.citations],
+                            retrieved_chunk_ids=[c.chunk_id for c in cached_citations if c.chunk_id],
                             response_time_ms=response_time_ms,
                         )
                         query_id = logged_query_id if logged_query_id > 0 else None
@@ -818,7 +839,7 @@ def process_chat(
                         )
                         return ChatResponse(
                             answer=cached_res.answer,
-                            citations=cached_res.citations,
+                            citations=cached_citations,
                             access_granted=cached_res.access_granted,
                             status_message=cached_res.status_message,
                             response_time_ms=response_time_ms,
@@ -912,8 +933,8 @@ def process_chat(
     metrics.rag_ms += timer.elapsed_ms
 
     answer = fast_res.get("answer", "")
-    access_granted = True
     status_message = fast_res.get("status", "ok")
+    access_granted = status_message not in {"no_access", "blocked", "error", "auth_required"}
     citations: List[CitationSchema] = [
         CitationSchema(
             chunk_id=s.get("chunk_id", 0),
@@ -926,7 +947,7 @@ def process_chat(
         for s in fast_res.get("sources", [])
         if isinstance(s, dict)
     ]
-    ranked_chunks = []
+    retrieved_chunk_ids = [c.chunk_id for c in citations if c.chunk_id]
 
     total_elapsed = time.monotonic() - start_time
     response_time_ms = int(total_elapsed * 1000)
@@ -938,7 +959,7 @@ def process_chat(
         user_id=user_id,
         query_text=sanitized_query,
         response_text=answer,
-        retrieved_chunk_ids=[c.chunk_id for c in ranked_chunks],
+        retrieved_chunk_ids=retrieved_chunk_ids,
         response_time_ms=response_time_ms,
         allowed_levels=allowed_levels,
         is_stream=False,
@@ -947,7 +968,7 @@ def process_chat(
 
     metrics.total_inference_ms = total_elapsed * 1000.0
     metrics.allowed_access_levels = allowed_levels
-    metrics.chunks_used_count = len(ranked_chunks)
+    metrics.chunks_used_count = len(citations)
     metrics.tokens_generated = len(answer.split())
     metrics.tokens_per_second = (metrics.tokens_generated / total_elapsed) if total_elapsed > 0 else 0.0
     metrics.is_streaming = False
@@ -1083,14 +1104,15 @@ def process_chat_stream(
                     if time.monotonic() - cached_time < ttl:
                         _RAG_RESPONSE_CACHE.move_to_end(cache_key)
                         response_time_ms = int((time.monotonic() - start_time) * 1000)
+                        cached_citations = _normalize_cached_citations(cached_res.citations)
                         logged = log_chatbot_interaction(
                             db, session_id=session_id, user_id=user_id, query_text=sanitized_query,
-                            response_text=cached_res.answer, retrieved_chunk_ids=[c.chunk_id for c in cached_res.citations],
+                            response_text=cached_res.answer, retrieved_chunk_ids=[c.chunk_id for c in cached_citations if c.chunk_id],
                             response_time_ms=response_time_ms,
                         )
                         query_id = _safe_query_id(logged)
                         done_resp = ChatResponse(
-                            answer=cached_res.answer, citations=cached_res.citations,
+                            answer=cached_res.answer, citations=cached_citations,
                             access_granted=cached_res.access_granted, status_message=cached_res.status_message,
                             response_time_ms=response_time_ms, query_id=query_id,
                         )

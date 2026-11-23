@@ -32,26 +32,30 @@ def test_singleton_gemini_client():
 
 def test_embedding_cache_hit_and_clear():
     """Verify embedding cache stores vectors and avoids redundant API calls."""
+    from types import SimpleNamespace
     google_embedding_service.clear_embedding_cache()
-    
-    with patch("RagChatbot.embeddings.google_embedding_service.genai.embed_content") as mock_embed:
-        mock_embed.return_value = {"embedding": [0.1, 0.2, 0.3]}
-        
+
+    mock_client = MagicMock()
+    mock_client.models.embed_content.return_value = SimpleNamespace(
+        embeddings=[SimpleNamespace(values=[0.1, 0.2, 0.3])]
+    )
+
+    with patch("RagChatbot.embeddings.google_embedding_service.get_gemini_client", return_value=mock_client):
         # First call -> cache miss, calls API
         emb1 = google_embedding_service.embed_text("What are the library hours?")
         assert emb1 == [0.1, 0.2, 0.3]
-        assert mock_embed.call_count == 1
-        
+        assert mock_client.models.embed_content.call_count == 1
+
         # Second call with same text (different casing/spacing) -> cache hit, no API call
         emb2 = google_embedding_service.embed_text("  what are the library hours?  ")
         assert emb2 == [0.1, 0.2, 0.3]
-        assert mock_embed.call_count == 1
-        
+        assert mock_client.models.embed_content.call_count == 1
+
         # Clear cache -> subsequent call makes API call
         google_embedding_service.clear_embedding_cache()
         emb3 = google_embedding_service.embed_text("What are the library hours?")
         assert emb3 == [0.1, 0.2, 0.3]
-        assert mock_embed.call_count == 2
+        assert mock_client.models.embed_content.call_count == 2
 
 
 def test_rag_response_cache_rbac_isolation():

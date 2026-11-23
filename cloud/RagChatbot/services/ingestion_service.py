@@ -309,6 +309,22 @@ def ingest_document(document_id: int, db: Session, force_reindex: bool = False) 
     if not doc:
         return _failed(document_id, f"Document ID {document_id} not found or is inactive.")
 
+    if not force_reindex and getattr(doc, "chunking_status", None) == "COMPLETED":
+        existing_chunks = (
+            db.query(DocumentChunk)
+            .filter_by(document_id=document_id, is_outdated=False)
+            .count()
+        )
+        if existing_chunks > 0:
+            return IngestionResult(
+                document_id,
+                0,
+                0,
+                0,
+                f"Document ID {document_id} is already indexed; skipping (force_reindex=False).",
+                status="COMPLETED",
+            )
+
     try:
         text = _load_document_text(doc.file_path)
     except (FileNotFoundError, ValueError) as exc:
@@ -423,7 +439,7 @@ def ingest_document(document_id: int, db: Session, force_reindex: bool = False) 
                 metadata_payload = {
                     "document_id": document_id,
                     "category": getattr(doc, "category", "GENERAL") or "GENERAL",
-                    "faculty_code": getattr(doc, "faculty_code", None),
+                    "faculty_code": getattr(doc, "faculty_code", None) or "",
                     "target_audience": getattr(doc, "target_audience", "ALL") or "ALL",
                     "chunk_type": child_item.chunk_type,
                     "parent_chunk_id": parent_record.chunk_id,
