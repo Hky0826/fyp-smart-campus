@@ -40,6 +40,7 @@ class SurveillanceUserRepository:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 5000;")
         conn.execute("PRAGMA journal_mode = WAL;")
         conn.execute("PRAGMA foreign_keys = ON;")
         return conn
@@ -365,9 +366,12 @@ class SurveillanceUserRepository:
                                     """
                                     INSERT INTO device_user_face_embeddings (
                                         user_id, template_name, model_name, embedding, last_synced_at
-                                    ) VALUES (?, ?, 'arcface_r50', ?, CURRENT_TIMESTAMP)
+                                    ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                                    ON CONFLICT(user_id, template_name, model_name) DO UPDATE SET
+                                        embedding=excluded.embedding,
+                                        last_synced_at=CURRENT_TIMESTAMP
                                     """,
-                                    (user_id, template_name, blob),
+                                    (user_id, template_name, model_name, blob),
                                 )
                 conn.commit()
                 logger.info("Applied users delta update for %s users", len(users))

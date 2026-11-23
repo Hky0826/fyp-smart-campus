@@ -69,6 +69,15 @@ class TemplateMatcher:
                 continue
 
             target = np.asarray(t.embedding, dtype=np.float32).reshape(-1)
+            if target.shape != query.shape:
+                logger.warning(
+                    "Skipping template %s for user %s due to dimension mismatch (%s vs %s)",
+                    t.template_name,
+                    t.user_id,
+                    target.shape,
+                    query.shape,
+                )
+                continue
             t_norm = np.linalg.norm(target)
             if t_norm > 1e-12:
                 target = target / t_norm

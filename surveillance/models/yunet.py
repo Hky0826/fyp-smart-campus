@@ -103,13 +103,13 @@ def _decode_yunet_raw_heads(
     nms_threshold: float = 0.3,
 ) -> List[YuNetDetectedFace]:
     """Decodes 3-scale YuNet feature maps (activation1..6, format_conversion1..12) from Hailo-8 NPU."""
+    target_w, target_h = input_size
     stride_configs = [
-        ("activation6", "format_conversion10", "format_conversion12", 8, 80, 80),
-        ("activation4", "format_conversion6", "format_conversion8", 16, 40, 40),
-        ("activation2", "format_conversion1", "format_conversion3", 32, 20, 20),
+        ("activation6", "format_conversion10", "format_conversion12", 8, max(1, target_h // 8), max(1, target_w // 8)),
+        ("activation4", "format_conversion6", "format_conversion8", 16, max(1, target_h // 16), max(1, target_w // 16)),
+        ("activation2", "format_conversion1", "format_conversion3", 32, max(1, target_h // 32), max(1, target_w // 32)),
     ]
 
-    target_w, target_h = input_size
     orig_h, orig_w = orig_shape
     scale_x = orig_w / target_w
     scale_y = orig_h / target_h

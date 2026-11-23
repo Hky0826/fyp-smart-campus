@@ -189,7 +189,7 @@ class STrack:
     def tlwh_to_xyah(tlwh: np.ndarray) -> np.ndarray:
         ret = np.asarray(tlwh, dtype=np.float32).copy()
         ret[:2] += ret[2:] / 2
-        ret[2] /= ret[3]
+        ret[2] = ret[2] / ret[3] if ret[3] > 0 else 0.0
         return ret
 
     @staticmethod
@@ -409,6 +409,8 @@ class ByteTracker:
         self.lost_stracks = self.sub_stracks(self.lost_stracks, self.removed_stracks)
 
         self.removed_stracks.extend(removed_stracks)
+        if len(self.removed_stracks) > 1000:
+            self.removed_stracks = self.removed_stracks[-1000:]
         self.tracked_stracks, self.lost_stracks = self.remove_duplicate_stracks(
             self.tracked_stracks, self.lost_stracks
         )

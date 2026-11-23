@@ -82,13 +82,11 @@ class CameraReader:
         return self.cap.read()
 
     def read_latest(self) -> Tuple[bool, Optional[np.ndarray]]:
-        """Flush stale buffered frames and retrieve the most recent frame."""
+        """Retrieve the latest buffered frame without discarding the sole frame on size-1 buffers."""
         if self.cap is None or cv2 is None:
             return False, None
-        # Grab frames to empty buffer queue
-        for _ in range(2):
-            if not self.cap.grab():
-                break
+        if not self.cap.grab():
+            return False, None
         return self.cap.retrieve()
 
     def release(self) -> None:

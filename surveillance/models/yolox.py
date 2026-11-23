@@ -29,7 +29,7 @@ def _decode_yolox_raw_heads(
     pad: Tuple[int, int],
     scale: float,
     orig_shape: Tuple[int, int],
-    ignore_class_id: bool = True,
+    ignore_class_id: bool = False,
     person_class_id: int = 0,
 ) -> List[np.ndarray]:
     """Decodes 3-scale raw YOLOX feature maps from Hailo-8 NPU (strides 8, 16, 32)."""
@@ -149,7 +149,7 @@ class YOLOXPersonDetector:
         input_size: Tuple[int, int] = (640, 640),
         confidence_threshold: float = 0.5,
         person_class_id: int = 0,
-        ignore_class_id: bool = True,
+        ignore_class_id: bool = False,
         runner: Optional[BaseHailoRunner] = None,
     ) -> None:
         self.hef_path = Path(hef_path)
@@ -193,14 +193,6 @@ class YOLOXPersonDetector:
 
         return tensor, r, (left, top)
 
-    def postprocess(
-        self,
-        outputs: Dict[str, np.ndarray],
-        scale: float,
-        pad: Tuple[int, int],
-        orig_shape: Tuple[int, int],
-    ) -> List[np.ndarray]:
-        """Decode YOLOX detections into [x1, y1, x2, y2, score] arrays."""
     def postprocess(
         self,
         outputs: Dict[str, np.ndarray],
@@ -370,7 +362,7 @@ class YOLOXPersonDetector:
             w = np.maximum(0.0, xx2 - xx1)
             h = np.maximum(0.0, yy2 - yy1)
             inter = w * h
-            ovr = inter / (areas[i] + areas[order[1:]] - inter)
+            ovr = inter / (areas[i] + areas[order[1:]] - inter + 1e-6)
 
             inds = np.where(ovr <= iou_threshold)[0]
             order = order[inds + 1]

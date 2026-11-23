@@ -57,7 +57,12 @@ class FaceAligner:
         if landmarks is not None and len(landmarks) == 5 and cv2 is not None:
             try:
                 src_pts = np.asarray(landmarks, dtype=np.float32)
-                M, _ = cv2.estimateAffinePartial2D(src_pts, REFERENCE_LANDMARKS)
+                target_w, target_h = self.target_size
+                ref_pts = REFERENCE_LANDMARKS * np.array(
+                    [float(target_w) / 112.0, float(target_h) / 112.0],
+                    dtype=np.float32,
+                )
+                M, _ = cv2.estimateAffinePartial2D(src_pts, ref_pts)
                 if M is not None:
                     aligned = cv2.warpAffine(image, M, self.target_size, borderValue=0)
                     return AlignmentResult(aligned, True)

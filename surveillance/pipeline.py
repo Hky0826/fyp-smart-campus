@@ -71,15 +71,37 @@ class SurveillancePipeline:
         self.identity_manager = identity_manager or IdentityManager()
         self.frame_count = 0
         self._cached_templates: Optional[List[FaceTemplate]] = None
+        self._cached_db_stamp: Optional[tuple[int, int, int, int]] = None
+
+    def _current_db_stamp(self) -> Optional[tuple[int, int, int, int]]:
+        db_path = getattr(self.repository, "db_path", None)
+        if not db_path:
+            return None
+        path = Path(db_path)
+        if not path.exists():
+            return None
+        try:
+            db_st = path.stat()
+            wal_path = path.with_name(f"{path.name}-wal")
+            if wal_path.exists():
+                wal_st = wal_path.stat()
+                return (db_st.st_mtime_ns, db_st.st_size, wal_st.st_mtime_ns, wal_st.st_size)
+            return (db_st.st_mtime_ns, db_st.st_size, 0, 0)
+        except OSError:
+            return None
 
     def load_templates(self, force_reload: bool = False) -> List[FaceTemplate]:
-        """Loads user templates from SQLite DB."""
-        if self._cached_templates is None or force_reload:
+        """Loads user templates from SQLite DB, reloading when DB/WAL files change."""
+        current_stamp = self._current_db_stamp()
+        stamp_changed = current_stamp is not None and current_stamp != self._cached_db_stamp
+        if self._cached_templates is None or force_reload or stamp_changed:
             try:
                 self._cached_templates = self.repository.load_templates()
+                self._cached_db_stamp = current_stamp
             except Exception:
                 logger.exception("Failed to load user face templates from database")
-                self._cached_templates = []
+                if self._cached_templates is None:
+                    self._cached_templates = []
         return self._cached_templates
 
     def process_frame(self, frame: np.ndarray) -> Dict[str, Any]:
@@ -160,17 +182,16 @@ class SurveillancePipeline:
             # Requirement 8: Avoid repeatedly running face recognition once identity is assigned
             if self.identity_manager.should_recognize(track_id):
                 rec_start = time.perf_counter()
-                if x2 > x1 and y2 > y1:
-                    person_crop = frame[y1:y2, x1:x2]
-                else:
-                    person_crop = frame
+                person_crop = frame[y1:y2, x1:x2] if (x2 > x1 and y2 > y1) else None
 
-                # Run Face Detection (YuNet) on crop, fallback to full frame if no face in crop
+                # Run Face Detection (YuNet) strictly within the person crop; never fall back
+                # to full frame, which could hijack another person's face onto this track.
                 try:
-                    faces = self.face_detector.detect(person_crop) if person_crop.size > 0 else []
-                    if not faces:
-                        faces = self.face_detector.detect(frame)
-                        x1, y1 = 0, 0 # Full frame coordinates
+                    faces = (
+                        self.face_detector.detect(person_crop)
+                        if (person_crop is not None and person_crop.size > 0)
+                        else []
+                    )
                 except Exception:
                     logger.exception("Face detection (YuNet) failed for track %s", track_id)
                     faces = []
@@ -180,17 +201,13 @@ class SurveillancePipeline:
                     # Select best face candidate by score
                     best_face = max(faces, key=lambda f: f.score)
                     if best_face.score >= self.config.face_detection_threshold:
-                        # Translate face bbox relative to full frame if crop was used
-                        if person_crop.size > 0 and (x1, y1) != (0, 0):
-                            fx1, fy1, fx2, fy2 = best_face.bbox
-                            face_bbox = (fx1 + x1, fy1 + y1, fx2 + x1, fy2 + y1)
-                            face_lms = best_face.landmarks.copy() if best_face.landmarks is not None else None
-                            if face_lms is not None:
-                                face_lms[:, 0] += x1
-                                face_lms[:, 1] += y1
-                        else:
-                            face_bbox = best_face.bbox
-                            face_lms = best_face.landmarks
+                        # Translate face bbox relative to full frame
+                        fx1, fy1, fx2, fy2 = best_face.bbox
+                        face_bbox = (fx1 + x1, fy1 + y1, fx2 + x1, fy2 + y1)
+                        face_lms = best_face.landmarks.copy() if best_face.landmarks is not None else None
+                        if face_lms is not None:
+                            face_lms[:, 0] += x1
+                            face_lms[:, 1] += y1
 
                         face_bbox_out = [int(round(v)) for v in face_bbox]
                         align_res = self.aligner.align(frame, face_bbox, face_lms)
