@@ -1,5 +1,3 @@
-import React from 'react';
-
 export function MapManagerCard({
     // Form fields
     buildingName, setBuildingName,
@@ -23,9 +21,7 @@ export function MapManagerCard({
     wallSensitivity, setWallSensitivity,
     showWallOverlay, setShowWallOverlay,
     fetchWallMask,
-    isFetchingWallMask,
-    // Nodes for committing draft
-    nodes, setNodes
+    isFetchingWallMask
 }) {
     return (
         <>

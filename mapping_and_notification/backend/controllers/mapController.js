@@ -105,6 +105,7 @@ exports.getMapData = (req, res) => {
         if (err || fpRes.length === 0) return res.status(404).json({ error: 'Floorplan not found' });
 
         db.query('SELECT building_name FROM buildings WHERE building_id = ?', [fpRes[0].building_id], (err, bRes) => {
+            if (err || !bRes || bRes.length === 0) return res.status(500).json({ error: 'Failed to load building metadata' });
             const floorplanData = { ...fpRes[0], building_name: bRes[0].building_name };
             db.query('SELECT * FROM nodes WHERE floorplan_id = ?', [fpId], (err, nodes) => {
                 if (err) return res.status(500).json({ error: 'Failed to load nodes' });
@@ -112,7 +113,8 @@ exports.getMapData = (req, res) => {
 
                 const nodeIds = nodes.map(n => n.node_id);
                 db.query('SELECT * FROM node_rbac WHERE node_id IN (?)', [nodeIds], (err, nodeRbac) => {
-                    nodes.forEach(n => { n.allowed_roles = nodeRbac.filter(r => r.node_id === n.node_id).map(r => r.role_id); });
+                    if (err) return res.status(500).json({ error: 'Failed to load node permissions' });
+                    nodes.forEach(n => { n.allowed_roles = (nodeRbac || []).filter(r => r.node_id === n.node_id).map(r => r.role_id); });
 
                     db.query('SELECT * FROM edges WHERE source_node_id IN (?)', [nodeIds], (err, edges) => {
                         if (err) return res.status(500).json({ error: 'Failed to load edges' });
@@ -120,7 +122,8 @@ exports.getMapData = (req, res) => {
 
                         const edgeIds = edges.map(e => e.edge_id);
                         db.query('SELECT * FROM edge_rbac WHERE edge_id IN (?)', [edgeIds], (err, edgeRbac) => {
-                            edges.forEach(e => { e.allowed_roles = edgeRbac.filter(r => r.edge_id === e.edge_id).map(r => r.role_id); });
+                            if (err) return res.status(500).json({ error: 'Failed to load edge permissions' });
+                            edges.forEach(e => { e.allowed_roles = (edgeRbac || []).filter(r => r.edge_id === e.edge_id).map(r => r.role_id); });
                             res.json({ floorplan: floorplanData, nodes, edges });
                         });
                     });
@@ -170,9 +173,11 @@ exports.uploadFloorplan = (req, res) => {
     };
 
     db.query('SELECT building_id FROM buildings WHERE building_name = ?', [buildingName], (err, results) => {
-        if (results.length > 0) insertFloorplan(results[0].building_id);
+        if (err) return res.status(500).json({ error: "Failed to resolve building." });
+        if (results && results.length > 0) insertFloorplan(results[0].building_id);
         else {
-            db.query('INSERT INTO buildings (building_name) VALUES (?)', [buildingName], (err, insertResult) => {
+            db.query('INSERT INTO buildings (building_name) VALUES (?)', [buildingName], (insertErr, insertResult) => {
+                if (insertErr || !insertResult) return res.status(500).json({ error: "Failed to create building." });
                 insertFloorplan(insertResult.insertId);
             });
         }
@@ -207,9 +212,10 @@ exports.updateFloorplan = (req, res) => {
                 [newBuildingId, parseInt(floorLevel), parseFloat(scaleRatio || 1.0), fpId],
                 (err) => {
                     if (err) return res.status(500).json({ error: "Failed to update floorplan." });
+                    invalidateFloorplanCaches(fpId);
                     if (oldBuildingId !== newBuildingId) {
-                        db.query('SELECT COUNT(*) as count FROM floorplans WHERE building_id = ?', [oldBuildingId], (err, countRes) => {
-                            if (!err && countRes[0].count === 0) {
+                        db.query('SELECT COUNT(*) as count FROM floorplans WHERE building_id = ?', [oldBuildingId], (countErr, countRes) => {
+                            if (!countErr && countRes && countRes[0].count === 0) {
                                 db.query('DELETE FROM buildings WHERE building_id = ?', [oldBuildingId], () => {
                                     res.json({ message: "Floorplan updated and old unused building removed." });
                                 });
@@ -220,10 +226,12 @@ exports.updateFloorplan = (req, res) => {
             );
         };
 
-        db.query('SELECT building_id FROM buildings WHERE building_name = ?', [buildingName], (err, results) => {
-            if (results.length > 0) updateFloorplanAndCleanup(results[0].building_id);
+        db.query('SELECT building_id FROM buildings WHERE building_name = ?', [buildingName], (bErr, results) => {
+            if (bErr) return res.status(500).json({ error: "Failed to resolve building." });
+            if (results && results.length > 0) updateFloorplanAndCleanup(results[0].building_id);
             else {
-                db.query('INSERT INTO buildings (building_name) VALUES (?)', [buildingName], (err, insertResult) => {
+                db.query('INSERT INTO buildings (building_name) VALUES (?)', [buildingName], (insertErr, insertResult) => {
+                    if (insertErr || !insertResult) return res.status(500).json({ error: "Failed to create building." });
                     updateFloorplanAndCleanup(insertResult.insertId);
                 });
             }
@@ -266,9 +274,11 @@ exports.deleteFloorplan = (req, res) => {
 
         /** Deletes the floorplan record and cleans up orphaned building. */
         const deleteFloorplanAndCheckBuilding = () => {
-            db.query('DELETE FROM floorplans WHERE floorplan_id = ?', [fpId], () => {
-                db.query('SELECT COUNT(*) as count FROM floorplans WHERE building_id = ?', [oldBuildingId], (err, countRes) => {
-                    if (!err && countRes[0].count === 0) {
+            invalidateFloorplanCaches(fpId);
+            db.query('DELETE FROM floorplans WHERE floorplan_id = ?', [fpId], (delFpErr) => {
+                if (delFpErr) return res.status(500).json({ error: "Failed to delete floorplan." });
+                db.query('SELECT COUNT(*) as count FROM floorplans WHERE building_id = ?', [oldBuildingId], (countErr, countRes) => {
+                    if (!countErr && countRes && countRes[0].count === 0) {
                         db.query('DELETE FROM buildings WHERE building_id = ?', [oldBuildingId], () =>
                             res.json({ message: "Map, file, and unused building deleted successfully." })
                         );
@@ -277,11 +287,33 @@ exports.deleteFloorplan = (req, res) => {
             });
         };
 
-        db.query('SELECT node_id FROM nodes WHERE floorplan_id = ?', [fpId], (err, nodes) => {
+        db.query('SELECT node_id FROM nodes WHERE floorplan_id = ?', [fpId], (nodesErr, nodes) => {
+            if (nodesErr) return res.status(500).json({ error: "Failed to query floorplan nodes." });
             if (nodes && nodes.length > 0) {
                 const nodeIds = nodes.map(n => n.node_id);
-                db.query('DELETE FROM edges WHERE source_node_id IN (?) OR destination_node_id IN (?)', [nodeIds, nodeIds], () => {
-                    db.query('DELETE FROM nodes WHERE floorplan_id = ?', [fpId], deleteFloorplanAndCheckBuilding);
+                db.query('SELECT edge_id FROM edges WHERE source_node_id IN (?) OR destination_node_id IN (?)', [nodeIds, nodeIds], (edgeLookupErr, edges) => {
+                    if (edgeLookupErr) return res.status(500).json({ error: "Failed to query connected edges." });
+                    const removeNodesAndFloorplan = () => {
+                        db.query('DELETE FROM node_rbac WHERE node_id IN (?)', [nodeIds], (nrErr) => {
+                            if (nrErr) return res.status(500).json({ error: "Failed to clean up node permissions." });
+                            db.query('DELETE FROM nodes WHERE floorplan_id = ?', [fpId], (dnErr) => {
+                                if (dnErr) return res.status(500).json({ error: "Failed to delete floorplan nodes." });
+                                deleteFloorplanAndCheckBuilding();
+                            });
+                        });
+                    };
+                    if (edges && edges.length > 0) {
+                        const edgeIds = edges.map(e => e.edge_id);
+                        db.query('DELETE FROM edge_rbac WHERE edge_id IN (?)', [edgeIds], (erErr) => {
+                            if (erErr) return res.status(500).json({ error: "Failed to clean up edge permissions." });
+                            db.query('DELETE FROM edges WHERE edge_id IN (?)', [edgeIds], (deErr) => {
+                                if (deErr) return res.status(500).json({ error: "Failed to delete floorplan edges." });
+                                removeNodesAndFloorplan();
+                            });
+                        });
+                    } else {
+                        removeNodesAndFloorplan();
+                    }
                 });
             } else deleteFloorplanAndCheckBuilding();
         });
@@ -567,8 +599,30 @@ exports.saveMapData = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // In-memory cache for Wall Detection results (Recommendation 2)
-// Key: `${floorplan_id}_${sensitivity}_${grid_scale}`
-const wallDetectionCache = {};
+// Bounded in-memory caches for AI results
+const MAX_AI_CACHE_ENTRIES = 50;
+const wallDetectionCache = new Map();
+const floorplanAnalysisCache = new Map();
+
+function setBoundedCache(cache, key, value) {
+    if (cache.has(key)) {
+        cache.delete(key);
+    } else if (cache.size >= MAX_AI_CACHE_ENTRIES) {
+        const oldestKey = cache.keys().next().value;
+        cache.delete(oldestKey);
+    }
+    cache.set(key, value);
+}
+
+function invalidateFloorplanCaches(fpId) {
+    const prefix = `${fpId}_`;
+    for (const key of wallDetectionCache.keys()) {
+        if (key.startsWith(prefix)) wallDetectionCache.delete(key);
+    }
+    for (const key of floorplanAnalysisCache.keys()) {
+        if (key.startsWith(prefix)) floorplanAnalysisCache.delete(key);
+    }
+}
 
 /**
  * Perform Wall Detection only, returning the WallGrid and timing metadata.
@@ -581,23 +635,27 @@ exports.getWallDetection = async (req, res) => {
     try {
         const rows = await queryAsync('SELECT image_path FROM floorplans WHERE floorplan_id = ?', [floorplan_id]);
         if (!rows || rows.length === 0) return res.status(404).json({ success: false, error: `Floorplan not found.` });
-        
+
         const imagePath = rows[0].image_path;
-        const cacheKey = `${floorplan_id}_${sensitivity || 120}_${grid_scale || 8}`;
-        
-        if (wallDetectionCache[cacheKey]) {
-            return res.json({ success: true, ...wallDetectionCache[cacheKey] });
+        const effSens = sensitivity !== undefined ? Number(sensitivity) : 120;
+        const effWidth = canvas_width !== undefined ? Number(canvas_width) : 800;
+        const effHeight = canvas_height !== undefined ? Number(canvas_height) : 600;
+        const effScale = grid_scale !== undefined ? Number(grid_scale) : 8;
+        const cacheKey = `${floorplan_id}_${imagePath}_${effSens}_${effWidth}_${effHeight}_${effScale}`;
+
+        if (wallDetectionCache.has(cacheKey)) {
+            return res.json({ success: true, ...wallDetectionCache.get(cacheKey) });
         }
 
         const wallRes = await detectWalls(imagePath, {
-            sensitivity: sensitivity !== undefined ? Number(sensitivity) : 120,
-            canvasWidth: canvas_width !== undefined ? Number(canvas_width) : 800,
-            canvasHeight: canvas_height !== undefined ? Number(canvas_height) : 600,
-            gridScale: grid_scale !== undefined ? Number(grid_scale) : 8,
+            sensitivity: effSens,
+            canvasWidth: effWidth,
+            canvasHeight: effHeight,
+            gridScale: effScale,
         });
-        
+
         if (!wallRes || !wallRes.grid) throw new Error("Missing 'grid' in Wall Detection response.");
-        
+
         const wallGrid = {
             grid: wallRes.grid,
             grid_width: wallRes.grid_width,
@@ -611,8 +669,8 @@ exports.getWallDetection = async (req, res) => {
             wallGrid,
             timing: wallRes.processing_time_ms
         };
-        
-        wallDetectionCache[cacheKey] = result;
+
+        setBoundedCache(wallDetectionCache, cacheKey, result);
         res.json({ success: true, ...result });
     } catch (error) {
         console.error('[mapController] getWallDetection failed:', error.message);
@@ -640,17 +698,13 @@ exports.checkAIHealth = async (req, res) => {
 // AI FLOORPLAN ANALYSIS PROXY (Phase 1)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// In-memory cache for Floorplan Analysis results.
-// Key: `${floorplan_id}_${sensitivity}_${room_gap_close_px}_${min_room_area_px}`
-const floorplanAnalysisCache = {};
-
 /**
  * Proxy the full Phase 1 AI Floorplan Analysis to the Python microservice.
  *
  * Reads the floorplan image from disk, forwards it with all tuning parameters
  * to POST /api/v1/analyze/floorplan, and returns the FloorplanAnalysisResult.
  *
- * The result is cached in memory by floorplan_id + key parameters to avoid
+ * The result is cached in memory by floorplan_id + image_path + parameters to avoid
  * re-running the expensive OCR pipeline on identical requests.
  *
  * @param {import('express').Request}  req - Body must contain `floorplan_id`.
@@ -685,10 +739,22 @@ exports.analyzeFloorplan = async (req, res) => {
 
         const imagePath = rows[0].image_path;
 
-        // Cache key — invalidated when key analysis parameters change
-        const cacheKey = `${floorplan_id}_${sensitivity}_${room_gap_close_px}_${min_room_area_px}`;
-        if (floorplanAnalysisCache[cacheKey]) {
-            return res.json({ success: true, ...floorplanAnalysisCache[cacheKey] });
+        // Cache key — invalidated when floorplan image or any analysis parameter changes
+        const cacheKey = [
+            floorplan_id,
+            imagePath,
+            sensitivity,
+            room_gap_close_px,
+            min_room_area_px,
+            max_room_area_ratio,
+            min_ocr_confidence,
+            wall_clearance_px,
+            canvas_width,
+            canvas_height,
+            grid_scale,
+        ].join('_');
+        if (floorplanAnalysisCache.has(cacheKey)) {
+            return res.json({ success: true, ...floorplanAnalysisCache.get(cacheKey) });
         }
 
         const result = await analyzeFloorplan(imagePath, {
@@ -703,7 +769,7 @@ exports.analyzeFloorplan = async (req, res) => {
             wallClearancePx:  Number(wall_clearance_px),
         });
 
-        floorplanAnalysisCache[cacheKey] = result;
+        setBoundedCache(floorplanAnalysisCache, cacheKey, result);
         res.json({ success: true, ...result });
     } catch (error) {
         console.error('[mapController] analyzeFloorplan failed:', error.message);

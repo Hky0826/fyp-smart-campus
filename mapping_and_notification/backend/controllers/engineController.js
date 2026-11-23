@@ -866,7 +866,11 @@ exports.calculateRoute = async (req, res) => {
                 if (visitorEmailAvailable) {
                     publishPromises.push(publishNotification(visitorPayload));
                 }
-                await Promise.all(publishPromises);
+                const publishResults = await Promise.all(publishPromises);
+                if (publishResults.some(resItem => !resItem || !resItem.success)) {
+                    const firstFail = publishResults.find(resItem => !resItem || !resItem.success);
+                    throw new Error(firstFail?.status || 'RabbitMQ publish returned failure.');
+                }
             } catch (mqErr) {
                 console.error('[EngineController] RabbitMQ publish failed, executing audit trail compensation:', mqErr.message);
 

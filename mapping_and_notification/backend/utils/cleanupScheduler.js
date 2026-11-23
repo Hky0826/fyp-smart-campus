@@ -12,25 +12,75 @@ const fs = require('fs');
 const path = require('path');
 
 const VIS_DIR = path.resolve(__dirname, '..', 'uploads', 'visualisations');
+const QR_DIR  = path.resolve(__dirname, '..', 'uploads', 'qr_codes');
 
 /**
- * Ensures the target visualisations directory exists.
+ * Ensures a target directory exists.
  */
-function ensureVisDir() {
-    if (!fs.existsSync(VIS_DIR)) {
-        fs.mkdirSync(VIS_DIR, { recursive: true });
+function ensureDir(dirPath) {
+    if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
     }
 }
 
 /**
- * Execute a single cleanup sweep of expired visualisation images.
+ * Removes expired `.png` files within `dirPath` older than `cutoff`.
+ */
+function sweepPngDirectory(dirPath, cutoff, label) {
+    ensureDir(dirPath);
+    let scanned = 0;
+    let deleted = 0;
+    let errors = 0;
+
+    try {
+        const files = fs.readdirSync(dirPath);
+
+        for (const file of files) {
+            if (!file.toLowerCase().endsWith('.png')) {
+                continue;
+            }
+
+            const filePath = path.join(dirPath, file);
+            const resolvedPath = path.resolve(filePath);
+            if (!resolvedPath.startsWith(dirPath)) {
+                console.warn(`[CleanupScheduler] Skipped suspicious path outside ${label}: ${resolvedPath}`);
+                continue;
+            }
+
+            try {
+                const stat = fs.statSync(filePath);
+                if (!stat.isFile()) {
+                    continue;
+                }
+
+                scanned++;
+
+                if (stat.mtimeMs < cutoff) {
+                    const ageHours = ((Date.now() - stat.mtimeMs) / (1000 * 60 * 60)).toFixed(1);
+                    fs.unlinkSync(filePath);
+                    deleted++;
+                    console.log(`[CleanupScheduler] Deleted expired ${label} file: ${file} (age: ${ageHours}h)`);
+                }
+            } catch (fileErr) {
+                errors++;
+                console.error(`[CleanupScheduler] Error inspecting/deleting ${label} file ${file}:`, fileErr.message);
+            }
+        }
+    } catch (dirErr) {
+        errors++;
+        console.error(`[CleanupScheduler] Failed to read ${label} directory:`, dirErr.message);
+    }
+
+    return { scanned, deleted, errors };
+}
+
+/**
+ * Execute a single cleanup sweep of expired visualisation and QR code images.
  *
  * @param {number} [customRetentionHours] - Optional override for retention hours.
  * @returns {Promise<{ scanned: number, deleted: number, errors: number }>}
  */
 async function runCleanup(customRetentionHours) {
-    ensureVisDir();
-
     const retentionHours = customRetentionHours !== undefined
         ? Number(customRetentionHours)
         : parseInt(process.env.VISUALISATION_RETENTION_HOURS || '24', 10);
@@ -38,55 +88,14 @@ async function runCleanup(customRetentionHours) {
     const retentionMs = retentionHours * 60 * 60 * 1000;
     const cutoff = Date.now() - retentionMs;
 
-    let scanned = 0;
-    let deleted = 0;
-    let errors = 0;
+    const visStats = sweepPngDirectory(VIS_DIR, cutoff, 'visualisation');
+    const qrStats  = sweepPngDirectory(QR_DIR, cutoff, 'qr_code');
+    const scanned = visStats.scanned + qrStats.scanned;
+    const deleted = visStats.deleted + qrStats.deleted;
+    const errors  = visStats.errors + qrStats.errors;
 
-    try {
-        const files = fs.readdirSync(VIS_DIR);
-
-        for (const file of files) {
-            // Safety: strictly only touch .png files
-            if (!file.toLowerCase().endsWith('.png')) {
-                continue;
-            }
-
-            const filePath = path.join(VIS_DIR, file);
-
-            // Safety check: ensure path is strictly contained within VIS_DIR
-            const resolvedPath = path.resolve(filePath);
-            if (!resolvedPath.startsWith(VIS_DIR)) {
-                console.warn(`[CleanupScheduler] Skipped suspicious path outside target directory: ${resolvedPath}`);
-                continue;
-            }
-
-            try {
-                const stat = fs.statSync(filePath);
-
-                if (!stat.isFile()) {
-                    continue;
-                }
-
-                scanned++;
-
-                // If file modification timestamp is older than 24h cutoff
-                if (stat.mtimeMs < cutoff) {
-                    const ageHours = ((Date.now() - stat.mtimeMs) / (1000 * 60 * 60)).toFixed(1);
-                    fs.unlinkSync(filePath);
-                    deleted++;
-                    console.log(`[CleanupScheduler] Deleted expired visualisation: ${file} (age: ${ageHours}h)`);
-                }
-            } catch (fileErr) {
-                errors++;
-                console.error(`[CleanupScheduler] Error inspecting/deleting file ${file}:`, fileErr.message);
-            }
-        }
-
-        if (deleted > 0 || errors > 0) {
-            console.log(`[CleanupScheduler] Sweep completed: scanned ${scanned} file(s), deleted ${deleted} expired file(s), ${errors} error(s).`);
-        }
-    } catch (dirErr) {
-        console.error('[CleanupScheduler] Failed to read visualisations directory:', dirErr.message);
+    if (deleted > 0 || errors > 0) {
+        console.log(`[CleanupScheduler] Sweep completed: scanned ${scanned} file(s), deleted ${deleted} expired file(s), ${errors} error(s).`);
     }
 
     // Also purge expired mobile navigation sessions
@@ -110,7 +119,8 @@ async function runCleanup(customRetentionHours) {
  * @returns {{ stop: Function, runNow: Function }}
  */
 function startCleanupScheduler(options = {}) {
-    ensureVisDir();
+    ensureDir(VIS_DIR);
+    ensureDir(QR_DIR);
 
     const intervalMinutes = options.intervalMinutes || parseInt(process.env.CLEANUP_INTERVAL_MINUTES || '60', 10);
     const intervalMs = Math.max(intervalMinutes, 1) * 60 * 1000;
@@ -146,5 +156,6 @@ function startCleanupScheduler(options = {}) {
 module.exports = {
     runCleanup,
     startCleanupScheduler,
-    VIS_DIR
+    VIS_DIR,
+    QR_DIR
 };

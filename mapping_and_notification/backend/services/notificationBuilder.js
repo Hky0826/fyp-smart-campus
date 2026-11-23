@@ -77,10 +77,16 @@ async function buildNotifications({ reqBody, routeResult }) {
         // 1. Single-query optimization: fetch both host and visitor details simultaneously
         const userIds = [hostId, visitorIdNum];
         const userResults = await queryAsync(
-            `SELECT u.user_id, u.full_name, u.email, u.role_id, r.role_name 
-             FROM users u 
-             LEFT JOIN roles r ON u.role_id = r.role_id 
-             WHERE u.user_id IN (?)`,
+            `SELECT u.user_id,
+                    CONCAT_WS(' ', u.given_name, u.family_name) AS full_name,
+                    u.email,
+                    MIN(ur.role_id) AS role_id,
+                    SUBSTRING_INDEX(GROUP_CONCAT(r.role_name ORDER BY ur.role_id SEPARATOR ','), ',', 1) AS role_name
+             FROM users u
+             LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+             LEFT JOIN roles r ON ur.role_id = r.role_id
+             WHERE u.user_id IN (?)
+             GROUP BY u.user_id, u.given_name, u.family_name, u.email`,
             [userIds]
         );
 
@@ -97,10 +103,16 @@ async function buildNotifications({ reqBody, routeResult }) {
         hostMsgId = `MSG-HOST-${Date.now()}-${Math.floor(Math.random() * 10000).toString(16)}`;
     } else {
         const userResults = await queryAsync(
-            `SELECT u.user_id, u.full_name, u.email, u.role_id, r.role_name 
-             FROM users u 
-             LEFT JOIN roles r ON u.role_id = r.role_id 
-             WHERE u.user_id = ?`,
+            `SELECT u.user_id,
+                    CONCAT_WS(' ', u.given_name, u.family_name) AS full_name,
+                    u.email,
+                    MIN(ur.role_id) AS role_id,
+                    SUBSTRING_INDEX(GROUP_CONCAT(r.role_name ORDER BY ur.role_id SEPARATOR ','), ',', 1) AS role_name
+             FROM users u
+             LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+             LEFT JOIN roles r ON ur.role_id = r.role_id
+             WHERE u.user_id = ?
+             GROUP BY u.user_id, u.given_name, u.family_name, u.email`,
             [visitorIdNum]
         );
         resolvedVisitor = userResults.find(u => u.user_id === visitorIdNum);

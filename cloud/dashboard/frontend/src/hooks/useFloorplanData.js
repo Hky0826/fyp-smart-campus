@@ -23,7 +23,7 @@ import { authAxios } from '../services/api';
  * @param {React.RefObject} deps.fileInputRef - Ref to the file input element (to reset after upload).
  * @returns {Object} Floorplan state and handlers.
  */
-export function useFloorplanData({ onFloorplanLoaded, onFloorplanCleared, onUploadSuccess, fileInputRef }) {
+export function useFloorplanData({ isAuthenticated, onFloorplanLoaded, onFloorplanCleared, onUploadSuccess, fileInputRef }) {
     const [currentFloorplanId, setCurrentFloorplanId] = useState(null);
     const [floorplansList, setFloorplansList]         = useState([]);
     const [globalNodes, setGlobalNodes]               = useState([]);
@@ -94,8 +94,10 @@ export function useFloorplanData({ onFloorplanLoaded, onFloorplanCleared, onUplo
     };
 
     useEffect(() => {
-        fetchInitialData();
-    }, []);
+        if (isAuthenticated) {
+            fetchInitialData();
+        }
+    }, [isAuthenticated]);
 
     /**
      * Refreshes the global nodes list from the API.
@@ -249,7 +251,7 @@ export function useFloorplanData({ onFloorplanLoaded, onFloorplanCleared, onUplo
                     scaleRatio
                 });
             }
-        } catch (error) {
+        } catch {
             alert('Upload Failed.');
         } finally {
             setIsUploading(false);
@@ -271,7 +273,7 @@ export function useFloorplanData({ onFloorplanLoaded, onFloorplanCleared, onUplo
             const res = await authAxios.put(`/api/floorplans/${currentFloorplanId}`, payload);
             alert(res.data.message);
             authAxios.get('/api/floorplans').then(r => setFloorplansList(r.data));
-        } catch (err) {
+        } catch {
             alert('Failed to update floorplan details.');
         }
     };
@@ -291,7 +293,7 @@ export function useFloorplanData({ onFloorplanLoaded, onFloorplanCleared, onUplo
             setWallGrid(null);
             authAxios.get('/api/floorplans').then(res => setFloorplansList(res.data));
             if (onFloorplanCleared) onFloorplanCleared();
-        } catch (error) {
+        } catch {
             alert('Failed to delete map.');
         }
     };

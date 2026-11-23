@@ -31,8 +31,10 @@ if (!fs.existsSync(dataDir)) {
 // TRANSPORTER FACTORY
 // ─────────────────────────────────────────────────────────────────────────────
 
+const transporterCache = {};
+
 /**
- * Build a Nodemailer transporter for the requested delivery mode.
+ * Build or return a cached pooled Nodemailer transporter for the requested delivery mode.
  *
  * @param {string} [mode] - "ethereal" | "smtp". Falls back to EMAIL_MODE env var,
  *                          then to "ethereal" if neither is set.
@@ -41,6 +43,10 @@ if (!fs.existsSync(dataDir)) {
 async function getTransporter(mode) {
     // Resolve the effective mode
     const effectiveMode = (mode || process.env.EMAIL_MODE || 'ethereal').toLowerCase();
+
+    if (transporterCache[effectiveMode]) {
+        return transporterCache[effectiveMode];
+    }
 
     if (effectiveMode === 'smtp') {
         const host = process.env.SMTP_HOST;
@@ -52,8 +58,11 @@ async function getTransporter(mode) {
             throw new Error('[EmailService] EMAIL_MODE=smtp requested but SMTP configuration is incomplete in .env. Required: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD.');
         }
 
-        console.log(`[EmailService] Using real SMTP server: ${host}`);
-        return nodemailer.createTransport({
+        console.log(`[EmailService] Using pooled real SMTP server: ${host}`);
+        transporterCache[effectiveMode] = nodemailer.createTransport({
+            pool: true,
+            maxConnections: 5,
+            maxMessages: 100,
             host,
             port:   parseInt(port, 10),
             secure: process.env.SMTP_SECURE === 'true' || parseInt(port, 10) === 465,
@@ -62,10 +71,11 @@ async function getTransporter(mode) {
                 pass
             }
         });
+        return transporterCache[effectiveMode];
     }
 
     // ── Ethereal mode ──────────────────────────────────────────────────────────
-    console.log('[EmailService] Using Ethereal SMTP sandbox.');
+    console.log('[EmailService] Using pooled Ethereal SMTP sandbox.');
     let etherealAccount;
 
     if (fs.existsSync(ETHEREAL_CACHE_PATH)) {
@@ -84,7 +94,10 @@ async function getTransporter(mode) {
         console.log(`[EmailService] Saved Ethereal credentials to: ${ETHEREAL_CACHE_PATH}`);
     }
 
-    return nodemailer.createTransport({
+    transporterCache[effectiveMode] = nodemailer.createTransport({
+        pool: true,
+        maxConnections: 5,
+        maxMessages: 100,
         host:   etherealAccount.smtp.host,
         port:   etherealAccount.smtp.port,
         secure: etherealAccount.smtp.secure,
@@ -93,6 +106,7 @@ async function getTransporter(mode) {
             pass: etherealAccount.pass
         }
     });
+    return transporterCache[effectiveMode];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

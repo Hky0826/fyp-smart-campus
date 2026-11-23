@@ -10,7 +10,7 @@
  * before passing nodes to this component. NodeSelector itself is generic.
  */
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 
 /**
  * Builds a human-readable label for a node.

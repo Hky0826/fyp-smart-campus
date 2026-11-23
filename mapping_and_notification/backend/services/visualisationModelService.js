@@ -12,9 +12,14 @@ const queryAsync = require('../utils/queryAsync');
 
 const ROLE_MAP = {
     admin: 1,
+    super_admin: 1,
+    system_admin: 1,
+    content_admin: 1,
     staff: 2,
-    student: 3,
-    visitor: 4
+    lecturer: 3,
+    student: 4,
+    visitor: 5,
+    guest: 5
 };
 
 const TRANSITION_TYPES = ['ELEVATOR', 'STAIRWELL', 'ENTRANCE'];
@@ -56,16 +61,20 @@ function isUnintendedFacilityNode(node) {
 
 /**
  * Resolves a role string or number into a valid numeric role ID.
- * Defaults to 4 (visitor) if unknown.
+ * Defaults to 5 (visitor) if unknown.
  *
  * @param {string|number} role
  * @returns {number}
  */
 function resolveRoleId(role) {
-    if (typeof role === 'number') return role;
-    if (!role) return 4;
+    if (typeof role === 'number') return Number.isFinite(role) ? role : 5;
+    if (!role) return 5;
     const lower = String(role).trim().toLowerCase();
-    return ROLE_MAP[lower] ?? (parseInt(lower, 10) || 4);
+    if (Object.prototype.hasOwnProperty.call(ROLE_MAP, lower)) {
+        return ROLE_MAP[lower];
+    }
+    const parsed = parseInt(lower, 10);
+    return Number.isNaN(parsed) ? 5 : parsed;
 }
 
 /**

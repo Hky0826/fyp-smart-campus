@@ -82,7 +82,7 @@ export function deserializeEdgesFromApi(apiEdges, nodeIdToIndex) {
                     pathPoints = parsed;
                     isCustom   = true;
                 }
-            } catch (_) {
+            } catch {
                 // Malformed custom_path — fall back to straight line
                 pathPoints = null;
                 isCustom   = false;

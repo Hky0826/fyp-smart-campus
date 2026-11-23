@@ -7,63 +7,68 @@ const ROUTING_KEY = 'appointment_routing';
 
 let connection = null;
 let channel = null;
-let isConnecting = false;
+let connectingPromise = null;
 
 /**
  * Initialize connection and channel, assert exchange and queue.
  */
 async function connectBroker() {
     if (connection && channel) return { connection, channel };
-    if (isConnecting) {
-        // Wait briefly if connection is already in progress
-        await new Promise(resolve => setTimeout(resolve, 500));
-        return connectBroker();
-    }
+    if (connectingPromise) return connectingPromise;
 
-    isConnecting = true;
-    console.log(`[RabbitMQ] Connecting to broker at ${RABBITMQ_URL}...`);
-    try {
-        connection = await amqp.connect(RABBITMQ_URL);
-        
-        // Use a confirm channel so we can await broker receipt confirmation
-        channel = await connection.createConfirmChannel();
-        
-        // Assert Topic exchange (durable)
+    connectingPromise = (async () => {
+        console.log(`[RabbitMQ] Connecting to broker at ${RABBITMQ_URL}...`);
         try {
-            await channel.assertExchange(EXCHANGE_NAME, 'topic', { durable: true });
-        } catch (_) {
-            await channel.assertExchange(EXCHANGE_NAME, 'direct', { durable: true });
+            connection = await amqp.connect(RABBITMQ_URL);
+
+            connection.on('error', (err) => {
+                console.error('[RabbitMQ] Connection error:', err.message);
+                connection = null;
+                channel = null;
+            });
+
+            connection.on('close', () => {
+                console.warn('[RabbitMQ] Connection closed. Will reconnect on next publish.');
+                connection = null;
+                channel = null;
+            });
+
+            // Use a confirm channel so we can await broker receipt confirmation
+            channel = await connection.createConfirmChannel();
+            channel.on('error', (err) => {
+                console.error('[RabbitMQ] Channel error:', err.message);
+                channel = null;
+            });
+            channel.on('close', () => {
+                channel = null;
+            });
+
+            // Assert Topic exchange (durable)
+            try {
+                await channel.assertExchange(EXCHANGE_NAME, 'topic', { durable: true });
+            } catch (_) {
+                await channel.assertExchange(EXCHANGE_NAME, 'direct', { durable: true });
+            }
+
+            // Assert Queue (durable)
+            await channel.assertQueue(QUEUE_NAME, { durable: true });
+
+            // Bind Queue to Exchange with Routing Key
+            await channel.bindQueue(QUEUE_NAME, EXCHANGE_NAME, ROUTING_KEY);
+
+            console.log('[RabbitMQ] Successfully connected, exchange/queue asserted.');
+        } catch (err) {
+            console.error('[RabbitMQ] Connection failed:', err.message);
+            connection = null;
+            channel = null;
+        } finally {
+            connectingPromise = null;
         }
-        
-        // Assert Queue (durable)
-        await channel.assertQueue(QUEUE_NAME, { durable: true });
-        
-        // Bind Queue to Exchange with Routing Key
-        await channel.bindQueue(QUEUE_NAME, EXCHANGE_NAME, ROUTING_KEY);
-        
-        console.log('[RabbitMQ] Successfully connected, exchange/queue asserted.');
 
-        connection.on('error', (err) => {
-            console.error('[RabbitMQ] Connection error:', err.message);
-            connection = null;
-            channel = null;
-        });
+        return { connection, channel };
+    })();
 
-        connection.on('close', () => {
-            console.warn('[RabbitMQ] Connection closed. Will reconnect on next publish.');
-            connection = null;
-            channel = null;
-        });
-
-    } catch (err) {
-        console.error('[RabbitMQ] Connection failed:', err.message);
-        connection = null;
-        channel = null;
-    } finally {
-        isConnecting = false;
-    }
-
-    return { connection, channel };
+    return connectingPromise;
 }
 
 /**

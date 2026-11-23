@@ -3,7 +3,6 @@
  * @description The Navigation Tester panel used to invoke the A* routing engine manually.
  */
 
-import React from 'react';
 import { isCorridorNode } from '../utils/nodeUtils';
 import { NodeSelector } from './NodeSelector/NodeSelector';
 

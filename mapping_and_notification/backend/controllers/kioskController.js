@@ -11,6 +11,7 @@
  *   3. Public endpoint to retrieve an active mobile navigation session by token.
  */
 
+const crypto = require('crypto');
 const queryAsync = require('../utils/queryAsync');
 const { runNavigation } = require('./engineController');
 const { buildVisualisationModel, resolveRoleId, isRolePermitted } = require('../services/visualisationModelService');
@@ -52,7 +53,7 @@ exports.navigateForKiosk = async (req, res) => {
             const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
             const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:5000';
             const baseUrl = process.env.MOBILE_BASE_URL ? process.env.MOBILE_BASE_URL.replace(/\/$/, '') : `${proto}://${host}`;
-            const tempToken = 'nav_' + Date.now();
+            const tempToken = `nav_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
             const generated = await routeVisualizer.generate(navResult, tempToken);
             visualisations = generated.map(v => ({
                 floorplan_id: v.floorplanId,
@@ -566,7 +567,7 @@ exports.renderMobileRoutePage = async (req, res) => {
                             chk.checked = !chk.checked;
                             updateProgress();
                         }
-                        if (stepFpId && String(stepFpId) !== activeFloorId) {
+                        if (stepFpId && String(stepFpId) !== String(activeFloorId)) {
                             switchFloor(stepFpId);
                         }
                     }

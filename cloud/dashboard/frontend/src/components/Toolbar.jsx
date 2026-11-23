@@ -7,13 +7,10 @@
  * triggering the Phase 1 AI Floorplan Analysis.
  */
 
-import React from 'react';
-
 export function Toolbar({
     appMode, setAppMode,
     mode, selectTool,
     currentFloorplanId,
-    handleDeleteSelected,
     navPanelOpen, setNavPanelOpen,
     notifPanelOpen, setNotifPanelOpen,
     handleSaveMapData,

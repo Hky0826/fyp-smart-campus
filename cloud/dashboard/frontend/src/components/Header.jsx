@@ -6,8 +6,6 @@
  * and the logout functionality.
  */
 
-import React from 'react';
-
 export function Header({ cvLoaded, cvLoadingError, adminName, handleLogout }) {
     return (
         <header className="bg-slate-900/90 backdrop-blur border-b border-slate-800 px-3 py-1.5 flex justify-between items-center shadow-md">

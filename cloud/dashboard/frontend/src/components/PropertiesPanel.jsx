@@ -6,7 +6,6 @@
  * and Cross-floor transitions.
  */
 
-import React from 'react';
 import { NodeSelector } from './NodeSelector/NodeSelector';
 
 export function PropertiesPanel({

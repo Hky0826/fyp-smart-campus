@@ -8,6 +8,27 @@ const QUEUE_NAME = 'campus.notifications.queue';
 
 let connection = null;
 let channel = null;
+let reconnectTimer = null;
+let isShuttingDown = false;
+let dbVerified = false;
+
+function scheduleReconnect() {
+    if (isShuttingDown || reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        start();
+    }, 5000);
+}
+
+function safeAck(msg) {
+    try {
+        if (channel) {
+            channel.ack(msg);
+        }
+    } catch (ackErr) {
+        console.warn('[Consumer] Failed to ack message (channel closed):', ackErr.message);
+    }
+}
 
 /**
  * Handle incoming message from RabbitMQ.
@@ -20,7 +41,7 @@ async function handleMessage(msg) {
         payload = JSON.parse(msg.content.toString());
     } catch (err) {
         console.error('[Consumer] Failed to parse message content as JSON. Rejecting.');
-        channel.ack(msg);
+        safeAck(msg);
         return;
     }
 
@@ -31,50 +52,76 @@ async function handleMessage(msg) {
         console.error('[Consumer] Error processing message inside service:', err.message);
     } finally {
         // Always acknowledge to avoid infinite message loop re-deliveries
-        channel.ack(msg);
+        safeAck(msg);
     }
 }
+
+async function shutdown() {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+    console.log('[Consumer] Shutting down consumer worker gracefully...');
+    try {
+        if (channel) await channel.close();
+        if (connection) await connection.close();
+        console.log('[Consumer] RabbitMQ connection closed.');
+        process.exit(0);
+    } catch (err) {
+        console.error('[Consumer] Error during shutdown:', err.message);
+        process.exit(1);
+    }
+}
+
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);
 
 /**
  * Start the consumer worker.
  */
 async function start() {
+    if (isShuttingDown) return;
     console.log('[Consumer] Starting notification consumer...');
-    
-    // Connect to database check
-    db.getConnection((err, conn) => {
-        if (err) {
-            console.error('[Consumer] Database connection failed:', err.message);
-            process.exit(1);
-        }
-        console.log('[Consumer] Database connection pool verified.');
-        conn.release();
-    });
+
+    if (!dbVerified) {
+        db.getConnection((err, conn) => {
+            if (err) {
+                console.error('[Consumer] Database connection failed:', err.message);
+                process.exit(1);
+            }
+            dbVerified = true;
+            console.log('[Consumer] Database connection pool verified.');
+            conn.release();
+        });
+    }
 
     try {
         connection = await amqp.connect(RABBITMQ_URL);
-        
+
         connection.on('error', (err) => {
             console.error('[Consumer] Connection error:', err.message);
         });
-        
+
         connection.on('close', () => {
             console.warn('[Consumer] RabbitMQ connection closed. Reconnecting in 5 seconds...');
             connection = null;
             channel = null;
-            setTimeout(start, 5000);
+            scheduleReconnect();
         });
 
         channel = await connection.createChannel();
-        
+
         channel.on('error', (err) => {
             console.error('[Consumer] Channel error:', err.message);
         });
-        
+
         channel.on('close', () => {
             console.warn('[Consumer] RabbitMQ channel closed.');
+            channel = null;
         });
-        
+
         await channel.assertQueue(QUEUE_NAME, { durable: true });
         // Prefetch set to 1 for load balancing
         await channel.prefetch(1);
@@ -85,26 +132,9 @@ async function start() {
             handleMessage(msg);
         }, { noAck: false });
 
-        // Handle graceful shutdowns
-        const shutdown = async () => {
-            console.log('[Consumer] Shutting down consumer worker gracefully...');
-            try {
-                if (channel) await channel.close();
-                if (connection) await connection.close();
-                console.log('[Consumer] RabbitMQ connection closed.');
-                process.exit(0);
-            } catch (err) {
-                console.error('[Consumer] Error during shutdown:', err.message);
-                process.exit(1);
-            }
-        };
-
-        process.on('SIGINT', shutdown);
-        process.on('SIGTERM', shutdown);
-
     } catch (err) {
         console.error('[Consumer] Consumer startup failed:', err.message);
-        setTimeout(start, 5000); // Retry connecting in 5 seconds
+        scheduleReconnect();
     }
 }
 

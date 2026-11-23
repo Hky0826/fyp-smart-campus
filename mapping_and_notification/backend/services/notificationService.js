@@ -113,6 +113,16 @@ async function processNotification(payload) {
             notificationDbId = insertRes.insertId;
         }
 
+        // Atomic claim prevents concurrent consumers from dispatching duplicate emails
+        const claimResult = await queryAsync(
+            "UPDATE notifications SET status = 'RETRYING' WHERE notification_id = ? AND status IN ('PENDING', 'QUEUED')",
+            [notificationDbId]
+        );
+        if (!claimResult || claimResult.affectedRows === 0) {
+            console.log(`[NotificationService] messageId=${message_id} already claimed or processed. Skipping.`);
+            return { success: true, skipped: true };
+        }
+
         // 4. Dispatch the appropriate email based on notification_type
         let emailResult;
 
@@ -146,7 +156,10 @@ async function processNotification(payload) {
                 throw new Error('Missing target_host_id or alert_message in host trigger.');
             }
 
-            const hostUsers = await queryAsync('SELECT user_id, full_name, email FROM users WHERE user_id = ?', [hostId]);
+            const hostUsers = await queryAsync(
+                "SELECT user_id, CONCAT_WS(' ', given_name, family_name) AS full_name, email FROM users WHERE user_id = ?",
+                [hostId]
+            );
             if (hostUsers.length === 0) {
                 const err = new Error(`Target host ID ${hostId} does not exist in users database.`);
                 err.code = 'HOST_MISSING';

@@ -3,7 +3,6 @@
  * @description The Notification Hub panel for triggering routing + notifications.
  */
 
-import React from 'react';
 import { isCorridorNode } from '../utils/nodeUtils';
 import { NodeSelector } from './NodeSelector/NodeSelector';
 
@@ -13,7 +12,7 @@ export function NotificationPanel({
     navStartId, setNavStartId,
     navEndId, setNavEndId,
     navRoleId, setNavRoleId,
-    globalNodes, rolesList,
+    globalNodes,
     notifUsers,
     notifTargetHostId, setNotifTargetHostId,
     notifVisitorId, setNotifVisitorId,

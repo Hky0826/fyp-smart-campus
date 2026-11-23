@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 
 const LoginScreen = ({ handleLogin, loginEmail, setLoginEmail, loginPassword, setLoginPassword, loginError }) => {
     const [showPassword, setShowPassword] = useState(false);

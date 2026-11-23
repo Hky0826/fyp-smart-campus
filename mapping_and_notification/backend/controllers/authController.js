@@ -28,7 +28,8 @@ exports.loginAdmin = (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ message: "Email and password required." });
 
-    const sql = `SELECT u.email, a.password_hash, a.admin_type, u.full_name 
+    const sql = `SELECT u.email, a.password_hash, a.admin_type,
+                        CONCAT_WS(' ', u.given_name, u.family_name) AS full_name 
                  FROM users u JOIN admins a ON u.user_id = a.user_id 
                  WHERE u.email = ?`;
 

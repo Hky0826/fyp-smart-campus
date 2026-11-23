@@ -126,7 +126,6 @@ export function useAuth({ onLoginSuccess, onLogout }) {
             authAxios.interceptors.request.eject(reqIntercept);
             authAxios.interceptors.response.eject(resIntercept);
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // On token change: pre-fetch initial data and set up session expiry timer
@@ -138,7 +137,9 @@ export function useAuth({ onLoginSuccess, onLogout }) {
             // Decode JWT payload to determine remaining session time if valid JWT
             if (typeof token === 'string' && token.includes('.')) {
                 try {
-                    const payload = JSON.parse(atob(token.split('.')[1]));
+                    const b64Url = token.split('.')[1];
+                    const b64 = b64Url.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (b64Url.length % 4)) % 4);
+                    const payload = JSON.parse(atob(b64));
                     const timeRemainingMs = (payload.exp * 1000) - Date.now();
                     if (timeRemainingMs <= 0) {
                         handleLogout();
@@ -149,12 +150,11 @@ export function useAuth({ onLoginSuccess, onLogout }) {
                         }, timeRemainingMs);
                         return () => clearTimeout(autoLogoutTimer);
                     }
-                } catch (error) { handleLogout(); }
+                } catch { handleLogout(); }
             } else {
                 handleLogout();
             }
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [token]);
 
     /**

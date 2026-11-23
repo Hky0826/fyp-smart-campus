@@ -29,7 +29,7 @@ import { TRANSITION_TYPES, CANVAS_WIDTH, CANVAS_HEIGHT } from '../constants/mapC
  * @param {Object|null} deps.imageObj - The loaded floorplan image object.
  * @returns {Object} Full editor state and all event handler functions.
  */
-export function useMapEditor({ rolesList, globalNodes, getWallGrid, editScaleRatio, imageObj }) {
+export function useMapEditor({ rolesList, globalNodes, getWallGrid, editScaleRatio, imageObj, fileInputRef: externalFileInputRef }) {
     // ── Graph State ───────────────────────────────────────────────────────────
     const [nodes, setNodes]             = useState([]);
     const [edges, setEdges]             = useState([]);
@@ -73,7 +73,8 @@ export function useMapEditor({ rolesList, globalNodes, getWallGrid, editScaleRat
     const isDraggingControlPoint  = useRef(false);
     const drawPathStartNode       = useRef(null); // Tracks first node for Draw Edges tool
     const mouseDownPos            = useRef(null);
-    const fileInputRef            = useRef(null);
+    const internalFileInputRef    = useRef(null);
+    const fileInputRef            = externalFileInputRef || internalFileInputRef;
 
     // ── Mode Switch Effect ────────────────────────────────────────────────────
     useEffect(() => {

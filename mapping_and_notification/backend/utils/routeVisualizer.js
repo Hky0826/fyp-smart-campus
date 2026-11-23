@@ -437,9 +437,14 @@ async function generate(routeResult, notificationId) {
         const pngStream = canvas.createPNGStream();
 
         await new Promise((resolve, reject) => {
-            pngStream.pipe(out);
+            const onError = (streamErr) => {
+                fs.unlink(filePath, () => {});
+                reject(streamErr);
+            };
+            pngStream.on('error', onError);
+            out.on('error', onError);
             out.on('finish', resolve);
-            out.on('error', reject);
+            pngStream.pipe(out);
         });
 
         console.log(`[RouteVisualizer] Generated visualization: ${filePath}`);

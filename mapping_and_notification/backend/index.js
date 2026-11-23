@@ -37,7 +37,7 @@ app.use('/api', engineRoutes);
 app.use('/api', notificationRoutes);
 app.use('/api', kioskRoutes);
 
-const PORT = 5000;
+const PORT = Number(process.env.PORT) || 5000;
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
     // Connect to RabbitMQ asynchronously on startup

@@ -25,7 +25,7 @@ export function useKiosk() {
     });
     const [roleId, setRoleId] = useState(() => {
         const r = searchParams.get('role');
-        return r ? (Number(r) || r) : 4; // Default to Visitor (4)
+        return r ? (Number(r) || r) : 5; // Default to Visitor (5)
     });
 
     // ── Result State ───────────────────────────────────────────────────────
@@ -58,7 +58,7 @@ export function useKiosk() {
     // ── Fetch global nodes filtered by selected role ──────────────────────
     useEffect(() => {
         const fetchNodesForRole = async () => {
-            const activeRole = roleId || 4;
+            const activeRole = roleId || 5;
             try {
                 const nodesRes = await kioskAxios.get(`/api/kiosk/global-nodes?role=${encodeURIComponent(activeRole)}`);
                 setGlobalNodes(nodesRes.data || []);

@@ -11,7 +11,7 @@
  *  - Fetching and displaying the MySQL notification audit trail
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { authAxios } from '../services/api';
 
 /**
@@ -52,6 +52,16 @@ export function useNotificationHub({
     const [notifLog, setNotifLog]                       = useState([]);
     const [notifLogLoading, setNotifLogLoading]         = useState(false);
     const [emailDeliveryMode, setEmailDeliveryMode]     = useState('ethereal');
+    const pollTimerRef = useRef(null);
+
+    useEffect(() => {
+        return () => {
+            if (pollTimerRef.current) {
+                clearTimeout(pollTimerRef.current);
+                pollTimerRef.current = null;
+            }
+        };
+    }, []);
 
     /**
      * Fetches the notification audit log and user list from the API.
@@ -78,7 +88,6 @@ export function useNotificationHub({
         if (notifPanelOpen && isAuthenticated) {
             fetchNotifData();
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [notifPanelOpen, isAuthenticated]);
 
     /**
@@ -176,11 +185,17 @@ export function useNotificationHub({
             }
 
             // Poll notification logs after delay to allow consumer processing
-            setTimeout(async () => {
+            if (pollTimerRef.current) {
+                clearTimeout(pollTimerRef.current);
+            }
+            pollTimerRef.current = setTimeout(async () => {
+                pollTimerRef.current = null;
                 try {
                     const logRes = await authAxios.get('/api/notifications');
                     setNotifLog(logRes.data);
-                } catch (_) {}
+                } catch {
+                    // Ignore transient polling error
+                }
             }, 1500);
 
         } catch (err) {

@@ -44,9 +44,11 @@ function App() {
     // We need to keep a local reference to the image object loaded by the floorplan hook
     // so OpenCV and Konva can render it.
     const [currentImageObj, setCurrentImageObj] = React.useState(null);
+    const fileInputRef = React.useRef(null);
 
     // 2. Floorplan Data Hook
     const floorplanData = useFloorplanData({
+        isAuthenticated: auth.isAuthenticated,
         onFloorplanLoaded: ({ img, nodes, edges }) => {
             setCurrentImageObj(img);
             mapEditor.setNodes(nodes);
@@ -62,7 +64,7 @@ function App() {
             mapEditor.setEdges([]);
             mapEditor.setMode(''); // Clear any active tool, but preserve Edit/Test mode
         },
-        fileInputRef: null // Will be assigned shortly via mapEditor ref
+        fileInputRef
     });
 
     // 3. Map Editor Hook (Core interaction state)
@@ -71,11 +73,9 @@ function App() {
         globalNodes: floorplanData.globalNodes,
         getWallGrid: () => floorplanData.wallGrid || [],
         editScaleRatio: floorplanData.editScaleRatio,
-        imageObj: currentImageObj
+        imageObj: currentImageObj,
+        fileInputRef
     });
-    
-    // Bind the file input ref now that it exists
-    floorplanData.fileInputRef = mapEditor.fileInputRef;
     
     mapEditor.imageObj = currentImageObj;
 
@@ -338,13 +338,20 @@ function App() {
                                                         const edge = mapEditor.edges[mapEditor.selectedElement.index];
                                                         const finalPoints = [...edge.pathPoints];
                                                         finalPoints[ptIdx] = { x: newX, y: newY };
-                                                        
-                                                        // Collision check is handled by the visual representation or backend for now
+                                                        const scale = parseFloat(floorplanData.editScaleRatio) || 1.0;
+                                                        let pixelDistance = 0;
+                                                        for (let idx = 1; idx < finalPoints.length; idx++) {
+                                                            pixelDistance += Math.hypot(
+                                                                finalPoints[idx].x - finalPoints[idx - 1].x,
+                                                                finalPoints[idx].y - finalPoints[idx - 1].y
+                                                            );
+                                                        }
+                                                        const updatedWeight = Number((pixelDistance * scale).toFixed(2));
                                                         
                                                         const newEdges = [...mapEditor.edges];
-                                                        // Rough weight update (we leave full recalc to the hook if needed, but here we just update points)
                                                         newEdges[mapEditor.selectedElement.index] = {
                                                             ...newEdges[mapEditor.selectedElement.index],
+                                                            weight: updatedWeight,
                                                             pathPoints: finalPoints,
                                                             customPathPoints: finalPoints,
                                                             isCustom: true
@@ -361,7 +368,6 @@ function App() {
                                     {mapEditor.nodes.map((node, i) => {
                                         const isSelected = mapEditor.selectedElement.type === 'node' && mapEditor.selectedElement.index === i;
                                         const isAiPending = node.ai_generated && node.review_status === 'PENDING';
-                                        const isAiModified = node.ai_generated && node.review_status === 'MODIFIED';
 
                                         // Fill color logic
                                         let fillColor;
