@@ -153,7 +153,7 @@ def create_device(device_in: schemas.DeviceCreate, background_tasks: BackgroundT
     resp.allowed_role_ids = [r.role_id for r in device.device_rbac]
     resp.provisioned_secret = provisioned_secret
     if push_sync_to_all_edges and background_tasks:
-        background_tasks.add_task(push_sync_to_all_edges, db)
+        background_tasks.add_task(push_sync_to_all_edges)
     return resp
 
 
@@ -195,7 +195,7 @@ def update_device(device_id: str, device_in: schemas.DeviceUpdate, background_ta
     resp = schemas.DeviceResponse.model_validate(device)
     resp.allowed_role_ids = [r.role_id for r in device.device_rbac]
     if push_sync_to_all_edges and background_tasks:
-        background_tasks.add_task(push_sync_to_all_edges, db)
+        background_tasks.add_task(push_sync_to_all_edges)
     return resp
 
 @router.post("/devices/{device_id}/heartbeat")
@@ -282,7 +282,7 @@ def grant_device_clearance(rbac_in: schemas.DeviceRBACBase, background_tasks: Ba
     db.add(rbac)
     db.commit()
     if push_sync_to_all_edges and background_tasks:
-        background_tasks.add_task(push_sync_to_all_edges, db)
+        background_tasks.add_task(push_sync_to_all_edges)
     return rbac
 
 @router.delete("/device-rbac/{device_id}/{role_id}")
@@ -293,7 +293,7 @@ def revoke_device_clearance(device_id: str, role_id: int, background_tasks: Back
     db.delete(rbac)
     db.commit()
     if push_sync_to_all_edges and background_tasks:
-        background_tasks.add_task(push_sync_to_all_edges, db)
+        background_tasks.add_task(push_sync_to_all_edges)
     return {"detail": "Device clearance rule revoked successfully"}
 
 @router.put("/devices/{device_id}/rbac", response_model=List[int])
@@ -308,7 +308,7 @@ def set_device_clearance(device_id: str, role_ids: List[int], background_tasks: 
             db.add(DeviceRBAC(device_id=device_id, role_id=r_id))
     db.commit()
     if push_sync_to_all_edges and background_tasks:
-        background_tasks.add_task(push_sync_to_all_edges, db)
+        background_tasks.add_task(push_sync_to_all_edges)
     return role_ids
 
 # ==========================================

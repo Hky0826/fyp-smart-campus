@@ -6,6 +6,7 @@ import base64
 import binascii
 import logging
 import datetime
+import secrets
 import uuid
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
@@ -156,51 +157,47 @@ class SQLAlchemyUpstreamHandler(AbstractUpstreamHandler):
         for idx, log in enumerate(logs):
             # Start nested checkpoint/transaction block for each log
             # to prevent one bad log entry from failing the entire batch
-            db.begin_nested()
             try:
-                sync_key = self._sync_key(log.sync_key)
-                existing = db.query(AuthenticationLog).filter(AuthenticationLog.sync_key == sync_key).first()
-                if existing:
-                    db.commit()
-                    processed_indices.append(idx)
-                    continue
+                with db.begin_nested():
+                    sync_key = self._sync_key(log.sync_key)
+                    existing = db.query(AuthenticationLog).filter(AuthenticationLog.sync_key == sync_key).first()
+                    if existing:
+                        processed_indices.append(idx)
+                        continue
 
-                # 1. Append log to cloud authentication_logs
-                parsed_time = self._parse_timestamp(log.timestamp)
-                db_log = AuthenticationLog(
-                    sync_key=sync_key,
-                    user_id=log.user_id,
-                    device_id=log.device_id,
-                    auth_status=log.auth_status,
-                    confidence_score=log.confidence_score,
-                    face_count=log.face_count,
-                    reason=log.reason,
-                    spoofing_checked=log.spoofing_checked,
-                    spoofing_passed=log.spoofing_passed,
-                    timestamp=parsed_time,
-                    image_path=log.image_path,
-                    node_id=log.node_id,
-                    policy_version=log.policy_version,
-                    decision_reason=log.decision_reason,
-                    correlation_id=log.correlation_id,
-                )
-                db.add(db_log)
-                db.flush() # Flushes so we trigger constraints and auto-increment
-
-                if log.auth_status.upper() == "SUCCESS" and log.user_id is not None:
-                    self._update_user_last_known_location(
-                        db,
+                    # 1. Append log to cloud authentication_logs
+                    parsed_time = self._parse_timestamp(log.timestamp)
+                    db_log = AuthenticationLog(
+                        sync_key=sync_key,
                         user_id=log.user_id,
                         device_id=log.device_id,
-                        event_time=parsed_time,
-                        source="access_control",
+                        auth_status=log.auth_status,
+                        confidence_score=log.confidence_score,
+                        face_count=log.face_count,
+                        reason=log.reason,
+                        spoofing_checked=log.spoofing_checked,
+                        spoofing_passed=log.spoofing_passed,
+                        timestamp=parsed_time,
+                        image_path=log.image_path,
+                        node_id=log.node_id,
+                        policy_version=log.policy_version,
+                        decision_reason=log.decision_reason,
+                        correlation_id=log.correlation_id,
                     )
+                    db.add(db_log)
+                    db.flush() # Flushes so we trigger constraints and auto-increment
 
-                # Commit log & mutation block
-                db.commit()
+                    if log.auth_status.upper() == "SUCCESS" and log.user_id is not None:
+                        self._update_user_last_known_location(
+                            db,
+                            user_id=log.user_id,
+                            device_id=log.device_id,
+                            event_time=parsed_time,
+                            source="access_control",
+                        )
+
                 processed_indices.append(idx)
             except Exception as e:
-                db.rollback()
                 logger.error(f"Failed to ingest log entry {idx} (device: {log.device_id}): {str(e)}")
                 # Continue processing other logs in the batch
         
@@ -218,45 +215,52 @@ class SQLAlchemyUpstreamHandler(AbstractUpstreamHandler):
         processed_indices = []
 
         for idx, log in enumerate(logs):
-            db.begin_nested()
+            saved_object_key: Optional[str] = None
             try:
-                sync_key = self._sync_key(log.sync_key)
-                existing = db.query(SurveillanceLog).filter(SurveillanceLog.sync_key == sync_key).first()
-                if existing:
-                    db.commit()
-                    processed_indices.append(idx)
-                    continue
+                with db.begin_nested():
+                    sync_key = self._sync_key(log.sync_key)
+                    existing = db.query(SurveillanceLog).filter(SurveillanceLog.sync_key == sync_key).first()
+                    if existing:
+                        processed_indices.append(idx)
+                        continue
 
-                parsed_time = self._parse_timestamp(log.timestamp)
-                image_path = self._save_surveillance_image(sync_key, log)
-                db_log = SurveillanceLog(
-                    sync_key=sync_key,
-                    user_id=log.user_id,
-                    device_id=log.device_id,
-                    recognition_status=log.recognition_status.upper(),
-                    confidence_score=log.confidence_score,
-                    matched_template=log.matched_template,
-                    face_count=log.face_count,
-                    bbox=log.bbox,
-                    timestamp=parsed_time,
-                    image_path=image_path,
-                )
-                db.add(db_log)
-                db.flush()
-
-                if log.recognition_status.upper() == "RECOGNIZED" and log.user_id is not None:
-                    self._update_user_last_known_location(
-                        db,
+                    parsed_time = self._parse_timestamp(log.timestamp)
+                    db_log = SurveillanceLog(
+                        sync_key=sync_key,
                         user_id=log.user_id,
                         device_id=log.device_id,
-                        event_time=parsed_time,
-                        source="surveillance",
+                        recognition_status=log.recognition_status.upper(),
+                        confidence_score=log.confidence_score,
+                        matched_template=log.matched_template,
+                        face_count=log.face_count,
+                        bbox=log.bbox,
+                        timestamp=parsed_time,
+                        image_path=log.image_path,
                     )
+                    db.add(db_log)
+                    db.flush()
 
-                db.commit()
+                    if log.recognition_status.upper() == "RECOGNIZED" and log.user_id is not None:
+                        self._update_user_last_known_location(
+                            db,
+                            user_id=log.user_id,
+                            device_id=log.device_id,
+                            event_time=parsed_time,
+                            source="surveillance",
+                        )
+
+                    saved_object_key = self._save_surveillance_image(sync_key, log)
+                    if saved_object_key:
+                        db_log.image_path = saved_object_key
+                        db.flush()
+
                 processed_indices.append(idx)
             except Exception as e:
-                db.rollback()
+                if saved_object_key:
+                    try:
+                        private_path("surveillance", saved_object_key).unlink(missing_ok=True)
+                    except Exception:
+                        pass
                 logger.error(f"Failed to ingest surveillance log entry {idx} (device: {log.device_id}): {str(e)}")
 
         try:
@@ -300,12 +304,16 @@ class SQLAlchemyUpstreamHandler(AbstractUpstreamHandler):
         object_key = f"{datetime.datetime.utcnow():%Y%m%d}/{sync_key}{ext}"
         file_path = private_path("surveillance", object_key)
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = file_path.with_name(f".{file_path.name}.tmp")
-        with temp_path.open("xb") as out:
-            out.write(image_bytes)
-            out.flush()
-            os.fsync(out.fileno())
-        temp_path.replace(file_path)
+        temp_path = file_path.with_name(f".{file_path.name}.{secrets.token_hex(6)}.tmp")
+        try:
+            with temp_path.open("xb") as out:
+                out.write(image_bytes)
+                out.flush()
+                os.fsync(out.fileno())
+            temp_path.replace(file_path)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
         return object_key
 
     def register_heartbeat(self, db: Session, hb: HeartbeatPayload) -> Dict[str, Any]:
@@ -378,6 +386,10 @@ def ingest_surveillance_logs(req: SurveillanceIngestionRequest, device: Device =
     for log in req.logs:
         bind_device_id(log.device_id, device)
         log.device_id = device.device_id
+        if log.recognition_status.upper() not in {"RECOGNIZED", "UNKNOWN"} or log.face_count < 0 or log.face_count > 50:
+            raise HTTPException(status_code=422, detail="Invalid surveillance log")
+        if log.user_id is not None and not db.query(User.user_id).filter(User.user_id == log.user_id).first():
+            raise HTTPException(status_code=422, detail="Invalid surveillance log")
     success_indices = handler.ingest_surveillance_logs(db, req.logs)
     return {
         "status": "processed",

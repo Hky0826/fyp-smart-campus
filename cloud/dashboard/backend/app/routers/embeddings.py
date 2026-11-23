@@ -17,5 +17,5 @@ router = APIRouter(prefix='/embeddings', tags=['Face Embeddings'])
 def reembed_all(models: list[Literal['openvc_sface','arcface_r50']] | None = None, background_tasks: BackgroundTasks = None, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     result = MultiModelEmbeddingService().reembed_all(db, tuple(models or (SFACE, ARCFACE)))
     if push_sync_to_all_edges and background_tasks:
-        background_tasks.add_task(push_sync_to_all_edges, db)
+        background_tasks.add_task(push_sync_to_all_edges)
     return result

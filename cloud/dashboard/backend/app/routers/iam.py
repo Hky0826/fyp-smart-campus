@@ -162,9 +162,6 @@ def check_and_delete_user_if_orphaned(db: Session, user):
     has_visitor = db.query(Visitor).filter_by(user_id=user.user_id).first() is not None
     has_admin = db.query(Admin).filter_by(user_id=user.user_id).first() is not None
     if not (has_student or has_lecturer or has_staff or has_visitor or has_admin):
-        from app.models.models import DeletedUser
-        deleted_record = DeletedUser(user_id=user.user_id, deleted_at=datetime.datetime.utcnow())
-        db.add(deleted_record)
         db.delete(user)
 
 def apply_user_update(db: Session, user: User, user_data: dict):
@@ -383,8 +380,6 @@ def create_user(user_in: schemas.UserCreate, db: Session = Depends(get_db), curr
     if db.query(User).filter_by(email=user_in.email).first():
         raise HTTPException(status_code=400, detail="email already taken")
     
-    email = generate_unique_email(db, user_in.given_name, user_in.family_name)
-    
     role_ids = []
     if user_in.role_ids:
         role_ids.extend(user_in.role_ids)
@@ -417,14 +412,15 @@ def update_user(user_id: int, user_in: schemas.UserUpdate, db: Session = Depends
         raise HTTPException(status_code=404, detail="User not found")
         
     # Resolve roles if provided
+    roles_provided = user_in.role_ids is not None or user_in.role_id is not None
     role_ids = []
     if user_in.role_ids is not None:
         role_ids.extend(user_in.role_ids)
     elif user_in.role_id is not None:
         role_ids.append(user_in.role_id)
         
-    if role_ids:
-        roles = db.query(Role).filter(Role.role_id.in_(role_ids)).all()
+    if roles_provided:
+        roles = db.query(Role).filter(Role.role_id.in_(role_ids)).all() if role_ids else []
         user.roles = roles
     
     for field, val in user_in.model_dump(exclude_unset=True).items():
@@ -450,9 +446,6 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current_admin=Depen
     user = db.query(User).filter_by(user_id=user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    from app.models.models import DeletedUser
-    deleted_record = DeletedUser(user_id=user_id, deleted_at=datetime.datetime.utcnow())
-    db.add(deleted_record)
     db.delete(user)
     db.commit()
     return {"detail": "User deleted successfully"}
@@ -489,7 +482,6 @@ def create_student(student_in: schemas.StudentCreate, db: Session = Depends(get_
         if db.query(User).filter_by(email=student_in.user.email).first():
             raise HTTPException(status_code=400, detail="email already taken")
             
-        email = generate_unique_email(db, student_in.user.given_name, student_in.user.family_name)
         role_ids = []
         if student_in.user.role_ids:
             role_ids.extend(student_in.user.role_ids)
@@ -614,7 +606,6 @@ def create_lecturer(lecturer_in: schemas.LecturerCreate, db: Session = Depends(g
         if db.query(User).filter_by(email=lecturer_in.user.email).first():
             raise HTTPException(status_code=400, detail="email already taken")
             
-        email = generate_unique_email(db, lecturer_in.user.given_name, lecturer_in.user.family_name)
         role_ids = []
         if lecturer_in.user.role_ids:
             role_ids.extend(lecturer_in.user.role_ids)
@@ -693,6 +684,7 @@ def update_lecturer(lecturer_id: str, lecturer_in: schemas.LecturerUpdate, db: S
             lecturer.staff.position = position
             
     if office_node_id is not None:
+        lecturer.office_node_id = office_node_id
         if lecturer.staff:
             lecturer.staff.office_node_id = office_node_id
             
@@ -754,7 +746,6 @@ def create_staff(staff_in: schemas.StaffCreate, db: Session = Depends(get_db), c
         if db.query(User).filter_by(email=staff_in.user.email).first():
             raise HTTPException(status_code=400, detail="email already taken")
             
-        email = generate_unique_email(db, staff_in.user.given_name, staff_in.user.family_name)
         role_ids = []
         if staff_in.user.role_ids:
             role_ids.extend(staff_in.user.role_ids)
@@ -859,7 +850,6 @@ def create_visitor(visitor_in: schemas.VisitorCreate, db: Session = Depends(get_
         if db.query(User).filter_by(email=visitor_in.user.email).first():
             raise HTTPException(status_code=400, detail="email already taken")
             
-        email = generate_unique_email(db, visitor_in.user.given_name, visitor_in.user.family_name)
         role_ids = []
         if visitor_in.user.role_ids:
             role_ids.extend(visitor_in.user.role_ids)
@@ -964,7 +954,6 @@ def create_admin(admin_in: schemas.AdminCreate, db: Session = Depends(get_db), c
         if db.query(User).filter_by(email=admin_in.user.email).first():
             raise HTTPException(status_code=400, detail="email already taken")
             
-        email = generate_unique_email(db, admin_in.user.given_name, admin_in.user.family_name)
         user = User(
             given_name=admin_in.user.given_name,
             family_name=admin_in.user.family_name,
@@ -1133,7 +1122,7 @@ def upload_user_face_photo(
     _replace_user_enrollment(db, user, crops, merge_existing=True)
 
     if _PUSH_SYNC_AVAILABLE and _push_sync_to_all_edges is not None:
-        background_tasks.add_task(_push_sync_to_all_edges, db)
+        background_tasks.add_task(_push_sync_to_all_edges)
 
     return {
         "detail": f"Face photo for {pose} uploaded and Face ID templates updated successfully",
@@ -1172,7 +1161,7 @@ def enroll_live_start(
 
 
 @router.post("/users/{user_id}/enroll-live/frame")
-async def enroll_live_frame(
+def enroll_live_frame(
     user_id: int,
     target_pose: str,
     file: UploadFile = File(...),
@@ -1405,7 +1394,8 @@ def enroll_live_complete(
         low_light_crop = np.clip(front_crop.astype(np.float32) * 0.4, 0, 255).astype(np.uint8)
         session_data["low_light"] = low_light_crop
 
-        poses = [p for p in ["front", "low_light"] if p in session_data]
+        all_poses = ["front", "left_30", "right_30", "left_60", "right_60", "slightly_up", "low_light"]
+        poses = [p for p in all_poses if p in session_data]
         for idx, pose in enumerate(poses):
             # Update progress
             enrollment_progress[user_id] = int((idx + 1) / len(poses) * 100)
@@ -1415,7 +1405,7 @@ def enroll_live_complete(
         enrollment_sessions.pop(user_id, None)
 
         if _PUSH_SYNC_AVAILABLE and _push_sync_to_all_edges is not None:
-            background_tasks.add_task(_push_sync_to_all_edges, db)
+            background_tasks.add_task(_push_sync_to_all_edges)
 
         return {
             "detail": "Live face enrollment completed successfully.",
@@ -1427,7 +1417,7 @@ def enroll_live_complete(
 
 
 @router.post("/users/{user_id}/enroll-video")
-async def enroll_user_video(
+def enroll_user_video(
     user_id: int,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -1460,106 +1450,111 @@ async def enroll_user_video(
 
     cap = cv2.VideoCapture(temp_video.name)
     if not cap.isOpened():
-        os.unlink(temp_video.name)
+        cap.release()
+        try:
+            os.unlink(temp_video.name)
+        except OSError:
+            pass
         raise HTTPException(status_code=400, detail="Could not open video file.")
 
     required_poses = ["front", "left_30", "right_30", "left_60", "right_60", "slightly_up"]
     harvested_crops = {}
     harvested_blurs = {}
 
-    detector = get_yunet_detector()
-    frame_idx = 0
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    # Sample no more than roughly 60 frames; detector inference dominates runtime.
-    frame_step = max(2, int(np.ceil(total_frames / 60))) if total_frames else 2
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        frame_idx += 1
-        if frame_idx % frame_step != 0:
-            continue
-
-        try:
-            faces = detector.detect(frame)
-        except Exception:
-            continue
-
-        if not faces:
-            continue
-
-        faces.sort(key=lambda f: (f["bbox"][2] - f["bbox"][0]) * (f["bbox"][3] - f["bbox"][1]), reverse=True)
-        face = faces[0]
-        bbox = face["bbox"]
-        x1, y1, x2, y2 = [int(v) for v in bbox]
-        h_img, w_img = frame.shape[:2]
-        x1 = max(0, x1)
-        y1 = max(0, y1)
-        x2 = min(w_img, x2)
-        y2 = min(h_img, y2)
-        crop = frame[y1:y2, x1:x2]
-
-        if crop.size == 0 or (x2 - x1) < 100 or (y2 - y1) < 100:
-            continue
-
-        gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        blur_score = float(cv2.Laplacian(gray_crop, cv2.CV_64F).var())
-        if blur_score < 50.0:
-            continue
-
-        landmarks = face["landmarks"]
-        # Sort eye coordinates so left_eye_x is always viewer's left (smaller x)
-        left_eye_x = float(min(landmarks[0][0], landmarks[1][0]))
-        right_eye_x = float(max(landmarks[0][0], landmarks[1][0]))
-        
-        left_eye_y = float(landmarks[0][1])
-        right_eye_y = float(landmarks[1][1])
-        
-        nose_x = float(landmarks[2][0])
-        nose_y = float(landmarks[2][1])
-        
-        eye_y = (left_eye_y + right_eye_y) / 2.0
-        mouth_y = (float(landmarks[3][1]) + float(landmarks[4][1])) / 2.0
-
-        denom_yaw = right_eye_x - left_eye_x
-        yaw_ratio = float((nose_x - left_eye_x) / denom_yaw if denom_yaw != 0 else 0.5)
-
-        denom_pitch = mouth_y - eye_y
-        pitch_ratio = float((nose_y - eye_y) / denom_pitch if denom_pitch != 0 else 0.5)
-
-        detected_pose = "unknown"
-        if pitch_ratio < 0.40:
-            detected_pose = "slightly_up"
-        else:
-            if yaw_ratio < 0.28:
-                detected_pose = "right_60"
-            elif yaw_ratio < 0.40:
-                detected_pose = "right_30"
-            elif yaw_ratio > 0.72:
-                detected_pose = "left_60"
-            elif yaw_ratio > 0.60:
-                detected_pose = "left_30"
-            else:
-                detected_pose = "front"
-
-        if detected_pose in required_poses:
-            aligned_crop = extract_aligned_face(frame, face)
-            existing_blur = harvested_blurs.get(detected_pose, 0.0)
-            if detected_pose not in harvested_crops or blur_score > existing_blur:
-                harvested_crops[detected_pose] = aligned_crop.copy()
-                harvested_blurs[detected_pose] = blur_score
-
-        # low_light is derived below; six required poses are enough to finish.
-        if len(harvested_crops) == len(required_poses):
-            break
-
-    cap.release()
     try:
-        os.unlink(temp_video.name)
-    except Exception:
-        pass
+        detector = get_yunet_detector()
+        frame_idx = 0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        # Sample no more than roughly 60 frames; detector inference dominates runtime.
+        frame_step = max(2, int(np.ceil(total_frames / 60))) if total_frames else 2
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            frame_idx += 1
+            if frame_idx % frame_step != 0:
+                continue
+
+            try:
+                faces = detector.detect(frame)
+            except Exception:
+                continue
+
+            if not faces:
+                continue
+
+            faces.sort(key=lambda f: (f["bbox"][2] - f["bbox"][0]) * (f["bbox"][3] - f["bbox"][1]), reverse=True)
+            face = faces[0]
+            bbox = face["bbox"]
+            x1, y1, x2, y2 = [int(v) for v in bbox]
+            h_img, w_img = frame.shape[:2]
+            x1 = max(0, x1)
+            y1 = max(0, y1)
+            x2 = min(w_img, x2)
+            y2 = min(h_img, y2)
+            crop = frame[y1:y2, x1:x2]
+
+            if crop.size == 0 or (x2 - x1) < 100 or (y2 - y1) < 100:
+                continue
+
+            gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+            blur_score = float(cv2.Laplacian(gray_crop, cv2.CV_64F).var())
+            if blur_score < 50.0:
+                continue
+
+            landmarks = face["landmarks"]
+            # Sort eye coordinates so left_eye_x is always viewer's left (smaller x)
+            left_eye_x = float(min(landmarks[0][0], landmarks[1][0]))
+            right_eye_x = float(max(landmarks[0][0], landmarks[1][0]))
+            
+            left_eye_y = float(landmarks[0][1])
+            right_eye_y = float(landmarks[1][1])
+            
+            nose_x = float(landmarks[2][0])
+            nose_y = float(landmarks[2][1])
+            
+            eye_y = (left_eye_y + right_eye_y) / 2.0
+            mouth_y = (float(landmarks[3][1]) + float(landmarks[4][1])) / 2.0
+
+            denom_yaw = right_eye_x - left_eye_x
+            yaw_ratio = float((nose_x - left_eye_x) / denom_yaw if denom_yaw != 0 else 0.5)
+
+            denom_pitch = mouth_y - eye_y
+            pitch_ratio = float((nose_y - eye_y) / denom_pitch if denom_pitch != 0 else 0.5)
+
+            detected_pose = "unknown"
+            if pitch_ratio < 0.40:
+                detected_pose = "slightly_up"
+            else:
+                if yaw_ratio < 0.28:
+                    detected_pose = "right_60"
+                elif yaw_ratio < 0.40:
+                    detected_pose = "right_30"
+                elif yaw_ratio > 0.72:
+                    detected_pose = "left_60"
+                elif yaw_ratio > 0.60:
+                    detected_pose = "left_30"
+                else:
+                    detected_pose = "front"
+
+            if detected_pose in required_poses:
+                aligned_crop = extract_aligned_face(frame, face)
+                existing_blur = harvested_blurs.get(detected_pose, 0.0)
+                if detected_pose not in harvested_crops or blur_score > existing_blur:
+                    harvested_crops[detected_pose] = aligned_crop.copy()
+                    harvested_blurs[detected_pose] = blur_score
+
+            # low_light is derived below; six required poses are enough to finish.
+            if len(harvested_crops) == len(required_poses):
+                break
+    finally:
+        cap.release()
+        try:
+            os.unlink(temp_video.name)
+        except Exception:
+            pass
 
     missing = [p for p in required_poses if p not in harvested_crops]
     if missing:
@@ -1577,7 +1572,7 @@ async def enroll_user_video(
     _replace_user_enrollment(db, user, harvested_crops)
 
     if _PUSH_SYNC_AVAILABLE and _push_sync_to_all_edges is not None:
-        background_tasks.add_task(_push_sync_to_all_edges, db)
+        background_tasks.add_task(_push_sync_to_all_edges)
 
     return {
         "detail": "Video face enrollment completed successfully.",
@@ -1588,7 +1583,7 @@ async def enroll_user_video(
 
 @router.post("/users/reembed-all")
 @router.post("/users/reembed-all/")
-async def reembed_all_users(
+def reembed_all_users(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_admin=Depends(verify_system_admin)
@@ -1606,11 +1601,13 @@ async def reembed_all_users(
         if not result["committed"]:
             raise HTTPException(status_code=400, detail="No enrollment templates were re-embedded.")
         if _PUSH_SYNC_AVAILABLE and _push_sync_to_all_edges is not None:
-            background_tasks.add_task(_push_sync_to_all_edges, db)
+            background_tasks.add_task(_push_sync_to_all_edges)
         return {
             "detail": f"Successfully re-embedded {result['written']} model templates for all users. Edge sync triggered."
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()

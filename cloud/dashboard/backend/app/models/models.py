@@ -639,6 +639,10 @@ class AuthenticationLog(Base):
         # Backwards compatibility with AuthStatusEnum in older API
         return self.auth_status
 
+    @property
+    def attempted_at(self):
+        return self.timestamp
+
 
 class AdministratorAuditEvent(Base):
     """Append-only security audit event; payloads are metadata, never secrets."""
@@ -655,10 +659,6 @@ class AdministratorAuditEvent(Base):
     source_ip = Column(String(45), nullable=True)
     details = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
-        
-    @property
-    def attempted_at(self):
-        return self.timestamp
 
 class SurveillanceLog(Base):
     __tablename__ = "surveillance_logs"
@@ -822,10 +822,15 @@ from sqlalchemy.sql import text
 @event.listens_for(User, 'after_delete')
 def receive_after_delete(mapper, connection, target):
     try:
-        connection.execute(
-            text("INSERT INTO deleted_users (user_id, deleted_at) VALUES (:user_id, :deleted_at)"),
-            {"user_id": target.user_id, "deleted_at": datetime.datetime.utcnow()}
-        )
+        exists = connection.execute(
+            text("SELECT 1 FROM deleted_users WHERE user_id = :user_id"),
+            {"user_id": target.user_id},
+        ).first()
+        if not exists:
+            connection.execute(
+                text("INSERT INTO deleted_users (user_id, deleted_at) VALUES (:user_id, :deleted_at)"),
+                {"user_id": target.user_id, "deleted_at": datetime.datetime.utcnow()}
+            )
     except Exception as e:
         import logging
         logging.getLogger("sqlalchemy.event").error(f"Failed to log deleted user {target.user_id}: {e}")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 import cv2
@@ -14,6 +15,10 @@ from app.models.models import User, UserFaceEmbedding
 SFACE = "openvc_sface"
 ARCFACE = "arcface_r50"
 ROOT = Path(__file__).resolve().parents[5]
+
+_MODEL_CACHE_LOCK = threading.Lock()
+_SFACE_CACHE: dict[str, object] = {}
+_ARCFACE_CACHE: dict[str, EdgeFaceEmbedder] = {}
 
 
 class EnrollmentEmbeddingError(ValueError):
@@ -42,18 +47,30 @@ class MultiModelEmbeddingService:
                 if not self.sface_path.is_file():
                     raise EnrollmentEmbeddingError(f"{SFACE}: model not found: {self.sface_path}")
                 if self._sface is None:
-                    try:
-                        self._sface = cv2.FaceRecognizerSF.create(str(self.sface_path), "")
-                    except Exception as exc:
-                        raise EnrollmentEmbeddingError(f"{SFACE}: model initialization failed: {exc}") from exc
+                    key = str(self.sface_path.resolve())
+                    with _MODEL_CACHE_LOCK:
+                        cached = _SFACE_CACHE.get(key)
+                        if cached is None:
+                            try:
+                                cached = cv2.FaceRecognizerSF.create(str(self.sface_path), "")
+                            except Exception as exc:
+                                raise EnrollmentEmbeddingError(f"{SFACE}: model initialization failed: {exc}") from exc
+                            _SFACE_CACHE[key] = cached
+                        self._sface = cached
             elif model_name == ARCFACE:
                 if not self.arcface_path or not Path(self.arcface_path).is_file():
                     raise EnrollmentEmbeddingError(f"{ARCFACE}: model not found: {self.arcface_path}")
                 if self._arcface is None:
-                    try:
-                        self._arcface = EdgeFaceEmbedder(self.arcface_path)
-                    except Exception as exc:
-                        raise EnrollmentEmbeddingError(f"{ARCFACE}: model initialization failed: {exc}") from exc
+                    key = str(Path(self.arcface_path).resolve())
+                    with _MODEL_CACHE_LOCK:
+                        cached = _ARCFACE_CACHE.get(key)
+                        if cached is None:
+                            try:
+                                cached = EdgeFaceEmbedder(self.arcface_path)
+                            except Exception as exc:
+                                raise EnrollmentEmbeddingError(f"{ARCFACE}: model initialization failed: {exc}") from exc
+                            _ARCFACE_CACHE[key] = cached
+                        self._arcface = cached
             else:
                 raise EnrollmentEmbeddingError(f"{model_name}: unsupported embedding model")
 

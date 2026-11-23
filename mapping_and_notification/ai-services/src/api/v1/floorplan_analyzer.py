@@ -18,6 +18,7 @@ No analysis logic lives here. All processing is in services/floorplan_analyzer.p
 from __future__ import annotations
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 
 from src.services.floorplan_analyzer import FloorplanAnalyzerService
 from src.shared.models.v1.domain import FloorplanAnalysisResult
@@ -189,7 +190,8 @@ async def analyze_floorplan(
 
     # ── Run analysis pipeline ──────────────────────────────────────────────────
     try:
-        result = _analyzer.analyze(
+        result = await run_in_threadpool(
+            _analyzer.analyze,
             image_bytes=image_bytes,
             canvas_width=canvas_width,
             canvas_height=canvas_height,

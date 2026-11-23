@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 
 
 from src.shared.models.v1.domain import ProcessingResult
@@ -119,7 +120,8 @@ async def detect_walls(
 
     # ── Run wall detection ─────────────────────────────────────────────────────
     try:
-        result = detector.detect(
+        result = await run_in_threadpool(
+            detector.detect,
             image_bytes=image_bytes,
             sensitivity=sensitivity,
             canvas_width=canvas_width,

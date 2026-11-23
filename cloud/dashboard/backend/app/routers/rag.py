@@ -324,8 +324,6 @@ def list_chatbot_queries(
 
 @router.get("/speech-languages", response_model=List[schemas.SpeechLanguageResponse])
 def list_speech_languages(db: Session = Depends(get_db), current_admin=Depends(verify_content_admin)):
-    from app.db_init import ensure_speech_tables_and_seed
-    ensure_speech_tables_and_seed(db)
     return db.query(SpeechLanguage).order_by(SpeechLanguage.is_default.desc(), SpeechLanguage.language_name.asc()).all()
 
 @router.post("/speech-languages", response_model=schemas.SpeechLanguageResponse, status_code=status.HTTP_201_CREATED)
@@ -334,8 +332,6 @@ def create_speech_language(
     db: Session = Depends(get_db),
     current_admin=Depends(verify_content_admin)
 ):
-    from app.db_init import ensure_speech_tables_and_seed
-    ensure_speech_tables_and_seed(db)
     code = payload.language_code.lower().strip()
     if not code:
         raise HTTPException(status_code=400, detail="Language code cannot be empty.")
@@ -367,8 +363,6 @@ def delete_speech_language(
     db: Session = Depends(get_db),
     current_admin=Depends(verify_content_admin)
 ):
-    from app.db_init import ensure_speech_tables_and_seed
-    ensure_speech_tables_and_seed(db)
     clean_code = code.lower().strip()
     lang = db.query(SpeechLanguage).filter(SpeechLanguage.language_code == clean_code).first()
     if not lang:
@@ -380,8 +374,6 @@ def delete_speech_language(
 
 @router.post("/speech-languages/{code}/toggle-default", response_model=schemas.SpeechLanguageResponse)
 def toggle_language_default(code: str, db: Session = Depends(get_db), current_admin=Depends(verify_content_admin)):
-    from app.db_init import ensure_speech_tables_and_seed
-    ensure_speech_tables_and_seed(db)
     lang = db.query(SpeechLanguage).filter(SpeechLanguage.language_code == code.lower().strip()).first()
     if not lang:
         raise HTTPException(status_code=404, detail="Language not found")
@@ -394,8 +386,6 @@ def toggle_language_default(code: str, db: Session = Depends(get_db), current_ad
 
 @router.post("/speech-languages/{code}/toggle-active", response_model=schemas.SpeechLanguageResponse)
 def toggle_language_active(code: str, db: Session = Depends(get_db), current_admin=Depends(verify_content_admin)):
-    from app.db_init import ensure_speech_tables_and_seed
-    ensure_speech_tables_and_seed(db)
     lang = db.query(SpeechLanguage).filter(SpeechLanguage.language_code == code.lower().strip()).first()
     if not lang:
         raise HTTPException(status_code=404, detail="Language not found")
@@ -416,8 +406,6 @@ def list_adaptation_phrases(
     db: Session = Depends(get_db),
     current_admin=Depends(verify_content_admin)
 ):
-    from app.db_init import ensure_speech_tables_and_seed
-    ensure_speech_tables_and_seed(db)
     query = db.query(SpeechAdaptationPhrase)
     if category and category.upper() != "ALL":
         query = query.filter(SpeechAdaptationPhrase.language_category == category.upper().strip())
@@ -436,8 +424,6 @@ def list_adaptation_phrases(
 
 @router.get("/adaptation-phrases/categories")
 def get_adaptation_categories(db: Session = Depends(get_db), current_admin=Depends(verify_content_admin)):
-    from app.db_init import ensure_speech_tables_and_seed
-    ensure_speech_tables_and_seed(db)
     records = db.query(SpeechAdaptationPhrase.language_category).distinct().all()
     categories = sorted({r[0].upper() for r in records if r[0]})
     base_cats = ["CAMPUS", "ACADEMIC", "ENGLISH", "MALAY", "CHINESE", "CANTONESE", "GENERAL"]
@@ -446,8 +432,6 @@ def get_adaptation_categories(db: Session = Depends(get_db), current_admin=Depen
 
 @router.post("/adaptation-phrases", response_model=schemas.SpeechAdaptationPhraseResponse)
 def create_adaptation_phrase(payload: schemas.SpeechAdaptationPhraseCreate, db: Session = Depends(get_db), current_admin=Depends(verify_content_admin)):
-    from app.db_init import ensure_speech_tables_and_seed
-    ensure_speech_tables_and_seed(db)
     cleaned_phrase = payload.phrase.strip()
     if not cleaned_phrase:
         raise HTTPException(status_code=400, detail="Phrase cannot be empty")
@@ -468,8 +452,6 @@ def create_adaptation_phrase(payload: schemas.SpeechAdaptationPhraseCreate, db: 
 
 @router.put("/adaptation-phrases/{phrase_id}", response_model=schemas.SpeechAdaptationPhraseResponse)
 def update_adaptation_phrase(phrase_id: int, payload: schemas.SpeechAdaptationPhraseUpdate, db: Session = Depends(get_db), current_admin=Depends(verify_content_admin)):
-    from app.db_init import ensure_speech_tables_and_seed
-    ensure_speech_tables_and_seed(db)
     record = db.query(SpeechAdaptationPhrase).filter_by(phrase_id=phrase_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="Phrase not found")
@@ -493,8 +475,6 @@ def update_adaptation_phrase(phrase_id: int, payload: schemas.SpeechAdaptationPh
 
 @router.delete("/adaptation-phrases/{phrase_id}")
 def delete_adaptation_phrase(phrase_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_content_admin)):
-    from app.db_init import ensure_speech_tables_and_seed
-    ensure_speech_tables_and_seed(db)
     record = db.query(SpeechAdaptationPhrase).filter_by(phrase_id=phrase_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="Phrase not found")
@@ -504,8 +484,6 @@ def delete_adaptation_phrase(phrase_id: int, db: Session = Depends(get_db), curr
 
 @router.post("/adaptation-phrases/{phrase_id}/toggle-active", response_model=schemas.SpeechAdaptationPhraseResponse)
 def toggle_adaptation_phrase_active(phrase_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_content_admin)):
-    from app.db_init import ensure_speech_tables_and_seed
-    ensure_speech_tables_and_seed(db)
     record = db.query(SpeechAdaptationPhrase).filter_by(phrase_id=phrase_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="Phrase not found")

@@ -20,10 +20,10 @@ if backend_dir not in sys.path:
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 import requests
 
-from app.core.database import get_db, Base, engine
+from app.core.database import get_db, SessionLocal
 from app.core.security import verify_super_admin, verify_system_admin
 from app.models.models import User, Role, NodeRBAC, Device, DeviceRBAC, UserRole, DeletedUser
 from app.core.device_auth import decrypt_device_secret, require_signed_device_request, bind_device_id, sign_request
@@ -32,13 +32,6 @@ from sync.callback_security import validate_callback_url
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("CloudSyncService")
-
-# Auto-create tables (e.g. deleted_users) if not exists
-try:
-    Base.metadata.create_all(bind=engine)
-    logger.info("Ensured all database tables exist (including deleted_users).")
-except Exception as e:
-    logger.error(f"Error ensuring database tables exist: {e}")
 
 
 # =====================================================================
@@ -292,9 +285,15 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
         Filters on updated_at (preferred) so photo updates and any user field
         changes are captured — not just new user enrollments.
         """
+        if last_synced_at is not None and last_synced_at.tzinfo is not None:
+            last_synced_at = last_synced_at.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+
         # Fetching Users — filter on updated_at so photo uploads are picked up.
         # updated_at is set by the ORM on every UPDATE (including face_vector changes).
-        user_query = db.query(User)
+        user_query = db.query(User).options(
+            joinedload(User.embeddings),
+            joinedload(User.visitor),
+        )
         if last_synced_at:
             from sqlalchemy import or_
             user_query = user_query.filter(
@@ -423,11 +422,9 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
         # Discover active edge devices
         active_devices = db.query(Device).filter(Device.is_active == True, Device.ip_address != None).all()
         
-        pushed_targets = []
-        for dev in active_devices:
-            # Dispatch push alert inside background task
-            background_tasks.add_task(EdgeNotificationDispatcher.send_deactivation_push, dev, user_id)
-            pushed_targets.append(dev.device_id)
+        pushed_targets = [dev.device_id for dev in active_devices]
+        if pushed_targets:
+            background_tasks.add_task(push_deactivation_to_edges, pushed_targets, user_id)
 
         return {
             "status": "deactivated",
@@ -444,14 +441,34 @@ router = APIRouter(prefix="/sync/downstream", tags=["Database Synchronization - 
 handler: AbstractDownstreamHandler = SQLAlchemyDownstreamHandler()
 
 
-def push_sync_to_all_edges(db: Session) -> None:
+def push_deactivation_to_edges(device_ids: List[str], user_id: int) -> None:
+    """Background task helper: opens a fresh DB session and sends deactivation pushes."""
+    if not device_ids:
+        return
+    db = SessionLocal()
+    try:
+        devices = db.query(Device).filter(
+            Device.device_id.in_(device_ids),
+            Device.is_active == True,
+        ).all()
+        for dev in devices:
+            EdgeNotificationDispatcher.send_deactivation_push(dev, user_id)
+    except Exception as e:
+        logger.error(f"push_deactivation_to_edges failed: {str(e)}")
+    finally:
+        db.close()
+
+
+def push_sync_to_all_edges(db: Optional[Session] = None) -> None:
     """
     Background task helper: iterates over all active edge devices and sends
     a trigger-sync push so they immediately pull the latest delta from the cloud.
     Intended to be called via FastAPI BackgroundTasks after any user update.
     """
+    own_session = db is None
+    session = SessionLocal() if own_session else db
     try:
-        active_devices = db.query(Device).filter(
+        active_devices = session.query(Device).filter(
             Device.is_active == True,
             Device.ip_address != None
         ).all()
@@ -459,6 +476,9 @@ def push_sync_to_all_edges(db: Session) -> None:
             EdgeNotificationDispatcher.send_sync_push(dev)
     except Exception as e:
         logger.error(f"push_sync_to_all_edges failed: {str(e)}")
+    finally:
+        if own_session:
+            session.close()
 
 @router.post("/register", status_code=status.HTTP_200_OK)
 def register_edge(registration: EdgeRegistration, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
@@ -511,5 +531,5 @@ def trigger_push_sync(background_tasks: BackgroundTasks, db: Session = Depends(g
     registered edge devices so they pull the latest cloud delta without waiting for
     their polling interval. Useful after bulk user updates or photo enrollments.
     """
-    background_tasks.add_task(push_sync_to_all_edges, db)
+    background_tasks.add_task(push_sync_to_all_edges)
     return {"status": "dispatched", "message": "Trigger-sync broadcast queued for all active edge devices"}
