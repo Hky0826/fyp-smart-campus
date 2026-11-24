@@ -85,9 +85,6 @@ export function SessionsPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">Active JWT Sessions</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-          Inspect issued administrator and kiosk sessions and revoke compromised tokens immediately.
-        </p>
       </div>
       <DataTable columns={columns} data={sessions} loading={isLoading} total={sessions.length} />
     </div>

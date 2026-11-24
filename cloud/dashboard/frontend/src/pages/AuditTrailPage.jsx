@@ -107,9 +107,6 @@ export function AuditTrailPage() {
         <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
           Admin Audit Trail
         </h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-          Immutable log of administrative mutations, RBAC changes, bulk operations, and CSV imports.
-        </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5">

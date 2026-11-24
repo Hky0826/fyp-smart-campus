@@ -127,9 +127,6 @@ export function AcademicsPage() {
         <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
           Academics & Scheduling
         </h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-          Manage courses, server-paginated enrollments, timetables, appointments, notifications, and campus structure.
-        </p>
       </div>
 
       <div className="flex flex-wrap gap-1.5 border-b border-slate-200 dark:border-slate-800 pb-3">

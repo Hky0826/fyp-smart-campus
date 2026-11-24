@@ -164,9 +164,6 @@ export function DocumentsPage() {
           <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
             Knowledge Base Documents
           </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            Upload and govern role-restricted campus documents indexed by the RAG chatbot.
-          </p>
         </div>
         <button
           type="button"

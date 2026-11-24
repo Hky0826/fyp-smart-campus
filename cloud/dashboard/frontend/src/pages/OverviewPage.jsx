@@ -83,9 +83,6 @@ export function OverviewPage() {
           <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
             Operations Overview
           </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            Live campus identity, biometric access, and infrastructure health.
-          </p>
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
           <StatusBadge variant="success" dot>
@@ -161,7 +158,6 @@ export function OverviewPage() {
               </div>
               <div>
                 <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">Actionable Alerts</h2>
-                <p className="text-xs text-slate-500">Exceptions requiring operator attention</p>
               </div>
             </div>
             <StatusBadge variant={alerts.length > 0 ? 'warning' : 'success'}>
@@ -173,7 +169,6 @@ export function OverviewPage() {
             <div className="py-10 flex flex-col items-center justify-center text-center border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
               <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2" />
               <p className="text-sm font-bold text-slate-900 dark:text-slate-100">All systems nominal</p>
-              <p className="text-xs text-slate-500 mt-0.5">No offline gates, spoofing events, or expiring passes detected.</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -301,10 +296,7 @@ export function OverviewPage() {
               <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
                 <Upload className="w-4 h-4" />
               </div>
-              <div>
-                <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Bulk Import CSV</div>
-                <div className="text-xs text-slate-500">Onboard all roles at scale</div>
-              </div>
+              <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Bulk Import CSV</div>
             </button>
           )}
           {canAccess('infra') && (
@@ -316,10 +308,7 @@ export function OverviewPage() {
               <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
                 <Grid3x3 className="w-4 h-4" />
               </div>
-              <div>
-                <div className="text-sm font-bold text-slate-900 dark:text-slate-100">RBAC Policy Matrix</div>
-                <div className="text-xs text-slate-500">Manage role-to-door access</div>
-              </div>
+              <div className="text-sm font-bold text-slate-900 dark:text-slate-100">RBAC Policy Matrix</div>
             </button>
           )}
           {canAccess('rag') && (
@@ -331,10 +320,7 @@ export function OverviewPage() {
               <div className="p-2 rounded-lg bg-violet-50 dark:bg-violet-500/15 text-violet-600 dark:text-violet-400">
                 <BookOpen className="w-4 h-4" />
               </div>
-              <div>
-                <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Upload Knowledge Doc</div>
-                <div className="text-xs text-slate-500">Index files for campus RAG</div>
-              </div>
+              <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Upload Knowledge Doc</div>
             </button>
           )}
           {canAccess('infra') && (
@@ -346,10 +332,7 @@ export function OverviewPage() {
               <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400">
                 <Activity className="w-4 h-4" />
               </div>
-              <div>
-                <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Admin Audit Trail</div>
-                <div className="text-xs text-slate-500">Inspect all policy changes</div>
-              </div>
+              <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Admin Audit Trail</div>
             </button>
           )}
         </div>

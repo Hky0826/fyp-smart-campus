@@ -95,11 +95,8 @@ export function CsvImportWizard({ open, onClose, onImported }) {
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
-                Bulk CSV User Import (All Roles)
+                Bulk CSV User Import
               </h3>
-              <p className="text-xs text-slate-500">
-                Supports STUDENT, LECTURER, STAFF, and VISITOR accounts with server dry-run validation.
-              </p>
             </div>
           </div>
           <button
@@ -116,10 +113,7 @@ export function CsvImportWizard({ open, onClose, onImported }) {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
             <div>
               <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                1. Download the multi-role CSV template
-              </p>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Includes sample rows for STUDENT, LECTURER, STAFF, and VISITOR with supported column headers.
+                1. Download CSV template
               </p>
             </div>
             <button

@@ -92,9 +92,6 @@ export function ChatbotLogsPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">Chatbot Logs</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-          Server-paginated RAG conversation history. Click any row to inspect the full prompt and grounded response.
-        </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5">

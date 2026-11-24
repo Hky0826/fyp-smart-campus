@@ -135,9 +135,6 @@ export function AccessLogsPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">Access Logs</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-          Server-paginated gate and door authentication history with date-range and anomaly filtering.
-        </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5">
