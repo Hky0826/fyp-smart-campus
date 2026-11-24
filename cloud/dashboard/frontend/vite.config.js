@@ -13,6 +13,15 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, '../backend/app/static/vite'),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          tanstack: ['@tanstack/react-query', '@tanstack/react-table'],
+          konva: ['konva', 'react-konva'],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

@@ -120,19 +120,23 @@ except Exception as exc:
 def redirect_to_dashboard():
     return RedirectResponse(url="/dashboard/")
 
-# Mount the static files directory to serve the locally built dashboard SPA
+# Mount the static files directory to serve the unified Vite dashboard SPA
 static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+vite_index_path = os.path.join(static_dir, "vite", "index.html")
 if not os.path.exists(static_dir):
     os.makedirs(static_dir)
 
+@app.get("/dashboard", include_in_schema=False)
+@app.get("/dashboard/", include_in_schema=False)
 @app.get("/dashboard/{full_path:path}", include_in_schema=False)
-def dashboard_spa_fallback(full_path: str):
+def dashboard_spa_fallback(full_path: str = ""):
+    if os.path.isfile(vite_index_path):
+        return FileResponse(vite_index_path)
     return FileResponse(os.path.join(static_dir, "index.html"))
 
 # Only the built dashboard assets are served here. Private uploads are stored
 # under settings.PRIVATE_STORAGE_ROOT and have authenticated download routes.
 app.mount("/static", StaticFiles(directory=static_dir), name="static-assets")
-app.mount("/dashboard", StaticFiles(directory=static_dir, html=True), name="static")
 
 @app.get("/health", tags=["Health"])
 @app.get("/api/health", tags=["Health"])
