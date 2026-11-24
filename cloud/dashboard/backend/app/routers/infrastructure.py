@@ -1,21 +1,29 @@
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, or_, exists
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 import os
 import secrets
+import time
 import requests
 
 from app.core.database import get_db
 from app.core.config import settings
+from app.core.audit import record_audit
 from app.core.device_auth import generate_device_secret, encrypt_device_secret, require_signed_device_request, bind_device_id
 from app.core.private_storage import safe_existing_path
 from app.core.security import verify_super_admin, verify_system_admin, get_current_admin
-from app.models.models import Device, DeviceRBAC, NodeRBAC, EdgeRBAC, JWTSession, AuthenticationLog, SurveillanceLog, Node, Role, Edge, User, Admin, Floorplan, Course, UploadedDocument
+from app.models.models import (
+    Device, DeviceRBAC, NodeRBAC, EdgeRBAC, JWTSession, AuthenticationLog, SurveillanceLog,
+    Node, Role, Edge, User, Admin, Floorplan, Building, Course, UploadedDocument,
+    UserFaceEmbedding, AdministratorAuditEvent, Visitor,
+)
 from app.schemas import schemas
 
 try:
@@ -75,14 +83,67 @@ def _probe_device(base_url: str) -> dict:
 
 @router.get("/dashboard-stats")
 def get_dashboard_stats(db: Session = Depends(get_db), current_admin=Depends(get_current_admin)):
+    started = time.perf_counter()
     admin_type = current_admin.admin_type
-    stats = {"users": 0, "devices": 0, "documents": 0, "courses": 0}
+    now = datetime.utcnow()
+    online_cutoff = now - timedelta(minutes=5)
+    since_24h = now - timedelta(hours=24)
+
+    stats = {
+        "users": 0,
+        "active_users": 0,
+        "inactive_users": 0,
+        "face_enrolled_users": 0,
+        "devices": 0,
+        "online_devices": 0,
+        "offline_devices": 0,
+        "documents": 0,
+        "courses": 0,
+        "active_sessions": 0,
+        "auth_attempts_24h": 0,
+        "auth_failures_24h": 0,
+        "db_latency_ms": 0.0,
+    }
     if admin_type != "CONTENT_ADMIN":
-        stats["users"] = db.query(User).count()
-        stats["devices"] = db.query(Device).count()
-        stats["courses"] = db.query(Course).count()
+        total_users = db.query(func.count(User.user_id)).scalar() or 0
+        active_users = db.query(func.count(User.user_id)).filter(User.is_active.is_(True)).scalar() or 0
+        face_enrolled_users = db.query(func.count(func.distinct(UserFaceEmbedding.user_id))).scalar() or 0
+        total_devices = db.query(func.count(Device.device_id)).scalar() or 0
+        online_devices = (
+            db.query(func.count(Device.device_id))
+            .filter(Device.is_active.is_(True), Device.last_heartbeat.isnot(None), Device.last_heartbeat >= online_cutoff)
+            .scalar()
+            or 0
+        )
+        stats["users"] = total_users
+        stats["active_users"] = active_users
+        stats["inactive_users"] = max(0, total_users - active_users)
+        stats["face_enrolled_users"] = face_enrolled_users
+        stats["devices"] = total_devices
+        stats["online_devices"] = online_devices
+        stats["offline_devices"] = max(0, total_devices - online_devices)
+        stats["courses"] = db.query(func.count(Course.course_id)).scalar() or 0
+        stats["active_sessions"] = (
+            db.query(func.count(JWTSession.session_id))
+            .filter(JWTSession.is_revoked.is_(False), JWTSession.expires_at > now)
+            .scalar()
+            or 0
+        )
+        stats["auth_attempts_24h"] = (
+            db.query(func.count(AuthenticationLog.log_id))
+            .filter(AuthenticationLog.timestamp >= since_24h)
+            .scalar()
+            or 0
+        )
+        stats["auth_failures_24h"] = (
+            db.query(func.count(AuthenticationLog.log_id))
+            .filter(AuthenticationLog.timestamp >= since_24h, AuthenticationLog.auth_status != "SUCCESS")
+            .scalar()
+            or 0
+        )
     if admin_type != "SYSTEM_ADMIN":
-        stats["documents"] = db.query(UploadedDocument).count()
+        stats["documents"] = db.query(func.count(UploadedDocument.document_id)).scalar() or 0
+    stats["db_latency_ms"] = round((time.perf_counter() - started) * 1000.0, 1)
     return stats
 
 # ==========================================
@@ -512,3 +573,452 @@ def create_auth_log(
     db.commit()
     db.refresh(log)
     return log
+
+
+# ==========================================
+# ENTERPRISE OPERATIONS: EXCEPTIONS, DEVICE DETAIL, RBAC MATRIX & PAGINATED LOGS
+# ==========================================
+@router.get("/overview-exceptions")
+def get_overview_exceptions(db: Session = Depends(get_db), current_admin=Depends(get_current_admin)):
+    now = datetime.utcnow()
+    online_cutoff = now - timedelta(minutes=5)
+    since_24h = now - timedelta(hours=24)
+    expiry_cutoff = now + timedelta(hours=48)
+
+    alerts = []
+    if current_admin.admin_type != "CONTENT_ADMIN":
+        offline_devices = (
+            db.query(Device)
+            .filter(Device.is_active.is_(True), or_(Device.last_heartbeat.is_(None), Device.last_heartbeat < online_cutoff))
+            .limit(10)
+            .all()
+        )
+        if offline_devices:
+            alerts.append({
+                "id": "offline-devices",
+                "severity": "critical",
+                "title": f"{len(offline_devices)} active device(s) offline",
+                "description": ", ".join(d.device_name for d in offline_devices[:4]) + ("..." if len(offline_devices) > 4 else ""),
+                "action_label": "Inspect Devices",
+                "action_path": "/dashboard/devices",
+            })
+
+        spoof_24h = (
+            db.query(func.count(AuthenticationLog.log_id))
+            .filter(AuthenticationLog.timestamp >= since_24h, AuthenticationLog.auth_status == "SPOOFING")
+            .scalar()
+            or 0
+        )
+        if spoof_24h > 0:
+            alerts.append({
+                "id": "spoofing-alerts",
+                "severity": "critical",
+                "title": f"{spoof_24h} spoofing attempt(s) detected in 24h",
+                "description": "Review failed liveness checks in Access Logs.",
+                "action_label": "Review Spoof Logs",
+                "action_path": "/dashboard/access-logs?status=SPOOFING",
+            })
+
+        face_exists = exists().where(UserFaceEmbedding.user_id == User.user_id)
+        unenrolled_active = (
+            db.query(func.count(User.user_id))
+            .filter(User.is_active.is_(True), ~face_exists)
+            .scalar()
+            or 0
+        )
+        if unenrolled_active > 0:
+            alerts.append({
+                "id": "unenrolled-users",
+                "severity": "warning",
+                "title": f"{unenrolled_active} active user(s) missing Face ID",
+                "description": "These accounts cannot unlock biometric doors until enrolled.",
+                "action_label": "View Unenrolled",
+                "action_path": "/dashboard/users?status=ACTIVE&face_status=NOT_ENROLLED",
+            })
+
+        expiring_visitors = (
+            db.query(func.count(Visitor.visitor_id))
+            .filter(Visitor.access_expiry.isnot(None), Visitor.access_expiry <= expiry_cutoff)
+            .scalar()
+            or 0
+        )
+        if expiring_visitors > 0:
+            alerts.append({
+                "id": "expiring-visitors",
+                "severity": "info",
+                "title": f"{expiring_visitors} visitor pass(es) expired or expiring within 48h",
+                "description": "Verify whether temporary visitor credentials should be extended or deactivated.",
+                "action_label": "Review Visitors",
+                "action_path": "/dashboard/users?role_id=5",
+            })
+
+    # 7-day auth activity time series
+    series = []
+    if current_admin.admin_type != "CONTENT_ADMIN":
+        start_day = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
+        logs = (
+            db.query(AuthenticationLog.timestamp, AuthenticationLog.auth_status)
+            .filter(AuthenticationLog.timestamp >= start_day)
+            .all()
+        )
+        buckets = {}
+        for i in range(7):
+            day_key = (start_day + timedelta(days=i)).strftime("%Y-%m-%d")
+            buckets[day_key] = {"date": day_key, "label": (start_day + timedelta(days=i)).strftime("%b %d"), "success": 0, "failed": 0}
+        for ts, st in logs:
+            if not ts:
+                continue
+            key = ts.strftime("%Y-%m-%d")
+            if key in buckets:
+                if st == "SUCCESS":
+                    buckets[key]["success"] += 1
+                else:
+                    buckets[key]["failed"] += 1
+        series = list(buckets.values())
+
+    return {"alerts": alerts, "auth_series_7d": series}
+
+
+@router.get("/devices/{device_id}/detail")
+def get_device_detail(device_id: str, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
+    dev = (
+        db.query(Device)
+        .options(
+            joinedload(Device.device_rbac),
+            joinedload(Device.node).joinedload(Node.floorplan).joinedload(Floorplan.building),
+        )
+        .filter(Device.device_id == device_id)
+        .first()
+    )
+    if not dev:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    now = datetime.utcnow()
+    since_24h = now - timedelta(hours=24)
+    online_cutoff = now - timedelta(minutes=5)
+    is_online = bool(dev.is_active and dev.last_heartbeat and dev.last_heartbeat >= online_cutoff)
+
+    recent_logs = (
+        db.query(AuthenticationLog)
+        .options(joinedload(AuthenticationLog.user))
+        .filter(AuthenticationLog.device_id == device_id)
+        .order_by(AuthenticationLog.timestamp.desc())
+        .limit(25)
+        .all()
+    )
+    attempts_24h = db.query(func.count(AuthenticationLog.log_id)).filter(
+        AuthenticationLog.device_id == device_id, AuthenticationLog.timestamp >= since_24h
+    ).scalar() or 0
+    failures_24h = db.query(func.count(AuthenticationLog.log_id)).filter(
+        AuthenticationLog.device_id == device_id,
+        AuthenticationLog.timestamp >= since_24h,
+        AuthenticationLog.auth_status != "SUCCESS",
+    ).scalar() or 0
+
+    node_rbac_ids = [r.role_id for r in db.query(NodeRBAC).filter_by(node_id=dev.node_id).all()]
+    dev_rbac_ids = [r.role_id for r in (dev.device_rbac or [])]
+
+    return {
+        "device": {
+            "device_id": dev.device_id,
+            "device_name": dev.device_name,
+            "device_type": dev.device_type,
+            "node_id": dev.node_id,
+            "room_label": dev.node.room_label if dev.node else None,
+            "floor_level": dev.node.floorplan.floor_level if dev.node and dev.node.floorplan else None,
+            "building_name": dev.node.floorplan.building.building_name if dev.node and dev.node.floorplan and dev.node.floorplan.building else None,
+            "ip_address": dev.ip_address,
+            "callback_url": dev.callback_url,
+            "is_active": dev.is_active,
+            "is_online": is_online,
+            "last_heartbeat": dev.last_heartbeat.isoformat() if dev.last_heartbeat else None,
+            "installed_at": dev.installed_at.isoformat() if dev.installed_at else None,
+            "credential_rotated_at": dev.credential_rotated_at.isoformat() if dev.credential_rotated_at else None,
+            "allowed_role_ids": dev_rbac_ids,
+            "inherited_node_role_ids": node_rbac_ids,
+            "uses_device_override": len(dev_rbac_ids) > 0,
+        },
+        "metrics_24h": {
+            "attempts": attempts_24h,
+            "failures": failures_24h,
+            "success_rate": round(((attempts_24h - failures_24h) / attempts_24h) * 100, 1) if attempts_24h else 100.0,
+        },
+        "recent_logs": [
+            {
+                "log_id": l.log_id,
+                "user_id": l.user_id,
+                "email": l.user.email if l.user else None,
+                "full_name": l.user.full_name if l.user else "Unknown",
+                "auth_status": l.auth_status,
+                "confidence_score": l.confidence_score,
+                "reason": l.reason or l.decision_reason,
+                "timestamp": l.timestamp.isoformat() if l.timestamp else None,
+            }
+            for l in recent_logs
+        ],
+    }
+
+
+class RbacMatrixToggleRequest(BaseModel):
+    target_type: str  # "node" | "device"
+    target_id: str
+    role_id: int
+    allowed: bool
+
+
+@router.get("/rbac-matrix")
+def get_rbac_matrix(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
+    roles = db.query(Role).options(selectinload(Role.users)).order_by(Role.role_id.asc()).all()
+    nodes = (
+        db.query(Node)
+        .options(joinedload(Node.floorplan).joinedload(Floorplan.building))
+        .order_by(Node.node_id.asc())
+        .all()
+    )
+    devices = db.query(Device).options(joinedload(Device.device_rbac)).order_by(Device.device_id.asc()).all()
+    node_rbac = db.query(NodeRBAC).all()
+
+    node_map: dict[int, list[int]] = {}
+    for nr in node_rbac:
+        node_map.setdefault(nr.node_id, []).append(nr.role_id)
+
+    return {
+        "roles": [
+            {
+                "role_id": r.role_id,
+                "role_name": r.role_name,
+                "user_count": len(r.users or []),
+            }
+            for r in roles
+        ],
+        "nodes": [
+            {
+                "node_id": n.node_id,
+                "room_label": n.room_label or f"Node #{n.node_id}",
+                "node_type": n.node_type,
+                "floor_level": n.floorplan.floor_level if n.floorplan else None,
+                "building_name": n.floorplan.building.building_name if n.floorplan and n.floorplan.building else "Unassigned",
+                "role_ids": sorted(node_map.get(n.node_id, [])),
+            }
+            for n in nodes
+        ],
+        "devices": [
+            {
+                "device_id": d.device_id,
+                "device_name": d.device_name,
+                "device_type": d.device_type,
+                "node_id": d.node_id,
+                "is_active": d.is_active,
+                "role_ids": sorted([r.role_id for r in (d.device_rbac or [])]),
+                "inherited_role_ids": sorted(node_map.get(d.node_id, [])),
+            }
+            for d in devices
+        ],
+    }
+
+
+@router.put("/rbac-matrix/toggle")
+def toggle_rbac_matrix(
+    payload: RbacMatrixToggleRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    role = db.query(Role).filter_by(role_id=payload.role_id).first()
+    if not role:
+        raise HTTPException(status_code=404, detail="Role not found")
+
+    if payload.target_type == "node":
+        node_id = int(payload.target_id)
+        existing = db.query(NodeRBAC).filter_by(node_id=node_id, role_id=payload.role_id).first()
+        if payload.allowed and not existing:
+            db.add(NodeRBAC(node_id=node_id, role_id=payload.role_id))
+        elif not payload.allowed and existing:
+            db.delete(existing)
+    elif payload.target_type == "device":
+        device_id = str(payload.target_id)
+        existing = db.query(DeviceRBAC).filter_by(device_id=device_id, role_id=payload.role_id).first()
+        if payload.allowed and not existing:
+            db.add(DeviceRBAC(device_id=device_id, role_id=payload.role_id))
+        elif not payload.allowed and existing:
+            db.delete(existing)
+    else:
+        raise HTTPException(status_code=400, detail="target_type must be 'node' or 'device'")
+
+    record_audit(
+        db,
+        actor_user_id=current_admin.user_id,
+        action="rbac_matrix_toggle",
+        target_type=payload.target_type,
+        target_id=payload.target_id,
+        result="success",
+        details={"role_id": payload.role_id, "role_name": role.role_name, "allowed": payload.allowed},
+    )
+    db.commit()
+    if push_sync_to_all_edges:
+        background_tasks.add_task(push_sync_to_all_edges)
+    return {"ok": True, "target_type": payload.target_type, "target_id": payload.target_id, "role_id": payload.role_id, "allowed": payload.allowed}
+
+
+@router.delete("/jwt-sessions/{session_id}")
+def revoke_jwt_session(session_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
+    session = db.query(JWTSession).filter_by(session_id=session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session.is_revoked = True
+    record_audit(
+        db,
+        actor_user_id=current_admin.user_id,
+        action="jwt_session_revoked",
+        target_type="jwt_session",
+        target_id=session_id,
+        result="success",
+        details={"target_user_id": session.user_id},
+    )
+    db.commit()
+    return {"detail": "Session revoked successfully", "session_id": session_id}
+
+
+@router.get("/auth-logs/paginated")
+def list_auth_logs_paginated(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    q: str = Query("", max_length=120),
+    auth_status: str = Query("ALL", alias="status"),
+    device_id: Optional[str] = Query(None),
+    user_id: Optional[int] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    query = db.query(AuthenticationLog).options(
+        joinedload(AuthenticationLog.user),
+        joinedload(AuthenticationLog.device),
+        joinedload(AuthenticationLog.node),
+    )
+    term = (q or "").strip()
+    if term:
+        pat = f"%{term}%"
+        query = query.outerjoin(AuthenticationLog.user).filter(
+            or_(
+                User.email.ilike(pat),
+                User.given_name.ilike(pat),
+                User.family_name.ilike(pat),
+                AuthenticationLog.device_id.ilike(pat),
+                AuthenticationLog.reason.ilike(pat),
+            )
+        )
+    if auth_status and auth_status.upper() != "ALL":
+        query = query.filter(AuthenticationLog.auth_status == auth_status.upper())
+    if device_id:
+        query = query.filter(AuthenticationLog.device_id == device_id)
+    if user_id is not None:
+        query = query.filter(AuthenticationLog.user_id == user_id)
+    if date_from:
+        try:
+            query = query.filter(AuthenticationLog.timestamp >= datetime.fromisoformat(date_from))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            dt_to = datetime.fromisoformat(date_to)
+            if len(date_to) <= 10:
+                dt_to = dt_to + timedelta(days=1)
+            query = query.filter(AuthenticationLog.timestamp <= dt_to)
+        except ValueError:
+            pass
+
+    total = query.count()
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    safe_page = min(page, total_pages)
+    rows = query.order_by(AuthenticationLog.timestamp.desc()).offset((safe_page - 1) * page_size).limit(page_size).all()
+
+    return {
+        "items": [
+            {
+                "log_id": r.log_id,
+                "user_id": r.user_id,
+                "email": r.user.email if r.user else "",
+                "full_name": r.user.full_name if r.user else "Unknown",
+                "device_id": r.device_id,
+                "device_name": r.device.device_name if r.device else r.device_id,
+                "node_id": r.node_id,
+                "node_label": r.node.room_label if r.node else None,
+                "auth_status": r.auth_status,
+                "confidence_score": r.confidence_score,
+                "spoofing_passed": r.spoofing_passed,
+                "reason": r.reason or r.decision_reason,
+                "policy_version": r.policy_version,
+                "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+            }
+            for r in rows
+        ],
+        "total": total,
+        "page": safe_page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+    }
+
+
+@router.get("/audit-events/paginated")
+def list_audit_events_paginated(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    q: str = Query("", max_length=120),
+    target_type: str = Query("ALL"),
+    result: str = Query("ALL"),
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_super_admin),
+):
+    query = db.query(AdministratorAuditEvent)
+    term = (q or "").strip()
+    if term:
+        pat = f"%{term}%"
+        query = query.filter(
+            or_(
+                AdministratorAuditEvent.action.ilike(pat),
+                AdministratorAuditEvent.target_type.ilike(pat),
+                AdministratorAuditEvent.target_id.ilike(pat),
+                AdministratorAuditEvent.source_ip.ilike(pat),
+            )
+        )
+    if target_type and target_type.upper() != "ALL":
+        query = query.filter(AdministratorAuditEvent.target_type == target_type)
+    if result and result.upper() != "ALL":
+        query = query.filter(AdministratorAuditEvent.result == result.lower())
+
+    total = query.count()
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    safe_page = min(page, total_pages)
+    events = query.order_by(AdministratorAuditEvent.created_at.desc()).offset((safe_page - 1) * page_size).limit(page_size).all()
+
+    actor_ids = {e.actor_user_id for e in events if e.actor_user_id is not None}
+    actors = {
+        u.user_id: {"full_name": u.full_name, "email": u.email}
+        for u in (db.query(User).filter(User.user_id.in_(actor_ids)).all() if actor_ids else [])
+    }
+
+    return {
+        "items": [
+            {
+                "event_id": e.event_id,
+                "actor_user_id": e.actor_user_id,
+                "actor_name": actors.get(e.actor_user_id, {}).get("full_name", "System"),
+                "actor_email": actors.get(e.actor_user_id, {}).get("email", ""),
+                "action": e.action,
+                "target_type": e.target_type,
+                "target_id": e.target_id,
+                "result": e.result,
+                "correlation_id": e.correlation_id,
+                "source_ip": e.source_ip,
+                "details": e.details or {},
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in events
+        ],
+        "total": total,
+        "page": safe_page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+    }

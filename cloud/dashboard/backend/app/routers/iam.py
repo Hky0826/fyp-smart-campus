@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
-from typing import List
+from sqlalchemy import func, or_, exists
+from sqlalchemy.orm import Session, selectinload, joinedload
+from typing import List, Optional
 import bcrypt
+import csv
+import io
 import os
 import datetime
 import json
@@ -17,7 +20,11 @@ from app.core.config import settings
 from app.core.private_storage import private_path, safe_existing_path
 from app.core.audit import record_audit
 from app.facial_recognition.alignment import extract_aligned_face
-from app.models.models import Role, User, Student, Lecturer, Staff, Visitor, Admin, Node, Department, Faculty, Programme
+from app.models.models import (
+    Role, User, Student, Lecturer, Staff, Visitor, Admin, Node, Department, Faculty, Programme,
+    UserImage, UserFaceEmbedding, AuthenticationLog, JWTSession, CourseEnrollment, Course, Appointment,
+    Device, DeviceRBAC, NodeRBAC, Building, Floorplan,
+)
 from app.schemas import schemas
 
 def slugify(text: str) -> str:
@@ -371,9 +378,802 @@ def delete_role(role_id: int, db: Session = Depends(get_db), current_admin=Depen
 # ==========================================
 # USERS CRUD (SYSTEM_ADMIN or SUPER_ADMIN)
 # ==========================================
+def _serialize_user_summary(user: User) -> schemas.UserSummaryResponse:
+    poses = sorted({emb.template_name for emb in (user.embeddings or []) if emb.template_name})
+    location_label = None
+    if user.location is not None:
+        location_label = user.location.room_label or f"Node #{user.location.node_id}"
+    return schemas.UserSummaryResponse(
+        user_id=user.user_id,
+        given_name=user.given_name,
+        family_name=user.family_name,
+        full_name=user.full_name,
+        email=user.email,
+        is_active=user.is_active,
+        last_known_location=user.last_known_location,
+        location_label=location_label,
+        enrolled_at=user.enrolled_at,
+        last_seen=user.last_seen,
+        roles=[schemas.RoleResponse.model_validate(r) for r in (user.roles or [])],
+        face_enrolled=bool(user.embeddings),
+        enrolled_poses_count=len(poses),
+        enrolled_poses=poses,
+        student=schemas.StudentBase.model_validate(user.student) if user.student else None,
+        lecturer=schemas.LecturerBase.model_validate(user.lecturer) if user.lecturer else None,
+        staff=schemas.StaffBase.model_validate(user.staff) if user.staff else None,
+        visitor=schemas.VisitorBase.model_validate(user.visitor) if user.visitor else None,
+        admin=schemas.AdminBase.model_validate(user.admin) if user.admin else None,
+    )
+
+
 @router.get("/users", response_model=List[schemas.UserResponse])
 def list_users(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
-    return db.query(User).all()
+    return (
+        db.query(User)
+        .options(
+            selectinload(User.roles),
+            selectinload(User.images),
+            selectinload(User.embeddings),
+            joinedload(User.student),
+            joinedload(User.lecturer),
+            joinedload(User.staff),
+            joinedload(User.visitor),
+            joinedload(User.admin),
+        )
+        .all()
+    )
+
+
+@router.get("/users/paginated", response_model=schemas.PaginatedUsersResponse)
+def list_users_paginated(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    q: str = Query("", max_length=120),
+    role_id: Optional[int] = Query(None),
+    status_filter: str = Query("ALL", alias="status"),
+    face_status: str = Query("ALL"),
+    faculty_id: Optional[str] = Query(None),
+    department_id: Optional[str] = Query(None),
+    sort_by: str = Query("user_id"),
+    sort_order: str = Query("desc"),
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    query = db.query(User)
+
+    search_term = (q or "").strip()
+    if search_term:
+        like_pat = f"%{search_term}%"
+        search_clauses = [
+            User.given_name.ilike(like_pat),
+            User.family_name.ilike(like_pat),
+            func.concat(User.given_name, " ", User.family_name).ilike(like_pat),
+            User.email.ilike(like_pat),
+            User.student.has(Student.student_id.ilike(like_pat)),
+            User.lecturer.has(Lecturer.lecturer_id.ilike(like_pat)),
+            User.staff.has(Staff.staff_id.ilike(like_pat)),
+            User.visitor.has(Visitor.id_number.ilike(like_pat)),
+            User.admin.has(Admin.admin_id.ilike(like_pat)),
+        ]
+        if search_term.isdigit():
+            search_clauses.append(User.user_id == int(search_term))
+        query = query.filter(or_(*search_clauses))
+
+    if role_id is not None:
+        query = query.filter(User.roles.any(Role.role_id == role_id))
+
+    norm_status = (status_filter or "ALL").strip().upper()
+    if norm_status == "ACTIVE":
+        query = query.filter(User.is_active.is_(True))
+    elif norm_status in {"DEACTIVATED", "INACTIVE"}:
+        query = query.filter(User.is_active.is_(False))
+
+    norm_face = (face_status or "ALL").strip().upper()
+    face_exists = exists().where(UserFaceEmbedding.user_id == User.user_id)
+    if norm_face == "ENROLLED":
+        query = query.filter(face_exists)
+    elif norm_face == "NOT_ENROLLED":
+        query = query.filter(~face_exists)
+
+    if faculty_id:
+        query = query.filter(
+            or_(
+                User.student.has(Student.faculty_id == faculty_id),
+                User.lecturer.has(Lecturer.faculty_id == faculty_id),
+            )
+        )
+
+    if department_id:
+        query = query.filter(
+            or_(
+                User.staff.has(Staff.department_id == department_id),
+                User.lecturer.has(Lecturer.staff.has(Staff.department_id == department_id)),
+            )
+        )
+
+    total = query.count()
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    safe_page = min(page, total_pages)
+
+    sort_columns = {
+        "user_id": User.user_id,
+        "name": User.given_name,
+        "full_name": User.given_name,
+        "email": User.email,
+        "status": User.is_active,
+        "is_active": User.is_active,
+        "enrolled_at": User.enrolled_at,
+        "last_seen": User.last_seen,
+    }
+    sort_col = sort_columns.get((sort_by or "user_id").lower(), User.user_id)
+    if (sort_order or "desc").lower() == "asc":
+        query = query.order_by(sort_col.asc(), User.user_id.asc())
+    else:
+        query = query.order_by(sort_col.desc(), User.user_id.desc())
+
+    users = (
+        query.options(
+            selectinload(User.roles),
+            selectinload(User.embeddings),
+            joinedload(User.location),
+            joinedload(User.student),
+            joinedload(User.lecturer),
+            joinedload(User.staff),
+            joinedload(User.visitor),
+            joinedload(User.admin),
+        )
+        .offset((safe_page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    total_users = db.query(func.count(User.user_id)).scalar() or 0
+    active_users = db.query(func.count(User.user_id)).filter(User.is_active.is_(True)).scalar() or 0
+    face_enrolled_users = (
+        db.query(func.count(func.distinct(UserFaceEmbedding.user_id))).scalar() or 0
+    )
+
+    return schemas.PaginatedUsersResponse(
+        items=[_serialize_user_summary(u) for u in users],
+        total=total,
+        page=safe_page,
+        page_size=page_size,
+        total_pages=total_pages,
+        summary=schemas.UserDirectorySummary(
+            total_users=total_users,
+            active_users=active_users,
+            inactive_users=max(0, total_users - active_users),
+            face_enrolled_users=face_enrolled_users,
+        ),
+    )
+
+
+@router.get("/users/{user_id}/detail")
+def get_user_detail(user_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
+    user = (
+        db.query(User)
+        .options(
+            selectinload(User.roles),
+            selectinload(User.images),
+            selectinload(User.embeddings),
+            joinedload(User.location),
+            joinedload(User.student),
+            joinedload(User.lecturer),
+            joinedload(User.staff),
+            joinedload(User.visitor),
+            joinedload(User.admin),
+        )
+        .filter(User.user_id == user_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    summary = _serialize_user_summary(user).model_dump()
+
+    recent_logs = (
+        db.query(AuthenticationLog)
+        .options(joinedload(AuthenticationLog.device), joinedload(AuthenticationLog.node))
+        .filter(AuthenticationLog.user_id == user_id)
+        .order_by(AuthenticationLog.timestamp.desc())
+        .limit(15)
+        .all()
+    )
+    now = datetime.datetime.utcnow()
+    sessions = (
+        db.query(JWTSession)
+        .filter(
+            JWTSession.user_id == user_id,
+            JWTSession.is_revoked.is_(False),
+            JWTSession.expires_at > now,
+        )
+        .order_by(JWTSession.issued_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    enrollments = []
+    if user.student:
+        rows = (
+            db.query(CourseEnrollment)
+            .options(joinedload(CourseEnrollment.course))
+            .filter(CourseEnrollment.student_id == user.student.student_id)
+            .order_by(CourseEnrollment.enrolled_at.desc())
+            .limit(20)
+            .all()
+        )
+        enrollments = [
+            {
+                "enrollment_id": row.enrollment_id,
+                "course_id": row.course_id,
+                "course_code": row.course.course_code if row.course else None,
+                "course_name": row.course.course_name if row.course else None,
+                "semester": row.semester,
+                "academic_year": row.academic_year,
+                "status": row.status,
+            }
+            for row in rows
+        ]
+
+    appointments = (
+        db.query(Appointment)
+        .options(joinedload(Appointment.host), joinedload(Appointment.guest), joinedload(Appointment.location))
+        .filter(or_(Appointment.guest_user_id == user_id, Appointment.host_user_id == user_id))
+        .order_by(Appointment.scheduled_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    embeddings_by_pose = {}
+    for emb in user.embeddings or []:
+        embeddings_by_pose.setdefault(emb.template_name, []).append(emb.model_name)
+
+    return {
+        "user": summary,
+        "biometrics": {
+            "enrolled": bool(user.embeddings),
+            "embedding_count": len(user.embeddings or []),
+            "image_count": len(user.images or []),
+            "poses": [
+                {"pose": pose, "models": sorted(set(models))}
+                for pose, models in sorted(embeddings_by_pose.items())
+            ],
+        },
+        "recent_auth_logs": [
+            {
+                "log_id": log.log_id,
+                "device_id": log.device_id,
+                "device_name": log.device.device_name if log.device else log.device_id,
+                "node_label": log.node.room_label if log.node else None,
+                "auth_status": log.auth_status,
+                "confidence_score": log.confidence_score,
+                "reason": log.reason or log.decision_reason,
+                "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+            }
+            for log in recent_logs
+        ],
+        "active_sessions": [
+            {
+                "session_id": s.session_id,
+                "device_id": s.device_id,
+                "principal_type": s.principal_type,
+                "issued_at": s.issued_at.isoformat() if s.issued_at else None,
+                "expires_at": s.expires_at.isoformat() if s.expires_at else None,
+            }
+            for s in sessions
+        ],
+        "enrollments": enrollments,
+        "appointments": [
+            {
+                "appointment_id": a.appointment_id,
+                "role_in_meeting": "HOST" if a.host_user_id == user_id else "GUEST",
+                "counterpart": (
+                    a.guest.full_name if a.host_user_id == user_id and a.guest
+                    else (a.host.full_name if a.host else "Unknown")
+                ),
+                "scheduled_at": a.scheduled_at.isoformat() if a.scheduled_at else None,
+                "duration_minutes": a.duration_minutes,
+                "status": a.status,
+                "purpose": a.purpose,
+                "location": a.location.room_label if a.location else None,
+            }
+            for a in appointments
+        ],
+    }
+
+
+@router.post("/users/bulk-status")
+def bulk_update_user_status(
+    payload: schemas.BulkUserStatusRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    target_ids = sorted(set(payload.user_ids))
+    if not payload.is_active and current_admin.user_id in target_ids:
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own admin account in bulk")
+    users = db.query(User).filter(User.user_id.in_(target_ids)).all()
+    if not users:
+        raise HTTPException(status_code=404, detail="No matching users found")
+    now = datetime.datetime.utcnow()
+    for user in users:
+        user.is_active = payload.is_active
+        user.updated_at = now
+    record_audit(
+        db,
+        actor_user_id=current_admin.user_id,
+        action="users_bulk_status",
+        target_type="user",
+        target_id=f"{len(users)}_users",
+        result="success",
+        details={"is_active": payload.is_active, "affected": len(users)},
+    )
+    db.commit()
+    if _PUSH_SYNC_AVAILABLE and _push_sync_to_all_edges:
+        background_tasks.add_task(_push_sync_to_all_edges)
+    action_label = "activated" if payload.is_active else "deactivated"
+    return {"detail": f"Successfully {action_label} {len(users)} user(s)", "affected": len(users)}
+
+
+@router.post("/users/bulk-role")
+def bulk_assign_user_role(
+    payload: schemas.BulkUserRoleRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    role = db.query(Role).filter_by(role_id=payload.role_id).first()
+    if not role:
+        raise HTTPException(status_code=404, detail="Selected role not found")
+    target_ids = sorted(set(payload.user_ids))
+    users = db.query(User).options(selectinload(User.roles)).filter(User.user_id.in_(target_ids)).all()
+    if not users:
+        raise HTTPException(status_code=404, detail="No matching users found")
+    now = datetime.datetime.utcnow()
+    for user in users:
+        if payload.mode == "replace":
+            user.roles = [role]
+        elif all(r.role_id != role.role_id for r in user.roles):
+            user.roles.append(role)
+        user.updated_at = now
+    record_audit(
+        db,
+        actor_user_id=current_admin.user_id,
+        action="users_bulk_role",
+        target_type="role",
+        target_id=role.role_id,
+        result="success",
+        details={"role_name": role.role_name, "mode": payload.mode, "affected": len(users)},
+    )
+    db.commit()
+    if _PUSH_SYNC_AVAILABLE and _push_sync_to_all_edges:
+        background_tasks.add_task(_push_sync_to_all_edges)
+    return {
+        "detail": f"Assigned role '{role.role_name}' to {len(users)} user(s)",
+        "affected": len(users),
+    }
+
+
+@router.post("/users/bulk-delete")
+def bulk_delete_users(
+    payload: schemas.BulkUserDeleteRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    target_ids = sorted(set(payload.user_ids))
+    if current_admin.user_id in target_ids:
+        raise HTTPException(status_code=400, detail="You cannot delete your own admin account")
+    users = db.query(User).filter(User.user_id.in_(target_ids)).all()
+    if not users:
+        raise HTTPException(status_code=404, detail="No matching users found")
+    count = len(users)
+    for user in users:
+        db.delete(user)
+    record_audit(
+        db,
+        actor_user_id=current_admin.user_id,
+        action="users_bulk_delete",
+        target_type="user",
+        target_id=f"{count}_users",
+        result="success",
+        details={"affected": count},
+    )
+    db.commit()
+    if _PUSH_SYNC_AVAILABLE and _push_sync_to_all_edges:
+        background_tasks.add_task(_push_sync_to_all_edges)
+    return {"detail": f"Deleted {count} user(s)", "affected": count}
+
+
+# ==========================================
+# EFFECTIVE ACCESS & BULK CSV IMPORT (ALL ROLES)
+# ==========================================
+@router.get("/users/{user_id}/effective-access")
+def get_user_effective_access(user_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
+    user = (
+        db.query(User)
+        .options(
+            selectinload(User.roles),
+            selectinload(User.embeddings),
+            joinedload(User.visitor),
+        )
+        .filter(User.user_id == user_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user_role_ids = {r.role_id for r in (user.roles or [])}
+    role_name_map = {r.role_id: r.role_name for r in (user.roles or [])}
+    now = datetime.datetime.utcnow()
+
+    blockers = []
+    if not user.is_active:
+        blockers.append("Account is deactivated")
+    if not user.embeddings:
+        blockers.append("No Face ID biometric template enrolled")
+    if user.visitor and user.visitor.access_expiry and user.visitor.access_expiry < now:
+        blockers.append("Visitor pass has expired")
+
+    devices = (
+        db.query(Device)
+        .options(
+            joinedload(Device.device_rbac),
+            joinedload(Device.node).joinedload(Node.floorplan).joinedload(Floorplan.building),
+        )
+        .all()
+    )
+    node_rbac_rows = db.query(NodeRBAC).all()
+    node_roles_map: dict[int, set[int]] = {}
+    for nr in node_rbac_rows:
+        node_roles_map.setdefault(nr.node_id, set()).add(nr.role_id)
+
+    doors = []
+    allowed_count = 0
+    for dev in devices:
+        dev_role_ids = {r.role_id for r in (dev.device_rbac or [])}
+        if dev_role_ids:
+            source = "DEVICE_OVERRIDE"
+            matching = user_role_ids.intersection(dev_role_ids)
+        else:
+            source = "NODE_INHERITED"
+            matching = user_role_ids.intersection(node_roles_map.get(dev.node_id, set()))
+
+        role_granted = bool(matching)
+        can_unlock = dev.is_active and role_granted and not blockers
+        if can_unlock:
+            allowed_count += 1
+
+        if not dev.is_active:
+            reason = "Device is disabled"
+        elif not role_granted:
+            reason = "User role not permitted by device/node RBAC"
+        elif blockers:
+            reason = "; ".join(blockers)
+        else:
+            granted_names = ", ".join(sorted(role_name_map.get(rid, str(rid)) for rid in matching))
+            reason = f"Allowed via {granted_names} ({'device rule' if source == 'DEVICE_OVERRIDE' else 'node rule'})"
+
+        building_name = None
+        floor_level = None
+        room_label = None
+        if dev.node:
+            room_label = dev.node.room_label or f"Node #{dev.node.node_id}"
+            if dev.node.floorplan:
+                floor_level = dev.node.floorplan.floor_level
+                if dev.node.floorplan.building:
+                    building_name = dev.node.floorplan.building.building_name
+
+        doors.append({
+            "device_id": dev.device_id,
+            "device_name": dev.device_name,
+            "device_type": dev.device_type,
+            "node_id": dev.node_id,
+            "room_label": room_label,
+            "building_name": building_name,
+            "floor_level": floor_level,
+            "device_active": dev.is_active,
+            "policy_source": source,
+            "role_granted": role_granted,
+            "can_unlock": can_unlock,
+            "reason": reason,
+        })
+
+    return {
+        "user_id": user.user_id,
+        "full_name": user.full_name,
+        "is_active": user.is_active,
+        "face_enrolled": bool(user.embeddings),
+        "blockers": blockers,
+        "total_devices": len(doors),
+        "allowed_devices": allowed_count,
+        "doors": doors,
+    }
+
+
+_SUPPORTED_IMPORT_ROLES = {"STUDENT", "LECTURER", "STAFF", "VISITOR"}
+
+
+def _validate_csv_import_rows(db: Session, csv_text: str) -> dict:
+    reader = csv.DictReader(io.StringIO(csv_text.lstrip("\ufeff")))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV file is empty or missing headers")
+
+    roles_by_name = {r.role_name.upper(): r for r in db.query(Role).all()}
+    faculties = db.query(Faculty).all()
+    programmes = db.query(Programme).all()
+    departments = db.query(Department).all()
+    existing_emails = {e.lower() for (e,) in db.query(User.email).all() if e}
+
+    fac_lookup = {}
+    for f in faculties:
+        fac_lookup[f.faculty_id.lower()] = f
+        fac_lookup[f.faculty_name.lower()] = f
+    prog_lookup = {}
+    for p in programmes:
+        prog_lookup[p.programme_id.lower()] = p
+        prog_lookup[p.programme_name.lower()] = p
+    dept_lookup = {}
+    for d in departments:
+        dept_lookup[d.department_id.lower()] = d
+        dept_lookup[d.department_name.lower()] = d
+
+    seen_emails = set()
+    rows_out = []
+    valid_count = 0
+
+    for idx, raw_row in enumerate(reader, start=2):
+        norm = {str(k or "").strip().lower(): str(v or "").strip() for k, v in raw_row.items()}
+        if not any(norm.values()):
+            continue
+
+        errors = []
+        given_name = norm.get("given_name", "")
+        family_name = norm.get("family_name", "")
+        email = norm.get("email", "").lower()
+        role_name = (norm.get("role", "") or "STUDENT").upper()
+
+        if not given_name:
+            errors.append("given_name is required")
+        if not family_name:
+            errors.append("family_name is required")
+        if not email and given_name and family_name:
+            clean_g = "".join(c for c in given_name.lower() if c.isalnum())
+            clean_f = "".join(c for c in family_name.lower() if c.isalnum())
+            email = f"{clean_g}.{clean_f}@qiu.edu.my"
+        if not email or "@" not in email:
+            errors.append("valid email is required")
+        elif email in existing_emails:
+            errors.append(f"email '{email}' already exists in database")
+        elif email in seen_emails:
+            errors.append(f"duplicate email '{email}' in CSV")
+        else:
+            seen_emails.add(email)
+
+        if role_name not in _SUPPORTED_IMPORT_ROLES:
+            errors.append(f"unsupported role '{role_name}' (allowed: STUDENT, LECTURER, STAFF, VISITOR)")
+        elif role_name not in roles_by_name:
+            errors.append(f"role '{role_name}' is not configured in roles table")
+
+        resolved_profile = {}
+        if role_name == "STUDENT":
+            intake_raw = norm.get("intake", "")
+            if not re.fullmatch(r"\d{6}", intake_raw):
+                errors.append("intake must be 6 digits (e.g. 202407)")
+            prog_key = (norm.get("programme_id") or norm.get("programme") or norm.get("program") or "").lower()
+            fac_key = (norm.get("faculty_id") or norm.get("faculty") or "").lower()
+            prog = prog_lookup.get(prog_key)
+            fac = fac_lookup.get(fac_key) or (fac_lookup.get(prog.faculty_id.lower()) if prog else None)
+            if not prog:
+                errors.append(f"unknown programme '{prog_key or '(empty)'}'")
+            if not fac:
+                errors.append(f"unknown faculty '{fac_key or '(empty)'}'")
+            enrolled_since = norm.get("enrolled_since") or datetime.date.today().isoformat()
+            try:
+                datetime.date.fromisoformat(enrolled_since)
+            except ValueError:
+                errors.append("enrolled_since must be YYYY-MM-DD")
+            resolved_profile = {
+                "student_id": norm.get("student_id") or None,
+                "intake": int(intake_raw) if re.fullmatch(r"\d{6}", intake_raw) else None,
+                "programme_id": prog.programme_id if prog else None,
+                "faculty_id": fac.faculty_id if fac else None,
+                "enrolled_since": enrolled_since,
+            }
+        elif role_name == "LECTURER":
+            dept_key = (norm.get("department_id") or norm.get("department") or "").lower()
+            fac_key = (norm.get("faculty_id") or norm.get("faculty") or "").lower()
+            dept = dept_lookup.get(dept_key)
+            fac = fac_lookup.get(fac_key)
+            position = norm.get("position") or "Lecturer"
+            if not dept:
+                errors.append(f"unknown department '{dept_key or '(empty)'}'")
+            if not fac:
+                errors.append(f"unknown faculty '{fac_key or '(empty)'}'")
+            resolved_profile = {
+                "lecturer_id": norm.get("lecturer_id") or None,
+                "department_id": dept.department_id if dept else None,
+                "faculty_id": fac.faculty_id if fac else None,
+                "position": position,
+                "is_head_of_department": norm.get("is_head_of_department", "").lower() in {"1", "true", "yes"},
+            }
+        elif role_name == "STAFF":
+            dept_key = (norm.get("department_id") or norm.get("department") or "").lower()
+            dept = dept_lookup.get(dept_key)
+            position = norm.get("position") or "Staff"
+            staff_type = (norm.get("staff_type") or "ADMINISTRATIVE").upper()
+            if not dept:
+                errors.append(f"unknown department '{dept_key or '(empty)'}'")
+            if staff_type not in {"ADMINISTRATIVE", "TECHNICAL", "SECURITY", "FACILITIES", "OTHER"}:
+                errors.append(f"invalid staff_type '{staff_type}'")
+            resolved_profile = {
+                "staff_id": norm.get("staff_id") or None,
+                "department_id": dept.department_id if dept else None,
+                "position": position,
+                "staff_type": staff_type,
+            }
+        elif role_name == "VISITOR":
+            id_number = norm.get("id_number", "")
+            if not id_number:
+                errors.append("id_number is required for VISITOR")
+            expiry_raw = norm.get("access_expiry", "")
+            if expiry_raw:
+                try:
+                    expiry_dt = datetime.datetime.fromisoformat(expiry_raw.replace("Z", "+00:00")).replace(tzinfo=None)
+                except ValueError:
+                    errors.append("access_expiry must be ISO datetime (YYYY-MM-DDTHH:MM)")
+                    expiry_dt = None
+            else:
+                expiry_dt = datetime.datetime.utcnow() + datetime.timedelta(days=1)
+            resolved_profile = {
+                "visitor_id": norm.get("visitor_id") or None,
+                "id_number": id_number,
+                "organization": norm.get("organization") or None,
+                "visit_purpose": norm.get("visit_purpose") or None,
+                "access_expiry": expiry_dt.isoformat() if expiry_dt else None,
+            }
+
+        is_valid = len(errors) == 0
+        if is_valid:
+            valid_count += 1
+        rows_out.append({
+            "row_number": idx,
+            "valid": is_valid,
+            "errors": errors,
+            "given_name": given_name,
+            "family_name": family_name,
+            "email": email,
+            "role": role_name,
+            "profile": resolved_profile,
+        })
+
+    return {
+        "total_rows": len(rows_out),
+        "valid_count": valid_count,
+        "error_count": len(rows_out) - valid_count,
+        "rows": rows_out,
+    }
+
+
+@router.post("/users/import/validate")
+async def validate_users_csv_import(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    raw_bytes = _read_bounded(file.file, 5 * 1024 * 1024)
+    try:
+        csv_text = raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        csv_text = raw_bytes.decode("latin-1")
+    return _validate_csv_import_rows(db, csv_text)
+
+
+@router.post("/users/import/commit")
+async def commit_users_csv_import(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    skip_invalid: bool = Form(True),
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    raw_bytes = _read_bounded(file.file, 5 * 1024 * 1024)
+    try:
+        csv_text = raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        csv_text = raw_bytes.decode("latin-1")
+
+    preview = _validate_csv_import_rows(db, csv_text)
+    if preview["error_count"] > 0 and not skip_invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"CSV contains {preview['error_count']} invalid row(s). Fix errors or enable skip_invalid.",
+        )
+
+    roles_by_name = {r.role_name.upper(): r for r in db.query(Role).all()}
+    created = 0
+    for row in preview["rows"]:
+        if not row["valid"]:
+            continue
+        role_obj = roles_by_name[row["role"]]
+        user = User(
+            given_name=row["given_name"],
+            family_name=row["family_name"],
+            email=row["email"],
+            is_active=True,
+            roles=[role_obj],
+        )
+        db.add(user)
+        db.flush()
+
+        p = row["profile"]
+        if row["role"] == "STUDENT":
+            sid = p.get("student_id") or generate_global_student_id(db, p["intake"])
+            db.add(Student(
+                student_id=sid,
+                user_id=user.user_id,
+                programme_id=p["programme_id"],
+                faculty_id=p["faculty_id"],
+                intake=p["intake"],
+                enrolled_since=datetime.date.fromisoformat(p["enrolled_since"]),
+            ))
+        elif row["role"] == "LECTURER":
+            stfid = generate_unique_id(db, Staff, "STF-", "staff_id")
+            db.add(Staff(
+                staff_id=stfid,
+                user_id=user.user_id,
+                department_id=p["department_id"],
+                position=p["position"],
+            ))
+            db.flush()
+            lid = p.get("lecturer_id") or generate_unique_id(db, Lecturer, "LEC-", "lecturer_id")
+            db.add(Lecturer(
+                lecturer_id=lid,
+                user_id=user.user_id,
+                staff_id=stfid,
+                faculty_id=p["faculty_id"],
+                Position_desc=p["position"],
+            ))
+        elif row["role"] == "STAFF":
+            stfid = p.get("staff_id") or generate_unique_id(db, Staff, "STF-", "staff_id")
+            db.add(Staff(
+                staff_id=stfid,
+                user_id=user.user_id,
+                department_id=p["department_id"],
+                position=p["position"],
+            ))
+        elif row["role"] == "VISITOR":
+            vid = p.get("visitor_id") or generate_unique_id(db, Visitor, "VIS-", "visitor_id")
+            db.add(Visitor(
+                visitor_id=vid,
+                user_id=user.user_id,
+                id_number=p["id_number"],
+                organization=p.get("organization"),
+                visit_purpose=p.get("visit_purpose"),
+                access_expiry=datetime.datetime.fromisoformat(p["access_expiry"]),
+                registered_by=current_admin.user_id,
+            ))
+        created += 1
+
+    record_audit(
+        db,
+        actor_user_id=current_admin.user_id,
+        action="users_csv_import",
+        target_type="user",
+        target_id=f"{created}_users",
+        result="success",
+        details={"created": created, "skipped": preview["error_count"]},
+    )
+    db.commit()
+    if created > 0 and _PUSH_SYNC_AVAILABLE and _push_sync_to_all_edges:
+        background_tasks.add_task(_push_sync_to_all_edges)
+
+    return {
+        "detail": f"Imported {created} user(s) successfully" + (f" ({preview['error_count']} skipped)" if preview["error_count"] else ""),
+        "created": created,
+        "skipped": preview["error_count"],
+        "total_rows": preview["total_rows"],
+    }
 
 @router.post("/users", response_model=schemas.UserResponse)
 def create_user(user_in: schemas.UserCreate, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):

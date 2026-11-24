@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import datetime, time
 
@@ -400,3 +401,81 @@ def delete_appointment(appointment_id: int, db: Session = Depends(get_db), curre
 @router.get("/notifications", response_model=List[schemas.NotificationResponse])
 def list_notifications(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     return db.query(Notification).all()
+
+
+@router.get("/enrollments/paginated")
+def list_enrollments_paginated(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    q: str = Query("", max_length=120),
+    status_filter: str = Query("ALL", alias="status"),
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    query = db.query(CourseEnrollment).options(joinedload(CourseEnrollment.course))
+    term = (q or "").strip()
+    if term:
+        pat = f"%{term}%"
+        query = query.outerjoin(CourseEnrollment.course).filter(
+            or_(
+                CourseEnrollment.student_id.ilike(pat),
+                CourseEnrollment.academic_year.ilike(pat),
+                Course.course_code.ilike(pat),
+                Course.course_name.ilike(pat),
+            )
+        )
+    if status_filter and status_filter.upper() != "ALL":
+        query = query.filter(CourseEnrollment.status == status_filter.upper())
+    total = query.count()
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    safe_page = min(page, total_pages)
+    rows = query.order_by(CourseEnrollment.enrolled_at.desc()).offset((safe_page - 1) * page_size).limit(page_size).all()
+    return {
+        "items": [
+            {
+                "enrollment_id": r.enrollment_id,
+                "student_id": r.student_id,
+                "course_id": r.course_id,
+                "course_code": r.course.course_code if r.course else None,
+                "course_name": r.course.course_name if r.course else None,
+                "semester": r.semester,
+                "academic_year": r.academic_year,
+                "status": r.status,
+                "enrolled_at": r.enrolled_at.isoformat() if r.enrolled_at else None,
+            }
+            for r in rows
+        ],
+        "total": total,
+        "page": safe_page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+    }
+
+
+@router.get("/notifications/paginated")
+def list_notifications_paginated(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    q: str = Query("", max_length=120),
+    status_filter: str = Query("ALL", alias="status"),
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    query = db.query(Notification)
+    term = (q or "").strip()
+    if term:
+        pat = f"%{term}%"
+        query = query.filter(or_(Notification.title.ilike(pat), Notification.body.ilike(pat)))
+    if status_filter and status_filter.upper() != "ALL":
+        query = query.filter(Notification.status == status_filter.upper())
+    total = query.count()
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    safe_page = min(page, total_pages)
+    rows = query.order_by(Notification.created_at.desc()).offset((safe_page - 1) * page_size).limit(page_size).all()
+    return {
+        "items": [schemas.NotificationResponse.model_validate(r).model_dump() for r in rows],
+        "total": total,
+        "page": safe_page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+    }

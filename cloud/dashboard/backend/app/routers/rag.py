@@ -492,3 +492,60 @@ def toggle_adaptation_phrase_active(phrase_id: int, db: Session = Depends(get_db
     db.refresh(record)
     return record
 
+
+@router.get("/chatbot-queries/paginated")
+def list_chatbot_queries_paginated(
+    page: int = 1,
+    page_size: int = 25,
+    q: str = "",
+    category: str = "ALL",
+    is_navigational: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_content_admin),
+):
+    safe_size = max(1, min(page_size, 100))
+    query = db.query(ChatbotQuery).options(joinedload(ChatbotQuery.user).joinedload(User.roles))
+    if category and category.upper() != "ALL":
+        query = query.filter(ChatbotQuery.query_category == category.lower())
+    if is_navigational is not None:
+        query = query.filter(ChatbotQuery.is_navigational == is_navigational)
+    term = (q or "").strip()
+    if term:
+        pat = f"%{term}%"
+        query = query.join(ChatbotQuery.user, isouter=True).filter(
+            or_(
+                ChatbotQuery.query_text.ilike(pat),
+                ChatbotQuery.response_text.ilike(pat),
+                User.given_name.ilike(pat),
+                User.family_name.ilike(pat),
+                User.email.ilike(pat),
+            )
+        )
+    total = query.count()
+    total_pages = max(1, (total + safe_size - 1) // safe_size)
+    safe_page = max(1, min(page, total_pages))
+    records = query.order_by(ChatbotQuery.timestamp.desc()).offset((safe_page - 1) * safe_size).limit(safe_size).all()
+    items = []
+    for r in records:
+        role_name = r.user.roles[0].role_name if r.user and r.user.roles else "VISITOR"
+        items.append({
+            "query_id": r.query_id,
+            "user_id": r.user_id,
+            "user_name": r.user.full_name if r.user else "Anonymous Visitor",
+            "user_email": r.user.email if r.user else "",
+            "user_role": role_name,
+            "query_text": r.query_text,
+            "response_text": r.response_text,
+            "query_category": r.query_category,
+            "is_navigational": r.is_navigational,
+            "response_time_ms": getattr(r, "response_time_ms", None),
+            "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+        })
+    return {
+        "items": items,
+        "total": total,
+        "page": safe_page,
+        "page_size": safe_size,
+        "total_pages": total_pages,
+    }
+

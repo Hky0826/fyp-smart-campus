@@ -808,3 +808,56 @@ class RoleUpdate(BaseSchema):
     role_name: Optional[str] = None
     description: Optional[str] = None
 
+
+# ==========================================
+# Category 7: Scalable User Directory, Detail & Bulk Schemas
+# ==========================================
+class UserSummaryResponse(UserBase):
+    user_id: int
+    full_name: str
+    enrolled_at: datetime.datetime
+    last_seen: Optional[datetime.datetime] = None
+    roles: List[RoleResponse] = []
+    face_enrolled: bool = False
+    enrolled_poses_count: int = 0
+    enrolled_poses: List[str] = []
+    location_label: Optional[str] = None
+
+    student: Optional[StudentBase] = None
+    lecturer: Optional[LecturerBase] = None
+    staff: Optional[StaffBase] = None
+    visitor: Optional[VisitorBase] = None
+    admin: Optional[AdminBase] = None
+
+
+class UserDirectorySummary(BaseSchema):
+    total_users: int = 0
+    active_users: int = 0
+    inactive_users: int = 0
+    face_enrolled_users: int = 0
+
+
+class PaginatedUsersResponse(BaseSchema):
+    items: List[UserSummaryResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    summary: UserDirectorySummary
+
+
+class BulkUserStatusRequest(BaseSchema):
+    user_ids: List[int] = Field(..., min_length=1, max_length=200)
+    is_active: bool
+
+
+class BulkUserDeleteRequest(BaseSchema):
+    user_ids: List[int] = Field(..., min_length=1, max_length=200)
+
+
+class BulkUserRoleRequest(BaseSchema):
+    user_ids: List[int] = Field(..., min_length=1, max_length=200)
+    role_id: int
+    mode: str = Field(default="add", pattern="^(add|replace)$")
+
+
