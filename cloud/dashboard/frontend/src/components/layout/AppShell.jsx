@@ -104,7 +104,7 @@ export function AppShell() {
   const isMapFullBleed = location.pathname.startsWith('/dashboard/mapping');
 
   return (
-    <div className="min-h-screen flex bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+    <div className="h-screen overflow-hidden flex bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       {mobileOpen && (
         <div
           className="fixed inset-0 z-30 bg-slate-900/40 dark:bg-slate-950/75 backdrop-blur-xs lg:hidden"
@@ -114,7 +114,7 @@ export function AppShell() {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 lg:static z-40 flex flex-col justify-between bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-all duration-200 shrink-0 ${
+        className={`fixed inset-y-0 left-0 lg:static lg:h-full z-40 flex flex-col justify-between bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-all duration-200 shrink-0 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         } ${collapsed ? 'w-[72px]' : 'w-[256px]'}`}
       >
@@ -231,7 +231,7 @@ export function AppShell() {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         <header className="h-16 shrink-0 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 flex items-center justify-between gap-4 z-10">
           <div className="flex items-center gap-2.5 min-w-0">
             <button

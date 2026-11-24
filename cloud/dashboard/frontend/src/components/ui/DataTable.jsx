@@ -65,9 +65,9 @@ export function DataTable({
   return (
     <div className="space-y-4">
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
-        <div className="overflow-x-auto max-h-[68vh] overflow-y-auto scrollbar-thin">
+        <div className="overflow-x-auto scrollbar-thin">
           <table className="w-full text-left text-sm border-collapse">
-            <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-xs border-b border-slate-200 dark:border-slate-800">
+            <thead className="bg-slate-50/95 dark:bg-slate-900/95 border-b border-slate-200 dark:border-slate-800">
               <tr>
                 {columns.map((col, cIdx) => {
                   const sortKey = col.meta?.sortKey;

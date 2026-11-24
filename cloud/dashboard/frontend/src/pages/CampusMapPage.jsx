@@ -116,7 +116,7 @@ function App() {
     }
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Outfit'] antialiased">
+        <div className="min-h-full bg-slate-950 text-slate-100 flex flex-col font-['Outfit'] antialiased">
             
             {/* Header / Topbar */}
             <Header 
