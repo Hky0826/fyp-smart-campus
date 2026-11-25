@@ -194,6 +194,8 @@ ApplicationWindow {
         setupLocalAddress: deviceController.setupLocalAddress
         setupDetectedLanAddress: deviceController.setupDetectedLanAddress
         setupCloudUrl: deviceController.setupCloudUrl
+        cameraSourceUrl: cameraController.sourceUrl
+        qrStatusText: deviceController.qrStatus
         onRefreshRequested: deviceController.refresh()
         onSetupCompleted: deviceController.completeSetup()
         onScanQrRequested: deviceController.scanQrFromCamera()

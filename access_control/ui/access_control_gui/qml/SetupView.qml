@@ -11,14 +11,16 @@ Item {
     property string setupLocalAddress: ""
     property string setupDetectedLanAddress: ""
     property string setupCloudUrl: ""
+    property string cameraSourceUrl: ""
+    property string qrStatusText: "Hold the dashboard QR code in front of the camera..."
     property string errorText: ""
     property string cloudUrlValue: setupCloudUrl || "http://127.0.0.1:8000"
     property string pairingCodeValue: ""
     property string deviceIdValue: ""
     property string deviceSecretValue: ""
     property bool remotePushValue: false
-    property bool manualMode: false
-    property bool qrScanActive: true
+    // Default mode is hands-free QR scanning ("qr"); fallbacks: "code" | "manual"
+    property string setupMode: "qr"
     signal refreshRequested()
     signal setupCompleted()
     signal scanQrRequested()
@@ -26,9 +28,9 @@ Item {
     signal provisionRequested(string cloudUrl, string deviceId, string deviceSecret, bool remotePush)
 
     Timer {
-        interval: 750
+        interval: 600
         repeat: true
-        running: root.visible && root.firstTimeSetup && !root.manualMode && root.qrScanActive
+        running: root.visible && root.firstTimeSetup && root.setupMode === "qr"
         onTriggered: root.scanQrRequested()
     }
 
@@ -47,14 +49,14 @@ Item {
 
     Rectangle {
         anchors.centerIn: parent
-        width: Math.min(760, parent.width - 36)
-        height: Math.min(root.firstTimeSetup ? 760 : 290, parent.height - 24)
-        radius: 10
+        width: Math.min(720, parent.width - 32)
+        height: Math.min(root.firstTimeSetup ? 620 : 280, parent.height - 24)
+        radius: 14
         color: "#f8fafc"
 
         Flickable {
             anchors.fill: parent
-            anchors.margins: 24
+            anchors.margins: 22
             contentWidth: width
             contentHeight: setupColumn.height
             clip: true
@@ -66,175 +68,229 @@ Item {
 
                 Text {
                     width: parent.width
-                    text: root.firstTimeSetup ? "Connect this access-control device" : "Device setup required"
+                    text: root.firstTimeSetup ? "Pair this Access-Control Kiosk" : "Device setup required"
                     color: "#0f172a"
-                    font.pixelSize: 28
+                    font.pixelSize: 24
                     font.bold: true
                     horizontalAlignment: Text.AlignHCenter
                 }
 
-                Text {
+                // ── DEFAULT MODE: LIVE QR CAMERA SCANNER ──────────────────────
+                Column {
+                    visible: root.firstTimeSetup && root.setupMode === "qr"
                     width: parent.width
-                    visible: root.firstTimeSetup
-                    text: "Follow the steps below. SQLite is initialized automatically; you do not need to edit an .env file."
-                    color: "#475569"
-                    font.pixelSize: 15
-                    wrapMode: Text.WordWrap
-                    horizontalAlignment: Text.AlignHCenter
-                }
+                    spacing: 10
 
-                Rectangle {
-                    visible: root.firstTimeSetup
-                    width: parent.width
-                    height: 98
-                    radius: 8
-                    color: "#e0f2fe"
-                    border.color: "#7dd3fc"
-                    Column {
-                        anchors.fill: parent
-                        anchors.margins: 12
-                        spacing: 5
-                        Text { text: "STEP 1 — NOTE THIS DEVICE ADDRESS"; color: "#075985"; font.bold: true; font.pixelSize: 12 }
-                        Text { width: parent.width; text: "Detected edge address: " + (root.setupLocalAddress || "Not available"); color: "#0c4a6e"; font.family: "monospace"; font.bold: true }
-                        Text { width: parent.width; text: "Automatic Wi-Fi address: " + (root.setupDetectedLanAddress || "Not available"); color: "#0c4a6e"; font.family: "monospace" }
-                        Text { width: parent.width; text: "Use 127.0.0.1 when cloud and edge run on this laptop. For separate Wi-Fi devices, remote mode uses this device's detected LAN address."; color: "#0c4a6e"; wrapMode: Text.WordWrap }
+                    Text {
+                        width: parent.width
+                        text: "In the Admin Dashboard, go to Devices → Add Device (or click the QR icon) and hold the QR code up to this kiosk's camera."
+                        color: "#475569"
+                        font.pixelSize: 13
+                        wrapMode: Text.WordWrap
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+
+                    Rectangle {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: Math.min(parent.width, 380)
+                        height: 230
+                        radius: 12
+                        color: "#0f172a"
+                        border.color: "#06b6d4"
+                        border.width: 3
+                        clip: true
+
+                        Image {
+                            anchors.fill: parent
+                            source: root.cameraSourceUrl
+                            cache: false
+                            fillMode: Image.PreserveAspectCrop
+                            mirror: true
+                            smooth: true
+                        }
+
+                        // Targeting reticle
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: 150
+                            height: 150
+                            radius: 12
+                            color: "transparent"
+                            border.color: "#22d3ee"
+                            border.width: 2
+                        }
+
+                        Rectangle {
+                            anchors.bottom: parent.bottom
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            height: 30
+                            color: "#aa020617"
+                            Text {
+                                anchors.centerIn: parent
+                                text: root.cameraSourceUrl.length > 0 ? "Scanning for QR code..." : "Starting camera..."
+                                color: "#e0f2fe"
+                                font.pixelSize: 12
+                                font.bold: true
+                            }
+                        }
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: root.qrStatusText
+                        color: "#0369a1"
+                        font.pixelSize: 13
+                        font.bold: true
+                        wrapMode: Text.WordWrap
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+
+                    Row {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        spacing: 12
+                        Button {
+                            text: "Type 8-character code instead"
+                            onClicked: root.setupMode = "code"
+                        }
+                        Button {
+                            flat: true
+                            text: "Manual ID & Secret"
+                            onClicked: root.setupMode = "manual"
+                        }
                     }
                 }
 
+                // ── FALLBACK 1: 8-CHARACTER PAIRING CODE ──────────────────────
+                Column {
+                    visible: root.firstTimeSetup && root.setupMode === "code"
+                    width: parent.width
+                    spacing: 10
+
+                    Text { text: "Cloud dashboard URL"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
+                    TextField {
+                        width: parent.width
+                        text: root.cloudUrlValue
+                        onTextChanged: root.cloudUrlValue = text
+                        placeholderText: "http://192.168.x.x:8000"
+                        selectByMouse: true
+                    }
+
+                    Text { text: "8-character pairing code"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
+                    TextField {
+                        width: parent.width
+                        text: root.pairingCodeValue
+                        onTextChanged: root.pairingCodeValue = text
+                        placeholderText: "e.g. K9X4-M2P8"
+                        selectByMouse: true
+                        font.family: "monospace"
+                        font.pixelSize: 18
+                    }
+
+                    Row {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        spacing: 10
+                        Button {
+                            width: 190; height: 42
+                            text: "Pair & Start"
+                            enabled: root.cloudUrlValue.length > 0 && root.pairingCodeValue.length >= 6
+                            onClicked: root.claimRequested(root.cloudUrlValue, root.pairingCodeValue, root.remotePushValue)
+                            background: Rectangle { radius: 8; color: parent.enabled ? "#111827" : "#94a3b8" }
+                            contentItem: Text { text: parent.text; color: "#ffffff"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                        }
+                        Button {
+                            height: 42
+                            text: "← Back to QR Scan"
+                            onClicked: root.setupMode = "qr"
+                        }
+                    }
+                }
+
+                // ── FALLBACK 2: MANUAL DEVICE ID & SECRET ─────────────────────
+                Column {
+                    visible: root.firstTimeSetup && root.setupMode === "manual"
+                    width: parent.width
+                    spacing: 8
+
+                    Text { text: "Cloud dashboard URL"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
+                    TextField {
+                        width: parent.width
+                        text: root.cloudUrlValue
+                        onTextChanged: root.cloudUrlValue = text
+                        placeholderText: "http://192.168.x.x:8000"
+                        selectByMouse: true
+                    }
+
+                    Text { text: "Generated device ID"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
+                    TextField {
+                        width: parent.width
+                        text: root.deviceIdValue
+                        onTextChanged: root.deviceIdValue = text
+                        placeholderText: "Paste Device ID"
+                        selectByMouse: true
+                        font.family: "monospace"
+                    }
+
+                    Text { text: "One-time device secret"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
+                    TextField {
+                        width: parent.width
+                        text: root.deviceSecretValue
+                        onTextChanged: root.deviceSecretValue = text
+                        placeholderText: "Paste one-time secret"
+                        selectByMouse: true
+                        echoMode: TextInput.Password
+                        font.family: "monospace"
+                    }
+
+                    Row {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        spacing: 10
+                        Button {
+                            width: 190; height: 42
+                            text: "Verify & Start"
+                            enabled: root.cloudUrlValue.length > 0 && root.deviceIdValue.length > 0 && root.deviceSecretValue.length > 0
+                            onClicked: root.provisionRequested(root.cloudUrlValue, root.deviceIdValue, root.deviceSecretValue, root.remotePushValue)
+                            background: Rectangle { radius: 8; color: parent.enabled ? "#111827" : "#94a3b8" }
+                            contentItem: Text { text: parent.text; color: "#ffffff"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                        }
+                        Button {
+                            height: 42
+                            text: "← Back to QR Scan"
+                            onClicked: root.setupMode = "qr"
+                        }
+                    }
+                }
+
+                // ── NON-FIRST-TIME SETUP STATUS ───────────────────────────────
                 Text {
-                    visible: root.firstTimeSetup
+                    visible: !root.firstTimeSetup
                     width: parent.width
-                    text: "STEP 2 — CREATE THE DEVICE IN THE ADMIN DASHBOARD"
-                    color: "#334155"
-                    font.bold: true
-                    font.pixelSize: 12
-                }
-                Text {
-                    visible: root.firstTimeSetup
-                    width: parent.width
-                    text: "Open the dashboard, choose Infrastructure → Devices → Add Device, complete the form, then copy the generated Device ID and one-time secret from the provisioning dialog."
-                    color: "#475569"
-                    wrapMode: Text.WordWrap
-                }
-
-                Text {
-                    visible: root.firstTimeSetup
-                    width: parent.width
-                    text: root.manualMode ? "MANUAL SETUP — ENTER DEVICE ID & SECRET" : "QUICK PAIR — ENTER 8-CHARACTER PAIRING CODE"
-                    color: "#334155"
-                    font.bold: true
-                    font.pixelSize: 12
-                }
-
-                Text { visible: root.firstTimeSetup; text: "Cloud dashboard URL"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
-                TextField {
-                    visible: root.firstTimeSetup
-                    width: parent.width
-                    text: root.cloudUrlValue
-                    onTextChanged: root.cloudUrlValue = text
-                    placeholderText: "https://your-cloud-dashboard-url"
-                    selectByMouse: true
-                }
-
-                Text { visible: root.firstTimeSetup && !root.manualMode; text: "8-character pairing code (from dashboard QR / Pair dialog)"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
-                TextField {
-                    id: pairingCodeField
-                    visible: root.firstTimeSetup && !root.manualMode
-                    width: parent.width
-                    text: root.pairingCodeValue
-                    onTextChanged: root.pairingCodeValue = text
-                    placeholderText: "e.g. K9X4-M2P8"
-                    selectByMouse: true
-                    font.family: "monospace"
-                    font.pixelSize: 18
-                }
-
-                Text { visible: root.firstTimeSetup && root.manualMode; text: "Generated device ID"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
-                TextField {
-                    id: deviceIdField
-                    visible: root.firstTimeSetup && root.manualMode
-                    width: parent.width
-                    text: root.deviceIdValue
-                    onTextChanged: root.deviceIdValue = text
-                    placeholderText: "Paste the ID shown by the dashboard"
-                    selectByMouse: true
-                    font.family: "monospace"
-                }
-
-                Text { visible: root.firstTimeSetup && root.manualMode; text: "One-time device secret"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
-                TextField {
-                    visible: root.firstTimeSetup && root.manualMode
-                    width: parent.width
-                    text: root.deviceSecretValue
-                    onTextChanged: root.deviceSecretValue = text
-                    placeholderText: "Paste the secret shown once by the dashboard"
-                    selectByMouse: true
-                    echoMode: TextInput.Password
-                    font.family: "monospace"
-                }
-
-                Button {
-                    visible: root.firstTimeSetup
-                    flat: true
-                    text: root.manualMode ? "← Use 8-character pairing code instead" : "Advanced: Enter Device ID & Secret manually"
-                    onClicked: root.manualMode = !root.manualMode
-                }
-
-                Text {
-                    visible: root.firstTimeSetup
-                    width: parent.width
-                    text: "Credentials are verified live against the cloud before setup completes and saved outside the project folder."
-                    color: "#64748b"
-                    font.pixelSize: 12
-                    wrapMode: Text.WordWrap
-                }
-
-                CheckBox {
-                    visible: root.firstTimeSetup && root.manualMode
-                    width: parent.width
-                    text: "Enable legacy LAN cloud-to-edge push (only needed if WebSocket is unavailable)"
-                    checked: root.remotePushValue
-                    onCheckedChanged: root.remotePushValue = checked
-                }
-
-                Text {
-                    width: parent.width
-                    text: root.firstTimeSetup ? "After pairing succeeds, synchronization starts automatically and this screen closes." : statusText()
+                    text: statusText()
                     color: "#475569"
                     font.pixelSize: 14
                     wrapMode: Text.WordWrap
                     horizontalAlignment: Text.AlignHCenter
                 }
 
-                Text { width: parent.width; visible: root.errorText.length > 0; text: root.errorText; color: "#b91c1c"; font.pixelSize: 13; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter }
+                Text {
+                    width: parent.width
+                    visible: root.errorText.length > 0
+                    text: root.errorText
+                    color: "#b91c1c"
+                    font.pixelSize: 13
+                    font.bold: true
+                    wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignHCenter
+                }
 
-                Row {
+                Button {
+                    visible: !root.firstTimeSetup
                     anchors.horizontalCenter: parent.horizontalCenter
-                    spacing: 10
-                    Button {
-                        width: 210; height: 44
-                        text: root.firstTimeSetup ? (root.manualMode ? "Verify & Start" : "Pair & Start") : "Refresh"
-                        enabled: !root.firstTimeSetup || (root.manualMode
-                            ? (root.cloudUrlValue.length > 0 && root.deviceIdValue.length > 0 && root.deviceSecretValue.length > 0)
-                            : (root.cloudUrlValue.length > 0 && root.pairingCodeValue.length >= 6))
-                        onClicked: {
-                            if (!root.firstTimeSetup) {
-                                root.refreshRequested()
-                            } else if (root.manualMode) {
-                                root.provisionRequested(root.cloudUrlValue, root.deviceIdValue, root.deviceSecretValue, root.remotePushValue)
-                            } else {
-                                root.claimRequested(root.cloudUrlValue, root.pairingCodeValue, root.remotePushValue)
-                            }
-                        }
-                        background: Rectangle { radius: 8; color: parent.enabled ? "#111827" : "#94a3b8" }
-                        contentItem: Text { text: parent.text; color: "#ffffff"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    }
-                    Button {
-                        visible: root.firstTimeSetup
-                        width: 100; height: 44
-                        text: "Refresh"
-                        onClicked: root.refreshRequested()
-                    }
+                    width: 160; height: 42
+                    text: "Refresh"
+                    onClicked: root.refreshRequested()
+                    background: Rectangle { radius: 8; color: "#111827" }
+                    contentItem: Text { text: parent.text; color: "#ffffff"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                 }
             }
         }

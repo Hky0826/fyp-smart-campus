@@ -27,15 +27,37 @@ class _DeviceCheckWorker(QThread):
             self.failure.emit(str(exc))
 
 
+class _QrScanWorker(QThread):
+    qr_found = Signal(str, str)
+    scan_error = Signal(str)
+
+    def __init__(self, api: KioskApiClient, jpeg_bytes: bytes) -> None:
+        super().__init__()
+        self._api = api
+        self._jpeg_bytes = jpeg_bytes
+
+    def run(self) -> None:
+        try:
+            result = self._api.scan_setup_qr(self._jpeg_bytes)
+            if result.get("found") and result.get("cloud_url") and result.get("pairing_code"):
+                self.qr_found.emit(str(result["cloud_url"]), str(result["pairing_code"]))
+            elif result.get("error"):
+                self.scan_error.emit(str(result["error"]))
+        except Exception:
+            pass
+
+
 class DeviceController(QObject):
     setupChanged = Signal()
     errorChanged = Signal()
+    qrStatusChanged = Signal()
 
     def __init__(self, api: KioskApiClient, camera: Any = None) -> None:
         super().__init__()
         self._api = api
         self._camera = camera
         self._qr_scan_busy = False
+        self._qr_status = "Hold the dashboard QR code in front of the camera..."
         self._setup_required = False
         self._database_ok = True
         self._models_ok = True
@@ -144,14 +166,27 @@ class DeviceController(QObject):
         if not jpeg:
             return
         self._qr_scan_busy = True
-        try:
-            result = self._api.scan_setup_qr(jpeg)
-            if result.get("found") and result.get("cloud_url") and result.get("pairing_code"):
-                self.claimSetup(str(result["cloud_url"]), str(result["pairing_code"]), False)
-        except Exception:
-            pass
-        finally:
-            self._qr_scan_busy = False
+        worker = _QrScanWorker(self._api, jpeg)
+        worker.qr_found.connect(self._on_qr_found)
+        worker.scan_error.connect(self._on_qr_scan_error)
+        worker.finished.connect(lambda: self._finish_qr_worker(worker))
+        self._workers.append(worker)
+        worker.start()
+
+    @Slot(str, str)
+    def _on_qr_found(self, cloud_url: str, pairing_code: str) -> None:
+        self._qr_status = f"QR detected ({pairing_code}) — pairing with cloud..."
+        self.qrStatusChanged.emit()
+        self.claimSetup(cloud_url, pairing_code, False)
+
+    @Slot(str)
+    def _on_qr_scan_error(self, message: str) -> None:
+        self._qr_status = f"Invalid QR: {message}"
+        self.qrStatusChanged.emit()
+
+    def _finish_qr_worker(self, worker: QThread) -> None:
+        self._qr_scan_busy = False
+        self._cleanup_worker(worker)
 
     @Slot(str)
     def resetSetup(self, admin_pin: str = "") -> None:
@@ -204,6 +239,9 @@ class DeviceController(QObject):
     def _get_setup_detected_lan_address(self) -> str:
         return self._setup_detected_lan_address
 
+    def _get_qr_status(self) -> str:
+        return self._qr_status
+
     setupRequired = Property(bool, _get_setup_required, notify=setupChanged)
     databaseOk = Property(bool, _get_database_ok, notify=setupChanged)
     modelsOk = Property(bool, _get_models_ok, notify=setupChanged)
@@ -214,3 +252,4 @@ class DeviceController(QObject):
     setupLocalAddress = Property(str, _get_setup_local_address, notify=setupChanged)
     setupCloudUrl = Property(str, _get_setup_cloud_url, notify=setupChanged)
     setupDetectedLanAddress = Property(str, _get_setup_detected_lan_address, notify=setupChanged)
+    qrStatus = Property(str, _get_qr_status, notify=qrStatusChanged)
