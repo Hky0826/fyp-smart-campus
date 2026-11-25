@@ -109,7 +109,9 @@ class DeviceController(QObject):
             self._api.complete_setup()
         except Exception as exc:  # pragma: no cover - exercised in GUI runtime
             self._error = str(exc)
+            self._qr_status = f"Pairing failed: {exc}"
             self.errorChanged.emit()
+            self.qrStatusChanged.emit()
             return
         self._first_time_setup = False
         self._setup_secret = ""
@@ -124,7 +126,9 @@ class DeviceController(QObject):
             )
         except Exception as exc:  # pragma: no cover - exercised in GUI runtime
             self._error = str(exc)
+            self._qr_status = f"Pairing failed: {exc}"
             self.errorChanged.emit()
+            self.qrStatusChanged.emit()
             return
         self._first_time_setup = False
         self._setup_secret = ""
@@ -146,7 +150,9 @@ class DeviceController(QObject):
             )
         except Exception as exc:  # pragma: no cover - exercised in GUI runtime
             self._error = str(exc)
+            self._qr_status = f"Pairing failed: {exc}"
             self.errorChanged.emit()
+            self.qrStatusChanged.emit()
             return
         self._first_time_setup = False
         self._setup_secret = ""
@@ -194,7 +200,9 @@ class DeviceController(QObject):
             self._api.reset_setup(admin_pin.strip())
         except Exception as exc:  # pragma: no cover - exercised in GUI runtime
             self._error = str(exc)
+            self._qr_status = f"Pairing failed: {exc}"
             self.errorChanged.emit()
+            self.qrStatusChanged.emit()
             return
         self._first_time_setup = True
         self._setup_secret = ""

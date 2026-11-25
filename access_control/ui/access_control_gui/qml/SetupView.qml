@@ -92,8 +92,8 @@ Item {
 
                     Rectangle {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: Math.min(parent.width, 380)
-                        height: 230
+                        width: Math.min(parent.width, 340)
+                        height: 185
                         radius: 12
                         color: "#0f172a"
                         border.color: "#06b6d4"

@@ -457,6 +457,7 @@ def claim_setup(payload: SetupClaimRequest) -> dict:
             pairing_code = (payload.pairing_code or "").strip()
         if not cloud_url or not pairing_code:
             raise ValueError("Cloud URL and pairing code are required")
+        logger.info("Edge claim attempt: cloud_url=%s pairing_code=%s", cloud_url, pairing_code)
         validate_cloud_url(cloud_url, current.allow_insecure_loopback)
 
         claim_url = f"{cloud_url}/api/infra/devices/claim"
@@ -498,6 +499,7 @@ def claim_setup(payload: SetupClaimRequest) -> dict:
             verify_handshake=True,
         )
     except ValueError as exc:
+        logger.warning("Edge QR/code pairing rejected: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Edge QR/code pairing failed")
@@ -526,16 +528,27 @@ async def scan_setup_qr(file: UploadFile = File(...)) -> dict:
     if frame is None:
         raise HTTPException(status_code=400, detail="Invalid image frame")
     detector = cv2.QRCodeDetector()
-    decoded, _, _ = detector.detectAndDecode(frame)
-    if not decoded:
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(gray)
-        decoded, _, _ = detector.detectAndDecode(clahe)
-    if not decoded:
-        thresh = cv2.adaptiveThreshold(
-            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 8
-        )
-        decoded, _, _ = detector.detectAndDecode(thresh)
+    decoded = ""
+    gray = None
+    for candidate in ("raw", "clahe", "thresh"):
+        try:
+            if candidate == "raw":
+                img = frame
+            elif candidate == "clahe":
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                img = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(gray)
+            else:
+                if gray is None:
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                img = cv2.adaptiveThreshold(
+                    gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 8
+                )
+            text, _, _ = detector.detectAndDecode(img)
+            if text:
+                decoded = text
+                break
+        except Exception:
+            continue
     if not decoded:
         return {"found": False}
     try:
