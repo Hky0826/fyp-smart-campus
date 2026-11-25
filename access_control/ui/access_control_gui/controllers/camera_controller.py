@@ -115,8 +115,8 @@ def _open_capture(source: str | int) -> Any:
     fourcc_name = os.getenv("EDGE_GUI_CAMERA_FOURCC", DEFAULT_CAMERA_FOURCC).strip()
     pixel_format = os.getenv("EDGE_CAMERA_FORMAT", "RGB888").strip().upper()
     swap_rb = os.getenv("EDGE_CAMERA_SWAP_RB", "false").strip().lower() in {"1", "true", "yes", "on"}
-    exposure_value = float(os.getenv("EDGE_CAMERA_EV", "1.2"))
-    brightness = float(os.getenv("EDGE_CAMERA_BRIGHTNESS", "0.1"))
+    exposure_value = float(os.getenv("EDGE_CAMERA_EV", "0.0"))
+    brightness = float(os.getenv("EDGE_CAMERA_BRIGHTNESS", "0.0"))
     contrast = float(os.getenv("EDGE_CAMERA_CONTRAST", "1.0"))
 
     if open_single_capture is not None:

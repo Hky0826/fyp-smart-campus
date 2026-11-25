@@ -528,6 +528,15 @@ async def scan_setup_qr(file: UploadFile = File(...)) -> dict:
     detector = cv2.QRCodeDetector()
     decoded, _, _ = detector.detectAndDecode(frame)
     if not decoded:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(gray)
+        decoded, _, _ = detector.detectAndDecode(clahe)
+    if not decoded:
+        thresh = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 8
+        )
+        decoded, _, _ = detector.detectAndDecode(thresh)
+    if not decoded:
         return {"found": False}
     try:
         cloud_url, pairing_code = _parse_qr_pairing_payload(decoded)

@@ -16,11 +16,12 @@ DEFAULT_HEIGHT = int(os.getenv("EDGE_CAMERA_HEIGHT", "720"))
 DEFAULT_FPS = int(os.getenv("EDGE_CAMERA_FPS", "30"))
 DEFAULT_PIXEL_FORMAT = os.getenv("EDGE_CAMERA_FORMAT", "RGB888").strip().upper()
 DEFAULT_SWAP_RB = os.getenv("EDGE_CAMERA_SWAP_RB", "false").strip().lower() in {"1", "true", "yes", "on"}
-DEFAULT_EXPOSURE_VALUE = float(os.getenv("EDGE_CAMERA_EV", "1.2"))
-DEFAULT_BRIGHTNESS = float(os.getenv("EDGE_CAMERA_BRIGHTNESS", "0.1"))
+DEFAULT_EXPOSURE_VALUE = float(os.getenv("EDGE_CAMERA_EV", "0.0"))
+DEFAULT_BRIGHTNESS = float(os.getenv("EDGE_CAMERA_BRIGHTNESS", "0.0"))
 DEFAULT_CONTRAST = float(os.getenv("EDGE_CAMERA_CONTRAST", "1.0"))
-DEFAULT_AE_METERING_MODE = int(os.getenv("EDGE_CAMERA_AE_METERING_MODE", "1"))  # 1 = Spot metering
-DEFAULT_AE_EXPOSURE_MODE = int(os.getenv("EDGE_CAMERA_AE_EXPOSURE_MODE", "2"))  # 2 = Long exposure mode
+DEFAULT_AE_METERING_MODE = int(os.getenv("EDGE_CAMERA_AE_METERING_MODE", "0"))  # 0 = CentreWeighted
+DEFAULT_AE_EXPOSURE_MODE = int(os.getenv("EDGE_CAMERA_AE_EXPOSURE_MODE", "0"))  # 0 = Normal auto-exposure
+DEFAULT_AE_CONSTRAINT_MODE = int(os.getenv("EDGE_CAMERA_AE_CONSTRAINT_MODE", "1"))  # 1 = Highlight (prevents overexposure)
 
 try:
     import cv2
@@ -152,11 +153,10 @@ class Picamera2Capture:
             # In Picamera2 / libcamera:
             # - 'RGB888' outputs memory byte order [B, G, R], which directly matches OpenCV's native BGR format.
             # - 'BGR888' outputs memory byte order [R, G, B].
-            controls: dict[str, Any] = {}
+            controls: dict[str, Any] = {"AeEnable": True, "AwbEnable": True}
             if self.fps:
                 controls["FrameRate"] = self.fps
-            if self.exposure_value != 0.0:
-                controls["ExposureValue"] = self.exposure_value
+            controls["ExposureValue"] = self.exposure_value
             if self.brightness != 0.0:
                 controls["Brightness"] = self.brightness
             if self.contrast != 1.0:
@@ -165,6 +165,8 @@ class Picamera2Capture:
                 controls["AeMeteringMode"] = self.ae_metering_mode
             if self.ae_exposure_mode is not None:
                 controls["AeExposureMode"] = self.ae_exposure_mode
+            if DEFAULT_AE_CONSTRAINT_MODE is not None:
+                controls["AeConstraintMode"] = DEFAULT_AE_CONSTRAINT_MODE
 
             video_config = self._picam2.create_video_configuration(
                 main={"format": self.pixel_format, "size": (self.width, self.height)},
