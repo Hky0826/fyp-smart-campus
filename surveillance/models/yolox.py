@@ -181,6 +181,7 @@ class YOLOXPersonDetector:
             padded = cv2.copyMakeBorder(
                 resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114)
             )
+            padded = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
         else:
             padded = np.full((target_h, target_w, 3), 114, dtype=frame.dtype)
             padded[top : top + new_unpad_h, left : left + new_unpad_w] = resized
@@ -193,6 +194,70 @@ class YOLOXPersonDetector:
 
         return tensor, r, (left, top)
 
+    def _decode_hailo_nms_by_class(
+        self,
+        raw_output: Any,
+        scale: float,
+        pad: Tuple[int, int],
+        orig_shape: Tuple[int, int],
+        num_classes: int = 80,
+    ) -> List[np.ndarray]:
+        """Decodes HailoRT HAILO_NMS_BY_CLASS output (e.g. official Hailo Model Zoo yolov8s.hef)."""
+        pad_w, pad_h = pad
+        orig_h, orig_w = orig_shape
+        target_w, target_h = self.input_size
+        boxes: List[np.ndarray] = []
+
+        def _append_box(ymin: float, xmin: float, ymax: float, xmax: float, score: float) -> None:
+            if score < self.confidence_threshold:
+                return
+            x1 = (xmin * target_w - pad_w) / scale
+            y1 = (ymin * target_h - pad_h) / scale
+            x2 = (xmax * target_w - pad_w) / scale
+            y2 = (ymax * target_h - pad_h) / scale
+            x1 = max(0.0, min(float(orig_w), x1))
+            y1 = max(0.0, min(float(orig_h), y1))
+            x2 = max(0.0, min(float(orig_w), x2))
+            y2 = max(0.0, min(float(orig_h), y2))
+            if x2 > x1 and y2 > y1:
+                boxes.append(np.array([x1, y1, x2, y2, score], dtype=np.float32))
+
+        # Format A: nested list [batch][class_id] -> ndarray(N, 5)
+        if isinstance(raw_output, list):
+            per_class = raw_output[0] if raw_output and isinstance(raw_output[0], list) else raw_output
+            for cls_id, cls_dets in enumerate(per_class):
+                if not self.ignore_class_id and cls_id != self.person_class_id:
+                    continue
+                arr = np.asarray(cls_dets, dtype=np.float32)
+                if arr.ndim == 2 and arr.shape[1] >= 5:
+                    for det in arr:
+                        _append_box(float(det[0]), float(det[1]), float(det[2]), float(det[3]), float(det[4]))
+            return boxes
+
+        # Format B: packed 1D float32 buffer [count_c0, ymin, xmin, ymax, xmax, score, ..., count_c1, ...]
+        flat = np.asarray(raw_output, dtype=np.float32).reshape(-1)
+        offset = 0
+        total = flat.size
+        for cls_id in range(num_classes):
+            if offset >= total:
+                break
+            count = int(round(float(flat[offset])))
+            offset += 1
+            if count < 0 or offset + count * 5 > total:
+                break
+            if self.ignore_class_id or cls_id == self.person_class_id:
+                for i in range(count):
+                    base = offset + i * 5
+                    _append_box(
+                        float(flat[base]),
+                        float(flat[base + 1]),
+                        float(flat[base + 2]),
+                        float(flat[base + 3]),
+                        float(flat[base + 4]),
+                    )
+            offset += count * 5
+        return boxes
+
     def postprocess(
         self,
         outputs: Dict[str, np.ndarray],
@@ -200,9 +265,28 @@ class YOLOXPersonDetector:
         pad: Tuple[int, int],
         orig_shape: Tuple[int, int],
     ) -> List[np.ndarray]:
-        """Decode YOLOX detections into [x1, y1, x2, y2, score] arrays."""
+        """Decode YOLOv8 / YOLOX detections into [x1, y1, x2, y2, score] arrays."""
         if not outputs:
             return []
+
+        # Official Hailo Model Zoo YOLOv8 on-chip NMS output (HAILO_NMS_BY_CLASS)
+        for name, raw_output in outputs.items():
+            if raw_output is None:
+                continue
+            is_nms_by_class = (
+                "nms_postprocess" in name.lower()
+                or isinstance(raw_output, list)
+                or (isinstance(raw_output, np.ndarray) and raw_output.ndim <= 2 and raw_output.size == 40080)
+            )
+            if is_nms_by_class:
+                nms_boxes = self._decode_hailo_nms_by_class(
+                    raw_output=raw_output,
+                    scale=scale,
+                    pad=pad,
+                    orig_shape=orig_shape,
+                )
+                logger.debug("Hailo NMS postprocess decoded %d person boxes", len(nms_boxes))
+                return self._nms(nms_boxes, iou_threshold=0.45) if nms_boxes else []
 
         has_raw_heads = any("conv" in k for k in outputs)
         if has_raw_heads:
@@ -376,3 +460,6 @@ class YOLOXPersonDetector:
         tensor, scale, pad = self.preprocess(frame)
         outputs = self.runner.infer(tensor)
         return self.postprocess(outputs, scale, pad, orig_shape=frame.shape[:2])
+
+
+YOLOv8PersonDetector = YOLOXPersonDetector

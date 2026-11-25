@@ -147,6 +147,7 @@ data/
 *.bin
 *.safetensors
 *.tflite
+surveillance/utils/scrcpy-server-v3.1
 cloud/models/
 cloud/dashboard/backend/app/facial_recognition/models/
 access_control/facial_recognition/models/
@@ -213,6 +214,8 @@ todo*.md
 pytest.ini
 
 documents/
+casing_cad/
+hardware/
 edge/
 floorplan/
 graphify-out/

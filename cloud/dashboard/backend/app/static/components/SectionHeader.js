@@ -1,10 +1,10 @@
 // Generic section header with title, search, and action button
-        function SectionHeader({ title, description, searchVal, onSearchChange, onCreateClick, createLabel, customAction }) {
+        function SectionHeader({ title, description, searchVal, onSearchChange, searchPlaceholder, searchInputRef, onCreateClick, createLabel, customAction }) {
             return (
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-6">
                     <div>
                         <h2 className="text-xl font-bold text-slate-100 tracking-tight">{title}</h2>
-                        {description && <p className="text-sm text-slate-500 mt-1 leading-relaxed">{description}</p>}
+                        {description && <p className="text-sm text-slate-400 mt-1 leading-relaxed">{description}</p>}
                     </div>
                     <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                         {onSearchChange !== undefined && (
@@ -13,12 +13,23 @@
                                     <Icon name="search" className="w-4 h-4" />
                                 </span>
                                 <input
+                                    ref={searchInputRef}
                                     type="text"
                                     value={searchVal}
                                     onChange={(e) => onSearchChange(e.target.value)}
-                                    placeholder="Search..."
-                                    className="bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 w-44 sm:w-56 transition-all duration-200 shadow-inner"
+                                    placeholder={searchPlaceholder || "Search... (press /)"}
+                                    className="bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-8 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 w-52 sm:w-64 transition-all duration-200 shadow-inner"
                                 />
+                                {searchVal && (
+                                    <button
+                                        type="button"
+                                        onClick={() => onSearchChange("")}
+                                        aria-label="Clear search"
+                                        className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-500 hover:text-slate-200"
+                                    >
+                                        <Icon name="x" className="w-3.5 h-3.5" />
+                                    </button>
+                                )}
                             </div>
                         )}
                         {customAction}

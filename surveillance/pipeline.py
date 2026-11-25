@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -20,6 +21,7 @@ from .config import SurveillanceConfig
 from .database import SurveillanceUserRepository
 from .sync import SurveillanceSyncEngine
 from .models.auraface import AuraFaceEmbedder
+from .models.scrfd import SCRFDFaceDetector
 from .models.yolox import YOLOXPersonDetector
 from .models.yunet import YuNetFaceDetector
 from .tracking.association import IdentityManager, TrackIdentity
@@ -395,10 +397,16 @@ def build_surveillance_pipeline(config: Optional[SurveillanceConfig] = None) -> 
         hef_path=cfg.person_detector_model_path,
         confidence_threshold=cfg.person_detection_threshold,
     )
-    face_detector = YuNetFaceDetector(
-        hef_path=cfg.face_detector_model_path,
-        confidence_threshold=cfg.face_detection_threshold,
-    )
+    if "scrfd" in cfg.face_detector_model_path.name.lower():
+        face_detector = SCRFDFaceDetector(
+            hef_path=cfg.face_detector_model_path,
+            confidence_threshold=cfg.face_detection_threshold,
+        )
+    else:
+        face_detector = YuNetFaceDetector(
+            hef_path=cfg.face_detector_model_path,
+            confidence_threshold=cfg.face_detection_threshold,
+        )
     embedder = AuraFaceEmbedder(
         hef_path=cfg.face_embedder_model_path,
     )
@@ -412,15 +420,67 @@ def build_surveillance_pipeline(config: Optional[SurveillanceConfig] = None) -> 
     )
 
 
+class _AsyncInferenceWorker:
+    """Runs SurveillancePipeline.process_frame() in a background thread so live display stays smooth."""
+
+    def __init__(self, pipeline: SurveillancePipeline) -> None:
+        self._pipeline = pipeline
+        self._cond = threading.Condition()
+        self._stop = False
+        self._pending_frame: Optional[np.ndarray] = None
+        self._latest_result: Dict[str, Any] = {"results": [], "person_count": 0, "track_count": 0}
+        self._ai_fps: float = 0.0
+        self._thread = threading.Thread(target=self._run, name="surveillance-ai-worker", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def submit(self, frame: np.ndarray) -> None:
+        with self._cond:
+            self._pending_frame = frame
+            self._cond.notify()
+
+    def latest(self) -> Tuple[Dict[str, Any], float]:
+        with self._cond:
+            return self._latest_result, self._ai_fps
+
+    def stop(self) -> None:
+        with self._cond:
+            self._stop = True
+            self._cond.notify_all()
+        self._thread.join(timeout=2.0)
+
+    def _run(self) -> None:
+        while True:
+            with self._cond:
+                while self._pending_frame is None and not self._stop:
+                    self._cond.wait(timeout=0.2)
+                if self._stop:
+                    return
+                frame = self._pending_frame
+                self._pending_frame = None
+            t0 = time.perf_counter()
+            try:
+                res = self._pipeline.process_frame(frame)
+            except Exception:
+                logger.exception("Async surveillance inference failed on frame")
+                continue
+            dt = max(time.perf_counter() - t0, 1e-6)
+            fps = 1.0 / dt
+            with self._cond:
+                self._latest_result = res
+                self._ai_fps = fps if self._ai_fps == 0.0 else (0.7 * self._ai_fps + 0.3 * fps)
+
+
 def main() -> None:
-    """CLI runner to execute surveillance camera pipeline with optional OpenCV display."""
+    """CLI runner to execute surveillance camera pipeline with live OpenCV display."""
     import argparse
     from .utils.camera import CameraReader
     from .utils.visualization import show_pipeline_result, close_display
     from .utils.logging import configure_logging
 
     parser = argparse.ArgumentParser(description="Run surveillance monitoring pipeline")
-    parser.add_argument("--camera", default=None, help="Camera index, RTSP URL, or video file")
+    parser.add_argument("--camera", default=None, help="Camera index, 'adb' (Android Camera2), HTTP/RTSP URL, or video file")
     parser.add_argument("--database", default=None, help="SQLite database path")
     display_group = parser.add_mutually_exclusive_group()
     display_group.add_argument(
@@ -439,6 +499,9 @@ def main() -> None:
     parser.add_argument("--window-name", default="Smart Campus Surveillance", help="OpenCV display window title")
     parser.add_argument("--mirror", dest="mirror", action="store_true", default=True, help="Mirror displayed frame")
     parser.add_argument("--no-mirror", dest="mirror", action="store_false", help="Do not mirror displayed frame")
+    swap_group = parser.add_mutually_exclusive_group()
+    swap_group.add_argument("--swap-rb", dest="swap_rb", action="store_true", default=None, help="Swap Red/Blue channels")
+    swap_group.add_argument("--no-swap-rb", dest="swap_rb", action="store_false", help="Disable Red/Blue channel swap")
     args = parser.parse_args()
 
     defaults = SurveillanceConfig()
@@ -449,7 +512,7 @@ def main() -> None:
     configure_logging(config.log_level)
 
     pipeline = build_surveillance_pipeline(config)
-    camera = CameraReader(config.camera)
+    camera = CameraReader(config.camera, swap_rb=args.swap_rb)
 
     if not camera.open():
         logger.error("Could not open camera source: %s", config.camera)
@@ -458,7 +521,13 @@ def main() -> None:
     sync_engine = SurveillanceSyncEngine.from_config(config, pipeline.repository)
     sync_engine.start()
 
+    worker = _AsyncInferenceWorker(pipeline) if args.display else None
+    if worker is not None:
+        worker.start()
+
     logger.info("Starting surveillance pipeline loop. Press 'q' or 'ESC' on display window to stop.")
+    cam_fps = 0.0
+    last_t = time.perf_counter()
     try:
         while True:
             ok, frame = camera.read_latest()
@@ -468,12 +537,23 @@ def main() -> None:
                     time.sleep(0.005)
                     continue
 
-            result = pipeline.process_frame(frame)
+            now = time.perf_counter()
+            dt = max(now - last_t, 1e-6)
+            last_t = now
+            inst_fps = 1.0 / dt
+            cam_fps = inst_fps if cam_fps == 0.0 else (0.8 * cam_fps + 0.2 * inst_fps)
 
-            if args.display:
-                if not show_pipeline_result(args.window_name, frame, result, mirror=args.mirror):
+            if args.display and worker is not None:
+                worker.submit(frame)
+                result, ai_fps = worker.latest()
+                hud = f"LIVE {cam_fps:.1f} FPS | AI {ai_fps:.1f} FPS | Persons: {result.get('person_count', 0)}"
+                if not show_pipeline_result(args.window_name, frame, result, mirror=args.mirror, hud_text=hud):
                     break
+            else:
+                pipeline.process_frame(frame)
     finally:
+        if worker is not None:
+            worker.stop()
         sync_engine.stop()
         camera.release()
         if args.display:

@@ -45,14 +45,22 @@ class MockHailoModelRunner(BaseHailoRunner):
 
     def infer(self, input_tensor: np.ndarray, input_name: Optional[str] = None) -> Dict[str, np.ndarray]:
         # Return mock outputs depending on the model name
-        if "yolox" in self.model_name.lower():
-            # Return dummy YOLOX detection output
+        name_lower = self.model_name.lower()
+        if "yolov8" in name_lower or "yolox" in name_lower:
+            # Return dummy YOLO detection output
             return {"output_0": np.zeros((1, 8400, 85), dtype=np.float32)}
-        elif "yunet" in self.model_name.lower():
+        elif "scrfd" in name_lower:
+            # Return empty SCRFD head outputs
+            return {
+                "scrfd/conv41": np.zeros((1, 80, 80, 2), dtype=np.float32),
+                "scrfd/conv42": np.zeros((1, 80, 80, 8), dtype=np.float32),
+                "scrfd/conv43": np.zeros((1, 80, 80, 20), dtype=np.float32),
+            }
+        elif "yunet" in name_lower:
             # Return dummy YuNet detection output
             return {"output_0": np.zeros((1, 100, 15), dtype=np.float32)}
-        elif "auraface" in self.model_name.lower():
-            # Return 512-d zero vector or random vector normalized
+        elif "arcface" in name_lower or "auraface" in name_lower or "glintr" in name_lower:
+            # Return 512-d normalized vector
             vec = np.ones((1, 512), dtype=np.float32)
             vec /= np.linalg.norm(vec)
             return {"output_0": vec}

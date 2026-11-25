@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, List
 
 import numpy as np
+
+if os.environ.get("QT_QPA_PLATFORM", "wayland").lower() in {"", "wayland", "wayland-egl"}:
+    os.environ["QT_QPA_PLATFORM"] = "xcb"
 
 try:
     import cv2
@@ -19,6 +23,7 @@ def draw_pipeline_result(
     frame: np.ndarray,
     results: List[Dict[str, Any]],
     mirror: bool = False,
+    hud_text: str | None = None,
 ) -> np.ndarray:
     """Draw bounding boxes, track IDs, and recognized user names on frame."""
     if cv2 is None or frame is None or frame.size == 0:
@@ -80,6 +85,11 @@ def draw_pipeline_result(
             cv2.LINE_AA,
         )
 
+    if hud_text:
+        (tw, th), _ = cv2.getTextSize(hud_text, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
+        cv2.rectangle(canvas, (8, 8), (18 + tw, 18 + th), (0, 0, 0), -1)
+        cv2.putText(canvas, hud_text, (13, 13 + th), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1, cv2.LINE_AA)
+
     return canvas
 
 
@@ -88,12 +98,13 @@ def show_pipeline_result(
     frame: np.ndarray,
     result: Dict[str, Any],
     mirror: bool = True,
+    hud_text: str | None = None,
 ) -> bool:
     """Show pipeline output window. Returns False if user pressed ESC or 'q'."""
     if cv2 is None:
         return True
 
-    rendered = draw_pipeline_result(frame, result.get("results", []), mirror=mirror)
+    rendered = draw_pipeline_result(frame, result.get("results", []), mirror=mirror, hud_text=hud_text)
     cv2.imshow(window_name, rendered)
     key = cv2.waitKey(1) & 0xFF
     return key not in (27, ord("q"))

@@ -167,14 +167,28 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
     const userSearchRef = useRef(null);
 
     useEffect(() => {
-        if (!isEdit) {
-            const token = "";
-            fetch("/api/iam/users", { headers: { "Authorization": `Bearer ${token}` } })
-                .then(res => res.json())
-                .then(data => { if (Array.isArray(data)) setSystemUsers(data); })
+        if (isEdit || !linkExisting) return;
+        let cancelled = false;
+        const timer = setTimeout(() => {
+            const params = new URLSearchParams({
+                page: "1",
+                page_size: "15",
+                q: userSearchQuery.trim(),
+            });
+            fetch(`/api/iam/users/paginated?${params.toString()}`)
+                .then(res => res.ok ? res.json() : null)
+                .then(data => {
+                    if (!cancelled && data && Array.isArray(data.items)) {
+                        setSystemUsers(data.items);
+                    }
+                })
                 .catch(() => {});
-        }
-    }, []);
+        }, 200);
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [isEdit, linkExisting, userSearchQuery]);
 
     useEffect(() => {
         function handleOutside(e) {
@@ -184,12 +198,7 @@ function UserForm({ item, roles, nodes, programmes = [], faculties = [], departm
         return () => document.removeEventListener("mousedown", handleOutside);
     }, []);
 
-    const filteredUsers = systemUsers.filter(u => {
-        const q = userSearchQuery.toLowerCase();
-        return u.full_name?.toLowerCase().includes(q) ||
-               u.email?.toLowerCase().includes(q) ||
-               String(u.user_id).includes(q);
-    });
+    const filteredUsers = systemUsers;
 
     const handleLinkUser = (u) => {
         setLinkedUserId(u.user_id);

@@ -117,20 +117,42 @@ function CampusMapTab() {
             }, []);
 
             // ── Dashboard data ────────────────────────────────
-            const [dashboardStats, setDashboardStats] = useState({ users: 0, devices: 0, documents: 0, courses: 0 });
+            const [dashboardStats, setDashboardStats] = useState({
+                users: 0, active_users: 0, inactive_users: 0, face_enrolled_users: 0,
+                devices: 0, online_devices: 0, offline_devices: 0,
+                documents: 0, courses: 0,
+                active_sessions: 0, auth_attempts_24h: 0, auth_failures_24h: 0, db_latency_ms: 0
+            });
             const [listData, setListData] = useState([]);
             const [listLoading, setListLoading] = useState(false);
             const [searchQuery, setSearchQuery] = useState("");
+            const [debouncedSearch, setDebouncedSearch] = useState("");
+            const searchInputRef = useRef(null);
 
             // ── Filter state ──────────────────────────────────
             const [roleFilter, setRoleFilter] = useState("ALL");
             const [statusFilter, setStatusFilter] = useState("ALL");
+            const [userFaceFilter, setUserFaceFilter] = useState("ALL");
+            const [facultyFilter, setFacultyFilter] = useState("ALL");
+            const [departmentFilter, setDepartmentFilter] = useState("ALL");
             const [accessLevelFilter, setAccessLevelFilter] = useState("ALL");
             const [categoryFilter, setCategoryFilter] = useState("ALL");
             const [faceStatusFilter, setFaceStatusFilter] = useState("ALL");
             const [faceRoleFilter, setFaceRoleFilter] = useState("ALL");
             const [speechLanguages, setSpeechLanguages] = useState([]);
             const [adaptationCategories, setAdaptationCategories] = useState([]);
+
+            // ── Scalable directory, inspector drawer, bulk & UX state ──
+            const [serverPagination, setServerPagination] = useState({ total: 0, page: 1, page_size: 25, total_pages: 1 });
+            const [userSummary, setUserSummary] = useState({ total_users: 0, active_users: 0, inactive_users: 0, face_enrolled_users: 0 });
+            const [selectedUserIds, setSelectedUserIds] = useState([]);
+            const [bulkRoleId, setBulkRoleId] = useState("");
+            const [bulkBusy, setBulkBusy] = useState(false);
+            const [drawerState, setDrawerState] = useState({ record: null, kind: "" });
+            const [confirmState, setConfirmState] = useState({ open: false, title: "", message: "", confirmLabel: "Confirm", variant: "danger", onConfirm: null });
+            const [tableDensity, setTableDensity] = useState(localStorage.getItem("dashboard_table_density") || "comfortable");
+            const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+            const [jumpPageInput, setJumpPageInput] = useState("");
 
             // ── Face enrollment modal ─────────────────────────
             const [showFaceModal, setShowFaceModal] = useState(false);
@@ -171,7 +193,43 @@ function CampusMapTab() {
             const [sortKey, setSortKey] = useState("");
             const [sortOrder, setSortOrder] = useState("asc");
             const [currentPage, setCurrentPage] = useState(1);
-            const [itemsPerPage] = useState(10);
+            const [itemsPerPage, setItemsPerPage] = useState(() => {
+                const saved = parseInt(localStorage.getItem("dashboard_page_size") || "25", 10);
+                return [10, 25, 50, 100].includes(saved) ? saved : 25;
+            });
+
+            const isServerPaginatedUsers = currentTab === "iam" && (subTab === "users" || subTab === "facial-recognition");
+
+            useEffect(() => {
+                localStorage.setItem("dashboard_table_density", tableDensity);
+            }, [tableDensity]);
+
+            useEffect(() => {
+                localStorage.setItem("dashboard_page_size", String(itemsPerPage));
+            }, [itemsPerPage]);
+
+            useEffect(() => {
+                const timer = setTimeout(() => setDebouncedSearch(searchQuery), 220);
+                return () => clearTimeout(timer);
+            }, [searchQuery]);
+
+            useEffect(() => {
+                const onKeyDown = (e) => {
+                    if (e.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) {
+                        if (searchInputRef.current) {
+                            e.preventDefault();
+                            searchInputRef.current.focus();
+                        }
+                    } else if (e.key === "Escape") {
+                        if (confirmState.open) setConfirmState(prev => ({ ...prev, open: false }));
+                        else if (drawerState.record) setDrawerState({ record: null, kind: "" });
+                        else if (showModal) setShowModal(false);
+                        else if (mobileSidebarOpen) setMobileSidebarOpen(false);
+                    }
+                };
+                window.addEventListener("keydown", onKeyDown);
+                return () => window.removeEventListener("keydown", onKeyDown);
+            }, [confirmState.open, drawerState.record, showModal, mobileSidebarOpen]);
 
             // ── Reference data for forms ──────────────────────
             const [refs, setRefs] = useState({
@@ -472,22 +530,64 @@ function CampusMapTab() {
                     if (!response.ok) throw new Error(data.detail || "Failed to load overview stats.");
                     setDashboardStats({
                         users: Number(data.users) || 0,
+                        active_users: Number(data.active_users) || 0,
+                        inactive_users: Number(data.inactive_users) || 0,
+                        face_enrolled_users: Number(data.face_enrolled_users) || 0,
                         devices: Number(data.devices) || 0,
+                        online_devices: Number(data.online_devices) || 0,
+                        offline_devices: Number(data.offline_devices) || 0,
                         documents: Number(data.documents) || 0,
-                        courses: Number(data.courses) || 0
+                        courses: Number(data.courses) || 0,
+                        active_sessions: Number(data.active_sessions) || 0,
+                        auth_attempts_24h: Number(data.auth_attempts_24h) || 0,
+                        auth_failures_24h: Number(data.auth_failures_24h) || 0,
+                        db_latency_ms: Number(data.db_latency_ms) || 0
                     });
                 } catch (err) { console.error("Overview stats failed:", err); }
             };
 
             // ── Fetch current tab data ────────────────────────
-            const fetchTabData = async () => {
+            const fetchTabData = async (overrides = {}) => {
                 if (!token) return;
                 const requestId = ++tabRequestIdRef.current;
                 setListLoading(true);
                 try {
                     const headers = { "Authorization": `Bearer ${token}` };
+                    if (currentTab === "iam" && (subTab === "users" || subTab === "facial-recognition")) {
+                        const params = new URLSearchParams();
+                        params.set("page", String(overrides.page ?? currentPage));
+                        params.set("page_size", String(overrides.page_size ?? itemsPerPage));
+                        const qVal = (overrides.q ?? debouncedSearch ?? "").trim();
+                        if (qVal) params.set("q", qVal);
+                        const activeRole = subTab === "facial-recognition" ? faceRoleFilter : roleFilter;
+                        if (activeRole && activeRole !== "ALL") params.set("role_id", String(activeRole));
+                        if (subTab === "users" && statusFilter !== "ALL") params.set("status", statusFilter);
+                        const activeFace = subTab === "facial-recognition" ? faceStatusFilter : userFaceFilter;
+                        if (activeFace && activeFace !== "ALL") params.set("face_status", activeFace);
+                        if (subTab === "users" && facultyFilter !== "ALL") params.set("faculty_id", facultyFilter);
+                        if (subTab === "users" && departmentFilter !== "ALL") params.set("department_id", departmentFilter);
+                        if (sortKey) {
+                            params.set("sort_by", sortKey);
+                            params.set("sort_order", sortOrder);
+                        }
+                        const response = await fetch(`/api/iam/users/paginated?${params.toString()}`, { headers });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.detail || "Failed to load users.");
+                        if (requestId === tabRequestIdRef.current) {
+                            setListData(Array.isArray(data.items) ? data.items : []);
+                            setServerPagination({
+                                total: Number(data.total) || 0,
+                                page: Number(data.page) || 1,
+                                page_size: Number(data.page_size) || itemsPerPage,
+                                total_pages: Number(data.total_pages) || 1
+                            });
+                            if (data.summary) setUserSummary(data.summary);
+                        }
+                        return;
+                    }
+
                     const endpointMap = {
-                        iam: { users: "/api/iam/users", roles: "/api/iam/roles", "facial-recognition": "/api/iam/users" },
+                        iam: { roles: "/api/iam/roles" },
                         rag: { documents: "/api/rag/documents", "chatbot-queries": "/api/rag/chatbot-queries", "adaptation-phrases": "/api/rag/adaptation-phrases", "speech-languages": "/api/rag/speech-languages" },
                         infra: { devices: "/api/infra/devices", "node-rbac": "/api/infra/node-rbac", "edge-rbac": "/api/infra/edge-rbac", "auth-logs": "/api/infra/auth-logs", "jwt-sessions": "/api/infra/jwt-sessions" },
                         academics: { courses: "/api/academics/courses", enrollments: "/api/academics/enrollments", timetables: "/api/academics/timetables", appointments: "/api/academics/appointments", notifications: "/api/academics/notifications", faculties: "/api/refs/faculties", departments: "/api/refs/departments", programmes: "/api/refs/programmes" }
@@ -576,7 +676,7 @@ function CampusMapTab() {
                 if (token) {
                     fetchReferences();
                     if (currentTab === "overview") fetchOverviewStats();
-                    else if (subTab || !DASHBOARD_DEFAULT_SUB_TAB[currentTab]) {
+                    else if (!isServerPaginatedUsers && (subTab || !DASHBOARD_DEFAULT_SUB_TAB[currentTab])) {
                         fetchTabData();
                         if (currentTab === "rag" && subTab === "adaptation-phrases") {
                             fetchSpeechLanguages();
@@ -585,6 +685,17 @@ function CampusMapTab() {
                     }
                 }
             }, [token, currentTab, subTab]);
+
+            useEffect(() => {
+                if (token && isServerPaginatedUsers) {
+                    fetchTabData();
+                }
+            }, [
+                token, isServerPaginatedUsers, subTab, currentPage, itemsPerPage,
+                debouncedSearch, roleFilter, statusFilter, userFaceFilter,
+                faceStatusFilter, faceRoleFilter, facultyFilter, departmentFilter,
+                sortKey, sortOrder
+            ]);
 
             // ── Default sub-tab per main tab ──────────────────
             useEffect(() => {
@@ -598,12 +709,21 @@ function CampusMapTab() {
 
             // ── Reset filters on tab change ───────────────────
             useEffect(() => {
-                setSearchQuery(""); setRoleFilter("ALL"); setStatusFilter("ALL");
-                setAccessLevelFilter("ALL"); setCategoryFilter("ALL"); setFaceStatusFilter("ALL"); setFaceRoleFilter("ALL");
+                setSearchQuery(""); setDebouncedSearch("");
+                setRoleFilter("ALL"); setStatusFilter("ALL"); setUserFaceFilter("ALL");
+                setFacultyFilter("ALL"); setDepartmentFilter("ALL");
+                setAccessLevelFilter("ALL"); setCategoryFilter("ALL");
+                setFaceStatusFilter("ALL"); setFaceRoleFilter("ALL");
+                setSortKey(""); setSortOrder("asc");
+                setSelectedUserIds([]); setDrawerState({ record: null, kind: "" });
+                setMobileSidebarOpen(false);
             }, [currentTab, subTab]);
 
             // ── Reset pagination on filter change ─────────────
-            useEffect(() => { setCurrentPage(1); }, [searchQuery, currentTab, subTab, roleFilter, statusFilter, accessLevelFilter, categoryFilter, faceStatusFilter, faceRoleFilter]);
+            useEffect(() => {
+                setCurrentPage(1);
+                setSelectedUserIds([]);
+            }, [debouncedSearch, currentTab, subTab, roleFilter, statusFilter, userFaceFilter, facultyFilter, departmentFilter, accessLevelFilter, categoryFilter, faceStatusFilter, faceRoleFilter, itemsPerPage]);
 
             // ── Form submit ───────────────────────────────────
             const handleFormSubmit = async (e, payload) => {
@@ -743,8 +863,7 @@ function CampusMapTab() {
             };
 
             // ── Delete ────────────────────────────────────────
-            const handleDeleteItem = async (item) => {
-                if (!confirm("Are you sure you want to delete this record? This cannot be undone.")) return;
+            const executeDeleteItem = async (item) => {
                 const actionKey = `delete:${getRecordKey(item)}`;
                 if (pendingActionKey) return;
                 setPendingActionKey(actionKey);
@@ -767,9 +886,152 @@ function CampusMapTab() {
                         removeRecordFromList(item);
                         showSuccessToast("Record deleted successfully.");
                     }
+                    setDrawerState(prev => (prev.record && getRecordKey(prev.record) === getRecordKey(item)) ? { record: null, kind: "" } : prev);
                     refreshAfterMutation({ refreshRefs: currentTab === "academics" && ["faculties", "departments", "programmes"].includes(subTab) });
                 } catch (err) { showErrorToast(err.message); }
                 finally { setPendingActionKey(""); }
+            };
+
+            const handleDeleteItem = (item) => {
+                const label = item.full_name || item.device_name || item.title || item.course_name || item.role_name || getRecordKey(item) || "this record";
+                setConfirmState({
+                    open: true,
+                    title: "Delete Record",
+                    message: `Are you sure you want to permanently delete "${label}"? This action cannot be undone.`,
+                    confirmLabel: "Delete",
+                    variant: "danger",
+                    onConfirm: async () => {
+                        setConfirmState(prev => ({ ...prev, open: false }));
+                        await executeDeleteItem(item);
+                    }
+                });
+            };
+
+            // ── Bulk User Actions & CSV Export ────────────────
+            const toggleSelectUser = (userId) => {
+                setSelectedUserIds(prev => prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]);
+            };
+
+            const toggleSelectAllPageUsers = () => {
+                const pageIds = paginatedData.map(u => u.user_id).filter(Boolean);
+                const allSelected = pageIds.length > 0 && pageIds.every(id => selectedUserIds.includes(id));
+                if (allSelected) {
+                    setSelectedUserIds(prev => prev.filter(id => !pageIds.includes(id)));
+                } else {
+                    setSelectedUserIds(prev => Array.from(new Set([...prev, ...pageIds])));
+                }
+            };
+
+            const handleBulkUserStatus = async (isActive) => {
+                if (selectedUserIds.length === 0 || bulkBusy) return;
+                setBulkBusy(true);
+                try {
+                    const res = await fetch("/api/iam/users/bulk-status", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ user_ids: selectedUserIds, is_active: isActive })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || "Bulk status update failed.");
+                    showSuccessToast(data.detail || "Users updated.");
+                    setSelectedUserIds([]);
+                    await fetchTabData();
+                } catch (err) {
+                    showErrorToast(err.message);
+                } finally {
+                    setBulkBusy(false);
+                }
+            };
+
+            const handleBulkUserRole = async () => {
+                if (selectedUserIds.length === 0 || !bulkRoleId || bulkBusy) return;
+                setBulkBusy(true);
+                try {
+                    const res = await fetch("/api/iam/users/bulk-role", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ user_ids: selectedUserIds, role_id: parseInt(bulkRoleId, 10), mode: "add" })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || "Bulk role assignment failed.");
+                    showSuccessToast(data.detail || "Roles assigned.");
+                    setBulkRoleId("");
+                    setSelectedUserIds([]);
+                    await fetchTabData();
+                } catch (err) {
+                    showErrorToast(err.message);
+                } finally {
+                    setBulkBusy(false);
+                }
+            };
+
+            const handleBulkUserDelete = () => {
+                if (selectedUserIds.length === 0 || bulkBusy) return;
+                const count = selectedUserIds.length;
+                setConfirmState({
+                    open: true,
+                    title: `Delete ${count} User${count > 1 ? "s" : ""}`,
+                    message: `This will permanently remove ${count} selected user account${count > 1 ? "s" : ""} and associated biometric profiles. This cannot be undone.`,
+                    confirmLabel: `Delete ${count} User${count > 1 ? "s" : ""}`,
+                    variant: "danger",
+                    onConfirm: async () => {
+                        setConfirmState(prev => ({ ...prev, open: false }));
+                        setBulkBusy(true);
+                        try {
+                            const res = await fetch("/api/iam/users/bulk-delete", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ user_ids: selectedUserIds })
+                            });
+                            const data = await res.json();
+                            if (!res.ok) throw new Error(data.detail || "Bulk delete failed.");
+                            showSuccessToast(data.detail || "Selected users deleted.");
+                            setSelectedUserIds([]);
+                            await fetchTabData();
+                        } catch (err) {
+                            showErrorToast(err.message);
+                        } finally {
+                            setBulkBusy(false);
+                        }
+                    }
+                });
+            };
+
+            const handleExportUsersCsv = () => {
+                const sourceRows = selectedUserIds.length > 0
+                    ? paginatedData.filter(u => selectedUserIds.includes(u.user_id))
+                    : paginatedData;
+                if (sourceRows.length === 0) {
+                    showErrorToast("No user rows to export.");
+                    return;
+                }
+                const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+                const header = ["User ID", "Full Name", "Email", "Roles", "Status", "Face Enrolled", "Identity ID", "Enrolled At"];
+                const rows = sourceRows.map(u => {
+                    const idCode = u.student?.student_id || u.lecturer?.lecturer_id || u.staff?.staff_id || u.visitor?.id_number || u.admin?.admin_id || "";
+                    const roleNames = (u.roles || []).map(r => r.role_name).join("; ");
+                    return [u.user_id, u.full_name, u.email, roleNames, u.is_active ? "Active" : "Deactivated", u.face_enrolled ? "Yes" : "No", idCode, u.enrolled_at || ""].map(esc).join(",");
+                });
+                const blob = new Blob([[header.map(esc).join(","), ...rows].join("\n")], { type: "text/csv;charset=utf-8;" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `smart-campus-users-page${pageToRender}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+                showSuccessToast(`Exported ${sourceRows.length} user record(s) to CSV.`);
+            };
+
+            const handleRevokeUserSession = async (sessionId, userId) => {
+                try {
+                    const res = await fetch(`/api/infra/jwt-sessions/${sessionId}`, { method: "DELETE" });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data.detail || "Failed to revoke session.");
+                    showSuccessToast("Session revoked.");
+                    setDrawerState(prev => prev.record && prev.record.user_id === userId ? { ...prev, record: { ...prev.record } } : prev);
+                } catch (err) {
+                    showErrorToast(err.message);
+                }
             };
 
             // ── Toggle active status ──────────────────────────
@@ -1154,47 +1416,86 @@ function CampusMapTab() {
             };
 
             const processedData = useMemo(
-                () => getFilteredSortedData(),
-                [listData, searchQuery, currentTab, subTab, roleFilter, statusFilter, accessLevelFilter, faceStatusFilter, faceRoleFilter, sortKey, sortOrder]
+                () => isServerPaginatedUsers ? listData : getFilteredSortedData(),
+                [isServerPaginatedUsers, listData, searchQuery, currentTab, subTab, roleFilter, statusFilter, accessLevelFilter, faceStatusFilter, faceRoleFilter, sortKey, sortOrder]
             );
-            const totalItems = processedData.length;
-            const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
+            const totalItems = isServerPaginatedUsers ? serverPagination.total : processedData.length;
+            const totalPages = isServerPaginatedUsers ? Math.max(1, serverPagination.total_pages) : (Math.ceil(totalItems / itemsPerPage) || 1);
             const pageToRender = Math.min(currentPage, totalPages);
             const startIndex = (pageToRender - 1) * itemsPerPage;
-            const paginatedData = processedData.slice(startIndex, startIndex + itemsPerPage);
+            const paginatedData = isServerPaginatedUsers ? listData : processedData.slice(startIndex, startIndex + itemsPerPage);
+
+            const handleJumpToPage = (e) => {
+                e.preventDefault();
+                const parsed = parseInt(jumpPageInput, 10);
+                if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= totalPages) {
+                    setCurrentPage(parsed);
+                    setJumpPageInput("");
+                }
+            };
 
             // ── Pagination render ─────────────────────────────
             const renderPagination = () => {
-                if (totalItems <= itemsPerPage) return null;
+                if (totalItems === 0) return null;
                 return (
-                    <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6 bg-slate-900/30 border border-slate-800 p-4 rounded-2xl">
-                        <span className="text-xs text-slate-500">
-                            Showing <span className="text-white font-bold">{startIndex + 1}</span>–<span className="text-white font-bold">{Math.min(startIndex + itemsPerPage, totalItems)}</span> of <span className="text-white font-bold">{totalItems}</span> records
-                        </span>
-                        <div className="flex items-center gap-1">
-                            {[["chevrons-left", 1], ["chevron-left", Math.max(pageToRender - 1, 1)]].map(([ic, pg], i) => (
-                                <button key={i} onClick={() => setCurrentPage(pg)} disabled={pageToRender === 1}
-                                    className="p-2 rounded-xl bg-slate-800 border border-slate-700/50 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
-                                    <Icon name={ic} className="w-4 h-4" />
-                                </button>
-                            ))}
-                            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                                let pn = pageToRender <= 3 ? i + 1 : pageToRender >= totalPages - 2 ? totalPages - 4 + i : pageToRender - 2 + i;
-                                if (pn < 1 || pn > totalPages) return null;
-                                return (
-                                    <button key={pn} onClick={() => setCurrentPage(pn)}
-                                        className={`w-9 h-9 rounded-xl text-xs font-bold transition-all ${pageToRender === pn ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30' : 'bg-slate-800 border border-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-white'}`}>
-                                        {pn}
-                                    </button>
-                                );
-                            })}
-                            {[["chevron-right", Math.min(pageToRender + 1, totalPages)], ["chevrons-right", totalPages]].map(([ic, pg], i) => (
-                                <button key={i} onClick={() => setCurrentPage(pg)} disabled={pageToRender === totalPages}
-                                    className="p-2 rounded-xl bg-slate-800 border border-slate-700/50 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
-                                    <Icon name={ic} className="w-4 h-4" />
-                                </button>
-                            ))}
+                    <div className="flex flex-col lg:flex-row justify-between items-center gap-4 mt-5 bg-slate-900/50 border border-slate-800 px-4 py-3.5 rounded-2xl">
+                        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400">
+                            <span className="tabular-nums">
+                                Showing <span className="text-slate-100 font-bold">{totalItems === 0 ? 0 : startIndex + 1}</span>–<span className="text-slate-100 font-bold">{Math.min(startIndex + paginatedData.length, totalItems)}</span> of <span className="text-slate-100 font-bold">{totalItems.toLocaleString()}</span> records
+                            </span>
+                            <label className="flex items-center gap-2">
+                                <span className="text-slate-500 font-medium">Rows</span>
+                                <select
+                                    value={itemsPerPage}
+                                    onChange={(e) => { setItemsPerPage(parseInt(e.target.value, 10)); setCurrentPage(1); }}
+                                    className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs font-semibold text-slate-200 focus:outline-none focus:border-indigo-500"
+                                >
+                                    {[10, 25, 50, 100].map(sz => <option key={sz} value={sz}>{sz}</option>)}
+                                </select>
+                            </label>
                         </div>
+                        {totalPages > 1 && (
+                            <div className="flex flex-wrap items-center gap-2">
+                                <div className="flex items-center gap-1">
+                                    {[["chevrons-left", 1], ["chevron-left", Math.max(pageToRender - 1, 1)]].map(([ic, pg], i) => (
+                                        <button key={i} onClick={() => setCurrentPage(pg)} disabled={pageToRender === 1}
+                                            className="p-2 rounded-xl bg-slate-800 border border-slate-700/50 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+                                            <Icon name={ic} className="w-4 h-4" />
+                                        </button>
+                                    ))}
+                                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                                        let pn = pageToRender <= 3 ? i + 1 : pageToRender >= totalPages - 2 ? totalPages - 4 + i : pageToRender - 2 + i;
+                                        if (pn < 1 || pn > totalPages) return null;
+                                        return (
+                                            <button key={pn} onClick={() => setCurrentPage(pn)}
+                                                className={`min-w-[36px] h-9 px-2 rounded-xl text-xs font-bold tabular-nums transition-all ${pageToRender === pn ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/30' : 'bg-slate-800 border border-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-white'}`}>
+                                                {pn}
+                                            </button>
+                                        );
+                                    })}
+                                    {[["chevron-right", Math.min(pageToRender + 1, totalPages)], ["chevrons-right", totalPages]].map(([ic, pg], i) => (
+                                        <button key={i} onClick={() => setCurrentPage(pg)} disabled={pageToRender === totalPages}
+                                            className="p-2 rounded-xl bg-slate-800 border border-slate-700/50 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+                                            <Icon name={ic} className="w-4 h-4" />
+                                        </button>
+                                    ))}
+                                </div>
+                                {totalPages > 5 && (
+                                    <form onSubmit={handleJumpToPage} className="flex items-center gap-1.5 pl-2 border-l border-slate-800">
+                                        <span className="text-[11px] text-slate-500">Go to</span>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            max={totalPages}
+                                            value={jumpPageInput}
+                                            onChange={(e) => setJumpPageInput(e.target.value)}
+                                            placeholder={String(pageToRender)}
+                                            className="w-14 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-200 tabular-nums focus:outline-none focus:border-indigo-500"
+                                        />
+                                    </form>
+                                )}
+                            </div>
+                        )}
                     </div>
                 );
             };
@@ -1435,8 +1736,16 @@ function CampusMapTab() {
             return (
                 <div className="min-h-screen flex bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30">
 
+                    {/* ─── MOBILE SIDEBAR BACKDROP ──────────────────────── */}
+                    {mobileSidebarOpen && (
+                        <div
+                            className="fixed inset-0 z-30 bg-slate-950/75 backdrop-blur-xs lg:hidden"
+                            onClick={() => setMobileSidebarOpen(false)}
+                        />
+                    )}
+
                     {/* ─── SIDEBAR ──────────────────────────────────────── */}
-                    <aside className={`bg-slate-950 border-r border-slate-800 flex flex-col justify-between shrink-0 z-20 transition-all duration-300 ${sidebarCollapsed ? 'w-[72px]' : 'w-[280px]'}`}>
+                    <aside className={`fixed inset-y-0 left-0 lg:static bg-slate-950 border-r border-slate-800 flex flex-col justify-between shrink-0 z-40 transition-all duration-300 ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} ${sidebarCollapsed ? 'w-[72px]' : 'w-[272px]'}`}>
                         <div>
                             {/* Logo row */}
                             <div className="h-[72px] px-4 border-b border-slate-800 flex items-center justify-between gap-3">
@@ -1529,20 +1838,41 @@ function CampusMapTab() {
                     <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden bg-slate-900 relative">
                         
                         {/* ─── TOPBAR ─────────────────────────────────────── */}
-                        <header className="h-[72px] shrink-0 border-b border-slate-800/60 bg-slate-900/80 backdrop-blur-md px-8 flex items-center justify-between z-10">
-                            <div className="flex items-center gap-3 text-sm">
-                                <span className="text-slate-500 font-medium">{navItems.find(n => n.id === currentTab)?.section === 'main' ? 'Main' : 'Manage'}</span>
-                                <Icon name="chevron-right" className="w-3.5 h-3.5 text-slate-600" />
-                                <span className="text-slate-200 font-bold">{navItems.find(n => n.id === currentTab)?.label}</span>
+                        <header className="h-[72px] shrink-0 border-b border-slate-800/60 bg-slate-900/80 backdrop-blur-md px-4 sm:px-8 flex items-center justify-between z-10">
+                            <div className="flex items-center gap-3 text-sm min-w-0">
+                                <button
+                                    type="button"
+                                    onClick={() => setMobileSidebarOpen(true)}
+                                    aria-label="Open navigation menu"
+                                    className="lg:hidden p-2 rounded-xl bg-slate-800/80 text-slate-300 hover:text-white border border-slate-700/60"
+                                >
+                                    <Icon name="menu" className="w-4 h-4" />
+                                </button>
+                                <span className="hidden sm:inline text-slate-500 font-medium">{navItems.find(n => n.id === currentTab)?.section === 'main' ? 'Main' : 'Manage'}</span>
+                                <Icon name="chevron-right" className="hidden sm:inline w-3.5 h-3.5 text-slate-600" />
+                                <span className="text-slate-200 font-bold truncate">{navItems.find(n => n.id === currentTab)?.label}</span>
+                                {subTab && (
+                                    <>
+                                        <Icon name="chevron-right" className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                                        <span className="text-indigo-400 font-semibold truncate">{subTabLabel(subTab)}</span>
+                                    </>
+                                )}
                             </div>
-                            <div className="flex items-center gap-4">
-                                <div className="hidden md:flex items-center gap-2 text-xs bg-slate-800/50 border border-slate-700/50 px-3 py-1.5 rounded-full text-slate-400">
+                            <div className="flex items-center gap-3">
+                                <div className="hidden md:flex items-center gap-2 text-xs bg-slate-800/50 border border-slate-700/50 px-3 py-1.5 rounded-full text-slate-300 tabular-nums">
                                     <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                                     <span>System Online</span>
+                                    {dashboardStats.db_latency_ms > 0 && (
+                                        <span className="text-slate-500 font-mono">· {dashboardStats.db_latency_ms}ms</span>
+                                    )}
                                 </div>
-                                <button className="relative p-2 text-slate-400 hover:text-slate-200 transition-colors">
+                                <button
+                                    type="button"
+                                    onClick={() => { if (adminType !== 'CONTENT_ADMIN') { setCurrentTab("academics"); setSubTab("notifications"); } }}
+                                    title="View Notifications"
+                                    className="relative p-2 text-slate-400 hover:text-slate-200 rounded-xl hover:bg-slate-800/60 transition-colors"
+                                >
                                     <Icon name="bell" className="w-5 h-5" />
-                                    <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-indigo-500 rounded-full border-2 border-slate-900"></span>
                                 </button>
                             </div>
                         </header>
@@ -1567,39 +1897,102 @@ function CampusMapTab() {
                                         </div>
 
                                         {/* Stat cards */}
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                                            {adminType !== 'CONTENT_ADMIN' && <StatCard title="Total Users" value={dashboardStats.users} icon="users" changeText="+12 this week" color="blue" />}
-                                            {adminType !== 'CONTENT_ADMIN' && <StatCard title="IoT Devices" value={dashboardStats.devices} icon="cpu" changeText="1 offline" color="indigo" />}
-                                            {adminType !== 'SYSTEM_ADMIN' && <StatCard title="Knowledge Docs" value={dashboardStats.documents} icon="book-open" changeText="+3 this month" color="violet" />}
-                                            {adminType !== 'CONTENT_ADMIN' && <StatCard title="Active Courses" value={dashboardStats.courses} icon="graduation-cap" changeText="Ongoing semester" color="emerald" />}
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                                            {adminType !== 'CONTENT_ADMIN' && (
+                                                <StatCard
+                                                    title="Total Users"
+                                                    value={dashboardStats.users.toLocaleString()}
+                                                    icon="users"
+                                                    changeText={`${dashboardStats.active_users.toLocaleString()} active · ${dashboardStats.inactive_users.toLocaleString()} inactive`}
+                                                    color="indigo"
+                                                />
+                                            )}
+                                            {adminType !== 'CONTENT_ADMIN' && (
+                                                <StatCard
+                                                    title="Face ID Coverage"
+                                                    value={dashboardStats.users > 0 ? `${Math.round((dashboardStats.face_enrolled_users / dashboardStats.users) * 100)}%` : "0%"}
+                                                    icon="scan-face"
+                                                    changeText={`${dashboardStats.face_enrolled_users.toLocaleString()} of ${dashboardStats.users.toLocaleString()} users enrolled`}
+                                                    color="emerald"
+                                                />
+                                            )}
+                                            {adminType !== 'CONTENT_ADMIN' && (
+                                                <StatCard
+                                                    title="IoT Devices"
+                                                    value={dashboardStats.devices.toLocaleString()}
+                                                    icon="cpu"
+                                                    changeText={`${dashboardStats.online_devices} online · ${dashboardStats.offline_devices} offline`}
+                                                    color="amber"
+                                                />
+                                            )}
+                                            {adminType !== 'SYSTEM_ADMIN' ? (
+                                                <StatCard
+                                                    title="Knowledge Docs"
+                                                    value={dashboardStats.documents.toLocaleString()}
+                                                    icon="book-open"
+                                                    changeText={`${dashboardStats.courses.toLocaleString()} active courses`}
+                                                    color="violet"
+                                                />
+                                            ) : (
+                                                <StatCard
+                                                    title="Active Courses"
+                                                    value={dashboardStats.courses.toLocaleString()}
+                                                    icon="graduation-cap"
+                                                    changeText="Current catalog"
+                                                    color="violet"
+                                                />
+                                            )}
                                         </div>
 
                                         {/* System status + permissions */}
-                                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                                             {/* System status */}
                                             <div className="lg:col-span-2 bg-slate-800/30 border border-slate-700/50 rounded-2xl p-6 shadow-sm">
                                                 <div className="flex items-center justify-between mb-6">
                                                     <div className="flex items-center gap-3">
                                                         <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl"><Icon name="activity" className="w-5 h-5" /></div>
-                                                        <h3 className="text-lg font-bold text-slate-100">System Status</h3>
+                                                        <h3 className="text-lg font-bold text-slate-100">Live Telemetry</h3>
                                                     </div>
-                                                    <button className="text-xs text-indigo-400 font-semibold hover:text-indigo-300 transition-colors">View Logs</button>
+                                                    {adminType === 'SUPER_ADMIN' && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => { setCurrentTab("infra"); setSubTab("auth-logs"); }}
+                                                            className="text-xs text-indigo-400 font-semibold hover:text-indigo-300 transition-colors"
+                                                        >
+                                                            View Access Logs →
+                                                        </button>
+                                                    )}
                                                 </div>
-                                                <div className="space-y-4">
+                                                <div className="space-y-3.5">
                                                     {[
-                                                        { status: "ok", title: "Database Connection", desc: "MySQL server is online and responding normally.", ping: "12ms" },
-                                                        { status: "ok", title: "Security Check", desc: "JWT token integrity and session logs are verified.", ping: "8ms" },
-                                                        { status: "ok", title: "API Services", desc: "All backend routes are healthy and responding.", ping: "24ms" },
+                                                        {
+                                                            status: "ok",
+                                                            title: "Database Connection",
+                                                            desc: "Central cloud database responding to live telemetry query.",
+                                                            metric: `${dashboardStats.db_latency_ms}ms`
+                                                        },
+                                                        {
+                                                            status: dashboardStats.offline_devices > 0 && dashboardStats.online_devices === 0 && dashboardStats.devices > 0 ? "warn" : "ok",
+                                                            title: "Edge Device Fleet",
+                                                            desc: `${dashboardStats.online_devices} device(s) reported heartbeat in the last 5 minutes.`,
+                                                            metric: `${dashboardStats.online_devices}/${dashboardStats.devices} online`
+                                                        },
+                                                        {
+                                                            status: dashboardStats.auth_failures_24h > 0 ? "warn" : "ok",
+                                                            title: "Access Control Activity (24h)",
+                                                            desc: `${dashboardStats.auth_attempts_24h} authentication attempt(s) logged · ${dashboardStats.active_sessions} active JWT session(s).`,
+                                                            metric: `${dashboardStats.auth_failures_24h} failed`
+                                                        },
                                                     ].map((s, i) => (
-                                                        <div key={i} className="flex items-center justify-between p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                                                            <div className="flex gap-4 items-start">
-                                                                <span className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${s.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
+                                                        <div key={i} className="flex items-center justify-between gap-4 p-4 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-slate-700 transition-colors">
+                                                            <div className="flex gap-3.5 items-start">
+                                                                <span className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${s.status === 'ok' ? 'bg-emerald-500' : 'bg-amber-400'}`}></span>
                                                                 <div>
                                                                     <p className="text-sm font-bold text-slate-200">{s.title}</p>
                                                                     <p className="text-xs text-slate-400 mt-0.5">{s.desc}</p>
                                                                 </div>
                                                             </div>
-                                                            <span className="text-[10px] font-mono text-slate-500 bg-slate-900 px-2 py-1 rounded-md">{s.ping}</span>
+                                                            <span className="text-xs font-mono font-semibold text-slate-300 bg-slate-950 border border-slate-800 px-2.5 py-1 rounded-lg tabular-nums shrink-0">{s.metric}</span>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -1632,20 +2025,20 @@ function CampusMapTab() {
 
                                         {/* Quick actions */}
                                         <div className="bg-slate-800/30 border border-slate-700/50 rounded-2xl p-6 shadow-sm">
-                                            <div className="flex items-center gap-3 mb-6">
+                                            <div className="flex items-center gap-3 mb-5">
                                                 <div className="p-2 bg-amber-500/10 text-amber-400 rounded-xl"><Icon name="zap" className="w-5 h-5" /></div>
                                                 <h3 className="text-lg font-bold text-slate-100">Quick Actions</h3>
                                             </div>
                                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                                                 {[
-                                                    { tab: "iam",       label: "Add User",         icon: "user-plus",   color: "blue",    disabled: adminType === 'CONTENT_ADMIN' },
-                                                    { tab: "rag",       label: "Upload Document",  icon: "upload",      color: "violet",  disabled: adminType === 'SYSTEM_ADMIN' },
-                                                    { tab: "infra",     label: "View Devices",     icon: "cpu",         color: "indigo",  disabled: adminType !== 'SUPER_ADMIN' },
-                                                    { tab: "academics", label: "Manage Courses",   icon: "book-open",   color: "emerald", disabled: adminType === 'CONTENT_ADMIN' },
+                                                    { tab: "iam",       sub: "users",     label: "Manage Users",     icon: "users",       cls: "bg-indigo-500/15 text-indigo-400",   disabled: adminType === 'CONTENT_ADMIN' },
+                                                    { tab: "rag",       sub: "documents", label: "Upload Document",  icon: "upload",      cls: "bg-violet-500/15 text-violet-400",   disabled: adminType === 'SYSTEM_ADMIN' },
+                                                    { tab: "infra",     sub: "devices",   label: "View Devices",     icon: "cpu",         cls: "bg-amber-500/15 text-amber-400",     disabled: adminType !== 'SUPER_ADMIN' },
+                                                    { tab: "academics", sub: "courses",   label: "Manage Courses",   icon: "book-open",   cls: "bg-emerald-500/15 text-emerald-400", disabled: adminType === 'CONTENT_ADMIN' },
                                                 ].map((a, i) => (
-                                                    <button key={i} onClick={() => !a.disabled && setCurrentTab(a.tab)} disabled={a.disabled}
-                                                        className={`flex items-center gap-3 p-4 rounded-xl border text-left transition-all duration-200 ${a.disabled ? 'opacity-30 cursor-not-allowed border-slate-800 bg-slate-900/50' : 'border-slate-700 bg-slate-800 hover:bg-slate-700 hover:border-slate-600 cursor-pointer shadow-sm hover:shadow-md'}`}>
-                                                        <div className={`p-2.5 rounded-lg bg-${a.color}-500/20 text-${a.color}-400 shrink-0`}>
+                                                    <button key={i} onClick={() => { if (!a.disabled) { setCurrentTab(a.tab); setSubTab(a.sub); } }} disabled={a.disabled}
+                                                        className={`flex items-center gap-3 p-4 rounded-xl border text-left transition-all duration-200 ${a.disabled ? 'opacity-30 cursor-not-allowed border-slate-800 bg-slate-900/50' : 'border-slate-700 bg-slate-800/80 hover:bg-slate-800 hover:border-indigo-500/40 cursor-pointer shadow-sm'}`}>
+                                                        <div className={`p-2.5 rounded-lg shrink-0 ${a.cls}`}>
                                                             <Icon name={a.icon} className="w-5 h-5" />
                                                         </div>
                                                         <span className="text-sm font-bold text-slate-200 leading-tight">{a.label}</span>
@@ -1657,87 +2050,245 @@ function CampusMapTab() {
                                 )}
 
                         {/* ══ USER MANAGEMENT (IAM) ═════════════════════════ */}
-                        {currentTab === "iam" && (
+                        {currentTab === "iam" && (() => {
+                            const cellPad = tableDensity === "compact" ? "py-2.5 px-3.5" : "p-4";
+                            const hasUserFilters = Boolean(searchQuery.trim()) || roleFilter !== "ALL" || statusFilter !== "ALL" || userFaceFilter !== "ALL" || facultyFilter !== "ALL" || departmentFilter !== "ALL";
+                            const hasFaceFilters = Boolean(searchQuery.trim()) || faceStatusFilter !== "ALL" || faceRoleFilter !== "ALL";
+                            const resetIamFilters = () => {
+                                setSearchQuery(""); setDebouncedSearch("");
+                                setRoleFilter("ALL"); setStatusFilter("ALL"); setUserFaceFilter("ALL");
+                                setFacultyFilter("ALL"); setDepartmentFilter("ALL");
+                                setFaceStatusFilter("ALL"); setFaceRoleFilter("ALL");
+                            };
+                            const pageUserIds = paginatedData.map(u => u.user_id).filter(Boolean);
+                            const allPageSelected = pageUserIds.length > 0 && pageUserIds.every(id => selectedUserIds.includes(id));
+                            const facePct = userSummary.total_users > 0 ? Math.round((userSummary.face_enrolled_users / userSummary.total_users) * 100) : 0;
+
+                            return (
                             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
                                 {/* Sub-tab bar */}
-                                <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-4 mb-6">
-                                    {["users", "roles", "facial-recognition"].map(t => (
-                                        <button key={t} onClick={() => setSubTab(t)}
-                                            className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 border ${subTab === t ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-sm' : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800/80 hover:border-slate-700'}`}>
-                                            {subTabLabel(t)}
-                                        </button>
-                                    ))}
+                                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4 mb-5">
+                                    <div className="flex flex-wrap gap-2">
+                                        {["users", "roles", "facial-recognition"].map(t => (
+                                            <button key={t} onClick={() => setSubTab(t)}
+                                                className={`px-4 py-2 rounded-xl text-sm font-bold transition-all duration-200 border ${subTab === t ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-sm' : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800/80 hover:border-slate-700'}`}>
+                                                {subTabLabel(t)}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {(subTab === "users" || subTab === "facial-recognition") && (
+                                        <div className="flex items-center gap-2">
+                                            <div className="inline-flex bg-slate-950 border border-slate-800 rounded-xl p-0.5">
+                                                <button type="button" onClick={() => setTableDensity("comfortable")} title="Comfortable density"
+                                                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${tableDensity === "comfortable" ? "bg-slate-800 text-slate-100" : "text-slate-500 hover:text-slate-300"}`}>
+                                                    Comfortable
+                                                </button>
+                                                <button type="button" onClick={() => setTableDensity("compact")} title="Compact density"
+                                                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${tableDensity === "compact" ? "bg-slate-800 text-slate-100" : "text-slate-500 hover:text-slate-300"}`}>
+                                                    Compact
+                                                </button>
+                                            </div>
+                                            {subTab === "users" && (
+                                                <button type="button" onClick={handleExportUsersCsv}
+                                                    className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5">
+                                                    <Icon name="download" className="w-3.5 h-3.5" />
+                                                    <span>{selectedUserIds.length > 0 ? `Export (${selectedUserIds.length})` : "Export CSV"}</span>
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
 
+                                {/* Live Directory Summary Strip for Users & Face ID */}
+                                {(subTab === "users" || subTab === "facial-recognition") && (
+                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+                                        <button type="button" onClick={resetIamFilters}
+                                            className="text-left p-3.5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-indigo-500/40 transition-colors">
+                                            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Total Users</div>
+                                            <div className="text-2xl font-extrabold text-slate-100 mt-1 tabular-nums">{userSummary.total_users.toLocaleString()}</div>
+                                        </button>
+                                        <button type="button" onClick={() => { if (subTab === "users") setStatusFilter(statusFilter === "ACTIVE" ? "ALL" : "ACTIVE"); }}
+                                            className={`text-left p-3.5 rounded-2xl border transition-colors ${subTab === "users" && statusFilter === "ACTIVE" ? "bg-emerald-500/10 border-emerald-500/40" : "bg-slate-900/70 border-slate-800 hover:border-slate-700"}`}>
+                                            <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-400">Active Accounts</div>
+                                            <div className="text-2xl font-extrabold text-slate-100 mt-1 tabular-nums">{userSummary.active_users.toLocaleString()}</div>
+                                        </button>
+                                        <button type="button" onClick={() => { if (subTab === "users") setStatusFilter(statusFilter === "DEACTIVATED" ? "ALL" : "DEACTIVATED"); }}
+                                            className={`text-left p-3.5 rounded-2xl border transition-colors ${subTab === "users" && statusFilter === "DEACTIVATED" ? "bg-red-500/10 border-red-500/40" : "bg-slate-900/70 border-slate-800 hover:border-slate-700"}`}>
+                                            <div className="text-[11px] font-semibold uppercase tracking-wider text-red-400">Deactivated</div>
+                                            <div className="text-2xl font-extrabold text-slate-100 mt-1 tabular-nums">{userSummary.inactive_users.toLocaleString()}</div>
+                                        </button>
+                                        <button type="button" onClick={() => {
+                                            if (subTab === "users") setUserFaceFilter(userFaceFilter === "ENROLLED" ? "ALL" : "ENROLLED");
+                                            else setFaceStatusFilter(faceStatusFilter === "ENROLLED" ? "ALL" : "ENROLLED");
+                                        }}
+                                            className={`text-left p-3.5 rounded-2xl border transition-colors ${((subTab === "users" && userFaceFilter === "ENROLLED") || (subTab === "facial-recognition" && faceStatusFilter === "ENROLLED")) ? "bg-indigo-500/10 border-indigo-500/40" : "bg-slate-900/70 border-slate-800 hover:border-slate-700"}`}>
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-400">Face ID Enrolled</span>
+                                                <span className="text-[11px] font-mono text-indigo-300 tabular-nums">{facePct}%</span>
+                                            </div>
+                                            <div className="text-2xl font-extrabold text-slate-100 mt-1 tabular-nums">{userSummary.face_enrolled_users.toLocaleString()}</div>
+                                        </button>
+                                    </div>
+                                )}
+
                                 <SectionHeader
-                                    title={subTab === "facial-recognition" ? "Face ID Enrollment" : subTab === "roles" ? "Access Roles" : "Users"}
+                                    title={subTab === "facial-recognition" ? "Face ID Enrollment" : subTab === "roles" ? "Access Roles" : "Users Directory"}
                                     description={
                                         subTab === "roles" ? "Manage campus access roles and their permission levels." :
-                                        subTab === "facial-recognition" ? "Set up facial recognition so users can unlock doors automatically." :
-                                        "Manage all registered users, their profiles, and campus access."
+                                        subTab === "facial-recognition" ? "Inspect and enroll facial recognition profiles. Click any user row to view enrolled poses." :
+                                        "Server-paginated directory. Click any user row to open their 360° profile, biometrics, and access logs."
                                     }
                                     searchVal={searchQuery}
                                     onSearchChange={setSearchQuery}
+                                    searchInputRef={searchInputRef}
+                                    searchPlaceholder={subTab === "roles" ? "Search roles..." : "Search name, email, ID... (/)"}
                                     onCreateClick={subTab === "facial-recognition" ? null : () => { setSelectedItem(null); setModalType("create"); setShowModal(true); }}
                                     createLabel={subTab === "roles" ? "Add Role" : "Register User"}
                                     customAction={
-                                        subTab === "users" ? (
-                                            <div className="flex gap-2 flex-wrap">
-                                                <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}
-                                                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer">
-                                                    <option value="ALL">All Roles</option>
-                                                    {refs.roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
-                                                </select>
-                                                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-                                                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer">
-                                                    <option value="ALL">All Status</option>
-                                                    <option value="ACTIVE">Active</option>
-                                                    <option value="DEACTIVATED">Deactivated</option>
-                                                </select>
-                                            </div>
-                                        ) : subTab === "facial-recognition" ? (
-                                            <div className="flex gap-2 flex-wrap">
-                                                <select value={faceStatusFilter} onChange={e => setFaceStatusFilter(e.target.value)}
-                                                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer">
-                                                    <option value="ALL">All Users</option>
-                                                    <option value="ENROLLED">Face ID Enrolled</option>
-                                                    <option value="NOT_ENROLLED">Not Enrolled</option>
-                                                </select>
-                                                <select value={faceRoleFilter} onChange={e => setFaceRoleFilter(e.target.value)}
-                                                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer">
-                                                    <option value="ALL">All Roles</option>
-                                                    {refs.roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
-                                                </select>
-                                                {adminType === "SUPER_ADMIN" && (
-                                                    <button onClick={handleReembedAll} disabled={reembedding}
-                                                        className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/50 px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 disabled:opacity-50">
-                                                        {reembedding ? <><span className="w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></span><span>Processing...</span></>
-                                                            : <><Icon name="refresh-cw" className="w-4 h-4" /><span>Re-process All</span></>}
-                                                    </button>
-                                                )}
-                                            </div>
+                                        subTab === "facial-recognition" && adminType === "SUPER_ADMIN" ? (
+                                            <button onClick={handleReembedAll} disabled={reembedding}
+                                                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/50 px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 disabled:opacity-50">
+                                                {reembedding ? <><span className="w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></span><span>Processing...</span></>
+                                                    : <><Icon name="refresh-cw" className="w-4 h-4" /><span>Re-process All</span></>}
+                                            </button>
                                         ) : null
                                     }
                                 />
 
+                                {/* Multi-Facet Filter Bar */}
+                                {subTab === "users" && (
+                                    <div className="flex flex-wrap items-center gap-2 mb-4">
+                                        <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}
+                                            className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                            <option value="ALL">All Roles</option>
+                                            {refs.roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
+                                        </select>
+                                        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+                                            className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                            <option value="ALL">All Status</option>
+                                            <option value="ACTIVE">Active</option>
+                                            <option value="DEACTIVATED">Deactivated</option>
+                                        </select>
+                                        <select value={userFaceFilter} onChange={e => setUserFaceFilter(e.target.value)}
+                                            className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                            <option value="ALL">All Face ID</option>
+                                            <option value="ENROLLED">Face ID Enrolled</option>
+                                            <option value="NOT_ENROLLED">Not Enrolled</option>
+                                        </select>
+                                        {refs.faculties.length > 0 && (
+                                            <select value={facultyFilter} onChange={e => setFacultyFilter(e.target.value)}
+                                                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer max-w-[190px]">
+                                                <option value="ALL">All Faculties</option>
+                                                {refs.faculties.map(f => <option key={f.faculty_id} value={f.faculty_id}>{f.faculty_name}</option>)}
+                                            </select>
+                                        )}
+                                        {refs.departments.length > 0 && (
+                                            <select value={departmentFilter} onChange={e => setDepartmentFilter(e.target.value)}
+                                                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer max-w-[190px]">
+                                                <option value="ALL">All Departments</option>
+                                                {refs.departments.map(d => <option key={d.department_id} value={d.department_id}>{d.department_name}</option>)}
+                                            </select>
+                                        )}
+                                        {hasUserFilters && (
+                                            <button type="button" onClick={resetIamFilters}
+                                                className="px-3 py-2 rounded-xl text-xs font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 transition-colors">
+                                                Reset Filters
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+
+                                {subTab === "facial-recognition" && (
+                                    <div className="flex flex-wrap items-center gap-2 mb-4">
+                                        <select value={faceStatusFilter} onChange={e => setFaceStatusFilter(e.target.value)}
+                                            className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                            <option value="ALL">All Face ID Status</option>
+                                            <option value="ENROLLED">Face ID Enrolled</option>
+                                            <option value="NOT_ENROLLED">Not Enrolled</option>
+                                        </select>
+                                        <select value={faceRoleFilter} onChange={e => setFaceRoleFilter(e.target.value)}
+                                            className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                            <option value="ALL">All Roles</option>
+                                            {refs.roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
+                                        </select>
+                                        {hasFaceFilters && (
+                                            <button type="button" onClick={resetIamFilters}
+                                                className="px-3 py-2 rounded-xl text-xs font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 transition-colors">
+                                                Reset Filters
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Bulk Selection Action Bar */}
+                                {subTab === "users" && selectedUserIds.length > 0 && (
+                                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-indigo-950/60 border border-indigo-500/40 shadow-lg">
+                                        <div className="flex items-center gap-2.5 text-sm font-bold text-indigo-200 tabular-nums">
+                                            <span className="px-2 py-0.5 rounded-lg bg-indigo-600 text-white text-xs">{selectedUserIds.length}</span>
+                                            <span>user{selectedUserIds.length > 1 ? "s" : ""} selected</span>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <button type="button" disabled={bulkBusy} onClick={() => handleBulkUserStatus(true)}
+                                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 disabled:opacity-50">
+                                                Activate
+                                            </button>
+                                            <button type="button" disabled={bulkBusy} onClick={() => handleBulkUserStatus(false)}
+                                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 disabled:opacity-50">
+                                                Deactivate
+                                            </button>
+                                            <div className="flex items-center gap-1.5">
+                                                <select value={bulkRoleId} onChange={(e) => setBulkRoleId(e.target.value)}
+                                                    className="bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500">
+                                                    <option value="">Add role...</option>
+                                                    {refs.roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
+                                                </select>
+                                                <button type="button" disabled={!bulkRoleId || bulkBusy} onClick={handleBulkUserRole}
+                                                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40">
+                                                    Apply
+                                                </button>
+                                            </div>
+                                            <button type="button" disabled={bulkBusy} onClick={handleBulkUserDelete}
+                                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 disabled:opacity-50">
+                                                Delete
+                                            </button>
+                                            <button type="button" onClick={() => setSelectedUserIds([])}
+                                                className="px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white">
+                                                Clear
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
                                 {listLoading ? (
                                     <div className="flex flex-col items-center justify-center py-24 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800">
                                         <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                                        <span className="text-sm font-semibold">Loading data...</span>
+                                        <span className="text-sm font-semibold">Loading directory...</span>
                                     </div>
-                                ) : listData.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-800 bg-slate-900/30 rounded-3xl py-24">
-                                        <div className="p-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-2xl mb-5"><Icon name="users" className="w-8 h-8" /></div>
-                                        <h4 className="text-base font-bold text-slate-200">No records found</h4>
-                                        <p className="text-sm text-slate-500 mt-1 max-w-sm text-center">Try adjusting your filters or search query, or add a new record to get started.</p>
+                                ) : paginatedData.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-800 bg-slate-900/30 rounded-3xl py-20 px-4">
+                                        <div className="p-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-2xl mb-4"><Icon name="users" className="w-7 h-7" /></div>
+                                        <h4 className="text-base font-bold text-slate-200">
+                                            {(hasUserFilters || hasFaceFilters) ? "No matching records" : "No records yet"}
+                                        </h4>
+                                        <p className="text-sm text-slate-400 mt-1 max-w-sm text-center">
+                                            {(hasUserFilters || hasFaceFilters)
+                                                ? "No users match your active search or filter criteria."
+                                                : "Register a user to get started."}
+                                        </p>
+                                        {(hasUserFilters || hasFaceFilters) && (
+                                            <button type="button" onClick={resetIamFilters}
+                                                className="mt-4 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors">
+                                                Reset All Filters
+                                            </button>
+                                        )}
                                     </div>
                                 ) : (
                                     <div className="bg-slate-900/80 border border-slate-800 rounded-2xl shadow-sm overflow-hidden backdrop-blur-sm">
-                                        <div className="overflow-x-auto">
+                                        <div className="overflow-x-auto max-h-[68vh] overflow-y-auto scrollbar-thin">
                                             <table className="w-full text-left text-sm">
-                                                <thead>
+                                                <thead className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur-sm">
                                                     {subTab === "roles" && (
-                                                        <tr className="bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80">
+                                                        <tr className="bg-slate-800/70 text-slate-400 font-bold text-xs tracking-wider uppercase border-b border-slate-800">
                                                             <th className="p-4 pl-6 font-semibold">Role Name</th>
                                                             <th className="p-4 font-semibold">Description</th>
                                                             <th className="p-4 font-semibold">Role ID</th>
@@ -1745,37 +2296,53 @@ function CampusMapTab() {
                                                         </tr>
                                                     )}
                                                     {subTab === "facial-recognition" && (
-                                                        <tr className="bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80">
-                                                            <th className="p-4 pl-6 font-semibold">User Profile</th>
+                                                        <tr className="bg-slate-800/70 text-slate-400 font-bold text-xs tracking-wider uppercase border-b border-slate-800">
+                                                            <th className="p-4 pl-6 font-semibold cursor-pointer select-none hover:text-slate-200" onClick={() => handleSort("name")}>
+                                                                <span className="inline-flex items-center">User Profile {renderSortIcon("name")}</span>
+                                                            </th>
                                                             <th className="p-4 font-semibold">Face ID Status</th>
-                                                            <th className="p-4 font-semibold">Data Sample</th>
+                                                            <th className="p-4 font-semibold">Enrolled Poses</th>
                                                             <th className="p-4 pr-6 text-right font-semibold">Actions</th>
                                                         </tr>
                                                     )}
                                                     {subTab === "users" && (
-                                                        <tr className="bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80">
-                                                            <th className="p-4 pl-6 font-semibold">User Profile</th>
-                                                            <th className="p-4 font-semibold">Identity Details</th>
-                                                            <th className="p-4 font-semibold">Status</th>
-                                                            <th className="p-4 pr-6 text-right font-semibold">Actions</th>
+                                                        <tr className="bg-slate-800/70 text-slate-400 font-bold text-xs tracking-wider uppercase border-b border-slate-800">
+                                                            <th className="p-3.5 pl-5 w-10">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    aria-label="Select all users on page"
+                                                                    checked={allPageSelected}
+                                                                    onChange={toggleSelectAllPageUsers}
+                                                                    className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                                />
+                                                            </th>
+                                                            <th className="p-3.5 font-semibold cursor-pointer select-none hover:text-slate-200" onClick={() => handleSort("name")}>
+                                                                <span className="inline-flex items-center">User Profile {renderSortIcon("name")}</span>
+                                                            </th>
+                                                            <th className="p-3.5 font-semibold">Identity Details</th>
+                                                            <th className="p-3.5 font-semibold">Face ID</th>
+                                                            <th className="p-3.5 font-semibold cursor-pointer select-none hover:text-slate-200" onClick={() => handleSort("is_active")}>
+                                                                <span className="inline-flex items-center">Status {renderSortIcon("is_active")}</span>
+                                                            </th>
+                                                            <th className="p-3.5 pr-5 text-right font-semibold">Actions</th>
                                                         </tr>
                                                     )}
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-800/50">
                                                     {paginatedData.map((item, idx) => {
                                                         if (subTab === "roles") return (
-                                                            <tr key={idx} className="hover:bg-slate-800/40 transition-colors group">
-                                                                <td className="p-4 pl-6">
+                                                            <tr key={item.role_id ?? idx} className="hover:bg-slate-800/40 transition-colors">
+                                                                <td className={`${cellPad} pl-6`}>
                                                                     <div className="inline-flex px-2 py-1 rounded-md bg-slate-800 border border-slate-700/50 text-slate-200 uppercase font-mono text-xs font-bold tracking-wider">
                                                                         {item.role_name}
                                                                     </div>
                                                                 </td>
-                                                                <td className="p-4 text-sm text-slate-400 max-w-xs">{item.description || "—"}</td>
-                                                                <td className="p-4 text-xs font-mono text-slate-500">#{item.role_id}</td>
-                                                                <td className="p-4 pr-6 text-right">
-                                                                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                <td className={`${cellPad} text-sm text-slate-400 max-w-xs`}>{item.description || "—"}</td>
+                                                                <td className={`${cellPad} text-xs font-mono text-slate-500 tabular-nums`}>#{item.role_id}</td>
+                                                                <td className={`${cellPad} pr-6 text-right`}>
+                                                                    <div className="flex justify-end gap-1.5">
                                                                         <button onClick={() => { setSelectedItem(item); setModalType("edit"); setShowModal(true); }} title="Edit Role"
-                                                                            className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white">
+                                                                            className="p-2 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white">
                                                                             <Icon name="edit-3" className="w-4 h-4" />
                                                                         </button>
                                                                         <button onClick={() => handleDeleteItem(item)} title="Remove Role"
@@ -1788,21 +2355,23 @@ function CampusMapTab() {
                                                         );
 
                                                         if (subTab === "facial-recognition") return (
-                                                            <tr key={idx} className="hover:bg-slate-800/40 transition-colors group">
-                                                                <td className="p-4 pl-6">
+                                                            <tr key={item.user_id ?? idx}
+                                                                onClick={() => setDrawerState({ record: item, kind: "user" })}
+                                                                className="hover:bg-slate-800/40 transition-colors cursor-pointer">
+                                                                <td className={`${cellPad} pl-6`}>
                                                                     <div className="flex items-center gap-3">
-                                                                        <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden shrink-0">
+                                                                        <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden shrink-0">
                                                                             <span className="text-xs font-bold text-slate-300">
                                                                                 {((item.given_name?.[0] || "") + (item.family_name?.[0] || "")).toUpperCase() || (item.full_name?.slice(0, 2).toUpperCase() || "U")}
                                                                             </span>
                                                                         </div>
-                                                                        <div>
+                                                                        <div className="min-w-0">
                                                                             <div className="font-bold text-slate-200 text-sm flex items-center gap-2">
-                                                                                {item.full_name}
-                                                                                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60">ID: #{item.user_id}</span>
+                                                                                <span className="truncate">{item.full_name}</span>
+                                                                                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60 tabular-nums">#{item.user_id}</span>
                                                                             </div>
-                                                                            <div className="text-xs text-slate-400 font-mono">{item.email}</div>
-                                                                            <div className="flex gap-1 mt-1">
+                                                                            <div className="text-xs text-slate-400 font-mono truncate">{item.email}</div>
+                                                                            <div className="flex gap-1 mt-1 flex-wrap">
                                                                                 {(item.roles || []).map((r, rI) => (
                                                                                     <span key={rI} className="text-[10px] font-bold tracking-wider px-1.5 py-0.2 bg-slate-800 text-indigo-300 border border-slate-700/50 rounded uppercase">
                                                                                         {r.role_name}
@@ -1812,24 +2381,30 @@ function CampusMapTab() {
                                                                         </div>
                                                                     </div>
                                                                 </td>
-                                                                <td className="p-4">
-                                                                    {item.face_vector || item.face_enrolled ? (
-                                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold">
+                                                                <td className={cellPad}>
+                                                                    {item.face_enrolled || item.face_vector ? (
+                                                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold">
                                                                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                                                                             Enrolled
                                                                         </span>
                                                                     ) : (
-                                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 text-slate-400 border border-slate-700/50 rounded-full text-xs font-bold">
+                                                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 text-slate-400 border border-slate-700/50 rounded-full text-xs font-bold">
                                                                             <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
                                                                             Not Enrolled
                                                                         </span>
                                                                     )}
                                                                 </td>
-                                                                <td className="p-4 text-xs font-mono text-slate-400">
-                                                                    {item.face_vector ? "512-dim SFace Feature Vector" : "No biometric features"}
+                                                                <td className={`${cellPad} text-xs font-mono text-slate-400`}>
+                                                                    {item.enrolled_poses?.length > 0
+                                                                        ? `${item.enrolled_poses.length} pose(s): ${item.enrolled_poses.join(", ")}`
+                                                                        : (item.face_enrolled ? "Enrolled" : "No biometric templates")}
                                                                 </td>
-                                                                <td className="p-4 pr-6 text-right">
-                                                                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                <td className={`${cellPad} pr-6 text-right`} onClick={(e) => e.stopPropagation()}>
+                                                                    <div className="flex justify-end gap-1.5">
+                                                                        <button onClick={() => setDrawerState({ record: item, kind: "user" })} title="Inspect User"
+                                                                            className="p-2 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white">
+                                                                            <Icon name="eye" className="w-4 h-4" />
+                                                                        </button>
                                                                         <button onClick={() => {
                                                                             setSelectedItem(item);
                                                                             setSelectedPhotoFile(null);
@@ -1840,7 +2415,7 @@ function CampusMapTab() {
                                                                             setScanning(false);
                                                                             setShowFaceModal(true);
                                                                         }} title="Manage Biometrics"
-                                                                            className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-indigo-400 rounded-xl transition-all hover:text-white">
+                                                                            className="p-2 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/50 text-indigo-400 rounded-xl transition-all hover:text-white">
                                                                             <Icon name="scan-face" className="w-4 h-4" />
                                                                         </button>
                                                                     </div>
@@ -1854,22 +2429,34 @@ function CampusMapTab() {
                                                             const staffObj = item.staff;
                                                             const visitorObj = item.visitor;
                                                             const adminObj = item.admin;
+                                                            const isSelected = selectedUserIds.includes(item.user_id);
 
                                                             return (
-                                                                <tr key={idx} className="hover:bg-slate-800/40 transition-colors group">
-                                                                    <td className="p-4 pl-6">
+                                                                <tr key={item.user_id ?? idx}
+                                                                    onClick={() => setDrawerState({ record: item, kind: "user" })}
+                                                                    className={`transition-colors cursor-pointer ${isSelected ? "bg-indigo-950/35 hover:bg-indigo-950/50" : "hover:bg-slate-800/40"}`}>
+                                                                    <td className={`${cellPad} pl-5`} onClick={(e) => e.stopPropagation()}>
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            aria-label={`Select ${item.full_name}`}
+                                                                            checked={isSelected}
+                                                                            onChange={() => toggleSelectUser(item.user_id)}
+                                                                            className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                                        />
+                                                                    </td>
+                                                                    <td className={cellPad}>
                                                                         <div className="flex items-center gap-3">
-                                                                            <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden shrink-0">
+                                                                            <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden shrink-0">
                                                                                 <span className="text-xs font-bold text-slate-300">
                                                                                     {((item.given_name?.[0] || "") + (item.family_name?.[0] || "")).toUpperCase() || (item.full_name?.slice(0, 2).toUpperCase() || "U")}
                                                                                 </span>
                                                                             </div>
-                                                                            <div>
+                                                                            <div className="min-w-0">
                                                                                 <div className="font-bold text-slate-200 text-sm flex items-center gap-2">
-                                                                                    {item.full_name}
-                                                                                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60">ID: #{item.user_id}</span>
+                                                                                    <span className="truncate">{item.full_name}</span>
+                                                                                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60 tabular-nums shrink-0">#{item.user_id}</span>
                                                                                 </div>
-                                                                                <div className="text-xs text-slate-400 font-mono">{item.email}</div>
+                                                                                <div className="text-xs text-slate-400 font-mono truncate">{item.email}</div>
                                                                                 <div className="flex flex-wrap gap-1 mt-1">
                                                                                     {(item.roles || []).map((r, rI) => (
                                                                                         <span key={rI} className="text-[10px] font-bold tracking-wider px-1.5 py-0.5 bg-indigo-950/80 text-indigo-300 border border-indigo-700/50 rounded uppercase">
@@ -1880,57 +2467,73 @@ function CampusMapTab() {
                                                                             </div>
                                                                         </div>
                                                                     </td>
-                                                                    <td className="p-4">
+                                                                    <td className={cellPad}>
                                                                         <div className="space-y-1">
                                                                             {studentObj && (
                                                                                 <div className="text-xs text-slate-300 flex items-center gap-1.5">
-                                                                                    <Icon name="graduation-cap" className="w-3.5 h-3.5 text-indigo-400" />
+                                                                                    <Icon name="graduation-cap" className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                                                                                     <span className="font-mono text-indigo-400 font-semibold">{studentObj.student_id}</span>
-                                                                                    {studentObj.program && <span className="text-slate-400">· {studentObj.program}</span>}
+                                                                                    {studentObj.program && <span className="text-slate-400 truncate max-w-[180px]">· {studentObj.program}</span>}
                                                                                 </div>
                                                                             )}
                                                                             {lecturerObj && (
                                                                                 <div className="text-xs text-slate-300 flex items-center gap-1.5">
-                                                                                    <Icon name="book-open" className="w-3.5 h-3.5 text-purple-400" />
+                                                                                    <Icon name="book-open" className="w-3.5 h-3.5 text-purple-400 shrink-0" />
                                                                                     <span className="font-mono text-purple-400 font-semibold">{lecturerObj.lecturer_id}</span>
-                                                                                    {lecturerObj.Position_desc && <span className="text-slate-400">· {lecturerObj.Position_desc}</span>}
+                                                                                    {lecturerObj.position && <span className="text-slate-400 truncate max-w-[180px]">· {lecturerObj.position}</span>}
                                                                                 </div>
                                                                             )}
                                                                             {staffObj && (
                                                                                 <div className="text-xs text-slate-300 flex items-center gap-1.5">
-                                                                                    <Icon name="briefcase" className="w-3.5 h-3.5 text-emerald-400" />
+                                                                                    <Icon name="briefcase" className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                                                                                     <span className="font-mono text-emerald-400 font-semibold">{staffObj.staff_id}</span>
-                                                                                    {staffObj.Position_desc && <span className="text-slate-400">· {staffObj.Position_desc}</span>}
+                                                                                    {staffObj.position && <span className="text-slate-400 truncate max-w-[180px]">· {staffObj.position}</span>}
                                                                                 </div>
                                                                             )}
                                                                             {visitorObj && (
                                                                                 <div className="text-xs text-slate-300 flex items-center gap-1.5">
-                                                                                    <Icon name="user-check" className="w-3.5 h-3.5 text-amber-400" />
+                                                                                    <Icon name="user-check" className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                                                                                     <span className="font-mono text-amber-400 font-semibold">{visitorObj.id_number}</span>
-                                                                                    {visitorObj.organization && <span className="text-slate-400">· {visitorObj.organization}</span>}
+                                                                                    {visitorObj.organization && <span className="text-slate-400 truncate max-w-[180px]">· {visitorObj.organization}</span>}
                                                                                 </div>
                                                                             )}
                                                                             {adminObj && (
                                                                                 <div className="text-xs text-slate-300 flex items-center gap-1.5">
-                                                                                    <Icon name="shield" className="w-3.5 h-3.5 text-rose-400" />
+                                                                                    <Icon name="shield" className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                                                                                     <span className="font-mono text-rose-400 font-semibold">{adminObj.admin_id}</span>
                                                                                     <span className="text-slate-400">· {adminObj.admin_type}</span>
                                                                                 </div>
                                                                             )}
                                                                             {!studentObj && !lecturerObj && !staffObj && !visitorObj && !adminObj && (
-                                                                                <span className="text-xs text-slate-500 italic">No specific profile assigned</span>
+                                                                                <span className="text-xs text-slate-500 italic">No sub-profile</span>
                                                                             )}
                                                                         </div>
                                                                     </td>
-                                                                    <td className="p-4">
+                                                                    <td className={cellPad}>
+                                                                        {item.face_enrolled ? (
+                                                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-[11px] font-bold tabular-nums">
+                                                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                                                                {item.enrolled_poses_count ? `${item.enrolled_poses_count} pose${item.enrolled_poses_count > 1 ? "s" : ""}` : "Enrolled"}
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-slate-800/80 text-slate-500 border border-slate-700/60 rounded-full text-[11px] font-semibold">
+                                                                                None
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className={cellPad} onClick={(e) => e.stopPropagation()}>
                                                                         <button onClick={() => handleToggleStatus(item)}
-                                                                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-all ${item.is_active ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500 hover:text-white hover:border-emerald-500' : 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500 hover:text-white'}`}>
+                                                                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border transition-all ${item.is_active ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500 hover:text-white hover:border-emerald-500' : 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500 hover:text-white'}`}>
                                                                             <span className={`w-1.5 h-1.5 rounded-full ${item.is_active ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
                                                                             {item.is_active ? 'Active' : 'Deactivated'}
                                                                         </button>
                                                                     </td>
-                                                                    <td className="p-4 pr-6 text-right">
-                                                                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                    <td className={`${cellPad} pr-5 text-right`} onClick={(e) => e.stopPropagation()}>
+                                                                        <div className="flex justify-end gap-1.5">
+                                                                            <button onClick={() => setDrawerState({ record: item, kind: "user" })} title="Inspect User 360°"
+                                                                                className="p-2 bg-slate-800/70 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white">
+                                                                                <Icon name="eye" className="w-4 h-4" />
+                                                                            </button>
                                                                             <button onClick={() => {
                                                                                 setSelectedItem(item);
                                                                                 setSelectedPhotoFile(null);
@@ -1941,11 +2544,11 @@ function CampusMapTab() {
                                                                                 setScanning(false);
                                                                                 setShowFaceModal(true);
                                                                             }} title="Manage Face ID"
-                                                                                className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-indigo-400 rounded-xl transition-all hover:text-white">
+                                                                                className="p-2 bg-slate-800/70 hover:bg-slate-700 border border-slate-700/50 text-indigo-400 rounded-xl transition-all hover:text-white">
                                                                                 <Icon name="scan-face" className="w-4 h-4" />
                                                                             </button>
                                                                             <button onClick={() => { setSelectedItem(item); setModalType("edit"); setShowModal(true); }} title="Edit User"
-                                                                                className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white">
+                                                                                className="p-2 bg-slate-800/70 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white">
                                                                                 <Icon name="edit-3" className="w-4 h-4" />
                                                                             </button>
                                                                             <button onClick={() => handleDeleteItem(item)} title="Remove User"
@@ -1966,7 +2569,8 @@ function CampusMapTab() {
                                 )}
                                 {renderPagination()}
                             </div>
-                        )}
+                            );
+                        })()}
 
                         {/* ══ KNOWLEDGE BASE (RAG) ══════════════════════════ */}
                         {currentTab === "rag" && (
@@ -2207,7 +2811,7 @@ function CampusMapTab() {
                                                     </thead>
                                                     <tbody className="divide-y divide-slate-800/50">
                                                         {paginatedData.map((item, idx) => (
-                                                            <tr key={idx} className="hover:bg-slate-800/40 transition-colors group">
+                                                            <tr key={item.document_id ?? idx} onClick={() => setDrawerState({ record: item, kind: "document" })} className="hover:bg-slate-800/40 transition-colors cursor-pointer group">
                                                                 <td className="p-4 pl-6">
                                                                     <div className="flex items-center gap-4">
                                                                         <div className="w-10 h-10 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-xl flex items-center justify-center shrink-0 shadow-sm"><Icon name="file-text" className="w-5 h-5" /></div>
@@ -2432,7 +3036,7 @@ function CampusMapTab() {
                                                     </thead>
                                                     <tbody className="divide-y divide-slate-800/50">
                                                         {paginatedData.map((item, idx) => (
-                                                            <tr key={idx} className="hover:bg-slate-800/40 transition-colors group">
+                                                            <tr key={item.device_id ?? idx} onClick={() => setDrawerState({ record: item, kind: "device" })} className="hover:bg-slate-800/40 transition-colors cursor-pointer group">
                                                                 <td className="p-4 pl-6">
                                                                     <div className="flex items-center gap-4">
                                                                         <div className="w-10 h-10 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-xl flex items-center justify-center shrink-0 shadow-sm"><Icon name="cpu" className="w-5 h-5" /></div>
@@ -2582,7 +3186,7 @@ function CampusMapTab() {
                                                     </thead>
                                                     <tbody className="divide-y divide-slate-800/50">
                                                         {paginatedData.map((item, idx) => (
-                                                            <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
+                                                            <tr key={item.log_id ?? idx} onClick={() => setDrawerState({ record: item, kind: "auth-log" })} className="hover:bg-slate-800/40 transition-colors cursor-pointer">
                                                                 <td className="p-4 pl-6 font-mono text-slate-200 text-sm font-semibold">{item.email || "Unknown"}</td>
                                                                 <td className="p-4 text-xs font-mono text-slate-500">{item.device_id || "—"}</td>
                                                                 <td className="p-4 text-xs font-bold">
@@ -2681,7 +3285,7 @@ function CampusMapTab() {
                                                     </thead>
                                                     <tbody className="divide-y divide-slate-800/50">
                                                         {paginatedData.map((item, idx) => (
-                                                            <tr key={idx} className="hover:bg-slate-800/40 transition-colors group">
+                                                            <tr key={item.course_id ?? idx} onClick={() => setDrawerState({ record: item, kind: "course" })} className="hover:bg-slate-800/40 transition-colors cursor-pointer group">
                                                                 <td className="p-4 pl-6">
                                                                     <p className="font-bold text-slate-200 text-sm">{item.course_name}</p>
                                                                     <p className="text-xs font-mono text-indigo-400 mt-0.5">{item.course_code}</p>
@@ -3416,6 +4020,43 @@ function CampusMapTab() {
                         )}
 
                     </div>
+                        <RecordDrawer
+                            record={drawerState.record}
+                            kind={drawerState.kind}
+                            refs={refs}
+                            onClose={() => setDrawerState({ record: null, kind: "" })}
+                            onEdit={(rec) => {
+                                setDrawerState({ record: null, kind: "" });
+                                setSelectedItem(rec);
+                                setModalType("edit");
+                                setShowModal(true);
+                            }}
+                            onDelete={(rec) => handleDeleteItem(rec)}
+                            onToggleUserStatus={(rec) => handleToggleStatus(rec)}
+                            onOpenFaceEnroll={(rec) => {
+                                setDrawerState({ record: null, kind: "" });
+                                setSelectedItem(rec);
+                                setSelectedPhotoFile(null);
+                                setUploadedPhoto(null);
+                                setPhotoPose("front");
+                                setEnrollMethod("photo");
+                                setScanStep(0);
+                                setScanning(false);
+                                setShowFaceModal(true);
+                            }}
+                            onRevokeSession={handleRevokeUserSession}
+                            onRotateDeviceSecret={null}
+                        />
+                        <ConfirmDialog
+                            open={confirmState.open}
+                            title={confirmState.title}
+                            message={confirmState.message}
+                            confirmLabel={confirmState.confirmLabel}
+                            variant={confirmState.variant}
+                            busy={bulkBusy || Boolean(pendingActionKey)}
+                            onConfirm={confirmState.onConfirm}
+                            onCancel={() => setConfirmState(prev => ({ ...prev, open: false }))}
+                        />
                         {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
                     </main>
                 </div>

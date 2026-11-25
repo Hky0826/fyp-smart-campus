@@ -1,126 +1,4657 @@
 const _fetch = window.fetch.bind(window); window.fetch = (input, init = {}) => { const headers = new Headers(init.headers || {}); headers.delete('Authorization'); const csrf = document.cookie.split('; ').find(v => v.startsWith('csrf_token=')); if (!['GET','HEAD','OPTIONS'].includes((init.method || 'GET').toUpperCase()) && csrf) headers.set('X-CSRF-Token', decodeURIComponent(csrf.split('=').slice(1).join('='))); return _fetch(input, {...init, headers, credentials: 'include'}); };
-(function(){const{useEffect,useRef}=React;function Icon({name,className=""}){const ref=useRef(null);useEffect(()=>{if(!ref.current)return;const safeName=/^[A-Za-z0-9-]+$/.test(String(name||""))?name:"circle-help";const safeClass=String(className).split(/\s+/).filter(token=>/^[A-Za-z0-9:_/-]+$/.test(token)).join(" ");const icon=document.createElement("i");icon.setAttribute("data-lucide",safeName);icon.setAttribute("class",safeClass);icon.setAttribute("aria-hidden","true");ref.current.replaceChildren(icon);// lucide 0.321 scans the document; it does not support the old
-// {node: ...} option. The fallback keeps controls visible if the
-// optional icon asset is unavailable during a cold load.
-if(window.lucide&&typeof window.lucide.createIcons==="function"){window.lucide.createIcons();}if(!ref.current.querySelector("svg")){const fallback=document.createElementNS("http://www.w3.org/2000/svg","svg");fallback.setAttribute("viewBox","0 0 24 24");fallback.setAttribute("fill","none");fallback.setAttribute("stroke","currentColor");fallback.setAttribute("stroke-width","2");fallback.setAttribute("aria-hidden","true");const circle=document.createElementNS("http://www.w3.org/2000/svg","circle");circle.setAttribute("cx","12");circle.setAttribute("cy","12");circle.setAttribute("r","8");fallback.appendChild(circle);ref.current.replaceChildren(fallback);}},[name,className]);return/*#__PURE__*/React.createElement("span",{ref:ref,className:"inline-flex items-center justify-center"});}window.Icon=Icon;})();
-(function(){const{useEffect}=React;// Redesigned Toast notification component
-function Toast({message,type,onClose}){useEffect(()=>{const timer=setTimeout(()=>onClose(),4500);return()=>clearTimeout(timer);},[message,onClose]);const isError=type==='error';return/*#__PURE__*/React.createElement("div",{className:`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-4 py-3.5 rounded-2xl shadow-2xl border max-w-sm animate-in fade-in slide-in-from-bottom-4 backdrop-blur-md ${isError?'bg-slate-950/90 border-red-900/50 shadow-red-900/10':'bg-slate-950/90 border-emerald-900/50 shadow-emerald-900/10'}`},/*#__PURE__*/React.createElement("div",{className:`p-1.5 rounded-lg shrink-0 ${isError?'bg-red-500/15 text-red-400':'bg-emerald-500/15 text-emerald-400'}`},/*#__PURE__*/React.createElement(Icon,{name:isError?"alert-circle":"check-circle",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("p",{className:"text-sm font-semibold text-slate-100 flex-1"},message),/*#__PURE__*/React.createElement("button",{onClick:onClose,className:"p-1 text-slate-500 hover:text-slate-300 rounded-lg hover:bg-slate-800 transition-colors duration-150 ml-1"},/*#__PURE__*/React.createElement(Icon,{name:"x",className:"w-3.5 h-3.5"})));}window.Toast=Toast;})();
-(function(){// Stat summary card with color variants and accent top border
-function StatCard({title,value,icon,changeText,color="indigo"}){const colorMap={blue:{bg:'bg-indigo-500/10',border:'border-indigo-500/20',text:'text-indigo-400',accent:'bg-indigo-600'},// Map legacy blue to indigo
-indigo:{bg:'bg-indigo-500/10',border:'border-indigo-500/20',text:'text-indigo-400',accent:'bg-indigo-600'},violet:{bg:'bg-violet-500/10',border:'border-violet-500/20',text:'text-violet-400',accent:'bg-violet-600'},emerald:{bg:'bg-emerald-500/10',border:'border-emerald-500/20',text:'text-emerald-400',accent:'bg-emerald-500'},amber:{bg:'bg-amber-500/10',border:'border-amber-500/20',text:'text-amber-400',accent:'bg-amber-500'}};const c=colorMap[color]||colorMap.indigo;return/*#__PURE__*/React.createElement("div",{className:"bg-slate-900/50 backdrop-blur-sm border border-slate-800 rounded-2xl p-5 shadow-xl hover:border-slate-700/80 hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group"},/*#__PURE__*/React.createElement("div",{className:`absolute top-0 left-0 right-0 h-0.5 ${c.accent} rounded-t-2xl`}),/*#__PURE__*/React.createElement("div",{className:"flex justify-between items-start pt-1"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-500 font-semibold tracking-wide uppercase"},title),/*#__PURE__*/React.createElement("h3",{className:"text-3xl font-extrabold mt-2 text-slate-100 tracking-tight"},value)),/*#__PURE__*/React.createElement("div",{className:`p-3 ${c.bg} border ${c.border} ${c.text} rounded-xl group-hover:scale-105 transition-transform duration-300`},/*#__PURE__*/React.createElement(Icon,{name:icon,className:"w-5 h-5"}))),changeText&&/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-1.5 mt-4 pt-3 border-t border-slate-800/60"},/*#__PURE__*/React.createElement("span",{className:`text-xs ${c.text} font-semibold`},changeText)));}window.StatCard=StatCard;})();
-(function(){// Generic section header with title, search, and action button
-function SectionHeader({title,description,searchVal,onSearchChange,onCreateClick,createLabel,customAction}){return/*#__PURE__*/React.createElement("div",{className:"flex flex-col md:flex-row md:items-start justify-between gap-4 mb-6"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("h2",{className:"text-xl font-bold text-slate-100 tracking-tight"},title),description&&/*#__PURE__*/React.createElement("p",{className:"text-sm text-slate-500 mt-1 leading-relaxed"},description)),/*#__PURE__*/React.createElement("div",{className:"flex flex-wrap items-center gap-2.5 shrink-0"},onSearchChange!==undefined&&/*#__PURE__*/React.createElement("div",{className:"relative"},/*#__PURE__*/React.createElement("span",{className:"absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500"},/*#__PURE__*/React.createElement(Icon,{name:"search",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("input",{type:"text",value:searchVal,onChange:e=>onSearchChange(e.target.value),placeholder:"Search...",className:"bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 w-44 sm:w-56 transition-all duration-200 shadow-inner"})),customAction,onCreateClick&&/*#__PURE__*/React.createElement("button",{onClick:onCreateClick,className:"bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-xl text-sm transition-all duration-200 shadow-md shadow-indigo-900/20 flex items-center gap-2 whitespace-nowrap"},/*#__PURE__*/React.createElement(Icon,{name:"plus",className:"w-4 h-4"}),/*#__PURE__*/React.createElement("span",null,createLabel||"Add New"))));}window.SectionHeader=SectionHeader;})();
-(function(){const{useState,useEffect,useRef}=React;// ==========================================================
-// SEARCHABLE DROPDOWN COMPONENT (Custom Search + Dropdown)
-// ==========================================================
-function SearchableDropdown({list,value,onChange,placeholder,filterFn,displayFn,valueFn}){const[query,setQuery]=useState("");const[isOpen,setIsOpen]=useState(false);const containerRef=useRef(null);useEffect(()=>{if(valueFn){const selected=list.find(item=>String(valueFn(item))===String(value));setQuery(selected?displayFn(selected):value||"");}else{setQuery(value||"");}},[value,list]);useEffect(()=>{function handleClickOutside(event){if(containerRef.current&&!containerRef.current.contains(event.target)){setIsOpen(false);}}document.addEventListener("mousedown",handleClickOutside);return()=>document.removeEventListener("mousedown",handleClickOutside);},[]);const filtered=list.filter(item=>{const q=query.toLowerCase();return filterFn(item,q);});return/*#__PURE__*/React.createElement("div",{className:"relative",ref:containerRef},/*#__PURE__*/React.createElement("div",{className:"relative flex items-center"},/*#__PURE__*/React.createElement("input",{type:"text",placeholder:placeholder,value:query,onChange:e=>{const val=e.target.value;setQuery(val);onChange(val);setIsOpen(true);},onFocus:()=>setIsOpen(true),className:"w-full bg-slate-950 border border-slate-800 rounded-xl pl-4 pr-10 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-all placeholder:text-slate-600"}),/*#__PURE__*/React.createElement("button",{type:"button",onClick:()=>setIsOpen(!isOpen),className:"absolute right-3 text-slate-500 hover:text-slate-300"},/*#__PURE__*/React.createElement("svg",{className:`w-4 h-4 transition-transform duration-200 ${isOpen?'rotate-180':''}`,fill:"none",stroke:"currentColor",strokeWidth:"2",viewBox:"0 0 24 24"},/*#__PURE__*/React.createElement("path",{strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"2",d:"M19 9l-7 7-7-7"})))),isOpen&&/*#__PURE__*/React.createElement("div",{className:"absolute left-0 z-50 w-full mt-1.5 max-h-60 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl shadow-2xl divide-y divide-slate-900 scrollbar-thin"},filtered.map((item,idx)=>/*#__PURE__*/React.createElement("div",{key:idx,onClick:()=>{const displayVal=displayFn(item);const submitVal=valueFn?valueFn(item):displayVal;setQuery(displayVal);onChange(submitVal,item);setIsOpen(false);},className:"p-3 hover:bg-slate-900 cursor-pointer text-sm transition-colors duration-150 text-slate-200"},displayFn(item))),filtered.length===0&&/*#__PURE__*/React.createElement("div",{className:"p-3 text-slate-500 text-xs text-center"},"No matching options")));}// ==========================================================
-// AUTOCOMPLETE SEARCH COMPONENT (Google-style similarity search)
-// ==========================================================
-function AutocompleteSearch({list,onSelect,filterFn,renderItem,placeholder}){const[query,setQuery]=useState("");const[isOpen,setIsOpen]=useState(false);const filtered=list.filter(item=>filterFn(item,query.toLowerCase()));return/*#__PURE__*/React.createElement("div",{className:"relative"},/*#__PURE__*/React.createElement("div",{className:"relative flex items-center"},/*#__PURE__*/React.createElement("input",{type:"text",placeholder:placeholder,value:query,onChange:e=>{setQuery(e.target.value);setIsOpen(true);},onFocus:()=>setIsOpen(true),onBlur:()=>setTimeout(()=>setIsOpen(false),250),className:"w-full bg-slate-950 border border-slate-800 rounded-xl pl-4 pr-10 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-all placeholder:text-slate-600"}),/*#__PURE__*/React.createElement("button",{type:"button",onClick:()=>setIsOpen(!isOpen),className:"absolute right-3 text-slate-500 hover:text-slate-300"},/*#__PURE__*/React.createElement("svg",{className:`w-4 h-4 transition-transform duration-200 ${isOpen?'rotate-180':''}`,fill:"none",stroke:"currentColor",strokeWidth:"2",viewBox:"0 0 24 24"},/*#__PURE__*/React.createElement("path",{strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"2",d:"M19 9l-7 7-7-7"})))),isOpen&&/*#__PURE__*/React.createElement("div",{className:"absolute top-full left-0 z-50 w-full mt-1.5 max-h-60 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl shadow-2xl divide-y divide-slate-900 scrollbar-thin"},filtered.map((item,idx)=>/*#__PURE__*/React.createElement("div",{key:idx,onMouseDown:()=>{onSelect(item,setQuery);setIsOpen(false);},className:"p-3 hover:bg-slate-900 cursor-pointer text-sm transition-colors duration-150 text-slate-200"},renderItem(item))),filtered.length===0&&/*#__PURE__*/React.createElement("div",{className:"p-3 text-slate-500 text-xs text-center"},"No matching records found")));}// ==========================================================
-// SUBFORM COMPONENT UTILITIES (React elements)
-// ==========================================================
-// 1. Unified User Form Component
-function UserForm({item,roles,nodes,programmes=[],faculties=[],departments=[],onSubmit,onCancel}){const isEdit=!!item;// User core states
-const[givenName,setGivenName]=useState(item?.given_name||"");const[familyName,setFamilyName]=useState(item?.family_name||"");const[email,setEmail]=useState(item?.email||"");const[roleId,setRoleId]=useState(item?.role_id||item?.roles?.[0]?.role_id||"");const[isActive,setIsActive]=useState(item?item.is_active:true);const[locationId,setLocationId]=useState(item?.last_known_location||"");const[editRole,setEditRole]=useState(false);// ── Link to Existing User ──────────────────────────────────
-const[linkExisting,setLinkExisting]=useState(false);const[linkedUserId,setLinkedUserId]=useState(null);const[systemUsers,setSystemUsers]=useState([]);const[userSearchQuery,setUserSearchQuery]=useState("");const[userDropdownOpen,setUserDropdownOpen]=useState(false);const userSearchRef=useRef(null);useEffect(()=>{if(!isEdit){const token="";fetch("/api/iam/users",{headers:{"Authorization":`Bearer ${token}`}}).then(res=>res.json()).then(data=>{if(Array.isArray(data))setSystemUsers(data);}).catch(()=>{});}},[]);useEffect(()=>{function handleOutside(e){if(userSearchRef.current&&!userSearchRef.current.contains(e.target))setUserDropdownOpen(false);}document.addEventListener("mousedown",handleOutside);return()=>document.removeEventListener("mousedown",handleOutside);},[]);const filteredUsers=systemUsers.filter(u=>{const q=userSearchQuery.toLowerCase();return u.full_name?.toLowerCase().includes(q)||u.email?.toLowerCase().includes(q)||String(u.user_id).includes(q);});const handleLinkUser=u=>{setLinkedUserId(u.user_id);setGivenName(u.given_name||"");setFamilyName(u.family_name||"");setEmail(u.email);setRoleId(u.role_id||u.roles?.[0]?.role_id||"");setUserSearchQuery(`${u.full_name} (@${u.email})`);setUserDropdownOpen(false);};const handleUnlink=()=>{setLinkedUserId(null);setGivenName("");setFamilyName("");setEmail("");setRoleId("");setUserSearchQuery("");};// ── Face Photo Upload ──────────────────────────────────────
-// Find active role details
-const selectedRole=roles.find(r=>r.role_id===parseInt(roleId));const roleName=selectedRole?selectedRole.role_name:"";// Sub-profile states
-// Student
-const[studentId,setStudentId]=useState(item?.student?.student_id||"");const[program,setProgram]=useState(item?.student?.programme_id||item?.student?.program||"");const[faculty,setFaculty]=useState(item?.student?.faculty_id||item?.lecturer?.faculty_id||item?.student?.faculty||item?.lecturer?.faculty||"");const[intake,setIntake]=useState(item?.student?.intake||"");const[enrolledSince,setEnrolledSince]=useState(item?.student?.enrolled_since||new Date().toISOString().split('T')[0]);// Lecturer / Staff / Admin / Visitor common department, faculty & office
-const[lecturerId,setLecturerId]=useState(item?.lecturer?.lecturer_id||"");const[department,setDepartment]=useState(item?.lecturer?.department_id||item?.staff?.department_id||item?.admin?.department_id||item?.lecturer?.department||item?.staff?.department||item?.admin?.department||"");const[position,setPosition]=useState(item?.lecturer?.position||item?.staff?.position||"");const[isHoD,setIsHoD]=useState(item?.lecturer?.is_head_of_department||false);const[officeNodeId,setOfficeNodeId]=useState(item?.lecturer?.office_node_id||item?.staff?.office_node_id||item?.admin?.office_node_id||"");const[staffId,setStaffId]=useState(item?.staff?.staff_id||item?.admin?.staff_id||"");const[staffType,setStaffType]=useState(item?.staff?.staff_type||"ADMINISTRATIVE");const[visitorId,setVisitorId]=useState(item?.visitor?.visitor_id||"");const[idNumber,setIdNumber]=useState(item?.visitor?.id_number||"");const[organization,setOrganization]=useState(item?.visitor?.organization||"");const[visitPurpose,setVisitPurpose]=useState(item?.visitor?.visit_purpose||"");const[accessExpiry,setAccessExpiry]=useState(item?.visitor?.access_expiry?new Date(item.visitor.access_expiry).toISOString().slice(0,16):new Date(Date.now()+86400000).toISOString().slice(0,16));const[registeredBy,setRegisteredBy]=useState(item?.visitor?.registered_by||1);const[adminId,setAdminId]=useState(item?.admin?.admin_id||"");const[adminType,setAdminType]=useState(item?.admin?.admin_type||"SYSTEM_ADMIN");const[password,setPassword]=useState("");// Real-time email generation
-useEffect(()=>{if(!isEdit){const cleanGiven=givenName.toLowerCase().replace(/[^a-z0-9]/g,"");const cleanFamily=familyName.toLowerCase().replace(/[^a-z0-9]/g,"");if(cleanGiven||cleanFamily){setEmail(`${cleanGiven}.${cleanFamily}@qiu.edu.my`);}else{setEmail("");}}},[givenName,familyName,isEdit]);// Custom Validation states
-const[errors,setErrors]=useState({});const findProgramme=value=>programmes.find(p=>String(p.programme_id)===String(value)||p.programme_name===value);const findFaculty=value=>faculties.find(f=>String(f.faculty_id)===String(value)||f.faculty_name===value);const findDepartment=value=>departments.find(d=>String(d.department_id)===String(value)||d.department_name===value);const validate=()=>{let err={};if(!linkExisting||isEdit){if(!givenName.trim())err.givenName="Given name is required";if(!familyName.trim())err.familyName="Family name is required";if(!email.trim())err.email="email is required";}if(!roleId)err.roleId="Role selection is required";if(roleName==="STUDENT"){if(!program.trim())err.program="Program selection is required";else if(programmes.length>0&&!findProgramme(program))err.program="Select a valid programme from the list";if(!faculty.trim())err.faculty="Faculty selection is required";else if(faculties.length>0&&!findFaculty(faculty))err.faculty="Select a valid faculty from the list";if(!/^\d{6}$/.test(String(intake).trim()))err.intake="Intake must be exactly 6 digits, for example 202407";if(!enrolledSince)err.enrolledSince="Enrollment date is required";}else if(roleName==="LECTURER"){if(!department.trim())err.department="Department selection is required";else if(departments.length>0&&!findDepartment(department))err.department="Select a valid department from the list";if(!faculty.trim())err.faculty="Faculty selection is required";else if(faculties.length>0&&!findFaculty(faculty))err.faculty="Select a valid faculty from the list";if(!position.trim())err.position="Position is required";}else if(roleName==="STAFF"){if(!department.trim())err.department="Department selection is required";else if(departments.length>0&&!findDepartment(department))err.department="Select a valid department from the list";if(!position.trim())err.position="Position is required";if(!staffType)err.staffType="Staff type selection is required";}else if(roleName==="VISITOR"){if(!idNumber.trim())err.idNumber="ID number is required";if(!accessExpiry)err.accessExpiry="Access expiry datetime is required";}else if(roleName==="ADMIN"){if(!adminType)err.adminType="Admin type selection is required";if(!isEdit&&!password.trim())err.password="Admin setup password is required";if(!department.trim())err.department="Department selection is required";else if(departments.length>0&&!findDepartment(department))err.department="Select a valid department from the list";}setErrors(err);return Object.keys(err).length===0;};const handleFormSubmit=e=>{e.preventDefault();if(!validate())return;let profileData={};if(roleName==="STUDENT"){const selectedProgramme=findProgramme(program);const selectedFaculty=findFaculty(faculty);profileData={student_id:studentId||null,programme_id:selectedProgramme?selectedProgramme.programme_id:program,faculty_id:selectedFaculty?selectedFaculty.faculty_id:faculty,intake:parseInt(String(intake).trim(),10),enrolled_since:enrolledSince};}else if(roleName==="LECTURER"){const selectedDepartment=findDepartment(department);const selectedFaculty=findFaculty(faculty);profileData={lecturer_id:lecturerId||null,department_id:selectedDepartment?selectedDepartment.department_id:department,faculty_id:selectedFaculty?selectedFaculty.faculty_id:faculty,position:position,is_head_of_department:isHoD,office_node_id:officeNodeId?parseInt(officeNodeId):null};}else if(roleName==="STAFF"){const selectedDepartment=findDepartment(department);profileData={staff_id:staffId||null,department_id:selectedDepartment?selectedDepartment.department_id:department,position:position,staff_type:staffType,office_node_id:officeNodeId?parseInt(officeNodeId):null};}else if(roleName==="VISITOR"){profileData={visitor_id:visitorId||null,id_number:idNumber,organization:organization,visit_purpose:visitPurpose,access_expiry:new Date(accessExpiry).toISOString(),registered_by:registeredBy};}else if(roleName==="ADMIN"){const selectedDepartment=findDepartment(department);profileData={admin_id:adminId||null,admin_type:adminType,department_id:selectedDepartment?selectedDepartment.department_id:department,office_node_id:officeNodeId?parseInt(officeNodeId):null,password:password||null};}// When linking to existing user, inject user_id into profile payload
-if(linkExisting&&linkedUserId){profileData.user_id=linkedUserId;}onSubmit(e,{isEdit,roleName,user_id:item?.user_id,user_payload:{given_name:givenName,family_name:familyName,email:email,role_id:parseInt(roleId),is_active:isActive,last_known_location:locationId?parseInt(locationId):null},profile_payload:profileData});};const getInputClass=errFlag=>{return`w-full bg-slate-950 border rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none transition-all ${errFlag?'border-rose-500 focus:border-rose-500':'border-slate-800 focus:border-emerald-500'}`;};return/*#__PURE__*/React.createElement("form",{onSubmit:handleFormSubmit,noValidate:true,className:"space-y-4 max-h-[80vh] overflow-y-auto pr-2"},!isEdit&&/*#__PURE__*/React.createElement("div",{className:"border border-slate-700/60 rounded-xl p-4 bg-slate-900/60"},/*#__PURE__*/React.createElement("div",{className:"flex items-center justify-between"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("p",{className:"text-xs font-bold uppercase tracking-wider text-slate-300"},"Link to Existing User Account"),/*#__PURE__*/React.createElement("p",{className:"text-[11px] text-slate-500 mt-0.5"},"Attach this profile to a user already in the system.")),/*#__PURE__*/React.createElement("button",{type:"button",onClick:()=>{setLinkExisting(!linkExisting);if(linkExisting)handleUnlink();},className:`relative w-11 h-6 rounded-full transition-colors duration-300 focus:outline-none ${linkExisting?'bg-emerald-500':'bg-slate-700'}`},/*#__PURE__*/React.createElement("span",{className:`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-300 ${linkExisting?'translate-x-5':'translate-x-0'}`}))),linkExisting&&/*#__PURE__*/React.createElement("div",{className:"mt-3 relative",ref:userSearchRef},/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-1.5"},"Search Existing User"),/*#__PURE__*/React.createElement("div",{className:"relative flex items-center"},/*#__PURE__*/React.createElement("input",{type:"text",placeholder:"Search by name, email or user ID...",value:userSearchQuery,onChange:e=>{setUserSearchQuery(e.target.value);setUserDropdownOpen(true);if(!e.target.value)handleUnlink();},onFocus:()=>setUserDropdownOpen(true),className:"w-full bg-slate-950 border border-slate-700 rounded-xl pl-4 pr-10 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-all placeholder:text-slate-600"}),/*#__PURE__*/React.createElement("svg",{className:`absolute right-3 w-4 h-4 text-slate-500 pointer-events-none transition-transform duration-200 ${userDropdownOpen?'rotate-180':''}`,fill:"none",stroke:"currentColor",strokeWidth:"2",viewBox:"0 0 24 24"},/*#__PURE__*/React.createElement("path",{strokeLinecap:"round",strokeLinejoin:"round",d:"M19 9l-7 7-7-7"}))),userDropdownOpen&&filteredUsers.length>0&&/*#__PURE__*/React.createElement("div",{className:"absolute left-0 z-50 w-full mt-1.5 max-h-52 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl shadow-2xl divide-y divide-slate-900"},filteredUsers.map((u,idx)=>/*#__PURE__*/React.createElement("div",{key:idx,onMouseDown:()=>handleLinkUser(u),className:"p-3 hover:bg-slate-900 cursor-pointer transition-colors duration-150"},/*#__PURE__*/React.createElement("p",{className:"text-sm font-semibold text-slate-200"},u.full_name),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-500 mt-0.5"},"@",u.email," \u2022 UID: ",u.user_id," \u2022 ",u.email)))),userDropdownOpen&&filteredUsers.length===0&&userSearchQuery&&/*#__PURE__*/React.createElement("div",{className:"absolute left-0 z-50 w-full mt-1.5 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl p-3 text-xs text-slate-500 text-center"},"No matching users found"),linkedUserId&&/*#__PURE__*/React.createElement("div",{className:"mt-2 flex items-center gap-2 text-xs text-emerald-400 font-semibold"},/*#__PURE__*/React.createElement("span",{className:"w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse"}),"Linked to User ID: ",linkedUserId,/*#__PURE__*/React.createElement("button",{type:"button",onClick:handleUnlink,className:"text-slate-500 hover:text-rose-400 ml-1 font-normal transition-colors"},"\u2715 Unlink")))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Given Name"),/*#__PURE__*/React.createElement("input",{type:"text",value:givenName,onChange:e=>{setGivenName(e.target.value);if(errors.givenName)setErrors(prev=>({...prev,givenName:""}));},className:getInputClass(errors.givenName)}),errors.givenName&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.givenName))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Family Name"),/*#__PURE__*/React.createElement("input",{type:"text",value:familyName,onChange:e=>{setFamilyName(e.target.value);if(errors.familyName)setErrors(prev=>({...prev,familyName:""}));},className:getInputClass(errors.familyName)}),errors.familyName&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.familyName)))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Email Address"),/*#__PURE__*/React.createElement("input",{type:"email",value:email,onChange:e=>{setEmail(e.target.value);if(errors.email)setErrors(prev=>({...prev,email:""}));},placeholder:"given_name.familyname@qiu.edu.my",className:getInputClass(errors.email)}),errors.email&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.email)))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},isEdit?"Role":"Role Access Level"),/*#__PURE__*/React.createElement("select",{value:roleId,onChange:e=>{setRoleId(e.target.value);if(errors.roleId)setErrors(prev=>({...prev,roleId:""}));},className:getInputClass(errors.roleId)},/*#__PURE__*/React.createElement("option",{value:""},"Select Role"),roles.map(r=>/*#__PURE__*/React.createElement("option",{key:r.role_id,value:r.role_id},r.role_name))),errors.roleId&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.roleId)))),roleName==="STUDENT"&&/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800 pt-4 mt-2 space-y-4"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-emerald-400 font-extrabold tracking-widest uppercase"},"Student Profile Parameters"),isEdit&&/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Student ID"),/*#__PURE__*/React.createElement("input",{type:"text",value:studentId,onChange:e=>setStudentId(e.target.value),className:getInputClass(errors.studentId)})),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Program"),/*#__PURE__*/React.createElement(SearchableDropdown,{list:programmes,value:program,onChange:(val,item)=>{setProgram(val);if(item?.faculty_id)setFaculty(item.faculty_id);if(errors.program)setErrors(prev=>({...prev,program:""}));if(errors.faculty)setErrors(prev=>({...prev,faculty:""}));},placeholder:"Search program (e.g. Computer Science)",filterFn:(p,q)=>p.programme_name.toLowerCase().includes(q)||p.programme_id.toLowerCase().includes(q),displayFn:p=>p.programme_name,valueFn:p=>p.programme_id}),errors.program&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.program))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Faculty Department"),/*#__PURE__*/React.createElement(SearchableDropdown,{list:faculties,value:faculty,onChange:val=>{setFaculty(val);if(errors.faculty)setErrors(prev=>({...prev,faculty:""}));},placeholder:"Search faculty (e.g. FCI)",filterFn:(f,q)=>f.faculty_name.toLowerCase().includes(q)||f.faculty_id.toLowerCase().includes(q),displayFn:f=>f.faculty_name,valueFn:f=>f.faculty_id}),errors.faculty&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.faculty)))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Intake Semester Code"),/*#__PURE__*/React.createElement("input",{type:"text",inputMode:"numeric",maxLength:"6",pattern:"\\d{6}",value:intake,onChange:e=>{setIntake(e.target.value.replace(/\D/g,"").slice(0,6));if(errors.intake)setErrors(prev=>({...prev,intake:""}));},className:getInputClass(errors.intake)}),errors.intake&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.intake))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Enrolled Since"),/*#__PURE__*/React.createElement("input",{type:"date",value:enrolledSince,onChange:e=>{setEnrolledSince(e.target.value);if(errors.enrolledSince)setErrors(prev=>({...prev,enrolledSince:""}));},className:getInputClass(errors.enrolledSince)}),errors.enrolledSince&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.enrolledSince))))),roleName==="LECTURER"&&/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800 pt-4 mt-2 space-y-4"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-emerald-400 font-extrabold tracking-widest uppercase"},"Lecturer Profile Parameters"),isEdit&&/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Lecturer ID"),/*#__PURE__*/React.createElement("input",{type:"text",value:lecturerId,onChange:e=>setLecturerId(e.target.value),className:getInputClass(errors.lecturerId)})),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Department"),/*#__PURE__*/React.createElement(SearchableDropdown,{list:departments,value:department,onChange:val=>{setDepartment(val);if(errors.department)setErrors(prev=>({...prev,department:""}));},placeholder:"Search department",filterFn:(d,q)=>d.department_name.toLowerCase().includes(q)||d.department_id.toLowerCase().includes(q),displayFn:d=>d.department_name,valueFn:d=>d.department_id}),errors.department&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.department))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Faculty"),/*#__PURE__*/React.createElement(SearchableDropdown,{list:faculties,value:faculty,onChange:val=>{setFaculty(val);if(errors.faculty)setErrors(prev=>({...prev,faculty:""}));},placeholder:"Search faculty",filterFn:(f,q)=>f.faculty_name.toLowerCase().includes(q)||f.faculty_id.toLowerCase().includes(q),displayFn:f=>f.faculty_name,valueFn:f=>f.faculty_id}),errors.faculty&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.faculty)))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Position Title"),/*#__PURE__*/React.createElement("input",{type:"text",value:position,onChange:e=>{setPosition(e.target.value);if(errors.position)setErrors(prev=>({...prev,position:""}));},className:getInputClass(errors.position)}),errors.position&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.position))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Office Room Node"),/*#__PURE__*/React.createElement("select",{value:officeNodeId,onChange:e=>setOfficeNodeId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"No Assigned Office"),nodes.filter(n=>n.node_type==='OFFICE').map(n=>/*#__PURE__*/React.createElement("option",{key:n.node_id,value:n.node_id},n.room_label||`Node ${n.node_id}`))))),/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-2"},/*#__PURE__*/React.createElement("input",{type:"checkbox",checked:isHoD,onChange:e=>setIsHoD(e.target.checked),id:"isHoD",className:"w-4 h-4 text-emerald-600 bg-slate-950 border-slate-800 rounded focus:ring-emerald-500"}),/*#__PURE__*/React.createElement("label",{htmlFor:"isHoD",className:"text-xs text-slate-400 font-bold uppercase tracking-wider"},"Is Head of Department"))),roleName==="STAFF"&&/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800 pt-4 mt-2 space-y-4"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-emerald-400 font-extrabold tracking-widest uppercase"},"Staff Profile Parameters"),isEdit&&/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Staff ID"),/*#__PURE__*/React.createElement("input",{type:"text",value:staffId,onChange:e=>setStaffId(e.target.value),className:getInputClass(errors.staffId)})),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Department"),/*#__PURE__*/React.createElement(SearchableDropdown,{list:departments,value:department,onChange:val=>{setDepartment(val);if(errors.department)setErrors(prev=>({...prev,department:""}));},placeholder:"Search department",filterFn:(d,q)=>d.department_name.toLowerCase().includes(q)||d.department_id.toLowerCase().includes(q),displayFn:d=>d.department_name,valueFn:d=>d.department_id}),errors.department&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.department))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Staff Type"),/*#__PURE__*/React.createElement("select",{value:staffType,onChange:e=>{setStaffType(e.target.value);if(errors.staffType)setErrors(prev=>({...prev,staffType:""}));},className:getInputClass(errors.staffType)},/*#__PURE__*/React.createElement("option",{value:"ADMINISTRATIVE"},"ADMINISTRATIVE"),/*#__PURE__*/React.createElement("option",{value:"TECHNICAL"},"TECHNICAL"),/*#__PURE__*/React.createElement("option",{value:"SECURITY"},"SECURITY"),/*#__PURE__*/React.createElement("option",{value:"FACILITIES"},"FACILITIES"),/*#__PURE__*/React.createElement("option",{value:"OTHER"},"OTHER")),errors.staffType&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.staffType)))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Position Title"),/*#__PURE__*/React.createElement("input",{type:"text",value:position,onChange:e=>{setPosition(e.target.value);if(errors.position)setErrors(prev=>({...prev,position:""}));},className:getInputClass(errors.position)}),errors.position&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.position))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Office Room Node"),/*#__PURE__*/React.createElement("select",{value:officeNodeId,onChange:e=>setOfficeNodeId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"No Assigned Office"),nodes.filter(n=>n.node_type==='OFFICE').map(n=>/*#__PURE__*/React.createElement("option",{key:n.node_id,value:n.node_id},n.room_label||`Node ${n.node_id}`)))))),roleName==="VISITOR"&&/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800 pt-4 mt-2 space-y-4"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-emerald-400 font-extrabold tracking-widest uppercase"},"Visitor Profile Parameters"),isEdit&&/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Visitor ID"),/*#__PURE__*/React.createElement("input",{type:"text",value:visitorId,onChange:e=>setVisitorId(e.target.value),className:getInputClass(errors.visitorId)})),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"ID Card Number"),/*#__PURE__*/React.createElement("input",{type:"text",value:idNumber,onChange:e=>{setIdNumber(e.target.value);if(errors.idNumber)setErrors(prev=>({...prev,idNumber:""}));},className:getInputClass(errors.idNumber)}),errors.idNumber&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.idNumber))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Organization"),/*#__PURE__*/React.createElement("input",{type:"text",value:organization,onChange:e=>setOrganization(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Access Expiry"),/*#__PURE__*/React.createElement("input",{type:"datetime-local",value:accessExpiry,onChange:e=>{setAccessExpiry(e.target.value);if(errors.accessExpiry)setErrors(prev=>({...prev,accessExpiry:""}));},className:getInputClass(errors.accessExpiry)}),errors.accessExpiry&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.accessExpiry))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Visit Purpose"),/*#__PURE__*/React.createElement("input",{type:"text",value:visitPurpose,onChange:e=>setVisitPurpose(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})))),roleName==="ADMIN"&&/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800 pt-4 mt-2 space-y-4"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-emerald-400 font-extrabold tracking-widest uppercase"},"Admin Profile Parameters"),isEdit&&/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Admin ID"),/*#__PURE__*/React.createElement("input",{type:"text",value:adminId,onChange:e=>setAdminId(e.target.value),className:getInputClass(errors.adminId)})),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Admin Type"),/*#__PURE__*/React.createElement("select",{value:adminType,onChange:e=>{setAdminType(e.target.value);if(errors.adminType)setErrors(prev=>({...prev,adminType:""}));},className:getInputClass(errors.adminType)},/*#__PURE__*/React.createElement("option",{value:"SUPER_ADMIN"},"SUPER_ADMIN"),/*#__PURE__*/React.createElement("option",{value:"SYSTEM_ADMIN"},"SYSTEM_ADMIN"),/*#__PURE__*/React.createElement("option",{value:"CONTENT_ADMIN"},"CONTENT_ADMIN")),errors.adminType&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.adminType))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Password"),/*#__PURE__*/React.createElement("input",{type:"password",placeholder:isEdit?"(Leave blank to keep unchanged)":"Enter password",value:password,onChange:e=>{setPassword(e.target.value);if(errors.password)setErrors(prev=>({...prev,password:""}));},className:getInputClass(errors.password)}),errors.password&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.password)))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Department"),/*#__PURE__*/React.createElement(SearchableDropdown,{list:departments,value:department,onChange:val=>{setDepartment(val);if(errors.department)setErrors(prev=>({...prev,department:""}));},placeholder:"Search department",filterFn:(d,q)=>d.department_name.toLowerCase().includes(q)||d.department_id.toLowerCase().includes(q),displayFn:d=>d.department_name,valueFn:d=>d.department_id}),errors.department&&/*#__PURE__*/React.createElement("p",{className:"text-rose-500 text-xs mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-rose-500"}),/*#__PURE__*/React.createElement("span",null,errors.department))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Office Room Node"),/*#__PURE__*/React.createElement("select",{value:officeNodeId,onChange:e=>setOfficeNodeId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"No Assigned Office"),nodes.filter(n=>n.node_type==='OFFICE').map(n=>/*#__PURE__*/React.createElement("option",{key:n.node_id,value:n.node_id},n.room_label||`Node ${n.node_id}`)))))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},"Submit Setup")));}// 2. Student Profile Form
-function StudentForm({item,roles,onSubmit,onCancel}){const[studentId,setStudentId]=useState(item?.student_id||"");const[program,setProgram]=useState(item?.program||"");const[faculty,setFaculty]=useState(item?.faculty||"");const[intake,setIntake]=useState(item?.intake||"");const[enrolledSince,setEnrolledSince]=useState(item?.enrolled_since||new Date().toISOString().split('T')[0]);// Nested User properties
-const[fullName,setFullName]=useState(item?.user?.full_name||"");const[email,setEmail]=useState(item?.user?.email||"");const[roleId,setRoleId]=useState(item?.user?.role_id||"");const[editRole,setEditRole]=useState(false);// Multi-role linking states
-const[linkExisting,setLinkExisting]=useState(false);const[userId,setUserId]=useState("");const[systemUsers,setSystemUsers]=useState([]);const isEdit=!!item;useEffect(()=>{if(!isEdit){const token="";fetch("/api/iam/users",{headers:{"Authorization":`Bearer ${token}`}}).then(res=>res.json()).then(data=>{if(Array.isArray(data)){setSystemUsers(data);}}).catch(err=>console.error("Error loading system users:",err));}},[]);const handleSubmit=e=>{onSubmit(e,{student_id:studentId||null,program:program,faculty:faculty,intake:parseInt(String(intake).trim(),10),enrolled_since:enrolledSince,user_id:!isEdit&&linkExisting&&userId?parseInt(userId):null,user:isEdit||!linkExisting?{full_name:fullName,email:email,role_id:parseInt(roleId),is_active:true}:null});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Student ID"),/*#__PURE__*/React.createElement("input",{type:"text",disabled:isEdit,value:studentId,onChange:e=>setStudentId(e.target.value),placeholder:"(Leave blank to auto-generate)",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500"})),!isEdit&&/*#__PURE__*/React.createElement("div",{className:"bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-4 mt-2"},/*#__PURE__*/React.createElement("div",{className:"flex items-center justify-between"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-slate-300 font-bold uppercase tracking-wider"},"Link to Existing User Account?"),/*#__PURE__*/React.createElement("label",{className:"relative inline-flex items-center cursor-pointer"},/*#__PURE__*/React.createElement("input",{type:"checkbox",checked:linkExisting,onChange:e=>{setLinkExisting(e.target.checked);if(!e.target.checked){setUserId("");}},className:"sr-only peer"}),/*#__PURE__*/React.createElement("div",{className:"w-11 h-6 bg-slate-800 rounded-full peer peer-focus:ring-2 peer-focus:ring-emerald-500/50 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 peer-checked:after:bg-slate-100"}))),linkExisting&&/*#__PURE__*/React.createElement("div",{className:"space-y-3"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Search Existing User (Similarity Search)"),/*#__PURE__*/React.createElement(AutocompleteSearch,{list:systemUsers,placeholder:"Type name, email or user ID...",filterFn:(u,q)=>u.full_name?.toLowerCase().includes(q)||u.email?.toLowerCase().includes(q)||String(u.user_id).includes(q),renderItem:u=>/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("div",{className:"font-bold text-slate-200"},u.full_name),/*#__PURE__*/React.createElement("div",{className:"text-xs text-slate-400"},"ID: ",u.user_id," | Email: ",u.email)),onSelect:(u,setQ)=>{setUserId(u.user_id);setQ(`${u.full_name} (${u.email})`);}})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Linked User ID"),/*#__PURE__*/React.createElement("input",{type:"number",value:userId,onChange:e=>setUserId(e.target.value),placeholder:"(Leave blank for new user, or search/select existing user to link)",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"}),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-500 mt-1 leading-relaxed"},"Leave blank for a new user. If a User ID is manually typed, the server will reject it if not found.")))),(isEdit||!linkExisting)&&/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800 pt-4 mt-2 space-y-4"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-emerald-400 font-extrabold tracking-widest uppercase"},"Associated System User"),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Full Name"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:fullName,onChange:e=>setFullName(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Email"),/*#__PURE__*/React.createElement("input",{type:"email",required:true,value:email,onChange:e=>setEmail(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},isEdit?"Role":"System Role"),/*#__PURE__*/React.createElement("select",{required:true,value:roleId,disabled:isEdit&&!editRole,onChange:e=>setRoleId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Role"),isEdit&&!editRole?roles.filter(r=>r.role_id===item?.user?.role_id).map(r=>/*#__PURE__*/React.createElement("option",{key:r.role_id,value:r.role_id},r.role_name)):roles.map(r=>/*#__PURE__*/React.createElement("option",{key:r.role_id,value:r.role_id},r.role_name))),isEdit&&/*#__PURE__*/React.createElement("div",{className:"mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("input",{type:"checkbox",id:"editStudentRoleCheck",checked:editRole,onChange:e=>setEditRole(e.target.checked),className:"w-3.5 h-3.5 text-emerald-600 bg-slate-950 border-slate-800 rounded focus:ring-emerald-500"}),/*#__PURE__*/React.createElement("label",{htmlFor:"editStudentRoleCheck",className:"text-[11px] text-slate-400 font-medium"},"Edit Role")))),/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800 pt-4 mt-2 grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Degree/Program"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:program,onChange:e=>setProgram(e.target.value),placeholder:"e.g. Computer Science",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Faculty Department"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:faculty,onChange:e=>setFaculty(e.target.value),placeholder:"e.g. FCI",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Intake Semester Code"),/*#__PURE__*/React.createElement("input",{type:"text",inputMode:"numeric",maxLength:"6",pattern:"\\d{6}",required:true,value:intake,onChange:e=>setIntake(e.target.value.replace(/\D/g,"").slice(0,6)),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Enrolled Since"),/*#__PURE__*/React.createElement("input",{type:"date",required:true,value:enrolledSince,onChange:e=>setEnrolledSince(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},"Enroll Student")));}// 3. Lecturer Profile Form
-function LecturerForm({item,roles,nodes,onSubmit,onCancel}){const[lecturerId,setLecturerId]=useState(item?.lecturer_id||"");const[department,setDepartment]=useState(item?.department||"");const[faculty,setFaculty]=useState(item?.faculty||"");const[position,setPosition]=useState(item?.position||"");const[isHoD,setIsHoD]=useState(item?item.is_head_of_department:false);const[officeNodeId,setOfficeNodeId]=useState(item?.office_node_id||"");const[fullName,setFullName]=useState(item?.user?.full_name||"");const[email,setEmail]=useState(item?.user?.email||"");const[roleId,setRoleId]=useState(item?.user?.role_id||"");const[editRole,setEditRole]=useState(false);// Multi-role linking states
-const[linkExisting,setLinkExisting]=useState(false);const[userId,setUserId]=useState("");const[systemUsers,setSystemUsers]=useState([]);const isEdit=!!item;useEffect(()=>{if(!isEdit){const token="";fetch("/api/iam/users",{headers:{"Authorization":`Bearer ${token}`}}).then(res=>res.json()).then(data=>{if(Array.isArray(data)){setSystemUsers(data);}}).catch(err=>console.error("Error loading system users:",err));}},[]);const handleSubmit=e=>{onSubmit(e,{lecturer_id:lecturerId||null,department:department,faculty:faculty,position:position,is_head_of_department:isHoD,office_node_id:officeNodeId?parseInt(officeNodeId):null,user_id:!isEdit&&linkExisting&&userId?parseInt(userId):null,user:isEdit||!linkExisting?{full_name:fullName,email:email,role_id:parseInt(roleId),is_active:true}:null});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Lecturer ID"),/*#__PURE__*/React.createElement("input",{type:"text",disabled:isEdit,value:lecturerId,onChange:e=>setLecturerId(e.target.value),placeholder:"(Leave blank to auto-generate)",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500"})),!isEdit&&/*#__PURE__*/React.createElement("div",{className:"bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-4 mt-2"},/*#__PURE__*/React.createElement("div",{className:"flex items-center justify-between"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-slate-300 font-bold uppercase tracking-wider"},"Link to Existing User Account?"),/*#__PURE__*/React.createElement("label",{className:"relative inline-flex items-center cursor-pointer"},/*#__PURE__*/React.createElement("input",{type:"checkbox",checked:linkExisting,onChange:e=>{setLinkExisting(e.target.checked);if(!e.target.checked){setUserId("");}},className:"sr-only peer"}),/*#__PURE__*/React.createElement("div",{className:"w-11 h-6 bg-slate-800 rounded-full peer peer-focus:ring-2 peer-focus:ring-emerald-500/50 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 peer-checked:after:bg-slate-100"}))),linkExisting&&/*#__PURE__*/React.createElement("div",{className:"space-y-3"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Search Existing User (Similarity Search)"),/*#__PURE__*/React.createElement(AutocompleteSearch,{list:systemUsers,placeholder:"Type name, email or user ID...",filterFn:(u,q)=>u.full_name?.toLowerCase().includes(q)||u.email?.toLowerCase().includes(q)||String(u.user_id).includes(q),renderItem:u=>/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("div",{className:"font-bold text-slate-200"},u.full_name),/*#__PURE__*/React.createElement("div",{className:"text-xs text-slate-400"},"ID: ",u.user_id," | Email: ",u.email)),onSelect:(u,setQ)=>{setUserId(u.user_id);setQ(`${u.full_name} (${u.email})`);}})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Linked User ID"),/*#__PURE__*/React.createElement("input",{type:"number",value:userId,onChange:e=>setUserId(e.target.value),placeholder:"(Leave blank for new user, or search/select existing user to link)",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"}),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-500 mt-1 leading-relaxed"},"Leave blank for a new user. If a User ID is manually typed, the server will reject it if not found.")))),(isEdit||!linkExisting)&&/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800 pt-4 mt-2 space-y-4"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-emerald-400 font-extrabold tracking-widest uppercase"},"Associated System User"),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Full Name"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:fullName,onChange:e=>setFullName(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Email"),/*#__PURE__*/React.createElement("input",{type:"email",required:true,value:email,onChange:e=>setEmail(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},isEdit?"Role":"System Role"),/*#__PURE__*/React.createElement("select",{required:true,value:roleId,disabled:isEdit&&!editRole,onChange:e=>setRoleId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Role"),isEdit&&!editRole?roles.filter(r=>r.role_id===item?.user?.role_id).map(r=>/*#__PURE__*/React.createElement("option",{key:r.role_id,value:r.role_id},r.role_name)):roles.map(r=>/*#__PURE__*/React.createElement("option",{key:r.role_id,value:r.role_id},r.role_name))),isEdit&&/*#__PURE__*/React.createElement("div",{className:"mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("input",{type:"checkbox",id:"editLecturerRoleCheck",checked:editRole,onChange:e=>setEditRole(e.target.checked),className:"w-3.5 h-3.5 text-emerald-600 bg-slate-950 border-slate-800 rounded focus:ring-emerald-500"}),/*#__PURE__*/React.createElement("label",{htmlFor:"editLecturerRoleCheck",className:"text-[11px] text-slate-400 font-medium"},"Edit Role")))),/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800 pt-4 mt-2 grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Department"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:department,onChange:e=>setDepartment(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Faculty"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:faculty,onChange:e=>setFaculty(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Position Title"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:position,onChange:e=>setPosition(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Office Room Node"),/*#__PURE__*/React.createElement("select",{value:officeNodeId,onChange:e=>setOfficeNodeId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"No Assigned Office"),nodes.filter(n=>n.node_type==='OFFICE').map(n=>/*#__PURE__*/React.createElement("option",{key:n.node_id,value:n.node_id},n.room_label||`Node ${n.node_id}`))))),/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-2"},/*#__PURE__*/React.createElement("input",{type:"checkbox",checked:isHoD,onChange:e=>setIsHoD(e.target.checked),id:"isHoD",className:"w-4 h-4 text-emerald-600 bg-slate-950 border-slate-800 rounded focus:ring-emerald-500"}),/*#__PURE__*/React.createElement("label",{htmlFor:"isHoD",className:"text-xs text-slate-400 font-bold uppercase tracking-wider"},"Is Head of Department")),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},"Submit Setup")));}// 4. Staff Profile Form
-function StaffForm({item,roles,nodes,onSubmit,onCancel}){const[staffId,setStaffId]=useState(item?.staff_id||"");const[department,setDepartment]=useState(item?.department||"");const[position,setPosition]=useState(item?.position||"");const[staffType,setStaffType]=useState(item?.staff_type||"ADMINISTRATIVE");const[officeNodeId,setOfficeNodeId]=useState(item?.office_node_id||"");const[fullName,setFullName]=useState(item?.user?.full_name||"");const[email,setEmail]=useState(item?.user?.email||"");const[roleId,setRoleId]=useState(item?.user?.role_id||"");const[editRole,setEditRole]=useState(false);// Multi-role linking states
-const[linkExisting,setLinkExisting]=useState(false);const[userId,setUserId]=useState("");const[systemUsers,setSystemUsers]=useState([]);const isEdit=!!item;useEffect(()=>{if(!isEdit){const token="";fetch("/api/iam/users",{headers:{"Authorization":`Bearer ${token}`}}).then(res=>res.json()).then(data=>{if(Array.isArray(data)){setSystemUsers(data);}}).catch(err=>console.error("Error loading system users:",err));}},[]);const handleSubmit=e=>{onSubmit(e,{staff_id:staffId||null,department:department,position:position,staff_type:staffType,office_node_id:officeNodeId?parseInt(officeNodeId):null,user_id:!isEdit&&linkExisting&&userId?parseInt(userId):null,user:isEdit||!linkExisting?{full_name:fullName,email:email,role_id:parseInt(roleId),is_active:true}:null});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Staff Profile ID"),/*#__PURE__*/React.createElement("input",{type:"text",disabled:isEdit,value:staffId,onChange:e=>setStaffId(e.target.value),placeholder:"(Leave blank to auto-generate)",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500"})),!isEdit&&/*#__PURE__*/React.createElement("div",{className:"bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-4 mt-2"},/*#__PURE__*/React.createElement("div",{className:"flex items-center justify-between"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-slate-300 font-bold uppercase tracking-wider"},"Link to Existing User Account?"),/*#__PURE__*/React.createElement("label",{className:"relative inline-flex items-center cursor-pointer"},/*#__PURE__*/React.createElement("input",{type:"checkbox",checked:linkExisting,onChange:e=>{setLinkExisting(e.target.checked);if(!e.target.checked){setUserId("");}},className:"sr-only peer"}),/*#__PURE__*/React.createElement("div",{className:"w-11 h-6 bg-slate-800 rounded-full peer peer-focus:ring-2 peer-focus:ring-emerald-500/50 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 peer-checked:after:bg-slate-100"}))),linkExisting&&/*#__PURE__*/React.createElement("div",{className:"space-y-3"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Search Existing User (Similarity Search)"),/*#__PURE__*/React.createElement(AutocompleteSearch,{list:systemUsers,placeholder:"Type name, email or user ID...",filterFn:(u,q)=>u.full_name?.toLowerCase().includes(q)||u.email?.toLowerCase().includes(q)||String(u.user_id).includes(q),renderItem:u=>/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("div",{className:"font-bold text-slate-200"},u.full_name),/*#__PURE__*/React.createElement("div",{className:"text-xs text-slate-400"},"ID: ",u.user_id," | Email: ",u.email)),onSelect:(u,setQ)=>{setUserId(u.user_id);setQ(`${u.full_name} (${u.email})`);}})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Linked User ID"),/*#__PURE__*/React.createElement("input",{type:"number",value:userId,onChange:e=>setUserId(e.target.value),placeholder:"(Leave blank for new user, or search/select existing user to link)",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"}),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-500 mt-1 leading-relaxed"},"Leave blank for a new user. If a User ID is manually typed, the server will reject it if not found.")))),(isEdit||!linkExisting)&&/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800 pt-4 mt-2 space-y-4"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-emerald-400 font-extrabold tracking-widest uppercase"},"Associated System User"),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Full Name"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:fullName,onChange:e=>setFullName(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Email"),/*#__PURE__*/React.createElement("input",{type:"email",required:true,value:email,onChange:e=>setEmail(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},isEdit?"Role":"System Role"),/*#__PURE__*/React.createElement("select",{required:true,value:roleId,disabled:isEdit&&!editRole,onChange:e=>setRoleId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Role"),isEdit&&!editRole?roles.filter(r=>r.role_id===item?.user?.role_id).map(r=>/*#__PURE__*/React.createElement("option",{key:r.role_id,value:r.role_id},r.role_name)):roles.map(r=>/*#__PURE__*/React.createElement("option",{key:r.role_id,value:r.role_id},r.role_name))),isEdit&&/*#__PURE__*/React.createElement("div",{className:"mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("input",{type:"checkbox",id:"editStaffRoleCheck",checked:editRole,onChange:e=>setEditRole(e.target.checked),className:"w-3.5 h-3.5 text-emerald-600 bg-slate-950 border-slate-800 rounded focus:ring-emerald-500"}),/*#__PURE__*/React.createElement("label",{htmlFor:"editStaffRoleCheck",className:"text-[11px] text-slate-400 font-medium"},"Edit Role")))),/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800 pt-4 mt-2 grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Department"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:department,onChange:e=>setDepartment(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Position"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:position,onChange:e=>setPosition(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Staff Category Type"),/*#__PURE__*/React.createElement("select",{value:staffType,onChange:e=>setStaffType(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:"ADMINISTRATIVE"},"ADMINISTRATIVE"),/*#__PURE__*/React.createElement("option",{value:"TECHNICAL"},"TECHNICAL"),/*#__PURE__*/React.createElement("option",{value:"SECURITY"},"SECURITY"),/*#__PURE__*/React.createElement("option",{value:"FACILITIES"},"FACILITIES"),/*#__PURE__*/React.createElement("option",{value:"OTHER"},"OTHER"))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Office Room Node"),/*#__PURE__*/React.createElement("select",{value:officeNodeId,onChange:e=>setOfficeNodeId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"No Assigned Office"),nodes.filter(n=>n.node_type==='OFFICE').map(n=>/*#__PURE__*/React.createElement("option",{key:n.node_id,value:n.node_id},n.room_label||`Node ${n.node_id}`))))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},"Submit Setup")));}// 5. Visitor Profile Form
-function VisitorForm({item,roles,onSubmit,onCancel,currentUserId}){const[visitorId,setVisitorId]=useState(item?.visitor_id||"");const[idNumber,setIdNumber]=useState(item?.id_number||"");const[organization,setOrganization]=useState(item?.organization||"");const[visitPurpose,setVisitPurpose]=useState(item?.visit_purpose||"");const[accessExpiry,setAccessExpiry]=useState(item?.access_expiry||new Date(Date.now()+24*3600*1000).toISOString().slice(0,16));const[fullName,setFullName]=useState(item?.user?.full_name||"");const[email,setEmail]=useState(item?.user?.email||"");const[roleId,setRoleId]=useState(item?.user?.role_id||"");const[editRole,setEditRole]=useState(false);// Multi-role linking states
-const[linkExisting,setLinkExisting]=useState(false);const[userId,setUserId]=useState("");const[systemUsers,setSystemUsers]=useState([]);const isEdit=!!item;useEffect(()=>{if(!isEdit){const token="";fetch("/api/iam/users",{headers:{"Authorization":`Bearer ${token}`}}).then(res=>res.json()).then(data=>{if(Array.isArray(data)){setSystemUsers(data);}}).catch(err=>console.error("Error loading system users:",err));}},[]);const handleSubmit=e=>{onSubmit(e,{visitor_id:visitorId||null,id_number:idNumber,organization:organization,visit_purpose:visitPurpose,access_expiry:accessExpiry,registered_by:currentUserId,user_id:!isEdit&&linkExisting&&userId?parseInt(userId):null,user:isEdit||!linkExisting?{full_name:fullName,email:email,role_id:parseInt(roleId),is_active:true}:null});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},!isEdit&&/*#__PURE__*/React.createElement("div",{className:"rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4 text-xs text-indigo-100 leading-relaxed"},/*#__PURE__*/React.createElement("div",{className:"font-bold uppercase tracking-wider text-indigo-300 mb-1"},"Guided device setup"),"Start the access-control module first. After you submit this form, the dashboard generates the device ID and one-time secret. Copy both into the setup screen shown on the access-control device, then choose ",/*#__PURE__*/React.createElement("span",{className:"font-bold"},"Apply and start"),"."),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Visitor Profile ID"),/*#__PURE__*/React.createElement("input",{type:"text",disabled:isEdit,value:visitorId,onChange:e=>setVisitorId(e.target.value),placeholder:"(Leave blank to auto-generate)",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Passport/National ID"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,disabled:isEdit,value:idNumber,onChange:e=>setIdNumber(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500"}))),!isEdit&&/*#__PURE__*/React.createElement("div",{className:"bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-4 mt-2"},/*#__PURE__*/React.createElement("div",{className:"flex items-center justify-between"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-slate-300 font-bold uppercase tracking-wider"},"Link to Existing User Account?"),/*#__PURE__*/React.createElement("label",{className:"relative inline-flex items-center cursor-pointer"},/*#__PURE__*/React.createElement("input",{type:"checkbox",checked:linkExisting,onChange:e=>{setLinkExisting(e.target.checked);if(!e.target.checked){setUserId("");}},className:"sr-only peer"}),/*#__PURE__*/React.createElement("div",{className:"w-11 h-6 bg-slate-800 rounded-full peer peer-focus:ring-2 peer-focus:ring-emerald-500/50 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 peer-checked:after:bg-slate-100"}))),linkExisting&&/*#__PURE__*/React.createElement("div",{className:"space-y-3"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Search Existing User (Similarity Search)"),/*#__PURE__*/React.createElement(AutocompleteSearch,{list:systemUsers,placeholder:"Type name, email or user ID...",filterFn:(u,q)=>u.full_name?.toLowerCase().includes(q)||u.email?.toLowerCase().includes(q)||String(u.user_id).includes(q),renderItem:u=>/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("div",{className:"font-bold text-slate-200"},u.full_name),/*#__PURE__*/React.createElement("div",{className:"text-xs text-slate-400"},"ID: ",u.user_id," | Email: ",u.email)),onSelect:(u,setQ)=>{setUserId(u.user_id);setQ(`${u.full_name} (${u.email})`);}})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Linked User ID"),/*#__PURE__*/React.createElement("input",{type:"number",value:userId,onChange:e=>setUserId(e.target.value),placeholder:"(Leave blank for new user, or search/select existing user to link)",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"}),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-500 mt-1 leading-relaxed"},"Leave blank for a new user. If a User ID is manually typed, the server will reject it if not found.")))),(isEdit||!linkExisting)&&/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800 pt-4 mt-2 space-y-4"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-emerald-400 font-extrabold tracking-widest uppercase"},"Associated System User"),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Full Name"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:fullName,onChange:e=>setFullName(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Email"),/*#__PURE__*/React.createElement("input",{type:"email",required:true,value:email,onChange:e=>setEmail(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},isEdit?"Role":"System Role"),/*#__PURE__*/React.createElement("select",{required:true,value:roleId,disabled:isEdit&&!editRole,onChange:e=>setRoleId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Role"),isEdit&&!editRole?roles.filter(r=>r.role_id===item?.user?.role_id).map(r=>/*#__PURE__*/React.createElement("option",{key:r.role_id,value:r.role_id},r.role_name)):roles.map(r=>/*#__PURE__*/React.createElement("option",{key:r.role_id,value:r.role_id},r.role_name))),isEdit&&/*#__PURE__*/React.createElement("div",{className:"mt-1.5 flex items-center gap-1.5"},/*#__PURE__*/React.createElement("input",{type:"checkbox",id:"editVisitorRoleCheck",checked:editRole,onChange:e=>setEditRole(e.target.checked),className:"w-3.5 h-3.5 text-emerald-600 bg-slate-950 border-slate-800 rounded focus:ring-emerald-500"}),/*#__PURE__*/React.createElement("label",{htmlFor:"editVisitorRoleCheck",className:"text-[11px] text-slate-400 font-medium"},"Edit Role")))),/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800 pt-4 mt-2 grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Organization/Affiliation"),/*#__PURE__*/React.createElement("input",{type:"text",value:organization,onChange:e=>setOrganization(e.target.value),placeholder:"e.g. Guest Company",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Access Expiry Date"),/*#__PURE__*/React.createElement("input",{type:"datetime-local",required:true,value:accessExpiry,onChange:e=>setAccessExpiry(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"}))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Purpose of Visit"),/*#__PURE__*/React.createElement("textarea",{value:visitPurpose,onChange:e=>setVisitPurpose(e.target.value),placeholder:"State the reason for visiting the smart campus area...",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 h-20"})),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},"Grant Access Pass")));}// 6. Admin User Form
-function AdminForm({item,roles,nodes,onSubmit,onCancel}){const[adminId,setAdminId]=useState(item?.admin_id||"");const[adminType,setAdminType]=useState(item?.admin_type||"SYSTEM_ADMIN");const[password,setPassword]=useState("");// Staff promoting states
-const[userId,setUserId]=useState(item?.user_id||"");const[staffList,setStaffList]=useState([]);const isEdit=!!item;useEffect(()=>{if(!isEdit){const token="";fetch("/api/iam/staff",{headers:{"Authorization":`Bearer ${token}`}}).then(res=>res.json()).then(data=>{if(Array.isArray(data)){setStaffList(data);}}).catch(err=>console.error("Error loading staff members:",err));}},[]);const handleSubmit=e=>{e.preventDefault();onSubmit(e,{admin_id:adminId||null,admin_type:adminType,password:password||undefined,user_id:!isEdit&&userId?parseInt(userId):null});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},isEdit&&item?.user&&/*#__PURE__*/React.createElement("div",{className:"bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-2"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-slate-400 font-bold uppercase tracking-wider block"},"Linked Staff Member"),/*#__PURE__*/React.createElement("div",{className:"text-sm font-bold text-slate-200"},item.user.full_name),/*#__PURE__*/React.createElement("div",{className:"text-xs text-slate-400"},"email: ",item.user.email," | Email: ",item.user.email)),!isEdit&&/*#__PURE__*/React.createElement("div",{className:"bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Search Existing Staff (Name, Staff ID)"),/*#__PURE__*/React.createElement(AutocompleteSearch,{list:staffList,placeholder:"Search by Name, Staff ID or User ID...",filterFn:(s,q)=>s.user?.full_name?.toLowerCase().includes(q)||s.staff_id?.toLowerCase().includes(q)||String(s.user_id).includes(q),renderItem:s=>/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("div",{className:"font-bold text-slate-200"},s.user?.full_name),/*#__PURE__*/React.createElement("div",{className:"text-xs text-slate-400"},"Staff ID: ",s.staff_id," | User ID: ",s.user_id," | Dept: ",s.department)),onSelect:(s,setQ)=>{setUserId(s.user_id);setQ(`${s.user?.full_name} (${s.staff_id})`);}})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Selected Staff User ID"),/*#__PURE__*/React.createElement("input",{type:"number",required:true,value:userId,onChange:e=>setUserId(e.target.value),placeholder:"Insert staff user ID...",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"}))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Admin Authority Tier"),/*#__PURE__*/React.createElement("select",{value:adminType,onChange:e=>setAdminType(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:"SUPER_ADMIN"},"SUPER ADMIN"),/*#__PURE__*/React.createElement("option",{value:"SYSTEM_ADMIN"},"SYSTEM ADMIN"),/*#__PURE__*/React.createElement("option",{value:"CONTENT_ADMIN"},"CONTENT ADMIN"))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Portal Access Password"),/*#__PURE__*/React.createElement("input",{type:"password",required:!isEdit,value:password,onChange:e=>setPassword(e.target.value),placeholder:isEdit?"(Leave blank to keep unchanged)":"••••••••",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},"Grant Admin Rights")));}// 7. RAG Document Meta Form
-function DocumentForm({item,onSubmit,onCancel}){const[title,setTitle]=useState(item?.title||"");const[uploadedBy,setUploadedBy]=useState(item?.uploaded_by||1);// default system admin user id
-const initialRoles=(()=>{if(item?.allowed_roles){if(Array.isArray(item.allowed_roles)){return item.allowed_roles.includes("VISITOR")?["VISITOR","STUDENT","LECTURER","STAFF","ADMIN"]:item.allowed_roles;}try{const parsed=JSON.parse(item.allowed_roles);if(Array.isArray(parsed)&&parsed.length>0){return parsed.includes("VISITOR")?["VISITOR","STUDENT","LECTURER","STAFF","ADMIN"]:parsed;}}catch(e){}}if(item?.access_level){return item.access_level==="PUBLIC"||item.access_level==="VISITOR"?["VISITOR","STUDENT","LECTURER","STAFF","ADMIN"]:[item.access_level];}return["VISITOR","STUDENT","LECTURER","STAFF","ADMIN"];})();const[selectedRoles,setSelectedRoles]=useState(initialRoles);const[file,setFile]=useState(null);const ALL_SYSTEM_ROLES=[{id:"VISITOR",label:"Visitor",badge:"All Roles / Public",desc:"Selecting Visitor automatically grants access to all system roles"},{id:"STUDENT",label:"Student",badge:"Students",desc:"Enrolled university students"},{id:"LECTURER",label:"Lecturer",badge:"Faculty",desc:"Academic teaching staff and professors"},{id:"STAFF",label:"Staff",badge:"Operations",desc:"Administrative, technical, and facility staff"},{id:"ADMIN",label:"Admin",badge:"Admins",desc:"System and content administrators"}];const toggleRole=roleId=>{const allRoleIds=ALL_SYSTEM_ROLES.map(r=>r.id);const nonVisitorRoleIds=["STUDENT","LECTURER","STAFF","ADMIN"];if(roleId==="VISITOR"){if(selectedRoles.includes("VISITOR")){// Unchecking VISITOR: keep remaining roles if any, else default to STUDENT
-const remaining=selectedRoles.filter(r=>r!=="VISITOR");setSelectedRoles(remaining.length>0?remaining:["STUDENT"]);}else{// Checking VISITOR: automatically selects ALL roles!
-setSelectedRoles(allRoleIds);}}else{if(selectedRoles.includes(roleId)){// Unchecking an individual role: remove that role AND also remove VISITOR
-const next=selectedRoles.filter(r=>r!==roleId&&r!=="VISITOR");if(next.length===0)return;// Prevent 0 roles selected
-setSelectedRoles(next);}else{// Checking an individual role: add it
-const next=[...selectedRoles,roleId];// If all non-visitor roles are now selected, auto-select VISITOR as well
-const hasAllNonVisitor=nonVisitorRoleIds.every(r=>next.includes(r));if(hasAllNonVisitor&&!next.includes("VISITOR")){next.push("VISITOR");}setSelectedRoles(next);}}};const handleSubmit=e=>{e.preventDefault();const formData=new FormData();formData.append("title",title);formData.append("uploaded_by",uploadedBy);formData.append("allowed_roles",JSON.stringify(selectedRoles));formData.append("access_level",selectedRoles[0]||"VISITOR");formData.append("is_active",true);if(file){formData.append("file",file);}onSubmit(e,formData);};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-5"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Document Title"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:title,onChange:e=>setTitle(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Document File (PDF, Word, Text, Markdown, CSV)"),/*#__PURE__*/React.createElement("input",{type:"file",required:!item?.document_id,onChange:e=>setFile(e.target.files[0]),accept:".txt,.md,.csv,.pdf,.docx,.doc",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-900/30 file:text-indigo-400 hover:file:bg-indigo-900/50"}),item?.file_path&&!file&&/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-500 mt-1"},"Current file: ",item.filename)),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("div",{className:"flex items-center justify-between mb-2"},/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider"},"Who Can Access (Select Multiple Roles)"),/*#__PURE__*/React.createElement("span",{className:"text-[11px] text-slate-500 font-medium"},"Selected: ",selectedRoles.join(", "))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 gap-2.5"},ALL_SYSTEM_ROLES.map(r=>{const isChecked=selectedRoles.includes(r.id);return/*#__PURE__*/React.createElement("div",{key:r.id,onClick:()=>toggleRole(r.id),className:`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all duration-200 ${isChecked?'bg-indigo-950/40 border-indigo-500/60 shadow-sm':'bg-slate-950/60 border-slate-800/80 hover:border-slate-700 opacity-70 hover:opacity-100'}`},/*#__PURE__*/React.createElement("input",{type:"checkbox",checked:isChecked,onChange:()=>{},className:"mt-0.5 rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-900 pointer-events-none"}),/*#__PURE__*/React.createElement("div",{className:"flex-1 min-w-0"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-2"},/*#__PURE__*/React.createElement("span",{className:`text-xs font-bold ${isChecked?'text-indigo-200':'text-slate-300'}`},r.label),/*#__PURE__*/React.createElement("span",{className:"text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/50 uppercase"},r.badge)),/*#__PURE__*/React.createElement("p",{className:"text-[11px] text-slate-500 mt-0.5 leading-tight"},r.desc)));}))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6 pt-2 border-t border-slate-800/60"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all duration-300 shadow-sm"},"Save Document")));}// 8. Device Configuration Form
-function DeviceForm({item,nodes,roles=[],onSubmit,onCancel}){const[deviceId,setDeviceId]=useState(item?.device_id||"");const[deviceName,setDeviceName]=useState(item?.device_name||"");const[nodeId,setNodeId]=useState(item?.node_id||"");const[deviceType,setDeviceType]=useState(item?.device_type||"KIOSK");const[ipAddress,setIpAddress]=useState(item?.ip_address||"");const[allowedRoleIds,setAllowedRoleIds]=useState(item?.allowed_role_ids||[]);const toggleRole=roleId=>{setAllowedRoleIds(prev=>prev.includes(roleId)?prev.filter(id=>id!==roleId):[...prev,roleId]);};const handleSubmit=e=>{onSubmit(e,{...(deviceId?{device_id:deviceId}:{}),device_name:deviceName,node_id:parseInt(nodeId),device_type:deviceType,ip_address:ipAddress||null,is_active:true,allowed_role_ids:allowedRoleIds});};const isEdit=!!item;return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Device ID"),isEdit?/*#__PURE__*/React.createElement("input",{type:"text",disabled:true,value:deviceId,className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-60 font-mono"}):/*#__PURE__*/React.createElement("div",{className:"w-full min-h-[42px] flex items-center bg-slate-950/60 border border-dashed border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-400"},"Generated automatically when you submit")),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Device Label Name"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:deviceName,onChange:e=>setDeviceName(e.target.value),placeholder:"e.g. Main Lobby Stand",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Device Node Location"),/*#__PURE__*/React.createElement("select",{required:true,value:nodeId,onChange:e=>setNodeId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Node"),nodes.map(n=>/*#__PURE__*/React.createElement("option",{key:n.node_id,value:n.node_id},n.room_label||`Node ${n.node_id}`)))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Hardware Type"),/*#__PURE__*/React.createElement("select",{value:deviceType,onChange:e=>setDeviceType(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:"KIOSK"},"KIOSK"),/*#__PURE__*/React.createElement("option",{value:"ENTRY_GATE"},"ENTRY GATE"),/*#__PURE__*/React.createElement("option",{value:"CLASSROOM"},"CLASSROOM"),/*#__PURE__*/React.createElement("option",{value:"OFFICE"},"OFFICE"),/*#__PURE__*/React.createElement("option",{value:"OTHER"},"OTHER")))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Authorized Roles (Device RBAC)"),/*#__PURE__*/React.createElement("p",{className:"text-[11px] text-slate-500 mb-2"},"Select which roles are permitted access on this physical device. If none selected, access will be denied."),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 sm:grid-cols-3 gap-2 bg-slate-950/60 p-3 rounded-xl border border-slate-800"},roles&&roles.length>0?roles.map(r=>{const isChecked=allowedRoleIds.includes(r.role_id);return/*#__PURE__*/React.createElement("label",{key:r.role_id,className:`flex items-center gap-2 p-2 rounded-lg cursor-pointer border transition-all text-xs select-none ${isChecked?'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 font-medium':'border-slate-800 text-slate-400 hover:bg-slate-900/50 hover:text-slate-300'}`},/*#__PURE__*/React.createElement("input",{type:"checkbox",checked:isChecked,onChange:()=>toggleRole(r.role_id),className:"rounded border-slate-700 text-emerald-500 focus:ring-emerald-500/20 bg-slate-900"}),/*#__PURE__*/React.createElement("span",null,r.role_name));}):/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-500 col-span-full"},"No roles loaded."))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Edge control address ",/*#__PURE__*/React.createElement("span",{className:"text-slate-600"},"(optional)")),/*#__PURE__*/React.createElement("input",{type:"text",value:ipAddress,onChange:e=>setIpAddress(e.target.value),placeholder:"e.g. https://192.168.1.100:8443",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"}),/*#__PURE__*/React.createElement("p",{className:"text-[11px] text-slate-500 mt-1.5"},"Leave blank if the device only sends signed synchronization to the cloud.")),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},"Submit Setup")));}// 9. Node RBAC Form
-function NodeRBACForm({nodes,roles,onSubmit,onCancel}){const[nodeId,setNodeId]=useState("");const[roleId,setRoleId]=useState("");const handleSubmit=e=>{onSubmit(e,{node_id:parseInt(nodeId),role_id:parseInt(roleId)});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Select Campus Node Location"),/*#__PURE__*/React.createElement("select",{required:true,value:nodeId,onChange:e=>setNodeId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Node"),nodes.map(n=>/*#__PURE__*/React.createElement("option",{key:n.node_id,value:n.node_id},n.room_label||`Node ${n.node_id}`," (",n.node_type,")")))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Granted Role clearance level"),/*#__PURE__*/React.createElement("select",{required:true,value:roleId,onChange:e=>setRoleId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Role"),roles.map(r=>/*#__PURE__*/React.createElement("option",{key:r.role_id,value:r.role_id},r.role_name)))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},"Grant Clearance")));}// 9b. Edge RBAC Form
-function EdgeRBACForm({edges=[],roles=[],onSubmit,onCancel}){const[edgeId,setEdgeId]=useState("");const[roleId,setRoleId]=useState("");const handleSubmit=e=>{onSubmit(e,{edge_id:parseInt(edgeId),role_id:parseInt(roleId)});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Select Campus Path (Edge)"),/*#__PURE__*/React.createElement("select",{required:true,value:edgeId,onChange:e=>setEdgeId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Path / Edge"),edges.map(ed=>/*#__PURE__*/React.createElement("option",{key:ed.edge_id,value:ed.edge_id},"Edge #",ed.edge_id," (Node ",ed.source_node_id," \u2192 Node ",ed.destination_node_id,") ",ed.weight_distance?`[${ed.weight_distance}m]`:'')))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Granted Role clearance level"),/*#__PURE__*/React.createElement("select",{required:true,value:roleId,onChange:e=>setRoleId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Role"),roles.map(r=>/*#__PURE__*/React.createElement("option",{key:r.role_id,value:r.role_id},r.role_name)))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},"Grant Path Clearance")));}// 10. Course Registration Form
-function CourseForm({item,programmes=[],faculties=[],onSubmit,onCancel}){const isEdit=!!item;const[courseCode,setCourseCode]=useState(item?.course_code||"");const[courseName,setCourseName]=useState(item?.course_name||"");const[credits,setCredits]=useState(item?.credit_hours||3);const[programmeId,setProgrammeId]=useState(item?.programme_id||item?.department||"");const[facultyId,setFacultyId]=useState(item?.faculty_id||item?.faculty||"");const[level,setLevel]=useState(item?.course_level||"UNDERGRADUATE");const findProgramme=value=>programmes.find(p=>String(p.programme_id)===String(value)||p.programme_name===value);const findFaculty=value=>faculties.find(f=>String(f.faculty_id)===String(value)||f.faculty_name===value);const handleSubmit=e=>{const selectedProgramme=findProgramme(programmeId);const selectedFaculty=findFaculty(facultyId);onSubmit(e,{course_code:courseCode,course_name:courseName,credit_hours:parseInt(credits),programme_id:selectedProgramme?selectedProgramme.programme_id:programmeId,faculty_id:selectedFaculty?selectedFaculty.faculty_id:facultyId,course_level:level,is_active:true});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Course Code"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,disabled:isEdit,value:courseCode,onChange:e=>setCourseCode(e.target.value),placeholder:"e.g. TCS3111",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-55 disabled:cursor-not-allowed focus:outline-none focus:border-emerald-500 uppercase"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Credit Hours"),/*#__PURE__*/React.createElement("input",{type:"number",required:true,value:credits,onChange:e=>setCredits(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Course Subject Name"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:courseName,onChange:e=>setCourseName(e.target.value),placeholder:"e.g. Distributed Computing Systems",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Programme"),/*#__PURE__*/React.createElement(SearchableDropdown,{list:programmes,value:programmeId,onChange:(val,item)=>{setProgrammeId(val);if(item?.faculty_id)setFacultyId(item.faculty_id);},placeholder:"Search programme",filterFn:(p,q)=>p.programme_name.toLowerCase().includes(q)||p.programme_id.toLowerCase().includes(q),displayFn:p=>p.programme_name,valueFn:p=>p.programme_id})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Faculty"),/*#__PURE__*/React.createElement(SearchableDropdown,{list:faculties,value:facultyId,onChange:setFacultyId,placeholder:"Search faculty",filterFn:(f,q)=>f.faculty_name.toLowerCase().includes(q)||f.faculty_id.toLowerCase().includes(q),displayFn:f=>f.faculty_name,valueFn:f=>f.faculty_id}))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Course Education Level"),/*#__PURE__*/React.createElement("select",{value:level,onChange:e=>setLevel(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:"UNDERGRADUATE"},"UNDERGRADUATE"),/*#__PURE__*/React.createElement("option",{value:"POSTGRADUATE"},"POSTGRADUATE"))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},isEdit?"Update Subject":"Submit Subject")));}// 11. Student Course Enrollment Form
-function EnrollmentForm({item,students=[],courses=[],onSubmit,onCancel}){const isEdit=!!item;const[studentId,setStudentId]=useState(item?.student_id||"");const[courseId,setCourseId]=useState(item?.course_id||"");const[semester,setSemester]=useState(item?.semester||202607);const[academicYear,setAcademicYear]=useState(item?.academic_year||"2025/2026");const[studentOptions,setStudentOptions]=useState(students);const[courseOptions,setCourseOptions]=useState(courses);useEffect(()=>{const token="";const headers={"Authorization":`Bearer ${token}`};if(!students||students.length===0){fetch("/api/iam/students",{headers}).then(res=>res.json()).then(data=>{if(Array.isArray(data))setStudentOptions(data);}).catch(()=>{});}if(!courses||courses.length===0){fetch("/api/academics/courses",{headers}).then(res=>res.json()).then(data=>{if(Array.isArray(data))setCourseOptions(data);}).catch(()=>{});}},[]);const handleSubmit=e=>{e.preventDefault();onSubmit(e,{student_id:studentId,course_id:parseInt(courseId),semester:parseInt(semester),academic_year:academicYear,status:"ENROLLED"});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Student Profile (Search by Name or Student ID)"),/*#__PURE__*/React.createElement(SearchableDropdown,{list:studentOptions,value:studentId,onChange:(val,s)=>setStudentId(val),placeholder:"Search student by name, email, or student ID...",filterFn:(s,q)=>{const name=(s.user?.full_name||s.full_name||s.user?.given_name||'').toLowerCase();const email=(s.user?.email||s.email||'').toLowerCase();const sid=String(s.student_id||'').toLowerCase();return name.includes(q)||email.includes(q)||sid.includes(q);},displayFn:s=>{const name=s.user?.full_name||s.full_name||(s.user?.given_name?`${s.user.given_name} ${s.user.family_name||''}`:'');return`${s.student_id}${name?' — '+name:''}`;},valueFn:s=>s.student_id})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Course (Search by Course Code or Course Name)"),/*#__PURE__*/React.createElement(SearchableDropdown,{list:courseOptions,value:courseId,onChange:(val,c)=>setCourseId(val),placeholder:"Search course by code, name, or ID...",filterFn:(c,q)=>{const code=(c.course_code||'').toLowerCase();const name=(c.course_name||'').toLowerCase();const id=String(c.course_id||'').toLowerCase();return code.includes(q)||name.includes(q)||id.includes(q);},displayFn:c=>`[${c.course_code}] ${c.course_name}`,valueFn:c=>c.course_id})),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Semester Code"),/*#__PURE__*/React.createElement("input",{type:"number",required:true,value:semester,onChange:e=>setSemester(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Academic Year"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:academicYear,onChange:e=>setAcademicYear(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},isEdit?"Update Enrollment":"Register Enrollment")));}// 12. Timetable scheduling form (Includes safety check for double booking)
-function TimetableForm({item,nodes,onSubmit,onCancel}){const isEdit=!!item;const[courseId,setCourseId]=useState(item?.course_id||"");const[lecturerId,setLecturerId]=useState(item?.lecturer_id||"");const[dayOfWeek,setDayOfWeek]=useState(item?.day_of_week||"MONDAY");const[startTime,setStartTime]=useState(item?.start_time?item.start_time.slice(0,5):"09:00");const[endTime,setEndTime]=useState(item?.end_time?item.end_time.slice(0,5):"11:00");const[nodeId,setNodeId]=useState(item?.node_id||"");const[semester,setSemester]=useState(item?.semester||202607);const[academicYear,setAcademicYear]=useState(item?.academic_year||"2025/2026");const handleSubmit=e=>{onSubmit(e,{course_id:parseInt(courseId),lecturer_id:lecturerId,day_of_week:dayOfWeek,start_time:startTime.slice(0,5)+":00",end_time:endTime.slice(0,5)+":00",node_id:parseInt(nodeId),semester:parseInt(semester),academic_year:academicYear});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Course Index ID"),/*#__PURE__*/React.createElement("input",{type:"number",required:true,value:courseId,onChange:e=>setCourseId(e.target.value),placeholder:"e.g. 1",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Lecturer Profile ID"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:lecturerId,onChange:e=>setLecturerId(e.target.value),placeholder:"e.g. LEC-20030",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-3 gap-3"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Day of Week"),/*#__PURE__*/React.createElement("select",{value:dayOfWeek,onChange:e=>setDayOfWeek(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:"MONDAY"},"MONDAY"),/*#__PURE__*/React.createElement("option",{value:"TUESDAY"},"TUESDAY"),/*#__PURE__*/React.createElement("option",{value:"WEDNESDAY"},"WEDNESDAY"),/*#__PURE__*/React.createElement("option",{value:"THURSDAY"},"THURSDAY"),/*#__PURE__*/React.createElement("option",{value:"FRIDAY"},"FRIDAY"),/*#__PURE__*/React.createElement("option",{value:"SATURDAY"},"SATURDAY"),/*#__PURE__*/React.createElement("option",{value:"SUNDAY"},"SUNDAY"))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Start Time"),/*#__PURE__*/React.createElement("input",{type:"time",required:true,value:startTime,onChange:e=>setStartTime(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"End Time"),/*#__PURE__*/React.createElement("input",{type:"time",required:true,value:endTime,onChange:e=>setEndTime(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"}))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-3 gap-3"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Classroom Node"),/*#__PURE__*/React.createElement("select",{required:true,value:nodeId,onChange:e=>setNodeId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Room"),nodes.filter(n=>n.node_type==='CLASSROOM').map(n=>/*#__PURE__*/React.createElement("option",{key:n.node_id,value:n.node_id},n.room_label||`Node ${n.node_id}`)))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Semester Code"),/*#__PURE__*/React.createElement("input",{type:"number",required:true,value:semester,onChange:e=>setSemester(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Academic Year"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:academicYear,onChange:e=>setAcademicYear(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},isEdit?"Update Class Slot":"Schedule Class Slot")));}// 13. Appointment Scheduler Form (Includes validation checks)
-function AppointmentForm({item,nodes,onSubmit,onCancel}){const[guestId,setGuestId]=useState(item?.guest_user_id||"");const[hostId,setHostId]=useState(item?.host_user_id||"");const[scheduledAt,setScheduledAt]=useState(item?.scheduled_at||new Date().toISOString().slice(0,16));const[duration,setDuration]=useState(item?.duration_minutes||30);const[nodeId,setNodeId]=useState(item?.node_id||"");const[purpose,setPurpose]=useState(item?.purpose||"");const[status,setStatus]=useState(item?.status||"PENDING");const handleSubmit=e=>{onSubmit(e,{guest_user_id:parseInt(guestId),host_user_id:parseInt(hostId),scheduled_at:scheduledAt,duration_minutes:parseInt(duration),node_id:nodeId?parseInt(nodeId):null,purpose,status});};const isEdit=!!item;return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},isEdit&&/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Appointment Status"),/*#__PURE__*/React.createElement("select",{value:status,onChange:e=>setStatus(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:"PENDING"},"PENDING"),/*#__PURE__*/React.createElement("option",{value:"CONFIRMED"},"CONFIRMED"),/*#__PURE__*/React.createElement("option",{value:"CANCELLED"},"CANCELLED"),/*#__PURE__*/React.createElement("option",{value:"COMPLETED"},"COMPLETED"))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Guest User Index ID"),/*#__PURE__*/React.createElement("input",{type:"number",required:true,disabled:isEdit,value:guestId,onChange:e=>setGuestId(e.target.value),placeholder:"e.g. 2 (verified Student)",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Host User Index ID"),/*#__PURE__*/React.createElement("input",{type:"number",required:true,disabled:isEdit,value:hostId,onChange:e=>setHostId(e.target.value),placeholder:"e.g. 3 (verified Lecturer)",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500"}))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-3 gap-3"},/*#__PURE__*/React.createElement("div",{className:"col-span-2"},/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Scheduled Date & Time"),/*#__PURE__*/React.createElement("input",{type:"datetime-local",required:true,value:scheduledAt,onChange:e=>setScheduledAt(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Duration (mins)"),/*#__PURE__*/React.createElement("input",{type:"number",required:true,value:duration,onChange:e=>setDuration(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"}))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Meeting Node Location"),/*#__PURE__*/React.createElement("select",{value:nodeId,onChange:e=>setNodeId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Node"),nodes.map(n=>/*#__PURE__*/React.createElement("option",{key:n.node_id,value:n.node_id},n.room_label||`Node ${n.node_id}`," (",n.node_type,")"))))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Appointment Purpose"),/*#__PURE__*/React.createElement("textarea",{value:purpose,onChange:e=>setPurpose(e.target.value),placeholder:"State meeting notes, agenda, discussion points...",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 h-20"})),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},"Book Appointment Slot")));}// 14. Role Creation Form
-function RoleForm({item,onSubmit,onCancel}){const isEdit=!!item;const[roleName,setRoleName]=useState(item?.role_name||"");const[description,setDescription]=useState(item?.description||"");const handleSubmit=e=>{onSubmit(e,{role_name:roleName.toUpperCase(),description:description});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Role Name"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,disabled:isEdit,value:roleName,onChange:e=>setRoleName(e.target.value),placeholder:"e.g. GUEST_STUDENT",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-55 disabled:cursor-not-allowed focus:outline-none focus:border-emerald-500 uppercase font-mono"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Description"),/*#__PURE__*/React.createElement("textarea",{value:description,onChange:e=>setDescription(e.target.value),placeholder:"Explain security clearance privileges...",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 h-24"})),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},isEdit?"Update Role":"Create Role")));}// 15. Faculty Form
-function FacultyForm({item,staff=[],onSubmit,onCancel}){const isEdit=!!item;const[facultyId,setFacultyId]=useState(item?.faculty_id||"");const[facultyName,setFacultyName]=useState(item?.faculty_name||"");const[deanId,setDeanId]=useState(item?.dean_id||"");const handleSubmit=e=>{onSubmit(e,{faculty_id:facultyId,faculty_name:facultyName,dean_id:deanId});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Faculty ID"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,disabled:isEdit,value:facultyId,onChange:e=>setFacultyId(e.target.value),placeholder:"e.g. FCI",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-55 disabled:cursor-not-allowed focus:outline-none focus:border-emerald-500 uppercase font-mono"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Faculty Name"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:facultyName,onChange:e=>setFacultyName(e.target.value),placeholder:"e.g. Faculty of Computing and Informatics",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Dean"),/*#__PURE__*/React.createElement("select",{required:true,value:deanId,onChange:e=>setDeanId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Dean"),staff.map(s=>/*#__PURE__*/React.createElement("option",{key:s.staff_id,value:s.staff_id},s.user?.full_name?`${s.user.full_name} (${s.staff_id})`:s.staff_id)))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},isEdit?"Update Faculty":"Create Faculty")));}// 16. Department Form
-function DepartmentForm({item,staff=[],onSubmit,onCancel}){const isEdit=!!item;const[departmentId,setDepartmentId]=useState(item?.department_id||"");const[departmentName,setDepartmentName]=useState(item?.department_name||"");const[managerId,setManagerId]=useState(item?.manager_id||"");const handleSubmit=e=>{onSubmit(e,{department_id:departmentId,department_name:departmentName,manager_id:managerId});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Department ID"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,disabled:isEdit,value:departmentId,onChange:e=>setDepartmentId(e.target.value),placeholder:"e.g. DEPT-CS",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-55 disabled:cursor-not-allowed focus:outline-none focus:border-emerald-500 uppercase font-mono"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Department Name"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:departmentName,onChange:e=>setDepartmentName(e.target.value),placeholder:"e.g. Department of Computer Science",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Manager"),/*#__PURE__*/React.createElement("select",{required:true,value:managerId,onChange:e=>setManagerId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Manager"),staff.map(s=>/*#__PURE__*/React.createElement("option",{key:s.staff_id,value:s.staff_id},s.user?.full_name?`${s.user.full_name} (${s.staff_id})`:s.staff_id)))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},isEdit?"Update Department":"Create Department")));}// 17. Programme Form
-function ProgrammeForm({item,staff=[],faculties=[],onSubmit,onCancel}){const isEdit=!!item;const[programmeId,setProgrammeId]=useState(item?.programme_id||"");const[programmeName,setProgrammeName]=useState(item?.programme_name||"");const[facultyId,setFacultyId]=useState(item?.faculty_id||"");const[hopId,setHopId]=useState(item?.hop_id||"");const handleSubmit=e=>{onSubmit(e,{programme_id:programmeId,programme_name:programmeName,faculty_id:facultyId,hop_id:hopId});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Programme ID"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,disabled:isEdit,value:programmeId,onChange:e=>setProgrammeId(e.target.value),placeholder:"e.g. BCS",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-55 disabled:cursor-not-allowed focus:outline-none focus:border-emerald-500 uppercase font-mono"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Programme Name"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:programmeName,onChange:e=>setProgrammeName(e.target.value),placeholder:"e.g. Bachelor of Computer Science",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"})),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Faculty"),/*#__PURE__*/React.createElement("select",{required:true,value:facultyId,onChange:e=>setFacultyId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select Faculty"),faculties.map(f=>/*#__PURE__*/React.createElement("option",{key:f.faculty_id,value:f.faculty_id},f.faculty_name," (",f.faculty_id,")")))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Head of Programme (HOP)"),/*#__PURE__*/React.createElement("select",{required:true,value:hopId,onChange:e=>setHopId(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"},/*#__PURE__*/React.createElement("option",{value:""},"Select HOP"),staff.map(s=>/*#__PURE__*/React.createElement("option",{key:s.staff_id,value:s.staff_id},s.user?.full_name?`${s.user.full_name} (${s.staff_id})`:s.staff_id))))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300"},isEdit?"Update Programme":"Create Programme")));}// 18. Acronym & Translations Form (simplified from SpeechAdaptationPhraseForm)
-function SpeechAdaptationPhraseForm({item,onSubmit,onCancel}){const isEdit=!!item;const[acronym,setAcronym]=useState(item?.phrase||"");// Parse existing translations from description JSON or text
-const parseInitialTranslations=()=>{if(!item?.description)return[{id:1,lang:"en",text:""}];try{const parsed=JSON.parse(item.description);if(Array.isArray(parsed)&&parsed.length>0){return parsed.map((t,idx)=>({id:idx+1,lang:t.lang||"en",text:t.text||(typeof t==="string"?t:"")}));}if(typeof parsed==="object"&&parsed!==null){return Object.entries(parsed).map(([lang,text],idx)=>({id:idx+1,lang,text:String(text)}));}}catch(e){return[{id:1,lang:"en",text:item.description}];}return[{id:1,lang:"en",text:""}];};const[translations,setTranslations]=useState(parseInitialTranslations);const handleAddRow=()=>{setTranslations(prev=>[...prev,{id:Date.now(),lang:"en",text:""}]);};const handleRemoveRow=id=>{setTranslations(prev=>{if(prev.length<=1)return[{id:Date.now(),lang:"en",text:""}];return prev.filter(row=>row.id!==id);});};const handleUpdateRow=(id,field,value)=>{setTranslations(prev=>prev.map(row=>row.id===id?{...row,[field]:value}:row));};const handleSubmit=e=>{e.preventDefault();const cleanAcronym=acronym.trim();if(!cleanAcronym)return;const validTranslations=translations.map(t=>({lang:t.lang,text:t.text.trim()})).filter(t=>t.text.length>0);onSubmit(e,{phrase:cleanAcronym,language_category:"ACRONYM",description:validTranslations.length>0?JSON.stringify(validTranslations):null,is_active:true});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-5"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Acronym"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:acronym,onChange:e=>setAcronym(e.target.value),placeholder:"e.g. FOCS, QIU, PTPTN, LIB",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-bold tracking-wide"}),/*#__PURE__*/React.createElement("p",{className:"text-[11px] text-slate-500 mt-1"},"Short acronym, abbreviation, or keyword.")),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("div",{className:"flex items-center justify-between mb-2"},/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider"},"Translations"),/*#__PURE__*/React.createElement("span",{className:"text-[11px] text-slate-500"},"List all language translations for this acronym")),/*#__PURE__*/React.createElement("div",{className:"space-y-2.5"},translations.map((row,idx)=>/*#__PURE__*/React.createElement("div",{key:row.id||idx,className:"flex items-center gap-2"},/*#__PURE__*/React.createElement("select",{value:row.lang,onChange:e=>handleUpdateRow(row.id,'lang',e.target.value),className:"bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-200 focus:outline-none focus:border-indigo-500 shrink-0 w-36"},/*#__PURE__*/React.createElement("option",{value:"en"},"English (EN)"),/*#__PURE__*/React.createElement("option",{value:"ms"},"Bahasa Melayu (MS)"),/*#__PURE__*/React.createElement("option",{value:"zh"},"Chinese (ZH)"),/*#__PURE__*/React.createElement("option",{value:"ta"},"Tamil (TA)"),/*#__PURE__*/React.createElement("option",{value:"yue"},"Cantonese (YUE)"),/*#__PURE__*/React.createElement("option",{value:"ar"},"Arabic (AR)")),/*#__PURE__*/React.createElement("input",{type:"text",value:row.text,onChange:e=>handleUpdateRow(row.id,'text',e.target.value),placeholder:"e.g. Faculty of Computing and Science",className:"flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"}),/*#__PURE__*/React.createElement("button",{type:"button",onClick:()=>handleRemoveRow(row.id),className:"p-2 text-slate-500 hover:text-rose-400 transition-colors rounded-lg hover:bg-rose-500/10",title:"Remove this translation"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"}))))),/*#__PURE__*/React.createElement("button",{type:"button",onClick:handleAddRow,className:"mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"},/*#__PURE__*/React.createElement(Icon,{name:"plus",className:"w-3.5 h-3.5"}),/*#__PURE__*/React.createElement("span",null,"Add another translation"))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6 pt-4 border-t border-slate-800"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all duration-300"},isEdit?"Update Acronym":"Add Acronym")));}// 19. Speech Language Form
-function SpeechLanguageForm({item,onSubmit,onCancel}){const isEdit=!!item;const[languageName,setLanguageName]=useState(item?.language_name||"");const[languageCode,setLanguageCode]=useState(item?.language_code||"");const[isDefault,setIsDefault]=useState(item?.is_default||false);const[isActive,setIsActive]=useState(item?.is_active??true);const handleSubmit=e=>{e.preventDefault();const code=languageCode.trim().toLowerCase();const name=languageName.trim();if(!code||!name)return;onSubmit(e,{language_code:code,language_name:name,is_default:isDefault,is_active:isActive});};return/*#__PURE__*/React.createElement("form",{onSubmit:handleSubmit,className:"space-y-5"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Language Name"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,value:languageName,onChange:e=>setLanguageName(e.target.value),placeholder:"e.g. Japanese, Korean, German, Spanish",className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-medium"}),/*#__PURE__*/React.createElement("p",{className:"text-[11px] text-slate-500 mt-1"},"Common or official name of the language.")),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2"},"Language Code (BCP-47)"),/*#__PURE__*/React.createElement("input",{type:"text",required:true,disabled:isEdit,value:languageCode,onChange:e=>setLanguageCode(e.target.value),placeholder:"e.g. ja, ko, de, es, vi, fr",maxLength:10,className:`w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-mono ${isEdit?'opacity-60 cursor-not-allowed':''}`}),/*#__PURE__*/React.createElement("p",{className:"text-[11px] text-slate-500 mt-1"},"Standard 2-letter or 3-letter BCP-47 / ISO code (e.g. ja, ko, de).")),/*#__PURE__*/React.createElement("div",{className:"pt-2 space-y-3"},/*#__PURE__*/React.createElement("label",{className:"flex items-start gap-3 cursor-pointer select-none group"},/*#__PURE__*/React.createElement("input",{type:"checkbox",checked:isDefault,onChange:e=>{setIsDefault(e.target.checked);if(e.target.checked)setIsActive(true);},className:"mt-1 rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900"}),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("span",{className:"text-xs font-bold text-slate-200 group-hover:text-indigo-300 transition-colors"},"Listen by Default"),/*#__PURE__*/React.createElement("p",{className:"text-[11px] text-slate-500 leading-snug"},"Pre-load this language into the speech recognition hypothesis hints at the start of every session."))),/*#__PURE__*/React.createElement("label",{className:"flex items-start gap-3 cursor-pointer select-none group"},/*#__PURE__*/React.createElement("input",{type:"checkbox",checked:isActive,disabled:isDefault,onChange:e=>setIsActive(e.target.checked),className:"mt-1 rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900 disabled:opacity-50"}),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("span",{className:"text-xs font-bold text-slate-200 group-hover:text-indigo-300 transition-colors"},"Active in Campus Directory"),/*#__PURE__*/React.createElement("p",{className:"text-[11px] text-slate-500 leading-snug"},"Mark as an officially active and supported language across the campus system.")))),/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-3 mt-6 pt-4 border-t border-slate-800"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:onCancel,className:"px-4 py-2 text-sm text-slate-400 hover:text-slate-200"},"Cancel"),/*#__PURE__*/React.createElement("button",{type:"submit",className:"bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all duration-300"},isEdit?"Update Language":"Add Language")));}window.UserForm=UserForm;window.StudentForm=StudentForm;window.LecturerForm=LecturerForm;window.StaffForm=StaffForm;window.VisitorForm=VisitorForm;window.AdminForm=AdminForm;window.DocumentForm=DocumentForm;window.DeviceForm=DeviceForm;window.NodeRBACForm=NodeRBACForm;window.EdgeRBACForm=EdgeRBACForm;window.CourseForm=CourseForm;window.EnrollmentForm=EnrollmentForm;window.TimetableForm=TimetableForm;window.AppointmentForm=AppointmentForm;window.RoleForm=RoleForm;window.FacultyForm=FacultyForm;window.DepartmentForm=DepartmentForm;window.ProgrammeForm=ProgrammeForm;window.SpeechAdaptationPhraseForm=SpeechAdaptationPhraseForm;window.SpeechLanguageForm=SpeechLanguageForm;})();
-(function(){const{useState,useEffect,useRef,useMemo}=React;const DASHBOARD_SUB_TABS={iam:["users","roles","facial-recognition"],rag:["documents","chatbot-queries","adaptation-phrases","speech-languages"],infra:["devices","node-rbac","edge-rbac","auth-logs","jwt-sessions"],academics:["courses","enrollments","timetables","appointments","notifications","faculties","departments","programmes"]};const DASHBOARD_DEFAULT_SUB_TAB={iam:"users",rag:"documents",infra:"devices",academics:"courses"};const DASHBOARD_TABS=["overview","iam","rag","infra","academics","mapping"];function readDashboardRoute(){const parts=window.location.pathname.replace(/^\/dashboard\/?/,"").split("/").filter(Boolean);const storedTab=localStorage.getItem("dashboard_current_tab");const storedSubTab=localStorage.getItem("dashboard_current_sub_tab");const candidateTab=parts[0]||storedTab||"overview";const tab=DASHBOARD_TABS.includes(candidateTab)?candidateTab:"overview";const allowedSubTabs=DASHBOARD_SUB_TABS[tab]||[];const candidateSubTab=parts[1]||storedSubTab||DASHBOARD_DEFAULT_SUB_TAB[tab]||"";const subTab=allowedSubTabs.includes(candidateSubTab)?candidateSubTab:DASHBOARD_DEFAULT_SUB_TAB[tab]||"";return{tab,subTab};}function dashboardPath(tab,subTab){if(!tab||tab==="overview")return"/dashboard/overview";return subTab?`/dashboard/${tab}/${subTab}`:`/dashboard/${tab}`;}function CampusMapTab(){return/*#__PURE__*/React.createElement("div",{className:"w-full h-[calc(100vh-6rem)] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl"},/*#__PURE__*/React.createElement("iframe",{src:"/static/vite/index.html",className:"w-full h-full border-none",title:"Campus Map Editor"}));}// ============================================================
-// MAIN APP COMPONENT
-// ============================================================
-function App(){const initialRoute=useMemo(()=>readDashboardRoute(),[]);// ── Core auth state ──────────────────────────────
-const[token,setToken]=useState("");const[authChecked,setAuthChecked]=useState(false);const[adminType,setAdminType]=useState(localStorage.getItem("admin_type")||"");const[email,setEmail]=useState(localStorage.getItem("email")||"");const[fullName,setFullName]=useState(localStorage.getItem("full_name")||"");const[adminId,setAdminId]=useState(localStorage.getItem("admin_id")||"");// ── Navigation ───────────────────────────────────
-const[currentTab,setCurrentTab]=useState(initialRoute.tab);const[subTab,setSubTab]=useState(initialRoute.subTab);const[sidebarCollapsed,setSidebarCollapsed]=useState(false);// ── UI ────────────────────────────────────────────
-const[toast,setToast]=useState(null);const[reembedding,setReembedding]=useState(false);const[formSubmitting,setFormSubmitting]=useState(false);const[pendingActionKey,setPendingActionKey]=useState("");// ── Theme State & Effect ──────────────────────────
-const[theme,setTheme]=useState(localStorage.getItem("theme")||"dark");useEffect(()=>{if(theme==="light"){document.documentElement.classList.add("light");document.documentElement.classList.remove("dark");}else{document.documentElement.classList.add("dark");document.documentElement.classList.remove("light");}localStorage.setItem("theme",theme);},[theme]);const toggleTheme=()=>{setTheme(prev=>prev==="dark"?"light":"dark");};// ── Login form state ──────────────────────────────
-const[loginEmail,setLoginEmail]=useState("");const[loginPass,setLoginPass]=useState("");const[loginLoading,setLoginLoading]=useState(false);const[loginError,setLoginError]=useState("");// Authentication is cookie-based. The state value is only a
-// non-secret UI flag; the JWT stays in the HttpOnly cookie.
-useEffect(()=>{let active=true;fetch("/api/auth/me",{credentials:"include"}).then(async response=>{if(!response.ok)throw new Error("Not authenticated");return response.json();}).then(admin=>{if(!active)return;localStorage.setItem("admin_type",admin.admin_type||"");localStorage.setItem("email",admin.user?.email||admin.email||"");localStorage.setItem("full_name",admin.user?.full_name||admin.full_name||"");localStorage.setItem("admin_id",String(admin.admin_id||""));setAdminType(admin.admin_type||"");setEmail(admin.user?.email||admin.email||"");setFullName(admin.user?.full_name||admin.full_name||"");setAdminId(admin.admin_id||"");setToken("cookie-authenticated");}).catch(()=>{if(active)setToken("");}).finally(()=>{if(active)setAuthChecked(true);});return()=>{active=false;};},[]);// ── Dashboard data ────────────────────────────────
-const[dashboardStats,setDashboardStats]=useState({users:0,devices:0,documents:0,courses:0});const[listData,setListData]=useState([]);const[listLoading,setListLoading]=useState(false);const[searchQuery,setSearchQuery]=useState("");// ── Filter state ──────────────────────────────────
-const[roleFilter,setRoleFilter]=useState("ALL");const[statusFilter,setStatusFilter]=useState("ALL");const[accessLevelFilter,setAccessLevelFilter]=useState("ALL");const[categoryFilter,setCategoryFilter]=useState("ALL");const[faceStatusFilter,setFaceStatusFilter]=useState("ALL");const[faceRoleFilter,setFaceRoleFilter]=useState("ALL");const[speechLanguages,setSpeechLanguages]=useState([]);const[adaptationCategories,setAdaptationCategories]=useState([]);// ── Face enrollment modal ─────────────────────────
-const[showFaceModal,setShowFaceModal]=useState(false);const[selectedPhotoFile,setSelectedPhotoFile]=useState(null);const[uploadedPhoto,setUploadedPhoto]=useState(null);const[scanning,setScanning]=useState(false);const[scanStep,setScanStep]=useState(0);const[confidence,setConfidence]=useState(0);const[scanLogs,setScanLogs]=useState([]);const logEndRef=useRef(null);const[enrollMethod,setEnrollMethod]=useState("photo");const[photoPose,setPhotoPose]=useState("front");const[activeCameraPoseIndex,setActiveCameraPoseIndex]=useState(0);const[liveFeedback,setLiveFeedback]=useState("Align your face in the center of the camera.");const[liveScanActive,setLiveScanActive]=useState(false);const[cameraStream,setCameraStream]=useState(null);const[selectedVideoFile,setSelectedVideoFile]=useState(null);const[videoProcessing,setVideoProcessing]=useState(false);const[videoError,setVideoError]=useState("");const videoRef=useRef(null);const canvasRef=useRef(null);// ── Guided recording state ────────────────────────────
-const[recordingPhase,setRecordingPhase]=useState('idle');// idle|countdown|recording|embedding|success|failed
-const[recordingCountdown,setRecordingCountdown]=useState(3);const[guidePoseIndex,setGuidePoseIndex]=useState(0);const[enrollFeedback,setEnrollFeedback]=useState('');const[recordingProgress,setRecordingProgress]=useState(0);const[embeddingProgress,setEmbeddingProgress]=useState(0);const guidedCaptureRef=useRef({active:false});// ── Record modal ──────────────────────────────────
-const[showModal,setShowModal]=useState(false);const[modalType,setModalType]=useState("");const[selectedItem,setSelectedItem]=useState(null);const[provisioningDetails,setProvisioningDetails]=useState(null);// ── Sorting & Pagination ──────────────────────────
-const[sortKey,setSortKey]=useState("");const[sortOrder,setSortOrder]=useState("asc");const[currentPage,setCurrentPage]=useState(1);const[itemsPerPage]=useState(10);// ── Reference data for forms ──────────────────────
-const[refs,setRefs]=useState({buildings:[],floorplans:[],nodes:[],edges:[],roles:[],faculties:[],programmes:[],departments:[],staff:[]});const refsLoadedRef=useRef(false);const refsLoadingRef=useRef(false);const tabRequestIdRef=useRef(0);// ── Friendly sub-tab label map ────────────────────
-const subTabLabel=t=>({'users':'Users','roles':'Access Roles','facial-recognition':'Face ID','documents':'Documents','chunks':'Content Chunks','chatbot-queries':'Chatbot Logs','adaptation-phrases':'Acronyms & Translations','speech-languages':'Supported Languages','devices':'Devices','node-rbac':'Room Access','edge-rbac':'Path Access','auth-logs':'Access Logs','jwt-sessions':'Active Sessions','courses':'Courses','enrollments':'Enrollments','timetables':'Timetables','appointments':'Appointments','notifications':'Notifications','faculties':'Faculties','departments':'Departments','programmes':'Programmes'})[t]||t;const getSingleTabLabel=t=>{if(t==='faculties')return'Faculty';if(t==='categories')return'Category';const label=subTabLabel(t);if(label.endsWith('ies'))return label.replace(/ies$/,'y');if(label.endsWith('s'))return label.replace(/s$/,'');return label;};// ── Lucide icon refresh ───────────────────────────
-useEffect(()=>{if(window.lucide)window.lucide.createIcons();},[currentTab,subTab,listData,showModal,showFaceModal,toast]);// ── Auto-scroll scan logs ─────────────────────────
-useEffect(()=>{if(logEndRef.current)logEndRef.current.scrollIntoView({behavior:'smooth'});},[scanLogs]);// ── Helpers ───────────────────────────────────────
-const showErrorToast=msg=>setToast({message:msg,type:'error'});const showSuccessToast=msg=>setToast({message:msg,type:'success'});const parseTranslations=desc=>{if(!desc)return[];try{const parsed=JSON.parse(desc);if(Array.isArray(parsed)){return parsed.filter(t=>t&&(t.text||typeof t==='string')).map(t=>{if(typeof t==='string')return{lang:'en',text:t};return{lang:t.lang||'en',text:t.text||''};});}if(typeof parsed==='object'&&parsed!==null){return Object.entries(parsed).map(([lang,text])=>({lang,text:String(text)}));}}catch(e){return[{lang:'en',text:desc}];}return[];};const getLangBadge=lang=>{const l=(lang||'en').toLowerCase();const map={'en':{name:'English',cls:'bg-indigo-500/15 text-indigo-300 border-indigo-500/30'},'ms':{name:'Bahasa Melayu',cls:'bg-amber-500/15 text-amber-300 border-amber-500/30'},'zh':{name:'Chinese',cls:'bg-rose-500/15 text-rose-300 border-rose-500/30'},'ta':{name:'Tamil',cls:'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'},'yue':{name:'Cantonese',cls:'bg-purple-500/15 text-purple-300 border-purple-500/30'},'ar':{name:'Arabic',cls:'bg-teal-500/15 text-teal-300 border-teal-500/30'}};return map[l]||{name:l.toUpperCase(),cls:'bg-slate-800 text-slate-300 border-slate-700'};};const getRecordKey=(item,tab=currentTab,activeSubTab=subTab)=>{if(!item)return"";const keyMap={iam:{users:"user_id",roles:"role_id","facial-recognition":"user_id"},rag:{documents:"document_id","chatbot-queries":"query_id","adaptation-phrases":"phrase_id","speech-languages":"language_code"},infra:{devices:"device_id","auth-logs":"log_id","jwt-sessions":"session_id"},academics:{courses:"course_id",enrollments:"enrollment_id",timetables:"timetable_id",appointments:"appointment_id",notifications:"notification_id",faculties:"faculty_id",departments:"department_id",programmes:"programme_id"}};if(tab==="infra"&&activeSubTab==="node-rbac")return`${item.node_id}:${item.role_id}`;if(tab==="infra"&&activeSubTab==="edge-rbac")return`${item.edge_id}:${item.role_id}`;const key=keyMap[tab]?.[activeSubTab];return key?String(item[key]??""):"";};const mergeRecordIntoList=record=>{const recordKey=getRecordKey(record);if(!recordKey)return;setListData(prev=>{const index=prev.findIndex(item=>getRecordKey(item)===recordKey);if(index===-1)return modalType==="create"?[record,...prev]:prev;const next=[...prev];next[index]={...next[index],...record};return next;});};const removeRecordFromList=record=>{const recordKey=getRecordKey(record);if(!recordKey)return;setListData(prev=>prev.filter(item=>getRecordKey(item)!==recordKey));};const userHasRole=(item,roleId)=>{const targetRoleId=Number(roleId);if(!targetRoleId)return false;if(Array.isArray(item?.roles)&&item.roles.some(role=>Number(role.role_id)===targetRoleId))return true;return Number(item?.role_id)===targetRoleId;};const primaryRoleName=item=>{if(Array.isArray(item?.roles)&&item.roles.length>0)return item.roles[0].role_name;return refs.roles.find(r=>r.role_id===item?.role_id)?.role_name||"USER";};const refreshAfterMutation=async({refreshRefs=false}={})=>{if(refreshRefs)await fetchReferences(true);await fetchTabData();if(currentTab==="overview")await fetchOverviewStats();};useEffect(()=>{const nextSubTab=DASHBOARD_SUB_TABS[currentTab]?.includes(subTab)?subTab:DASHBOARD_DEFAULT_SUB_TAB[currentTab]||"";if(nextSubTab!==subTab){setSubTab(nextSubTab);return;}localStorage.setItem("dashboard_current_tab",currentTab);if(nextSubTab)localStorage.setItem("dashboard_current_sub_tab",nextSubTab);else localStorage.removeItem("dashboard_current_sub_tab");const nextPath=dashboardPath(currentTab,nextSubTab);if(window.location.pathname!==nextPath)window.history.pushState({},"",nextPath);},[currentTab,subTab]);useEffect(()=>{const handlePopState=()=>{const route=readDashboardRoute();setCurrentTab(route.tab);setSubTab(route.subTab);};window.addEventListener("popstate",handlePopState);return()=>window.removeEventListener("popstate",handlePopState);},[]);// ── Login ─────────────────────────────────────────
-const handleLogin=async e=>{e.preventDefault();setLoginLoading(true);setLoginError("");try{const formData=new URLSearchParams();formData.append("email",loginEmail);formData.append("password",loginPass);const response=await fetch("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:formData});const data=await response.json();if(!response.ok)throw new Error(data.detail||"Authentication failed. Please check your credentials.");localStorage.setItem("admin_type",data.admin_type);localStorage.setItem("email",data.email);localStorage.setItem("full_name",data.full_name);localStorage.setItem("admin_id",data.admin_id);setToken("cookie-authenticated");setAdminType(data.admin_type);setEmail(data.email);setFullName(data.full_name);setAdminId(data.admin_id);showSuccessToast("Welcome back! You are now signed in.");}catch(err){showErrorToast(err.message);setLoginError(err.message);}finally{setLoginLoading(false);}};// ── Logout ────────────────────────────────────────
-const handleLogout=async()=>{try{await fetch("/api/auth/logout",{method:"POST",headers:{"Authorization":`Bearer ${token}`}});}catch(e){}localStorage.clear();setToken("");setAdminType("");setEmail("");setFullName("");setAdminId("");setSelectedPhotoFile(null);if(uploadedPhoto){URL.revokeObjectURL(uploadedPhoto);setUploadedPhoto(null);}setCurrentTab("overview");setSubTab("");window.history.replaceState({},"","/dashboard/overview");};// ── 401 auto-logout interceptor ───────────────────
-useEffect(()=>{const originalFetch=window.fetch;window.fetch=async(...args)=>{const response=await originalFetch(...args);if(response.status===401){const url=args[0];if(!(typeof url==="string"&&url.includes("/api/auth/login")))handleLogout();}return response;};return()=>{window.fetch=originalFetch;};},[token,uploadedPhoto]);// ── Re-embed all vectors ──────────────────────────
-const handleReembedAll=async()=>{if(!window.confirm("Re-embed all facial vectors from disk? This may take a moment."))return;setReembedding(true);try{const response=await fetch("/api/iam/users/reembed-all",{method:"POST",headers:{"Authorization":`Bearer ${token}`}});const resData=await response.json();if(response.ok)showSuccessToast(resData.detail||"Re-embedded all facial vectors successfully!");else showErrorToast(resData.detail||"Failed to re-embed vectors.");}catch(err){showErrorToast("Error: "+err.message);}finally{setReembedding(false);}};// ── Fetch reference lookups ───────────────────────
-const fetchReferences=async(force=false)=>{if(!token)return;if(!force&&(refsLoadedRef.current||refsLoadingRef.current))return;refsLoadingRef.current=true;try{const headers={"Authorization":`Bearer ${token}`};const[resBuildings,resFloorplans,resNodes,resRoles,resFaculties,resProgrammes,resDepartments,resStaff]=await Promise.all([fetch("/api/refs/buildings",{headers}),fetch("/api/refs/floorplans",{headers}),fetch("/api/refs/nodes",{headers}),fetch("/api/iam/roles",{headers}),fetch("/api/refs/faculties",{headers}),fetch("/api/refs/programmes",{headers}),fetch("/api/refs/departments",{headers}),fetch("/api/iam/staff",{headers})]);const[dBuildings,dFloorplans,dNodes,dRoles,dFaculties,dProgrammes,dDepartments,dStaff]=await Promise.all([resBuildings.ok?resBuildings.json():[],resFloorplans.ok?resFloorplans.json():[],resNodes.ok?resNodes.json():[],resRoles.ok?resRoles.json():[],resFaculties.ok?resFaculties.json():[],resProgrammes.ok?resProgrammes.json():[],resDepartments.ok?resDepartments.json():[],resStaff.ok?resStaff.json():[]]);setRefs({buildings:Array.isArray(dBuildings)?dBuildings:[],floorplans:Array.isArray(dFloorplans)?dFloorplans:[],nodes:Array.isArray(dNodes)?dNodes:[],roles:Array.isArray(dRoles)?dRoles:[],faculties:Array.isArray(dFaculties)?dFaculties:[],programmes:Array.isArray(dProgrammes)?dProgrammes:[],departments:Array.isArray(dDepartments)?dDepartments:[],staff:Array.isArray(dStaff)?dStaff:[],edges:[]});refsLoadedRef.current=true;}catch(err){console.error("Failed to fetch references:",err);}finally{refsLoadingRef.current=false;}};// ── Fetch overview stats ──────────────────────────
-const fetchOverviewStats=async()=>{if(!token)return;try{const headers={"Authorization":`Bearer ${token}`};const response=await fetch("/api/infra/dashboard-stats",{headers});const data=await response.json();if(!response.ok)throw new Error(data.detail||"Failed to load overview stats.");setDashboardStats({users:Number(data.users)||0,devices:Number(data.devices)||0,documents:Number(data.documents)||0,courses:Number(data.courses)||0});}catch(err){console.error("Overview stats failed:",err);}};// ── Fetch current tab data ────────────────────────
-const fetchTabData=async()=>{if(!token)return;const requestId=++tabRequestIdRef.current;setListLoading(true);try{const headers={"Authorization":`Bearer ${token}`};const endpointMap={iam:{users:"/api/iam/users",roles:"/api/iam/roles","facial-recognition":"/api/iam/users"},rag:{documents:"/api/rag/documents","chatbot-queries":"/api/rag/chatbot-queries","adaptation-phrases":"/api/rag/adaptation-phrases","speech-languages":"/api/rag/speech-languages"},infra:{devices:"/api/infra/devices","node-rbac":"/api/infra/node-rbac","edge-rbac":"/api/infra/edge-rbac","auth-logs":"/api/infra/auth-logs","jwt-sessions":"/api/infra/jwt-sessions"},academics:{courses:"/api/academics/courses",enrollments:"/api/academics/enrollments",timetables:"/api/academics/timetables",appointments:"/api/academics/appointments",notifications:"/api/academics/notifications",faculties:"/api/refs/faculties",departments:"/api/refs/departments",programmes:"/api/refs/programmes"}};const endpoint=endpointMap[currentTab]?.[subTab];if(!endpoint){setListData([]);return;}const response=await fetch(endpoint,{headers});const data=await response.json();if(!response.ok)throw new Error(data.detail||"Failed to load data.");if(requestId===tabRequestIdRef.current)setListData(Array.isArray(data)?data:[]);}catch(err){showErrorToast(err.message);}finally{if(requestId===tabRequestIdRef.current)setListLoading(false);}};// ── Fetch speech languages & categories ──────────
-const fetchSpeechLanguages=async()=>{if(!token)return;try{const res=await fetch("/api/rag/speech-languages",{headers:{"Authorization":`Bearer ${token}`}});if(res.ok){const data=await res.json();setSpeechLanguages(Array.isArray(data)?data:[]);}}catch(e){console.error("Failed to load speech languages",e);}};const fetchAdaptationCategories=async()=>{if(!token)return;try{const res=await fetch("/api/rag/adaptation-phrases/categories",{headers:{"Authorization":`Bearer ${token}`}});if(res.ok){const data=await res.json();setAdaptationCategories(Array.isArray(data)?data:[]);}}catch(e){console.error("Failed to load adaptation categories",e);}};const handleToggleLanguageDefault=async code=>{try{const res=await fetch(`/api/rag/speech-languages/${code}/toggle-default`,{method:"POST",headers:{"Authorization":`Bearer ${token}`}});if(!res.ok){const d=await res.json();throw new Error(d.detail||"Failed to toggle default language status.");}showSuccessToast("Default language status updated.");await fetchSpeechLanguages();if(currentTab==="rag"&&subTab==="speech-languages")await fetchTabData();}catch(err){showErrorToast(err.message);}};const handleToggleLanguageActive=async code=>{try{const res=await fetch(`/api/rag/speech-languages/${code}/toggle-active`,{method:"POST",headers:{"Authorization":`Bearer ${token}`}});if(!res.ok){const d=await res.json();throw new Error(d.detail||"Failed to toggle language active status.");}showSuccessToast("Language active status updated.");await fetchSpeechLanguages();if(currentTab==="rag"&&subTab==="speech-languages")await fetchTabData();}catch(err){showErrorToast(err.message);}};// ── Effects: data loading ─────────────────────────
-useEffect(()=>{if(token){fetchReferences();if(currentTab==="overview")fetchOverviewStats();else if(subTab||!DASHBOARD_DEFAULT_SUB_TAB[currentTab]){fetchTabData();if(currentTab==="rag"&&subTab==="adaptation-phrases"){fetchSpeechLanguages();fetchAdaptationCategories();}}}},[token,currentTab,subTab]);// ── Default sub-tab per main tab ──────────────────
-useEffect(()=>{const allowed=DASHBOARD_SUB_TABS[currentTab];if(!allowed){if(subTab)setSubTab("");return;}if(!allowed.includes(subTab))setSubTab(DASHBOARD_DEFAULT_SUB_TAB[currentTab]);},[currentTab,subTab]);// ── Reset filters on tab change ───────────────────
-useEffect(()=>{setSearchQuery("");setRoleFilter("ALL");setStatusFilter("ALL");setAccessLevelFilter("ALL");setCategoryFilter("ALL");setFaceStatusFilter("ALL");setFaceRoleFilter("ALL");},[currentTab,subTab]);// ── Reset pagination on filter change ─────────────
-useEffect(()=>{setCurrentPage(1);},[searchQuery,currentTab,subTab,roleFilter,statusFilter,accessLevelFilter,categoryFilter,faceStatusFilter,faceRoleFilter]);// ── Form submit ───────────────────────────────────
-const handleFormSubmit=async(e,payload)=>{e.preventDefault();if(formSubmitting)return;setFormSubmitting(true);try{const headers={"Authorization":`Bearer ${token}`,"Content-Type":"application/json"};let endpoint="",method="POST",finalBody=null,createdUser=null,savedRecord=null;if(currentTab==="iam"){if(subTab==="users"){const{roleName,isEdit,user_id,user_payload,profile_payload}=payload;if(!isEdit){const endpointMap={STUDENT:"/api/iam/students",LECTURER:"/api/iam/lecturers",STAFF:"/api/iam/staff",VISITOR:"/api/iam/visitors",ADMIN:"/api/iam/admins"};endpoint=endpointMap[roleName]||"/api/iam/users";finalBody=endpointMap[roleName]?{...profile_payload,user:user_payload}:user_payload;const res=await fetch(endpoint,{method:"POST",headers,body:JSON.stringify(finalBody)});const data=await res.json();if(!res.ok)throw new Error(data.detail||"Operation Failed");createdUser=data.user||data;savedRecord=createdUser;}else{const ur=await fetch(`/api/iam/users/${user_id}`,{method:"PUT",headers,body:JSON.stringify(user_payload)});const updatedUser=await ur.json();if(!ur.ok){throw new Error(updatedUser.detail||"Failed to update user.");}savedRecord=updatedUser;const profileMap={STUDENT:{hasProfile:!!selectedItem.student,idKey:'student_id',base:'/api/iam/students'},LECTURER:{hasProfile:!!selectedItem.lecturer,idKey:'lecturer_id',base:'/api/iam/lecturers'},STAFF:{hasProfile:!!selectedItem.staff,idKey:'staff_id',base:'/api/iam/staff'},VISITOR:{hasProfile:!!selectedItem.visitor,idKey:'visitor_id',base:'/api/iam/visitors'},ADMIN:{hasProfile:!!selectedItem.admin,idKey:'admin_id',base:'/api/iam/admins'}};const pm=profileMap[roleName];if(pm){endpoint=pm.hasProfile?`${pm.base}/${selectedItem[roleName.toLowerCase()][pm.idKey]}`:pm.base;method=pm.hasProfile?"PUT":"POST";finalBody=pm.hasProfile?profile_payload:{...profile_payload,user_id};const pr=await fetch(endpoint,{method,headers,body:JSON.stringify(finalBody)});if(!pr.ok){const d=await pr.json();throw new Error(d.detail||"Failed to update profile.");}}}endpoint="";finalBody=null;}else if(subTab==="roles"){endpoint=modalType==="create"?"/api/iam/roles":`/api/iam/roles/${selectedItem.role_id}`;method=modalType==="create"?"POST":"PUT";finalBody=payload;}}else if(currentTab==="rag"){if(subTab==="documents"){endpoint=modalType==="create"?"/api/rag/documents":`/api/rag/documents/${selectedItem.document_id}`;method=modalType==="create"?"POST":"PUT";finalBody=payload;}else if(subTab==="adaptation-phrases"){endpoint=modalType==="create"?"/api/rag/adaptation-phrases":`/api/rag/adaptation-phrases/${selectedItem.phrase_id}`;method=modalType==="create"?"POST":"PUT";finalBody=payload;}else if(subTab==="speech-languages"){endpoint="/api/rag/speech-languages";method="POST";finalBody=payload;}}else if(currentTab==="infra"){if(subTab==="devices"){endpoint=modalType==="create"?"/api/infra/devices":`/api/infra/devices/${selectedItem.device_id}`;method=modalType==="create"?"POST":"PUT";finalBody=payload;}else if(subTab==="node-rbac"){endpoint="/api/infra/node-rbac";method="POST";finalBody=payload;}else if(subTab==="edge-rbac"){endpoint="/api/infra/edge-rbac";method="POST";finalBody=payload;}}else if(currentTab==="academics"){if(subTab==="courses"){endpoint=modalType==="create"?"/api/academics/courses":`/api/academics/courses/${selectedItem.course_id}`;method=modalType==="create"?"POST":"PUT";finalBody=payload;}else if(subTab==="enrollments"){endpoint=modalType==="create"?"/api/academics/enrollments":`/api/academics/enrollments/${selectedItem.enrollment_id}`;method=modalType==="create"?"POST":"PUT";finalBody=payload;}else if(subTab==="timetables"){endpoint=modalType==="create"?"/api/academics/timetables":`/api/academics/timetables/${selectedItem.timetable_id}`;method=modalType==="create"?"POST":"PUT";finalBody=payload;}else if(subTab==="faculties"){endpoint=modalType==="create"?"/api/refs/faculties":`/api/refs/faculties/${selectedItem.faculty_id}`;method=modalType==="create"?"POST":"PUT";finalBody=payload;}else if(subTab==="departments"){endpoint=modalType==="create"?"/api/refs/departments":`/api/refs/departments/${selectedItem.department_id}`;method=modalType==="create"?"POST":"PUT";finalBody=payload;}else if(subTab==="programmes"){endpoint=modalType==="create"?"/api/refs/programmes":`/api/refs/programmes/${selectedItem.programme_id}`;method=modalType==="create"?"POST":"PUT";finalBody=payload;}else if(subTab==="appointments"){endpoint=modalType==="create"?"/api/academics/appointments":`/api/academics/appointments/${selectedItem?.appointment_id}`;method=modalType==="create"?"POST":"PUT";finalBody=payload;}}if(finalBody&&endpoint){let fetchOptions={method,headers};if(finalBody instanceof FormData){delete headers["Content-Type"];fetchOptions.body=finalBody;}else{fetchOptions.body=JSON.stringify(finalBody);}const response=await fetch(endpoint,fetchOptions);const data=await response.json();if(!response.ok)throw new Error(data.detail||"Operation Failed");savedRecord=data;}mergeRecordIntoList(savedRecord);showSuccessToast(`Record ${modalType==='create'?'created':'updated'} successfully!`);setShowModal(false);if(currentTab==="infra"&&subTab==="devices"&&modalType==="create"&&savedRecord?.provisioned_secret){setProvisioningDetails({deviceId:savedRecord.device_id,deviceName:savedRecord.device_name,secret:savedRecord.provisioned_secret,ipAddress:savedRecord.ip_address||"Not configured"});}refreshAfterMutation({refreshRefs:currentTab==="academics"&&["faculties","departments","programmes"].includes(subTab)});if(currentTab==="iam"&&subTab==="users"&&modalType==="create"&&createdUser){setSelectedItem(createdUser);setConfidence(0);setScanStep(0);setScanning(false);setUploadedPhoto(null);setSelectedPhotoFile(null);setPhotoPose("front");setEnrollMethod("video");setShowFaceModal(true);}}catch(err){showErrorToast(err.message);}finally{setFormSubmitting(false);}};// ── Delete ────────────────────────────────────────
-const handleDeleteItem=async item=>{if(!confirm("Are you sure you want to delete this record? This cannot be undone."))return;const actionKey=`delete:${getRecordKey(item)}`;if(pendingActionKey)return;setPendingActionKey(actionKey);try{const headers={"Authorization":`Bearer ${token}`};const epMap={iam:{users:`/api/iam/users/${item.user_id}`,roles:`/api/iam/roles/${item.role_id}`},rag:{documents:`/api/rag/documents/${item.document_id}`,"adaptation-phrases":`/api/rag/adaptation-phrases/${item.phrase_id}`,"speech-languages":`/api/rag/speech-languages/${item.language_code}`},infra:{devices:`/api/infra/devices/${item.device_id}`,"node-rbac":`/api/infra/node-rbac/${item.node_id}/${item.role_id}`,"edge-rbac":`/api/infra/edge-rbac/${item.edge_id}/${item.role_id}`},academics:{courses:`/api/academics/courses/${item.course_id}`,enrollments:`/api/academics/enrollments/${item.enrollment_id}`,timetables:`/api/academics/timetables/${item.timetable_id}`,appointments:`/api/academics/appointments/${item.appointment_id}`,faculties:`/api/refs/faculties/${item.faculty_id}`,departments:`/api/refs/departments/${item.department_id}`,programmes:`/api/refs/programmes/${item.programme_id}`}};const endpoint=epMap[currentTab]?.[subTab];if(!endpoint)return;const response=await fetch(endpoint,{method:"DELETE",headers});const data=await response.json();if(!response.ok)throw new Error(data.detail||"Delete failed.");if(data.deactivated){showSuccessToast(data.detail||"Device deactivated; audit history was preserved.");}else{removeRecordFromList(item);showSuccessToast("Record deleted successfully.");}refreshAfterMutation({refreshRefs:currentTab==="academics"&&["faculties","departments","programmes"].includes(subTab)});}catch(err){showErrorToast(err.message);}finally{setPendingActionKey("");}};// ── Toggle active status ──────────────────────────
-const handleToggleStatus=async item=>{const actionKey=`toggle:${getRecordKey(item)}`;if(pendingActionKey)return;setPendingActionKey(actionKey);try{const headers={"Authorization":`Bearer ${token}`};const epMap={iam:{users:`/api/iam/users/${item.user_id}/toggle-active`},rag:{documents:`/api/rag/documents/${item.document_id}/toggle-active`,"adaptation-phrases":`/api/rag/adaptation-phrases/${item.phrase_id}/toggle-active`}};const endpoint=epMap[currentTab]?.[subTab];if(!endpoint)return;const response=await fetch(endpoint,{method:"POST",headers});if(!response.ok){const d=await response.json();throw new Error(d.detail||"Toggle failed.");}mergeRecordIntoList({...item,is_active:!item.is_active});showSuccessToast("Status updated.");refreshAfterMutation();}catch(err){showErrorToast(err.message);}finally{setPendingActionKey("");}};const handlePingDevice=async item=>{const actionKey=`ping:${item.device_id}`;if(pendingActionKey)return;setPendingActionKey(actionKey);try{const response=await fetch(`/api/infra/devices/${item.device_id}/heartbeat`,{method:"POST",headers:{"Authorization":`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw new Error(data.detail||"Device did not respond.");mergeRecordIntoList({...item,last_heartbeat:data.last_heartbeat});showSuccessToast("Ping successful.");fetchTabData();}catch(err){showErrorToast(err.message);}finally{setPendingActionKey("");}};// ── Face scan simulation ──────────────────────────
-const startPhotoAnalysis=()=>{setScanning(true);setScanStep(1);setConfidence(15);setScanLogs(["Initializing face analysis module...","Image loaded and decoded."]);setTimeout(()=>{setConfidence(38);setScanLogs(p=>[...p,"Loading detection network...","Adjusting image contrast..."]);},500);setTimeout(()=>{setConfidence(62);setScanLogs(p=>[...p,"Face region detected.","Extracting 68 facial landmarks..."]);},1000);setTimeout(()=>{setConfidence(85);setScanLogs(p=>[...p,"Building 512-dimension embedding..."]);},1500);setTimeout(()=>{setConfidence(100);setScanLogs(p=>[...p,"Embedding complete.","Quality check: PASSED.","Confidence: 99%."]);setScanning(false);setScanStep(2);},2000);};const handlePhotoUpload=e=>{const file=e.target.files[0];if(!file)return;setSelectedPhotoFile(file);if(uploadedPhoto)URL.revokeObjectURL(uploadedPhoto);setUploadedPhoto(URL.createObjectURL(file));setScanning(false);setConfidence(0);setScanStep(1);setScanLogs(["Loading image..."]);startPhotoAnalysis();};const saveFacialEnrollment=async()=>{try{if(!selectedPhotoFile)throw new Error("No photo selected. Please upload a face photo first.");const formData=new FormData();formData.append("file",selectedPhotoFile);formData.append("pose",photoPose);const response=await fetch(`/api/iam/users/${selectedItem.user_id}/upload-photo`,{method:"POST",headers:{"Authorization":`Bearer ${token}`},body:formData});const data=await response.json();if(!response.ok)throw new Error(data.detail||"Failed to save Face ID.");showSuccessToast(`Face ID ${photoPose==="front"?"photo":`${photoPose} pose`} updated for ${selectedItem.full_name}!`);setShowFaceModal(false);setSelectedPhotoFile(null);if(uploadedPhoto){URL.revokeObjectURL(uploadedPhoto);setUploadedPhoto(null);}fetchTabData();}catch(err){showErrorToast(err.message);}};const stopCamera=()=>{guidedCaptureRef.current.active=false;if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());setCameraStream(null);}setLiveScanActive(false);};// ── Single front camera capture flow ───────────────────────
-const GUIDE_POSES=[{id:'front',dir:null,label:'Face the camera — stay still'}];const startCamera=async()=>{try{if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){throw new Error("Camera access is restricted by your browser. Ensure you are accessing via HTTPS or http://localhost, and browser permissions are granted.");}let stream;try{stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:640},height:{ideal:480}}});}catch(e1){stream=await navigator.mediaDevices.getUserMedia({video:true});}setCameraStream(stream);setRecordingPhase('idle');setGuidePoseIndex(0);setEnrollFeedback('');setRecordingProgress(0);setEmbeddingProgress(0);if(videoRef.current){videoRef.current.srcObject=stream;videoRef.current.play().catch(e=>console.warn("Video play exception:",e));}}catch(err){setRecordingPhase('failed');let hint="";if(err.name==="NotAllowedError"||err.message&&err.message.toLowerCase().includes("permission")){hint=" Recommended Checks:\n1. Windows Settings -> Privacy & security -> Camera -> Enable 'Allow desktop apps to access your camera'.\n2. Ensure no other application (Zoom, Teams, Python script, OpenCV, OBS) is currently using your webcam.";}setEnrollFeedback(`Could not access camera (${err.name||'Error'}): ${err.message||'Permission denied'}.${hint}`);}};const completeLiveEnrollment=async()=>{setRecordingPhase('embedding');setEmbeddingProgress(0);setEnrollFeedback('');let progressTimer;const pollProgress=async()=>{try{const res=await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/progress`,{headers:{"Authorization":`Bearer ${token}`}});if(res.ok){const data=await res.json();if(data.progress!==undefined){setEmbeddingProgress(data.progress);}}}catch(err){console.error("Error polling progress:",err);}};pollProgress();progressTimer=setInterval(pollProgress,250);try{const response=await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/complete`,{method:"POST",headers:{"Authorization":`Bearer ${token}`}});const data=await response.json();if(!response.ok)throw new Error(data.detail||"Face embedding failed.");setEmbeddingProgress(100);setRecordingPhase('success');showSuccessToast(`Face ID enrolled for ${selectedItem.full_name}!`);setTimeout(()=>{stopCamera();setShowFaceModal(false);fetchTabData();},1200);}catch(err){setRecordingPhase('failed');setEnrollFeedback(err.message);}finally{clearInterval(progressTimer);}};const startGuidedRecording=async()=>{if(!cameraStream)return;try{const startResponse=await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/start`,{method:"POST",headers:{"Authorization":`Bearer ${token}`}});const startData=await startResponse.json();if(!startResponse.ok)throw new Error(startData.detail||"Could not start live enrollment.");}catch(err){setRecordingPhase('failed');setEnrollFeedback(err.message);return;}// Countdown 3-2-1 then start
-setRecordingPhase('countdown');setRecordingCountdown(3);setRecordingProgress(0);setEmbeddingProgress(0);setEnrollFeedback('');guidedCaptureRef.current.active=true;let c=3;const cdTimer=setInterval(()=>{c--;setRecordingCountdown(c);if(c<=0){clearInterval(cdTimer);setRecordingPhase('recording');setGuidePoseIndex(0);setRecordingProgress(0);// Advance guide arrow through poses
-let pIdx=0;const pollVideoFrame=async()=>{if(!guidedCaptureRef.current.active)return;if(pIdx>=GUIDE_POSES.length)return;if(videoRef.current&&canvasRef.current){const ctx=canvasRef.current.getContext('2d');ctx.drawImage(videoRef.current,0,0,canvasRef.current.width,canvasRef.current.height);canvasRef.current.toBlob(async blob=>{if(blob){const fd=new FormData();fd.append("file",new File([blob],"frame.jpg",{type:"image/jpeg"}));try{const r=await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/frame?target_pose=${GUIDE_POSES[pIdx].id}`,{method:"POST",headers:{"Authorization":`Bearer ${token}`},body:fd});const d=await r.json();if(d.success){pIdx++;setRecordingProgress(Math.round(pIdx/GUIDE_POSES.length*100));if(pIdx<GUIDE_POSES.length){setGuidePoseIndex(pIdx);setTimeout(pollVideoFrame,500);// small delay before next pose
-}else{guidedCaptureRef.current.active=false;setRecordingProgress(100);await completeLiveEnrollment();}return;// advanced, exit callback
-}setEnrollFeedback(d.guidance||"Adjust your pose and try again.");}catch(e){console.error("Poll error:",e);}}if(guidedCaptureRef.current.active)setTimeout(pollVideoFrame,300);},"image/jpeg",0.78);}else{if(guidedCaptureRef.current.active)setTimeout(pollVideoFrame,300);}};pollVideoFrame();}},1000);};const retryRecording=()=>{guidedCaptureRef.current.active=false;setRecordingPhase('idle');setGuidePoseIndex(0);setEnrollFeedback('');setRecordingProgress(0);setEmbeddingProgress(0);};const handleVideoFileChange=e=>{setSelectedVideoFile(e.target.files[0]);setVideoError("");};const uploadVideoEnrollment=async()=>{if(!selectedVideoFile){setVideoError("Please select a video file first.");return;}setVideoProcessing(true);setVideoError("");try{const formData=new FormData();formData.append("file",selectedVideoFile);const response=await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-video`,{method:"POST",headers:{"Authorization":`Bearer ${token}`},body:formData});const data=await response.json();if(!response.ok)throw new Error(data.detail||"Video processing failed.");showSuccessToast(`Face ID enrolled for ${selectedItem.full_name}!`);setShowFaceModal(false);setSelectedVideoFile(null);fetchTabData();}catch(err){setVideoError(err.message);}finally{setVideoProcessing(false);}};// ── Sorting helpers ───────────────────────────────
-const handleSort=key=>{if(sortKey===key)setSortOrder(o=>o==="asc"?"desc":"asc");else{setSortKey(key);setSortOrder("asc");}};const renderSortIcon=key=>{if(sortKey!==key)return/*#__PURE__*/React.createElement(Icon,{name:"chevrons-up-down",className:"w-3 h-3 ml-1 opacity-30"});return sortOrder==="asc"?/*#__PURE__*/React.createElement(Icon,{name:"chevron-up",className:"w-3 h-3 ml-1 text-blue-400"}):/*#__PURE__*/React.createElement(Icon,{name:"chevron-down",className:"w-3 h-3 ml-1 text-blue-400"});};// ── Filtering / Sorting ───────────────────────────
-const getFilteredSortedData=()=>{let items=[...listData];const q=searchQuery.toLowerCase().trim();items=items.filter(item=>{if(currentTab==="iam"){if(subTab==="roles")return q===""||item.role_name?.toLowerCase().includes(q)||item.description?.toLowerCase().includes(q);if(subTab==="facial-recognition"){const mQ=q===""||item.full_name?.toLowerCase().includes(q)||item.email?.toLowerCase().includes(q)||String(item.user_id).includes(q);const mR=faceRoleFilter==="ALL"||userHasRole(item,faceRoleFilter);const mS=faceStatusFilter==="ALL"||(faceStatusFilter==="ENROLLED"?!!item.face_vector:!item.face_vector);return mQ&&mR&&mS;}if(subTab==="users"){const mQ=q===""||item.full_name?.toLowerCase().includes(q)||item.email?.toLowerCase().includes(q)||String(item.user_id).includes(q)||item.student?.student_id?.toLowerCase().includes(q)||item.lecturer?.lecturer_id?.toLowerCase().includes(q)||item.staff?.staff_id?.toLowerCase().includes(q);const mR=roleFilter==="ALL"||userHasRole(item,roleFilter);const mS=statusFilter==="ALL"||(statusFilter==="ACTIVE"?item.is_active:!item.is_active);return mQ&&mR&&mS;}}if(currentTab==="rag"){if(subTab==="documents"){const matchesQuery=q===""||item.title?.toLowerCase().includes(q)||item.filename?.toLowerCase().includes(q);const roles=item.allowed_roles&&item.allowed_roles.length>0?item.allowed_roles:item.access_level==="PUBLIC"?["VISITOR"]:[item.access_level||"VISITOR"];const isUniversal=roles.includes("VISITOR")||roles.includes("PUBLIC");const matchesRole=accessLevelFilter==="ALL"||accessLevelFilter==="VISITOR"&&isUniversal||roles.includes(accessLevelFilter)||isUniversal;return matchesQuery&&matchesRole;}if(subTab==="chunks"){const matchesQuery=q===""||item.chunk_text?.toLowerCase().includes(q);const roles=item.allowed_roles&&item.allowed_roles.length>0?item.allowed_roles:item.access_level==="PUBLIC"?["VISITOR"]:[item.access_level||"VISITOR"];const isUniversal=roles.includes("VISITOR")||roles.includes("PUBLIC");const matchesRole=accessLevelFilter==="ALL"||accessLevelFilter==="VISITOR"&&isUniversal||roles.includes(accessLevelFilter)||isUniversal;return matchesQuery&&matchesRole;}if(subTab==="chatbot-queries"){const matchesQuery=q===""||item.query_text?.toLowerCase().includes(q)||item.response_text?.toLowerCase().includes(q)||item.user_name?.toLowerCase().includes(q)||item.user_email?.toLowerCase().includes(q);const matchesRole=roleFilter==="ALL"||item.user_role?.toUpperCase()===roleFilter.toUpperCase()||roleFilter==="VISITOR"&&(!item.user_role||item.user_role==="VISITOR");const matchesNav=accessLevelFilter==="ALL"||accessLevelFilter==="NAV"&&item.is_navigational||accessLevelFilter==="INFO"&&!item.is_navigational;return matchesQuery&&matchesRole&&matchesNav;}if(subTab==="adaptation-phrases"){return q===""||item.phrase?.toLowerCase().includes(q)||item.description?.toLowerCase().includes(q);}if(subTab==="speech-languages"){return q===""||item.language_name?.toLowerCase().includes(q)||item.language_code?.toLowerCase().includes(q);}}if(currentTab==="infra"){if(subTab==="devices")return q===""||item.device_name?.toLowerCase().includes(q)||item.device_id?.toLowerCase().includes(q);if(subTab==="auth-logs")return q===""||item.email?.toLowerCase().includes(q)||item.auth_status?.toLowerCase().includes(q);if(subTab==="jwt-sessions")return q===""||item.user?.email?.toLowerCase().includes(q)||item.ip_address?.toLowerCase().includes(q);}if(currentTab==="academics"){if(subTab==="courses")return q===""||item.course_name?.toLowerCase().includes(q)||item.course_code?.toLowerCase().includes(q);if(subTab==="enrollments")return q===""||item.student_id?.toLowerCase().includes(q);if(subTab==="appointments")return q===""||item.purpose?.toLowerCase().includes(q)||item.status?.toLowerCase().includes(q);if(subTab==="notifications")return q===""||item.title?.toLowerCase().includes(q)||item.body?.toLowerCase().includes(q);if(subTab==="faculties")return q===""||item.faculty_name?.toLowerCase().includes(q)||item.faculty_id?.toLowerCase().includes(q);if(subTab==="departments")return q===""||item.department_name?.toLowerCase().includes(q)||item.department_id?.toLowerCase().includes(q);if(subTab==="programmes")return q===""||item.programme_name?.toLowerCase().includes(q)||item.programme_id?.toLowerCase().includes(q);}return true;});if(sortKey){items.sort((a,b)=>{let vA=a[sortKey]??"",vB=b[sortKey]??"";if(typeof vA==="string")vA=vA.toLowerCase();if(typeof vB==="string")vB=vB.toLowerCase();if(vA<vB)return sortOrder==="asc"?-1:1;if(vA>vB)return sortOrder==="asc"?1:-1;return 0;});}return items;};const processedData=useMemo(()=>getFilteredSortedData(),[listData,searchQuery,currentTab,subTab,roleFilter,statusFilter,accessLevelFilter,faceStatusFilter,faceRoleFilter,sortKey,sortOrder]);const totalItems=processedData.length;const totalPages=Math.ceil(totalItems/itemsPerPage)||1;const pageToRender=Math.min(currentPage,totalPages);const startIndex=(pageToRender-1)*itemsPerPage;const paginatedData=processedData.slice(startIndex,startIndex+itemsPerPage);// ── Pagination render ─────────────────────────────
-const renderPagination=()=>{if(totalItems<=itemsPerPage)return null;return/*#__PURE__*/React.createElement("div",{className:"flex flex-col sm:flex-row justify-between items-center gap-4 mt-6 bg-slate-900/30 border border-slate-800 p-4 rounded-2xl"},/*#__PURE__*/React.createElement("span",{className:"text-xs text-slate-500"},"Showing ",/*#__PURE__*/React.createElement("span",{className:"text-white font-bold"},startIndex+1),"\u2013",/*#__PURE__*/React.createElement("span",{className:"text-white font-bold"},Math.min(startIndex+itemsPerPage,totalItems))," of ",/*#__PURE__*/React.createElement("span",{className:"text-white font-bold"},totalItems)," records"),/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-1"},[["chevrons-left",1],["chevron-left",Math.max(pageToRender-1,1)]].map(([ic,pg],i)=>/*#__PURE__*/React.createElement("button",{key:i,onClick:()=>setCurrentPage(pg),disabled:pageToRender===1,className:"p-2 rounded-xl bg-slate-800 border border-slate-700/50 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all"},/*#__PURE__*/React.createElement(Icon,{name:ic,className:"w-4 h-4"}))),Array.from({length:Math.min(5,totalPages)},(_,i)=>{let pn=pageToRender<=3?i+1:pageToRender>=totalPages-2?totalPages-4+i:pageToRender-2+i;if(pn<1||pn>totalPages)return null;return/*#__PURE__*/React.createElement("button",{key:pn,onClick:()=>setCurrentPage(pn),className:`w-9 h-9 rounded-xl text-xs font-bold transition-all ${pageToRender===pn?'bg-blue-600 text-white shadow-lg shadow-blue-900/30':'bg-slate-800 border border-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-white'}`},pn);}),[["chevron-right",Math.min(pageToRender+1,totalPages)],["chevrons-right",totalPages]].map(([ic,pg],i)=>/*#__PURE__*/React.createElement("button",{key:i,onClick:()=>setCurrentPage(pg),disabled:pageToRender===totalPages,className:"p-2 rounded-xl bg-slate-800 border border-slate-700/50 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all"},/*#__PURE__*/React.createElement(Icon,{name:ic,className:"w-4 h-4"})))));};// ── Camera frame polling ──────────────────────────
-useEffect(()=>{let active=true,timerId=null;const validPoses=["front"];async function pollFrame(){if(!active||enrollMethod!=='live'||!liveScanActive||!cameraStream||!selectedItem)return;if(!videoRef.current||!canvasRef.current){timerId=setTimeout(pollFrame,500);return;}const ctx=canvasRef.current.getContext('2d');ctx.drawImage(videoRef.current,0,0,canvasRef.current.width,canvasRef.current.height);canvasRef.current.toBlob(async blob=>{if(!blob){if(active)timerId=setTimeout(pollFrame,500);return;}const fd=new FormData();fd.append("file",new File([blob],"frame.jpg",{type:"image/jpeg"}));try{const r=await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/frame?target_pose=${validPoses[activeCameraPoseIndex]}`,{method:"POST",headers:{"Authorization":`Bearer ${token}`},body:fd});const d=await r.json();if(!active)return;if(d.success){setLiveFeedback("Pose captured!");if(activeCameraPoseIndex<validPoses.length-1)setActiveCameraPoseIndex(p=>p+1);else{setLiveScanActive(false);await completeLiveEnrollment();}}else{setLiveFeedback(d.guidance||"Adjust your pose and try again.");}}catch(e){console.error("Poll error:",e);}finally{if(active)timerId=setTimeout(pollFrame,800);}},"image/jpeg",0.85);}if(enrollMethod==='live'&&liveScanActive&&cameraStream&&selectedItem)timerId=setTimeout(pollFrame,200);return()=>{active=false;if(timerId)clearTimeout(timerId);};},[enrollMethod,liveScanActive,cameraStream,activeCameraPoseIndex,selectedItem]);useEffect(()=>{if(cameraStream&&videoRef.current){videoRef.current.srcObject=cameraStream;videoRef.current.play().catch(e=>console.warn("Video play exception:",e));}},[cameraStream]);// ── Render modal form ─────────────────────────────
-const renderModalForm=()=>{if(modalType==="view-chatbot-query"&&selectedItem){return/*#__PURE__*/React.createElement("div",{className:"space-y-5 text-sm"},/*#__PURE__*/React.createElement("div",{className:"bg-slate-950/60 p-4 rounded-2xl border border-slate-800 space-y-3"},/*#__PURE__*/React.createElement("div",{className:"flex items-center justify-between"},/*#__PURE__*/React.createElement("span",{className:"text-xs font-bold text-slate-400 uppercase tracking-wider"},"User / Requester"),/*#__PURE__*/React.createElement("span",{className:`px-2.5 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider border ${selectedItem.user_role==='ADMIN'?'bg-amber-500/10 text-amber-400 border-amber-500/20':selectedItem.user_role==='LECTURER'?'bg-violet-500/10 text-violet-400 border-violet-500/20':selectedItem.user_role==='STUDENT'?'bg-emerald-500/10 text-emerald-400 border-emerald-500/20':selectedItem.user_role==='STAFF'?'bg-sky-500/10 text-sky-400 border-sky-500/20':'bg-slate-800 text-slate-400 border-slate-700/50'}`},selectedItem.user_role||"VISITOR")),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("p",{className:"font-bold text-slate-100 text-base"},selectedItem.user_name||"Anonymous Visitor"),selectedItem.user_email&&/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-400 font-mono mt-0.5"},selectedItem.user_email),selectedItem.user_id&&/*#__PURE__*/React.createElement("p",{className:"text-[11px] text-slate-500 font-mono mt-0.5"},"User ID: #",selectedItem.user_id," ",selectedItem.session_id?`• Session ID: #${selectedItem.session_id}`:''))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5"},"Question Asked"),/*#__PURE__*/React.createElement("div",{className:"bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-slate-100 text-sm font-medium leading-relaxed"},selectedItem.query_text)),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5"},"Chatbot Response"),/*#__PURE__*/React.createElement("div",{className:"bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-slate-300 text-xs font-normal leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap"},selectedItem.response_text||"No response recorded.")),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 sm:grid-cols-3 gap-3"},/*#__PURE__*/React.createElement("div",{className:"bg-slate-950/40 border border-slate-800/80 rounded-xl p-3"},/*#__PURE__*/React.createElement("span",{className:"text-[10px] text-slate-500 uppercase tracking-wider block mb-1"},"Response Time"),/*#__PURE__*/React.createElement("span",{className:"text-xs font-mono font-bold text-indigo-400"},selectedItem.response_time_ms?`${selectedItem.response_time_ms} ms`:'N/A')),/*#__PURE__*/React.createElement("div",{className:"bg-slate-950/40 border border-slate-800/80 rounded-xl p-3"},/*#__PURE__*/React.createElement("span",{className:"text-[10px] text-slate-500 uppercase tracking-wider block mb-1"},"Intent / Type"),/*#__PURE__*/React.createElement("span",{className:"text-xs font-bold text-slate-300"},selectedItem.is_navigational?'Navigation':'Information')),/*#__PURE__*/React.createElement("div",{className:"bg-slate-950/40 border border-slate-800/80 rounded-xl p-3 col-span-2 sm:col-span-1"},/*#__PURE__*/React.createElement("span",{className:"text-[10px] text-slate-500 uppercase tracking-wider block mb-1"},"Source Chunks"),/*#__PURE__*/React.createElement("span",{className:"text-xs font-mono text-slate-300"},selectedItem.retrieved_chunks?.length?`${selectedItem.retrieved_chunks.length} chunk${selectedItem.retrieved_chunks.length>1?'s':''}`:'None'))),/*#__PURE__*/React.createElement("div",{className:"flex justify-between items-center text-xs text-slate-500 font-mono pt-2 border-t border-slate-800"},/*#__PURE__*/React.createElement("span",null,"Query ID: #",selectedItem.query_id),/*#__PURE__*/React.createElement("span",null,selectedItem.timestamp?new Date(selectedItem.timestamp).toLocaleString():'')),/*#__PURE__*/React.createElement("div",{className:"pt-2"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:()=>setShowModal(false),className:"w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition-colors"},"Close Details")));}if(subTab==="users")return/*#__PURE__*/React.createElement(UserForm,{item:selectedItem,roles:refs.roles,nodes:refs.nodes,programmes:refs.programmes,faculties:refs.faculties,departments:refs.departments,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(subTab==="roles")return/*#__PURE__*/React.createElement(RoleForm,{item:selectedItem,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(currentTab==="rag"&&subTab==="documents")return/*#__PURE__*/React.createElement(DocumentForm,{item:selectedItem,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(currentTab==="rag"&&subTab==="adaptation-phrases")return/*#__PURE__*/React.createElement(SpeechAdaptationPhraseForm,{item:selectedItem,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(currentTab==="rag"&&subTab==="speech-languages")return/*#__PURE__*/React.createElement(SpeechLanguageForm,{item:selectedItem,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(currentTab==="infra"&&subTab==="devices")return/*#__PURE__*/React.createElement(DeviceForm,{item:selectedItem,nodes:refs.nodes,roles:refs.roles,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(currentTab==="infra"&&subTab==="node-rbac")return/*#__PURE__*/React.createElement(NodeRBACForm,{nodes:refs.nodes,roles:refs.roles,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(currentTab==="infra"&&subTab==="edge-rbac")return/*#__PURE__*/React.createElement(EdgeRBACForm,{edges:refs.edges,roles:refs.roles,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(currentTab==="academics"&&subTab==="courses")return/*#__PURE__*/React.createElement(CourseForm,{item:selectedItem,programmes:refs.programmes,faculties:refs.faculties,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(currentTab==="academics"&&subTab==="enrollments")return/*#__PURE__*/React.createElement(EnrollmentForm,{item:selectedItem,courses:refs.courses,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(currentTab==="academics"&&subTab==="timetables")return/*#__PURE__*/React.createElement(TimetableForm,{item:selectedItem,nodes:refs.nodes,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(currentTab==="academics"&&subTab==="appointments")return/*#__PURE__*/React.createElement(AppointmentForm,{item:selectedItem,nodes:refs.nodes,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(currentTab==="academics"&&subTab==="faculties")return/*#__PURE__*/React.createElement(FacultyForm,{item:selectedItem,staff:refs.staff,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(currentTab==="academics"&&subTab==="departments")return/*#__PURE__*/React.createElement(DepartmentForm,{item:selectedItem,staff:refs.staff,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});if(currentTab==="academics"&&subTab==="programmes")return/*#__PURE__*/React.createElement(ProgrammeForm,{item:selectedItem,staff:refs.staff,faculties:refs.faculties,onSubmit:handleFormSubmit,onCancel:()=>setShowModal(false)});return/*#__PURE__*/React.createElement("div",{className:"text-slate-400 text-sm py-4 text-center"},"Form not configured for this section.");};// ============================================================
-// UNAUTHENTICATED: LOGIN PAGE
-// ============================================================
-if(!token){return/*#__PURE__*/React.createElement("div",{className:"min-h-screen flex items-center justify-center bg-slate-950 px-4 relative overflow-hidden"},/*#__PURE__*/React.createElement("div",{className:"absolute inset-0 pointer-events-none overflow-hidden"},/*#__PURE__*/React.createElement("div",{className:"absolute top-[-15%] left-[-10%] w-[55%] h-[55%] bg-blue-900/10 rounded-full blur-[120px]"}),/*#__PURE__*/React.createElement("div",{className:"absolute bottom-[-15%] right-[-10%] w-[55%] h-[55%] bg-indigo-900/10 rounded-full blur-[120px]"})),/*#__PURE__*/React.createElement("div",{className:"w-full max-w-md relative z-10"},/*#__PURE__*/React.createElement("div",{className:"text-center mb-8"},/*#__PURE__*/React.createElement("div",{className:"inline-flex p-4 bg-blue-600/10 border border-blue-500/20 text-blue-400 rounded-2xl mb-5 shadow-lg shadow-blue-900/10"},/*#__PURE__*/React.createElement(Icon,{name:"graduation-cap",className:"w-10 h-10"})),/*#__PURE__*/React.createElement("h1",{className:"text-3xl font-extrabold text-slate-100 tracking-tight"},"Smart Campus"),/*#__PURE__*/React.createElement("p",{className:"text-slate-400 text-sm mt-2 font-medium"},"Admin Management Portal")),/*#__PURE__*/React.createElement("div",{className:"bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl"},/*#__PURE__*/React.createElement("h2",{className:"text-lg font-bold text-slate-100 mb-0.5"},"Welcome back"),/*#__PURE__*/React.createElement("p",{className:"text-slate-500 text-sm mb-6"},"Sign in to manage your campus systems"),/*#__PURE__*/React.createElement("form",{onSubmit:handleLogin,className:"space-y-5"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider"},"Email"),/*#__PURE__*/React.createElement("div",{className:"relative"},/*#__PURE__*/React.createElement("span",{className:"absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-600"},/*#__PURE__*/React.createElement(Icon,{name:"user",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("input",{type:"email",required:true,value:loginEmail,onChange:e=>setLoginEmail(e.target.value),placeholder:"Enter your email",className:"w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-slate-100 focus:outline-none focus:border-blue-500 placeholder-slate-700 text-sm transition-all duration-200"}))),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("label",{className:"block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider"},"Password"),/*#__PURE__*/React.createElement("div",{className:"relative"},/*#__PURE__*/React.createElement("span",{className:"absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-600"},/*#__PURE__*/React.createElement(Icon,{name:"lock",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("input",{type:"password",required:true,value:loginPass,onChange:e=>setLoginPass(e.target.value),placeholder:"Enter your password",className:"w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-slate-100 focus:outline-none focus:border-blue-500 placeholder-slate-700 text-sm transition-all duration-200"})),loginError&&/*#__PURE__*/React.createElement("div",{className:"mt-2.5 flex items-center gap-2 text-red-400 text-xs bg-red-900/10 border border-red-900/20 rounded-xl px-3 py-2.5"},/*#__PURE__*/React.createElement(Icon,{name:"alert-circle",className:"w-3.5 h-3.5 shrink-0"}),/*#__PURE__*/React.createElement("span",null,loginError))),/*#__PURE__*/React.createElement("button",{type:"submit",disabled:loginLoading,className:"w-full bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold py-3 px-4 rounded-xl transition-all duration-200 shadow-lg shadow-blue-900/30 flex justify-center items-center gap-2 text-sm mt-2"},loginLoading?/*#__PURE__*/React.createElement("div",{className:"w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"}):/*#__PURE__*/React.createElement(React.Fragment,null,/*#__PURE__*/React.createElement(Icon,{name:"log-in",className:"w-4 h-4"}),/*#__PURE__*/React.createElement("span",null,"Sign In")))),/*#__PURE__*/React.createElement("div",{className:"mt-6 pt-5 border-t border-slate-800"},/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-3 gap-3"},[{icon:"shield-check",label:"Secure Access"},{icon:"users",label:"User Management"},{icon:"cpu",label:"IoT Monitoring"}].map((f,i)=>/*#__PURE__*/React.createElement("div",{key:i,className:"flex flex-col items-center gap-1.5"},/*#__PURE__*/React.createElement("div",{className:"p-2 bg-slate-800 border border-slate-700/50 rounded-xl text-slate-400"},/*#__PURE__*/React.createElement(Icon,{name:f.icon,className:"w-4 h-4"})),/*#__PURE__*/React.createElement("span",{className:"text-[10px] text-slate-600 font-medium text-center leading-tight"},f.label))))))),toast&&/*#__PURE__*/React.createElement(Toast,{message:toast.message,type:toast.type,onClose:()=>setToast(null)}));}// ── Privilege check ───────────────────────────────
-const isTabDisabled=tabName=>{if(adminType!=='SUPER_ADMIN'&&(tabName==='infra'||tabName==='mapping'))return true;if(adminType==='CONTENT_ADMIN'&&tabName!=='rag'&&tabName!=='overview')return true;if(adminType==='SYSTEM_ADMIN'&&tabName==='rag')return true;return false;};const navItems=[{id:"overview",label:"Overview",icon:"layout-dashboard",section:"main"},{id:"iam",label:"User Management",icon:"users",section:"manage"},{id:"rag",label:"Knowledge Base",icon:"book-open",section:"manage"},{id:"infra",label:"Devices & Security",icon:"shield",section:"manage"},{id:"academics",label:"Scheduling",icon:"calendar",section:"manage"},{id:"mapping",label:"Campus Map",icon:"map",section:"manage"}];// ============================================================
-// AUTHENTICATED: MAIN LAYOUT
-// ============================================================
-return/*#__PURE__*/React.createElement("div",{className:"min-h-screen flex bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30"},/*#__PURE__*/React.createElement("aside",{className:`bg-slate-950 border-r border-slate-800 flex flex-col justify-between shrink-0 z-20 transition-all duration-300 ${sidebarCollapsed?'w-[72px]':'w-[280px]'}`},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("div",{className:"h-[72px] px-4 border-b border-slate-800 flex items-center justify-between gap-3"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-3 overflow-hidden"},/*#__PURE__*/React.createElement("div",{className:"w-10 h-10 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-xl flex items-center justify-center shrink-0"},/*#__PURE__*/React.createElement(Icon,{name:"graduation-cap",className:"w-5 h-5"})),!sidebarCollapsed&&/*#__PURE__*/React.createElement("div",{className:"overflow-hidden flex flex-col justify-center"},/*#__PURE__*/React.createElement("h1",{className:"font-extrabold text-[14px] text-slate-100 tracking-wide leading-none whitespace-nowrap"},"Smart Campus"),/*#__PURE__*/React.createElement("span",{className:"text-[10px] text-indigo-400 font-bold tracking-widest uppercase mt-1"},"Admin Portal"))),!sidebarCollapsed&&/*#__PURE__*/React.createElement("button",{onClick:()=>setSidebarCollapsed(true),className:"p-1.5 hover:bg-slate-800 rounded-lg text-slate-500 hover:text-slate-300 transition-colors shrink-0"},/*#__PURE__*/React.createElement(Icon,{name:"chevron-left",className:"w-4 h-4"}))),/*#__PURE__*/React.createElement("nav",{className:"p-4 space-y-1 mt-2"},sidebarCollapsed&&/*#__PURE__*/React.createElement("div",{className:"flex justify-center mb-6"},/*#__PURE__*/React.createElement("button",{onClick:()=>setSidebarCollapsed(false),className:"p-1.5 hover:bg-slate-800 rounded-lg text-slate-500 hover:text-slate-300 transition-colors"},/*#__PURE__*/React.createElement(Icon,{name:"chevron-right",className:"w-4 h-4"}))),!sidebarCollapsed&&/*#__PURE__*/React.createElement("p",{className:"text-[11px] font-bold text-slate-500 uppercase tracking-wider px-3 pb-2"},"Main"),navItems.filter(n=>n.section==='main').map(n=>!isTabDisabled(n.id)&&/*#__PURE__*/React.createElement("button",{key:n.id,onClick:()=>setCurrentTab(n.id),title:sidebarCollapsed?n.label:"",className:`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 group relative ${sidebarCollapsed?'justify-center':''} ${currentTab===n.id?'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20':'text-slate-400 hover:text-slate-100 hover:bg-slate-800/50 border border-transparent'}`},currentTab===n.id&&/*#__PURE__*/React.createElement("div",{className:"absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-indigo-500 rounded-r-full"}),/*#__PURE__*/React.createElement(Icon,{name:n.icon,className:`w-5 h-5 shrink-0 ${currentTab===n.id?'text-indigo-400':'text-slate-500 group-hover:text-slate-300'}`}),!sidebarCollapsed&&/*#__PURE__*/React.createElement("span",null,n.label))),!sidebarCollapsed?/*#__PURE__*/React.createElement("p",{className:"text-[11px] font-bold text-slate-500 uppercase tracking-wider px-3 pt-6 pb-2"},"Manage"):/*#__PURE__*/React.createElement("div",{className:"border-t border-slate-800/80 my-4 mx-2"}),navItems.filter(n=>n.section==='manage').map(n=>!isTabDisabled(n.id)&&/*#__PURE__*/React.createElement("button",{key:n.id,onClick:()=>setCurrentTab(n.id),title:sidebarCollapsed?n.label:"",className:`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 group relative ${sidebarCollapsed?'justify-center':''} ${currentTab===n.id?'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20':'text-slate-400 hover:text-slate-100 hover:bg-slate-800/50 border border-transparent'}`},currentTab===n.id&&/*#__PURE__*/React.createElement("div",{className:"absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-indigo-500 rounded-r-full"}),/*#__PURE__*/React.createElement(Icon,{name:n.icon,className:`w-5 h-5 shrink-0 ${currentTab===n.id?'text-indigo-400':'text-slate-500 group-hover:text-slate-300'}`}),!sidebarCollapsed&&/*#__PURE__*/React.createElement("span",null,n.label))))),/*#__PURE__*/React.createElement("div",{className:"p-4 border-t border-slate-800 bg-slate-950/50"},/*#__PURE__*/React.createElement("div",{className:`flex items-center gap-3 mb-4 ${sidebarCollapsed?'justify-center':'px-2'}`},/*#__PURE__*/React.createElement("div",{className:"w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-white text-sm shrink-0 shadow-md border-2 border-slate-800"},fullName?fullName.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase():"AD"),!sidebarCollapsed&&/*#__PURE__*/React.createElement("div",{className:"overflow-hidden flex flex-col justify-center"},/*#__PURE__*/React.createElement("p",{className:"text-sm font-bold text-slate-200 truncate"},fullName||"Admin User"),/*#__PURE__*/React.createElement("span",{className:"text-[10px] text-slate-500 font-semibold uppercase tracking-wider"},adminType.replace("_"," ")))),/*#__PURE__*/React.createElement("div",{className:`flex ${sidebarCollapsed?'flex-col':'gap-2'}`},/*#__PURE__*/React.createElement("button",{onClick:toggleTheme,title:sidebarCollapsed?theme==='dark'?"Light Mode":"Dark Mode":"",className:`flex-1 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 py-2.5 rounded-xl text-xs flex justify-center items-center transition-all border border-slate-800 ${sidebarCollapsed?'mb-2':''}`},/*#__PURE__*/React.createElement(Icon,{name:theme==='dark'?"sun":"moon",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:handleLogout,title:sidebarCollapsed?"Sign Out":"",className:"flex-1 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-red-400 py-2.5 rounded-xl text-xs flex justify-center items-center transition-all border border-slate-800"},/*#__PURE__*/React.createElement(Icon,{name:"log-out",className:"w-4 h-4"}))))),/*#__PURE__*/React.createElement("div",{className:"flex-1 flex flex-col min-w-0 h-screen overflow-hidden bg-slate-900 relative"},/*#__PURE__*/React.createElement("header",{className:"h-[72px] shrink-0 border-b border-slate-800/60 bg-slate-900/80 backdrop-blur-md px-8 flex items-center justify-between z-10"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-3 text-sm"},/*#__PURE__*/React.createElement("span",{className:"text-slate-500 font-medium"},navItems.find(n=>n.id===currentTab)?.section==='main'?'Main':'Manage'),/*#__PURE__*/React.createElement(Icon,{name:"chevron-right",className:"w-3.5 h-3.5 text-slate-600"}),/*#__PURE__*/React.createElement("span",{className:"text-slate-200 font-bold"},navItems.find(n=>n.id===currentTab)?.label)),/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-4"},/*#__PURE__*/React.createElement("div",{className:"hidden md:flex items-center gap-2 text-xs bg-slate-800/50 border border-slate-700/50 px-3 py-1.5 rounded-full text-slate-400"},/*#__PURE__*/React.createElement("span",{className:"w-2 h-2 rounded-full bg-emerald-500"}),/*#__PURE__*/React.createElement("span",null,"System Online")),/*#__PURE__*/React.createElement("button",{className:"relative p-2 text-slate-400 hover:text-slate-200 transition-colors"},/*#__PURE__*/React.createElement(Icon,{name:"bell",className:"w-5 h-5"}),/*#__PURE__*/React.createElement("span",{className:"absolute top-1.5 right-1.5 w-2 h-2 bg-indigo-500 rounded-full border-2 border-slate-900"})))),/*#__PURE__*/React.createElement("main",{className:"flex-1 overflow-y-auto p-6 md:p-8 relative scrollbar-thin"},/*#__PURE__*/React.createElement("div",{className:"max-w-[1600px] mx-auto"},currentTab==="overview"&&/*#__PURE__*/React.createElement("div",{className:"space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out"},/*#__PURE__*/React.createElement("div",{className:"flex flex-col sm:flex-row justify-between sm:items-end gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("h1",{className:"text-3xl font-extrabold text-slate-100 tracking-tight"},"Overview"),/*#__PURE__*/React.createElement("p",{className:"text-slate-400 text-sm mt-1"},"Here's a summary of your Smart Campus today.")),/*#__PURE__*/React.createElement("div",{className:"text-right"},/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-500 font-medium mb-1"},"Today's Date"),/*#__PURE__*/React.createElement("p",{className:"text-sm text-slate-300 font-bold"},new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"},adminType!=='CONTENT_ADMIN'&&/*#__PURE__*/React.createElement(StatCard,{title:"Total Users",value:dashboardStats.users,icon:"users",changeText:"+12 this week",color:"blue"}),adminType!=='CONTENT_ADMIN'&&/*#__PURE__*/React.createElement(StatCard,{title:"IoT Devices",value:dashboardStats.devices,icon:"cpu",changeText:"1 offline",color:"indigo"}),adminType!=='SYSTEM_ADMIN'&&/*#__PURE__*/React.createElement(StatCard,{title:"Knowledge Docs",value:dashboardStats.documents,icon:"book-open",changeText:"+3 this month",color:"violet"}),adminType!=='CONTENT_ADMIN'&&/*#__PURE__*/React.createElement(StatCard,{title:"Active Courses",value:dashboardStats.courses,icon:"graduation-cap",changeText:"Ongoing semester",color:"emerald"})),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 lg:grid-cols-3 gap-8"},/*#__PURE__*/React.createElement("div",{className:"lg:col-span-2 bg-slate-800/30 border border-slate-700/50 rounded-2xl p-6 shadow-sm"},/*#__PURE__*/React.createElement("div",{className:"flex items-center justify-between mb-6"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-3"},/*#__PURE__*/React.createElement("div",{className:"p-2 bg-emerald-500/10 text-emerald-400 rounded-xl"},/*#__PURE__*/React.createElement(Icon,{name:"activity",className:"w-5 h-5"})),/*#__PURE__*/React.createElement("h3",{className:"text-lg font-bold text-slate-100"},"System Status")),/*#__PURE__*/React.createElement("button",{className:"text-xs text-indigo-400 font-semibold hover:text-indigo-300 transition-colors"},"View Logs")),/*#__PURE__*/React.createElement("div",{className:"space-y-4"},[{status:"ok",title:"Database Connection",desc:"MySQL server is online and responding normally.",ping:"12ms"},{status:"ok",title:"Security Check",desc:"JWT token integrity and session logs are verified.",ping:"8ms"},{status:"ok",title:"API Services",desc:"All backend routes are healthy and responding.",ping:"24ms"}].map((s,i)=>/*#__PURE__*/React.createElement("div",{key:i,className:"flex items-center justify-between p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:bg-slate-700/30 transition-colors"},/*#__PURE__*/React.createElement("div",{className:"flex gap-4 items-start"},/*#__PURE__*/React.createElement("span",{className:`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${s.status==='ok'?'bg-emerald-500':'bg-red-500'}`}),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("p",{className:"text-sm font-bold text-slate-200"},s.title),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-400 mt-0.5"},s.desc))),/*#__PURE__*/React.createElement("span",{className:"text-[10px] font-mono text-slate-500 bg-slate-900 px-2 py-1 rounded-md"},s.ping))))),/*#__PURE__*/React.createElement("div",{className:"bg-slate-800/30 border border-slate-700/50 rounded-2xl p-6 shadow-sm"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-3 mb-6"},/*#__PURE__*/React.createElement("div",{className:"p-2 bg-indigo-500/10 text-indigo-400 rounded-xl"},/*#__PURE__*/React.createElement(Icon,{name:"shield-check",className:"w-5 h-5"})),/*#__PURE__*/React.createElement("h3",{className:"text-lg font-bold text-slate-100"},"My Access")),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-400 mb-6 leading-relaxed"},"Your assigned role determines which modules you can view and edit."),/*#__PURE__*/React.createElement("div",{className:"space-y-3"},[{label:"User Management",granted:adminType!=='CONTENT_ADMIN'},{label:"Knowledge Base",granted:adminType!=='SYSTEM_ADMIN'},{label:"Devices & Security",granted:adminType==='SUPER_ADMIN'},{label:"Scheduling",granted:adminType!=='CONTENT_ADMIN'}].map((p,i)=>/*#__PURE__*/React.createElement("div",{key:i,className:"flex justify-between items-center py-3 border-b border-slate-700/50 last:border-0 last:pb-0"},/*#__PURE__*/React.createElement("span",{className:"text-sm text-slate-300 font-medium"},p.label),/*#__PURE__*/React.createElement("span",{className:`text-[10px] font-bold px-2.5 py-1 rounded-lg ${p.granted?'bg-emerald-500/10 text-emerald-400':'bg-red-500/10 text-red-400'}`},p.granted?"Allowed":"Restricted")))))),/*#__PURE__*/React.createElement("div",{className:"bg-slate-800/30 border border-slate-700/50 rounded-2xl p-6 shadow-sm"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-3 mb-6"},/*#__PURE__*/React.createElement("div",{className:"p-2 bg-amber-500/10 text-amber-400 rounded-xl"},/*#__PURE__*/React.createElement(Icon,{name:"zap",className:"w-5 h-5"})),/*#__PURE__*/React.createElement("h3",{className:"text-lg font-bold text-slate-100"},"Quick Actions")),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-2 sm:grid-cols-4 gap-4"},[{tab:"iam",label:"Add User",icon:"user-plus",color:"blue",disabled:adminType==='CONTENT_ADMIN'},{tab:"rag",label:"Upload Document",icon:"upload",color:"violet",disabled:adminType==='SYSTEM_ADMIN'},{tab:"infra",label:"View Devices",icon:"cpu",color:"indigo",disabled:adminType!=='SUPER_ADMIN'},{tab:"academics",label:"Manage Courses",icon:"book-open",color:"emerald",disabled:adminType==='CONTENT_ADMIN'}].map((a,i)=>/*#__PURE__*/React.createElement("button",{key:i,onClick:()=>!a.disabled&&setCurrentTab(a.tab),disabled:a.disabled,className:`flex items-center gap-3 p-4 rounded-xl border text-left transition-all duration-200 ${a.disabled?'opacity-30 cursor-not-allowed border-slate-800 bg-slate-900/50':'border-slate-700 bg-slate-800 hover:bg-slate-700 hover:border-slate-600 cursor-pointer shadow-sm hover:shadow-md'}`},/*#__PURE__*/React.createElement("div",{className:`p-2.5 rounded-lg bg-${a.color}-500/20 text-${a.color}-400 shrink-0`},/*#__PURE__*/React.createElement(Icon,{name:a.icon,className:"w-5 h-5"})),/*#__PURE__*/React.createElement("span",{className:"text-sm font-bold text-slate-200 leading-tight"},a.label)))))),currentTab==="iam"&&/*#__PURE__*/React.createElement("div",{className:"animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out"},/*#__PURE__*/React.createElement("div",{className:"flex flex-wrap gap-2 border-b border-slate-800 pb-4 mb-6"},["users","roles","facial-recognition"].map(t=>/*#__PURE__*/React.createElement("button",{key:t,onClick:()=>setSubTab(t),className:`px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 border ${subTab===t?'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-sm':'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800/80 hover:border-slate-700'}`},subTabLabel(t)))),/*#__PURE__*/React.createElement(SectionHeader,{title:subTab==="facial-recognition"?"Face ID Enrollment":subTab==="roles"?"Access Roles":"Users",description:subTab==="roles"?"Manage campus access roles and their permission levels.":subTab==="facial-recognition"?"Set up facial recognition so users can unlock doors automatically.":"Manage all registered users, their profiles, and campus access.",searchVal:searchQuery,onSearchChange:setSearchQuery,onCreateClick:subTab==="facial-recognition"?null:()=>{setSelectedItem(null);setModalType("create");setShowModal(true);},createLabel:subTab==="roles"?"Add Role":"Register User",customAction:subTab==="users"?/*#__PURE__*/React.createElement("div",{className:"flex gap-2 flex-wrap"},/*#__PURE__*/React.createElement("select",{value:roleFilter,onChange:e=>setRoleFilter(e.target.value),className:"bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer"},/*#__PURE__*/React.createElement("option",{value:"ALL"},"All Roles"),refs.roles.map(r=>/*#__PURE__*/React.createElement("option",{key:r.role_id,value:r.role_id},r.role_name))),/*#__PURE__*/React.createElement("select",{value:statusFilter,onChange:e=>setStatusFilter(e.target.value),className:"bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer"},/*#__PURE__*/React.createElement("option",{value:"ALL"},"All Status"),/*#__PURE__*/React.createElement("option",{value:"ACTIVE"},"Active"),/*#__PURE__*/React.createElement("option",{value:"DEACTIVATED"},"Deactivated"))):subTab==="facial-recognition"?/*#__PURE__*/React.createElement("div",{className:"flex gap-2 flex-wrap"},/*#__PURE__*/React.createElement("select",{value:faceStatusFilter,onChange:e=>setFaceStatusFilter(e.target.value),className:"bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer"},/*#__PURE__*/React.createElement("option",{value:"ALL"},"All Users"),/*#__PURE__*/React.createElement("option",{value:"ENROLLED"},"Face ID Enrolled"),/*#__PURE__*/React.createElement("option",{value:"NOT_ENROLLED"},"Not Enrolled")),/*#__PURE__*/React.createElement("select",{value:faceRoleFilter,onChange:e=>setFaceRoleFilter(e.target.value),className:"bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer"},/*#__PURE__*/React.createElement("option",{value:"ALL"},"All Roles"),refs.roles.map(r=>/*#__PURE__*/React.createElement("option",{key:r.role_id,value:r.role_id},r.role_name))),adminType==="SUPER_ADMIN"&&/*#__PURE__*/React.createElement("button",{onClick:handleReembedAll,disabled:reembedding,className:"bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/50 px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 disabled:opacity-50"},reembedding?/*#__PURE__*/React.createElement(React.Fragment,null,/*#__PURE__*/React.createElement("span",{className:"w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"}),/*#__PURE__*/React.createElement("span",null,"Processing...")):/*#__PURE__*/React.createElement(React.Fragment,null,/*#__PURE__*/React.createElement(Icon,{name:"refresh-cw",className:"w-4 h-4"}),/*#__PURE__*/React.createElement("span",null,"Re-process All")))):null}),listLoading?/*#__PURE__*/React.createElement("div",{className:"flex flex-col items-center justify-center py-24 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800"},/*#__PURE__*/React.createElement("div",{className:"w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"}),/*#__PURE__*/React.createElement("span",{className:"text-sm font-semibold"},"Loading data...")):listData.length===0?/*#__PURE__*/React.createElement("div",{className:"flex flex-col items-center justify-center border-2 border-dashed border-slate-800 bg-slate-900/30 rounded-3xl py-24"},/*#__PURE__*/React.createElement("div",{className:"p-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-2xl mb-5"},/*#__PURE__*/React.createElement(Icon,{name:"users",className:"w-8 h-8"})),/*#__PURE__*/React.createElement("h4",{className:"text-base font-bold text-slate-200"},"No records found"),/*#__PURE__*/React.createElement("p",{className:"text-sm text-slate-500 mt-1 max-w-sm text-center"},"Try adjusting your filters or search query, or add a new record to get started.")):/*#__PURE__*/React.createElement("div",{className:"bg-slate-900/80 border border-slate-800 rounded-2xl shadow-sm overflow-hidden backdrop-blur-sm"},/*#__PURE__*/React.createElement("div",{className:"overflow-x-auto"},/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,subTab==="roles"&&/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Role Name"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Description"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Role ID"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions")),subTab==="facial-recognition"&&/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"User Profile"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Face ID Status"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Data Sample"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions")),subTab==="users"&&/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"User Profile"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Identity Details"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Status"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>{if(subTab==="roles")return/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6"},/*#__PURE__*/React.createElement("div",{className:"inline-flex px-2 py-1 rounded-md bg-slate-800 border border-slate-700/50 text-slate-200 uppercase font-mono text-xs font-bold tracking-wider"},item.role_name)),/*#__PURE__*/React.createElement("td",{className:"p-4 text-sm text-slate-400 max-w-xs"},item.description||"—"),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono text-slate-500"},"#",item.role_id),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"},/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setModalType("edit");setShowModal(true);},title:"Edit Role",className:"p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"},/*#__PURE__*/React.createElement(Icon,{name:"edit-3",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),title:"Remove Role",className:"p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"})))));if(subTab==="facial-recognition")return/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-3"},/*#__PURE__*/React.createElement("div",{className:"w-10 h-10 rounded-full bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden shrink-0"},/*#__PURE__*/React.createElement("span",{className:"text-xs font-bold text-slate-300"},((item.given_name?.[0]||"")+(item.family_name?.[0]||"")).toUpperCase()||item.full_name?.slice(0,2).toUpperCase()||"U")),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("div",{className:"font-bold text-slate-200 text-sm flex items-center gap-2"},item.full_name,/*#__PURE__*/React.createElement("span",{className:"text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60"},"ID: #",item.user_id)),/*#__PURE__*/React.createElement("div",{className:"text-xs text-slate-400 font-mono"},item.email),/*#__PURE__*/React.createElement("div",{className:"flex gap-1 mt-1"},(item.roles||[]).map((r,rI)=>/*#__PURE__*/React.createElement("span",{key:rI,className:"text-[10px] font-bold tracking-wider px-1.5 py-0.2 bg-slate-800 text-indigo-300 border border-slate-700/50 rounded uppercase"},r.role_name)))))),/*#__PURE__*/React.createElement("td",{className:"p-4"},item.face_vector||item.face_enrolled?/*#__PURE__*/React.createElement("span",{className:"inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-emerald-400"}),"Enrolled"):/*#__PURE__*/React.createElement("span",{className:"inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 text-slate-400 border border-slate-700/50 rounded-full text-xs font-bold"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-slate-500"}),"Not Enrolled")),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono text-slate-400"},item.face_vector?"512-dim SFace Feature Vector":"No biometric features"),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"},/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setSelectedPhotoFile(null);setUploadedPhoto(null);setPhotoPose("front");setEnrollMethod("photo");setScanStep(0);setScanning(false);setShowFaceModal(true);},title:"Manage Biometrics",className:"p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-indigo-400 rounded-xl transition-all hover:text-white"},/*#__PURE__*/React.createElement(Icon,{name:"scan-face",className:"w-4 h-4"})))));if(subTab==="users"){const studentObj=item.student;const lecturerObj=item.lecturer;const staffObj=item.staff;const visitorObj=item.visitor;const adminObj=item.admin;return/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-3"},/*#__PURE__*/React.createElement("div",{className:"w-10 h-10 rounded-full bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden shrink-0"},/*#__PURE__*/React.createElement("span",{className:"text-xs font-bold text-slate-300"},((item.given_name?.[0]||"")+(item.family_name?.[0]||"")).toUpperCase()||item.full_name?.slice(0,2).toUpperCase()||"U")),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("div",{className:"font-bold text-slate-200 text-sm flex items-center gap-2"},item.full_name,/*#__PURE__*/React.createElement("span",{className:"text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60"},"ID: #",item.user_id)),/*#__PURE__*/React.createElement("div",{className:"text-xs text-slate-400 font-mono"},item.email),/*#__PURE__*/React.createElement("div",{className:"flex flex-wrap gap-1 mt-1"},(item.roles||[]).map((r,rI)=>/*#__PURE__*/React.createElement("span",{key:rI,className:"text-[10px] font-bold tracking-wider px-1.5 py-0.5 bg-indigo-950/80 text-indigo-300 border border-indigo-700/50 rounded uppercase"},r.role_name)))))),/*#__PURE__*/React.createElement("td",{className:"p-4"},/*#__PURE__*/React.createElement("div",{className:"space-y-1"},studentObj&&/*#__PURE__*/React.createElement("div",{className:"text-xs text-slate-300 flex items-center gap-1.5"},/*#__PURE__*/React.createElement(Icon,{name:"graduation-cap",className:"w-3.5 h-3.5 text-indigo-400"}),/*#__PURE__*/React.createElement("span",{className:"font-mono text-indigo-400 font-semibold"},studentObj.student_id),studentObj.program&&/*#__PURE__*/React.createElement("span",{className:"text-slate-400"},"\xB7 ",studentObj.program)),lecturerObj&&/*#__PURE__*/React.createElement("div",{className:"text-xs text-slate-300 flex items-center gap-1.5"},/*#__PURE__*/React.createElement(Icon,{name:"book-open",className:"w-3.5 h-3.5 text-purple-400"}),/*#__PURE__*/React.createElement("span",{className:"font-mono text-purple-400 font-semibold"},lecturerObj.lecturer_id),lecturerObj.Position_desc&&/*#__PURE__*/React.createElement("span",{className:"text-slate-400"},"\xB7 ",lecturerObj.Position_desc)),staffObj&&/*#__PURE__*/React.createElement("div",{className:"text-xs text-slate-300 flex items-center gap-1.5"},/*#__PURE__*/React.createElement(Icon,{name:"briefcase",className:"w-3.5 h-3.5 text-emerald-400"}),/*#__PURE__*/React.createElement("span",{className:"font-mono text-emerald-400 font-semibold"},staffObj.staff_id),staffObj.Position_desc&&/*#__PURE__*/React.createElement("span",{className:"text-slate-400"},"\xB7 ",staffObj.Position_desc)),visitorObj&&/*#__PURE__*/React.createElement("div",{className:"text-xs text-slate-300 flex items-center gap-1.5"},/*#__PURE__*/React.createElement(Icon,{name:"user-check",className:"w-3.5 h-3.5 text-amber-400"}),/*#__PURE__*/React.createElement("span",{className:"font-mono text-amber-400 font-semibold"},visitorObj.id_number),visitorObj.organization&&/*#__PURE__*/React.createElement("span",{className:"text-slate-400"},"\xB7 ",visitorObj.organization)),adminObj&&/*#__PURE__*/React.createElement("div",{className:"text-xs text-slate-300 flex items-center gap-1.5"},/*#__PURE__*/React.createElement(Icon,{name:"shield",className:"w-3.5 h-3.5 text-rose-400"}),/*#__PURE__*/React.createElement("span",{className:"font-mono text-rose-400 font-semibold"},adminObj.admin_id),/*#__PURE__*/React.createElement("span",{className:"text-slate-400"},"\xB7 ",adminObj.admin_type)),!studentObj&&!lecturerObj&&!staffObj&&!visitorObj&&!adminObj&&/*#__PURE__*/React.createElement("span",{className:"text-xs text-slate-500 italic"},"No specific profile assigned"))),/*#__PURE__*/React.createElement("td",{className:"p-4"},/*#__PURE__*/React.createElement("button",{onClick:()=>handleToggleStatus(item),className:`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-all ${item.is_active?'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500 hover:text-white hover:border-emerald-500':'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500 hover:text-white'}`},/*#__PURE__*/React.createElement("span",{className:`w-1.5 h-1.5 rounded-full ${item.is_active?'bg-emerald-400':'bg-red-400'}`}),item.is_active?'Active':'Deactivated')),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"},/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setSelectedPhotoFile(null);setUploadedPhoto(null);setPhotoPose("front");setEnrollMethod("photo");setScanStep(0);setScanning(false);setShowFaceModal(true);},title:"Manage Face ID",className:"p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-indigo-400 rounded-xl transition-all hover:text-white"},/*#__PURE__*/React.createElement(Icon,{name:"scan-face",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setModalType("edit");setShowModal(true);},title:"Edit User",className:"p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"},/*#__PURE__*/React.createElement(Icon,{name:"edit-3",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),title:"Remove User",className:"p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"})))));}return null;}))))),renderPagination()),currentTab==="rag"&&/*#__PURE__*/React.createElement("div",{className:"animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out"},/*#__PURE__*/React.createElement("div",{className:"flex flex-wrap gap-2 border-b border-slate-800 pb-4 mb-6"},DASHBOARD_SUB_TABS.rag.map(t=>/*#__PURE__*/React.createElement("button",{key:t,onClick:()=>setSubTab(t),className:`px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 border ${subTab===t?'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-sm':'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800/80 hover:border-slate-700'}`},subTabLabel(t)))),/*#__PURE__*/React.createElement(SectionHeader,{title:subTab==='documents'?"Uploaded Documents":subTab==='adaptation-phrases'?"Acronyms & Translations":subTab==='speech-languages'?"Supported Languages":"Chatbot Conversations",description:subTab==='documents'?"Upload and manage documents that the campus chatbot uses to answer questions.":subTab==='adaptation-phrases'?"List of campus acronyms and all their language translations.":subTab==='speech-languages'?"Configure recognized campus languages and default voice recognition settings.":"Review and analyze user queries submitted to the chatbot, response quality, and latency.",searchVal:searchQuery,onSearchChange:setSearchQuery,onCreateClick:['documents','adaptation-phrases','speech-languages'].includes(subTab)?()=>{setSelectedItem(null);setModalType("create");setShowModal(true);}:null,createLabel:subTab==='adaptation-phrases'?"Add Acronym":subTab==='speech-languages'?"Add Language":"Upload Document",customAction:subTab==='documents'?/*#__PURE__*/React.createElement("select",{value:accessLevelFilter,onChange:e=>setAccessLevelFilter(e.target.value),className:"bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer"},/*#__PURE__*/React.createElement("option",{value:"ALL"},"All Roles"),/*#__PURE__*/React.createElement("option",{value:"VISITOR"},"Visitor (Public)"),/*#__PURE__*/React.createElement("option",{value:"STUDENT"},"Students"),/*#__PURE__*/React.createElement("option",{value:"LECTURER"},"Lecturers"),/*#__PURE__*/React.createElement("option",{value:"STAFF"},"Staff"),/*#__PURE__*/React.createElement("option",{value:"ADMIN"},"Admins")):subTab==='chatbot-queries'?/*#__PURE__*/React.createElement("div",{className:"flex flex-wrap items-center gap-2"},/*#__PURE__*/React.createElement("select",{value:roleFilter,onChange:e=>setRoleFilter(e.target.value),className:"bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer"},/*#__PURE__*/React.createElement("option",{value:"ALL"},"All Roles"),/*#__PURE__*/React.createElement("option",{value:"VISITOR"},"Visitor"),/*#__PURE__*/React.createElement("option",{value:"STUDENT"},"Student"),/*#__PURE__*/React.createElement("option",{value:"LECTURER"},"Lecturer"),/*#__PURE__*/React.createElement("option",{value:"STAFF"},"Staff"),/*#__PURE__*/React.createElement("option",{value:"ADMIN"},"Admin")),/*#__PURE__*/React.createElement("select",{value:accessLevelFilter,onChange:e=>setAccessLevelFilter(e.target.value),className:"bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer"},/*#__PURE__*/React.createElement("option",{value:"ALL"},"All Types"),/*#__PURE__*/React.createElement("option",{value:"INFO"},"Information"),/*#__PURE__*/React.createElement("option",{value:"NAV"},"Navigation"))):null}),listLoading?/*#__PURE__*/React.createElement("div",{className:"flex flex-col items-center justify-center py-24 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800"},/*#__PURE__*/React.createElement("div",{className:"w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"}),/*#__PURE__*/React.createElement("span",{className:"text-sm font-semibold"},"Loading knowledge base...")):listData.length===0?/*#__PURE__*/React.createElement("div",{className:"flex flex-col items-center justify-center border-2 border-dashed border-slate-800 bg-slate-900/30 rounded-3xl py-24"},/*#__PURE__*/React.createElement("div",{className:"p-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-2xl mb-5"},/*#__PURE__*/React.createElement(Icon,{name:"book-open",className:"w-8 h-8"})),/*#__PURE__*/React.createElement("h4",{className:"text-base font-bold text-slate-200"},"No records found"),/*#__PURE__*/React.createElement("p",{className:"text-sm text-slate-500 mt-1 max-w-sm text-center"},subTab==='adaptation-phrases'?"Add campus acronyms and their translations to get started.":subTab==='speech-languages'?"No languages configured.":"Upload documents to build the knowledge base.")):subTab==='adaptation-phrases'?/*#__PURE__*/React.createElement("div",{className:"space-y-3.5"},paginatedData.map((item,idx)=>{const translations=parseTranslations(item.description);return/*#__PURE__*/React.createElement("div",{key:item.phrase_id||idx,className:"bg-slate-900/80 border border-slate-800/80 hover:border-slate-700/80 rounded-2xl p-5 transition-all shadow-sm"},/*#__PURE__*/React.createElement("div",{className:"flex items-center justify-between pb-3.5 border-b border-slate-800/80 mb-3.5"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-3"},/*#__PURE__*/React.createElement("span",{className:"text-lg font-black text-white tracking-tight"},item.phrase),/*#__PURE__*/React.createElement("span",{className:"text-[11px] font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-0.5 rounded-md"},translations.length," ",translations.length===1?'translation':'translations')),/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-2"},/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setModalType("edit");setShowModal(true);},className:"px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 transition-colors inline-flex items-center gap-1.5",title:"Edit Acronym & Translations"},/*#__PURE__*/React.createElement(Icon,{name:"edit-3",className:"w-3.5 h-3.5"}),/*#__PURE__*/React.createElement("span",null,"Edit")),/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),className:"p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors",title:"Delete Acronym"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"})))),translations.length===0?/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-500 italic py-1"},"No translations added yet."):/*#__PURE__*/React.createElement("div",{className:"space-y-2"},translations.map((t,tIdx)=>{const badge=getLangBadge(t.lang);return/*#__PURE__*/React.createElement("div",{key:tIdx,className:"flex items-center justify-between bg-slate-950/60 border border-slate-800/60 rounded-xl px-3.5 py-2 text-xs"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-3 min-w-0"},/*#__PURE__*/React.createElement("span",{className:`inline-flex items-center justify-center font-bold text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md border shrink-0 min-w-[70px] ${badge.cls}`},badge.name),/*#__PURE__*/React.createElement("span",{className:"text-slate-200 font-medium truncate"},t.text)));})));})):subTab==='speech-languages'?/*#__PURE__*/React.createElement("div",{className:"space-y-4"},/*#__PURE__*/React.createElement("div",{className:"bg-slate-900/60 border border-slate-800 rounded-2xl p-5 backdrop-blur-sm"},/*#__PURE__*/React.createElement("div",{className:"flex flex-col sm:flex-row sm:items-center justify-between gap-4"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("h4",{className:"text-sm font-bold text-slate-100 flex items-center gap-2"},/*#__PURE__*/React.createElement(Icon,{name:"languages",className:"w-4 h-4 text-indigo-400"}),"Speech Recognition & Voice Understanding"),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed"},"The chatbot can dynamically converse and switch to ",/*#__PURE__*/React.createElement("strong",{className:"text-slate-200"},"any language")," requested by the user during conversation. Use ",/*#__PURE__*/React.createElement("strong",{className:"text-slate-200"},"\"Listen by Default\"")," to pre-load speech recognition models immediately at session start, or add new supported languages to the campus directory.")),/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-2 shrink-0"},/*#__PURE__*/React.createElement("span",{className:"text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-xl"},listData.filter(l=>l.is_default).length," Active Defaults"),/*#__PURE__*/React.createElement("span",{className:"text-xs font-semibold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-xl"},listData.filter(l=>l.is_active).length," Enabled")))),/*#__PURE__*/React.createElement("div",{className:"grid grid-cols-1 md:grid-cols-2 gap-3.5"},paginatedData.map((lang,idx)=>/*#__PURE__*/React.createElement("div",{key:lang.language_code||idx,className:`p-4 rounded-2xl border transition-all ${lang.is_default?'bg-slate-900/90 border-indigo-500/30 shadow-sm':lang.is_active?'bg-slate-900/70 border-slate-800 hover:border-slate-700':'bg-slate-950/40 border-slate-900 opacity-60'}`},/*#__PURE__*/React.createElement("div",{className:"flex items-center justify-between gap-3 mb-3"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-3"},/*#__PURE__*/React.createElement("div",{className:`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs uppercase border ${lang.is_default?'bg-indigo-500/15 text-indigo-300 border-indigo-500/30':'bg-slate-800 text-slate-300 border-slate-700'}`},lang.language_code),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("h5",{className:"font-bold text-slate-100 text-sm"},lang.language_name),/*#__PURE__*/React.createElement("span",{className:"text-[11px] text-slate-500 font-mono"},"Code: ",lang.language_code))),/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-1.5"},lang.is_default&&/*#__PURE__*/React.createElement("span",{className:"text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full uppercase tracking-wider"},"Primary ASR"),/*#__PURE__*/React.createElement("button",{type:"button",onClick:()=>handleDeleteItem(lang),className:"p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors",title:`Delete ${lang.language_name} (${lang.language_code})`},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"})))),/*#__PURE__*/React.createElement("div",{className:"flex items-center justify-between pt-3 border-t border-slate-800/80 text-xs"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-2"},/*#__PURE__*/React.createElement("button",{type:"button",onClick:()=>handleToggleLanguageDefault(lang.language_code),className:`px-3 py-1.5 rounded-xl font-semibold text-xs border transition-all flex items-center gap-1.5 ${lang.is_default?'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25':'bg-slate-800/80 text-slate-400 border-slate-700/60 hover:text-slate-200 hover:bg-slate-800'}`,title:"Toggle whether this language is loaded by default in Live ASR"},/*#__PURE__*/React.createElement("span",{className:`w-1.5 h-1.5 rounded-full ${lang.is_default?'bg-emerald-400':'bg-slate-500'}`}),lang.is_default?'Listening by Default':'Standby')),/*#__PURE__*/React.createElement("button",{type:"button",onClick:()=>handleToggleLanguageActive(lang.language_code),className:`px-3 py-1.5 rounded-xl font-semibold text-xs border transition-all ${lang.is_active?'bg-indigo-500/15 text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/25':'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'}`,title:"Toggle whether this language is active in the campus directory"},lang.is_active?'Enabled':'Disabled')))))):/*#__PURE__*/React.createElement("div",{className:"bg-slate-900/80 border border-slate-800 rounded-2xl shadow-sm overflow-hidden backdrop-blur-sm"},/*#__PURE__*/React.createElement("div",{className:"overflow-x-auto"},subTab==='documents'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Document"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Who Can Access"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Uploaded On"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Chunked Status"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Status"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-4"},/*#__PURE__*/React.createElement("div",{className:"w-10 h-10 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-xl flex items-center justify-center shrink-0 shadow-sm"},/*#__PURE__*/React.createElement(Icon,{name:"file-text",className:"w-5 h-5"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("p",{className:"font-bold text-slate-200 text-sm"},item.title),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-500 mt-0.5"},item.filename)))),/*#__PURE__*/React.createElement("td",{className:"p-4"},/*#__PURE__*/React.createElement("div",{className:"flex flex-wrap gap-1.5 max-w-xs"},(item.allowed_roles&&item.allowed_roles.length>0?item.allowed_roles:item.access_level==="PUBLIC"?["VISITOR"]:[item.access_level||"VISITOR"]).map((role,rIdx)=>/*#__PURE__*/React.createElement("span",{key:rIdx,className:"text-[10px] font-bold tracking-wider px-2.5 py-0.5 rounded-md uppercase border bg-indigo-950/80 text-indigo-300 border-indigo-700/50"},role==="PUBLIC"?"VISITOR":role)))),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono text-slate-400"},item.uploaded_at),/*#__PURE__*/React.createElement("td",{className:"p-4"},item.chunking_status==="COMPLETED"&&/*#__PURE__*/React.createElement("span",{className:"inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-emerald-400"}),"Chunked"),item.chunking_status==="PROCESSING"&&/*#__PURE__*/React.createElement("span",{className:"inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full text-xs font-bold"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"}),"Processing"),item.chunking_status==="PENDING"&&/*#__PURE__*/React.createElement("span",{className:"inline-flex items-center gap-1.5 px-3 py-1 bg-slate-500/10 text-slate-400 border border-slate-500/20 rounded-full text-xs font-bold"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-slate-400"}),"Pending"),item.chunking_status==="FAILED"&&/*#__PURE__*/React.createElement("span",{className:"inline-flex items-center gap-1.5 px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-full text-xs font-bold"},/*#__PURE__*/React.createElement("span",{className:"w-1.5 h-1.5 rounded-full bg-red-400"}),"Failed")),/*#__PURE__*/React.createElement("td",{className:"p-4"},/*#__PURE__*/React.createElement("button",{onClick:()=>handleToggleStatus(item),className:`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-all ${item.is_active?'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500 hover:text-white hover:border-emerald-500':'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500 hover:text-white'}`},/*#__PURE__*/React.createElement("span",{className:`w-1.5 h-1.5 rounded-full ${item.is_active?'bg-emerald-400':'bg-red-400'}`}),item.is_active?'Active':'Disabled')),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"},/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setModalType("edit");setShowModal(true);},title:"Edit Document",className:"p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"},/*#__PURE__*/React.createElement(Icon,{name:"edit-3",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),title:"Remove Document",className:"p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"})))))))),subTab==='chatbot-queries'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"User / Requester"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Question Asked"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Response"),/*#__PURE__*/React.createElement("th",{className:"p-4 w-32 font-semibold"},"Latency"),/*#__PURE__*/React.createElement("th",{className:"p-4 w-36 font-semibold"},"Type"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 w-24 text-right font-semibold"},"Actions"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6 align-top"},/*#__PURE__*/React.createElement("div",{className:"flex items-start gap-3"},/*#__PURE__*/React.createElement("div",{className:`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${item.user_role==='ADMIN'?'bg-amber-500/10 text-amber-400 border border-amber-500/20':item.user_role==='LECTURER'?'bg-violet-500/10 text-violet-400 border border-violet-500/20':item.user_role==='STUDENT'?'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20':item.user_role==='STAFF'?'bg-sky-500/10 text-sky-400 border border-sky-500/20':'bg-slate-800 text-slate-400 border border-slate-700/50'}`},item.user_name?item.user_name.charAt(0).toUpperCase():/*#__PURE__*/React.createElement(Icon,{name:"user",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("p",{className:"font-bold text-slate-200 text-xs"},item.user_name||"Anonymous Visitor"),/*#__PURE__*/React.createElement("span",{className:`inline-block mt-0.5 text-[9px] font-bold tracking-wider px-1.5 py-0.2 rounded uppercase border ${item.user_role==='ADMIN'?'bg-amber-500/10 text-amber-400 border-amber-500/20':item.user_role==='LECTURER'?'bg-violet-500/10 text-violet-400 border-violet-500/20':item.user_role==='STUDENT'?'bg-emerald-500/10 text-emerald-400 border-emerald-500/20':item.user_role==='STAFF'?'bg-sky-500/10 text-sky-400 border-sky-500/20':'bg-slate-800 text-slate-400 border-slate-700/50'}`},item.user_role||"VISITOR"),item.user_email&&/*#__PURE__*/React.createElement("p",{className:"text-[10px] text-slate-500 truncate max-w-[140px] mt-0.5"},item.user_email)))),/*#__PURE__*/React.createElement("td",{className:"p-4 align-top max-w-xs"},/*#__PURE__*/React.createElement("p",{className:"font-bold text-slate-200 text-xs leading-snug line-clamp-2"},item.query_text),/*#__PURE__*/React.createElement("span",{className:"text-[10px] text-slate-500 font-mono mt-1 block"},item.timestamp?new Date(item.timestamp).toLocaleString():'')),/*#__PURE__*/React.createElement("td",{className:"p-4 align-top text-xs text-slate-400 leading-relaxed max-w-sm"},/*#__PURE__*/React.createElement("p",{className:"line-clamp-2"},item.response_text||"No response recorded."),item.retrieved_chunks&&item.retrieved_chunks.length>0&&/*#__PURE__*/React.createElement("span",{className:"text-[10px] text-indigo-400 font-mono mt-1 inline-flex items-center gap-1"},/*#__PURE__*/React.createElement(Icon,{name:"book-open",className:"w-3 h-3"})," ",item.retrieved_chunks.length," source chunk",item.retrieved_chunks.length>1?'s':'')),/*#__PURE__*/React.createElement("td",{className:"p-4 align-top text-xs font-mono"},item.response_time_ms?/*#__PURE__*/React.createElement("span",{className:"px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-semibold"},item.response_time_ms,"ms"):/*#__PURE__*/React.createElement("span",{className:"text-slate-600"},"N/A")),/*#__PURE__*/React.createElement("td",{className:"p-4 align-top text-xs"},item.is_navigational?/*#__PURE__*/React.createElement("span",{className:"inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-bold uppercase tracking-wider text-[9px]"},/*#__PURE__*/React.createElement(Icon,{name:"map",className:"w-3 h-3"})," Navigation"):/*#__PURE__*/React.createElement("span",{className:"inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 border border-slate-700/50 text-slate-400 font-bold uppercase tracking-wider text-[9px]"},/*#__PURE__*/React.createElement(Icon,{name:"info",className:"w-3 h-3"})," Information")),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 align-top text-right"},/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setModalType("view-chatbot-query");setShowModal(true);},title:"View Details",className:"p-1.5 bg-slate-800 hover:bg-indigo-600 hover:text-white border border-slate-700/50 text-slate-300 rounded-lg transition-colors inline-flex items-center gap-1 text-xs font-medium"},/*#__PURE__*/React.createElement(Icon,{name:"eye",className:"w-3.5 h-3.5"}))))))))),renderPagination()),currentTab==="infra"&&/*#__PURE__*/React.createElement("div",{className:"animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out"},/*#__PURE__*/React.createElement("div",{className:"flex flex-wrap gap-2 border-b border-slate-800 pb-4 mb-6"},["devices","auth-logs","jwt-sessions"].map(t=>/*#__PURE__*/React.createElement("button",{key:t,onClick:()=>setSubTab(t),className:`px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 border ${subTab===t?'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-sm':'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800/80 hover:border-slate-700'}`},subTabLabel(t)))),/*#__PURE__*/React.createElement(SectionHeader,{title:subTab==='devices'?"Hardware Devices":subTab==='node-rbac'?"Room Access Rules":subTab==='edge-rbac'?"Path Access Rules":subTab==='auth-logs'?"Access Logs":"Active Sessions",description:subTab==='devices'?"Monitor all IoT devices on the campus network.":subTab==='node-rbac'?"Control which roles can enter which rooms or locations.":subTab==='edge-rbac'?"Control which roles can use which paths between locations.":subTab==='auth-logs'?"History of all door/gate access attempts.":"View all currently active admin login sessions.",searchVal:subTab==='devices'||subTab==='auth-logs'?searchQuery:undefined,onSearchChange:subTab==='devices'||subTab==='auth-logs'?setSearchQuery:undefined,onCreateClick:['devices'].includes(subTab)?()=>{setSelectedItem(null);setModalType("create");setShowModal(true);}:null,createLabel:subTab==='devices'?"Add Device":"Create Rule"}),listLoading?/*#__PURE__*/React.createElement("div",{className:"flex flex-col items-center justify-center py-24 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800"},/*#__PURE__*/React.createElement("div",{className:"w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"}),/*#__PURE__*/React.createElement("span",{className:"text-sm font-semibold"},"Loading data...")):listData.length===0?/*#__PURE__*/React.createElement("div",{className:"flex flex-col items-center justify-center border-2 border-dashed border-slate-800 bg-slate-900/30 rounded-3xl py-24"},/*#__PURE__*/React.createElement("div",{className:"p-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-2xl mb-5"},/*#__PURE__*/React.createElement(Icon,{name:"cpu",className:"w-8 h-8"})),/*#__PURE__*/React.createElement("h4",{className:"text-base font-bold text-slate-200"},"No records found"),/*#__PURE__*/React.createElement("p",{className:"text-sm text-slate-500 mt-1 max-w-sm text-center"},"Add devices or create access rules to get started.")):/*#__PURE__*/React.createElement("div",{className:"bg-slate-900/80 border border-slate-800 rounded-2xl shadow-sm overflow-hidden backdrop-blur-sm"},/*#__PURE__*/React.createElement("div",{className:"overflow-x-auto"},subTab==='devices'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Device"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"IP Address"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Type"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Authorized Roles"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Last Seen"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6"},/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-4"},/*#__PURE__*/React.createElement("div",{className:"w-10 h-10 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-xl flex items-center justify-center shrink-0 shadow-sm"},/*#__PURE__*/React.createElement(Icon,{name:"cpu",className:"w-5 h-5"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("p",{className:"font-bold text-slate-200 text-sm"},item.device_name),/*#__PURE__*/React.createElement("p",{className:"text-xs font-mono text-slate-500 mt-0.5"},item.device_id)))),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono text-slate-400"},item.ip_address||'N/A'),/*#__PURE__*/React.createElement("td",{className:"p-4"},/*#__PURE__*/React.createElement("span",{className:"px-2.5 py-1 bg-slate-800 border border-slate-700/50 text-slate-300 rounded-md font-bold text-[10px] tracking-wider uppercase"},item.device_type)),/*#__PURE__*/React.createElement("td",{className:"p-4"},/*#__PURE__*/React.createElement("div",{className:"flex flex-wrap gap-1 max-w-xs"},item.allowed_role_ids&&item.allowed_role_ids.length>0?item.allowed_role_ids.map(roleId=>{const roleObj=refs.roles?.find(r=>r.role_id===roleId);const roleName=roleObj?roleObj.role_name:`Role ${roleId}`;return/*#__PURE__*/React.createElement("span",{key:roleId,className:"px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded text-[11px] font-medium"},roleName);}):/*#__PURE__*/React.createElement("span",{className:"text-xs text-rose-400/80 italic font-mono"},"None (Deny-All)"))),/*#__PURE__*/React.createElement("td",{className:"p-4"},(()=>{if(!item.last_heartbeat){return/*#__PURE__*/React.createElement("div",{className:"inline-flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg"},/*#__PURE__*/React.createElement("span",{className:"w-2 h-2 rounded-full shrink-0 shadow-sm bg-red-500 shadow-red-500/50"}),/*#__PURE__*/React.createElement("span",{className:"text-xs font-semibold text-slate-300"},"Offline"));}const lastSeenStr=item.last_heartbeat.endsWith('Z')?item.last_heartbeat:item.last_heartbeat+'Z';const dateObj=new Date(lastSeenStr);const isOnline=(()=>{if(!item.is_active)return false;const diffMs=new Date()-dateObj;// 60 seconds threshold (1 minute)
-return diffMs>=0&&diffMs<=60000;})();const localTimeStr=`${String(dateObj.getHours()).padStart(2,'0')}:${String(dateObj.getMinutes()).padStart(2,'0')}`;return/*#__PURE__*/React.createElement("div",{className:"inline-flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg"},/*#__PURE__*/React.createElement("span",{className:`w-2 h-2 rounded-full shrink-0 shadow-sm ${isOnline?'bg-emerald-400 shadow-emerald-500/50 animate-pulse':'bg-red-500 shadow-red-500/50'}`}),/*#__PURE__*/React.createElement("span",{className:"text-xs font-semibold text-slate-300"},isOnline?`Active ${localTimeStr}`:'Offline'));})()),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"},/*#__PURE__*/React.createElement("button",{onClick:()=>handlePingDevice(item),disabled:pendingActionKey===`ping:${item.device_id}`,title:"Ping Device",className:"p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700/50 transition-all hover:text-indigo-400 hover:border-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed"},pendingActionKey===`ping:${item.device_id}`?/*#__PURE__*/React.createElement("span",{className:"block w-4 h-4 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin"}):/*#__PURE__*/React.createElement(Icon,{name:"radio",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setModalType("edit");setShowModal(true);},title:"Edit Device",className:"p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"},/*#__PURE__*/React.createElement(Icon,{name:"edit-3",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),title:"Remove Device",className:"p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"})))))))),subTab==='node-rbac'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Room / Location"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Allowed Role"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6 font-mono text-slate-200 text-sm font-bold"},"Node ",/*#__PURE__*/React.createElement("span",{className:"text-indigo-400"},"#",item.node_id)),/*#__PURE__*/React.createElement("td",{className:"p-4"},/*#__PURE__*/React.createElement("span",{className:"text-xs font-bold px-3 py-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-lg"},refs.roles.find(r=>r.role_id===item.role_id)?.role_name||`Role #${item.role_id}`)),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),title:"Remove Rule",className:"p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all opacity-0 group-hover:opacity-100"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"}))))))),subTab==='edge-rbac'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Path / Route"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Allowed Role"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6 font-mono text-slate-200 text-sm font-bold"},"Path ",/*#__PURE__*/React.createElement("span",{className:"text-indigo-400"},"#",item.edge_id)),/*#__PURE__*/React.createElement("td",{className:"p-4"},/*#__PURE__*/React.createElement("span",{className:"text-xs font-bold px-3 py-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-lg"},refs.roles.find(r=>r.role_id===item.role_id)?.role_name||`Role #${item.role_id}`)),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),title:"Remove Rule",className:"p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all opacity-0 group-hover:opacity-100"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"}))))))),subTab==='auth-logs'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"User"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Device"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Result"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 font-semibold"},"When"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6 font-mono text-slate-200 text-sm font-semibold"},item.email||"Unknown"),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono text-slate-500"},item.device_id||"—"),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-bold"},item.auth_status==='SUCCESS'||item.auth_status==='GRANTED'?/*#__PURE__*/React.createElement("span",{className:"inline-flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-lg"},/*#__PURE__*/React.createElement(Icon,{name:"check-circle",className:"w-3.5 h-3.5"})," ",item.auth_status):/*#__PURE__*/React.createElement("span",{className:"inline-flex items-center gap-1.5 text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-lg"},/*#__PURE__*/React.createElement(Icon,{name:"x-circle",className:"w-3.5 h-3.5"})," ",item.auth_status)),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-xs text-slate-400 font-mono"},item.timestamp||item.created_at||"—"))))),subTab==='jwt-sessions'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Admin User"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"IP Address"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Expires"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 font-semibold"},"Status"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6 font-mono text-slate-200 text-sm font-bold"},/*#__PURE__*/React.createElement(Icon,{name:"shield",className:"inline-block w-4 h-4 mr-2 text-indigo-400"}),item.user?.email||item.admin_id||"—"),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono text-slate-500"},item.ip_address||"—"),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono text-slate-400"},item.expires_at),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-xs font-bold"},item.is_revoked?/*#__PURE__*/React.createElement("span",{className:"inline-flex items-center gap-1.5 text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-lg"},/*#__PURE__*/React.createElement(Icon,{name:"x-circle",className:"w-3.5 h-3.5"})," Revoked"):/*#__PURE__*/React.createElement("span",{className:"inline-flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-lg"},/*#__PURE__*/React.createElement(Icon,{name:"check-circle",className:"w-3.5 h-3.5"})," Active")))))))),renderPagination()),currentTab==="academics"&&/*#__PURE__*/React.createElement("div",{className:"animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out"},/*#__PURE__*/React.createElement("div",{className:"flex flex-wrap gap-2 border-b border-slate-800 pb-4 mb-6"},["courses","enrollments","timetables","faculties","departments","programmes","appointments","notifications"].map(t=>/*#__PURE__*/React.createElement("button",{key:t,onClick:()=>setSubTab(t),className:`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 border ${subTab===t?'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-sm':'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800/80 hover:border-slate-700'}`},subTabLabel(t)))),/*#__PURE__*/React.createElement(SectionHeader,{title:subTabLabel(subTab),description:subTab==='courses'?"Manage the course catalog and academic programs.":subTab==='enrollments'?"View and manage student course enrollments.":subTab==='timetables'?"Schedule class sessions and manage time slots.":subTab==='appointments'?"Manage student-lecturer appointment bookings.":"System notification announcements sent to users.",onCreateClick:subTab!=="notifications"?()=>{setSelectedItem(null);setModalType("create");setShowModal(true);}:null,createLabel:`Add ${getSingleTabLabel(subTab)}`}),listLoading?/*#__PURE__*/React.createElement("div",{className:"flex flex-col items-center justify-center py-24 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800"},/*#__PURE__*/React.createElement("div",{className:"w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"}),/*#__PURE__*/React.createElement("span",{className:"text-sm font-semibold"},"Loading scheduling data...")):listData.length===0?/*#__PURE__*/React.createElement("div",{className:"flex flex-col items-center justify-center border-2 border-dashed border-slate-800 bg-slate-900/30 rounded-3xl py-24"},/*#__PURE__*/React.createElement("div",{className:"p-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-2xl mb-5"},/*#__PURE__*/React.createElement(Icon,{name:"calendar",className:"w-8 h-8"})),/*#__PURE__*/React.createElement("h4",{className:"text-base font-bold text-slate-200"},"No records found"),/*#__PURE__*/React.createElement("p",{className:"text-sm text-slate-500 mt-1 max-w-sm text-center"},"Add items to get started.")):/*#__PURE__*/React.createElement("div",{className:"bg-slate-900/80 border border-slate-800 rounded-2xl shadow-sm overflow-hidden backdrop-blur-sm"},/*#__PURE__*/React.createElement("div",{className:"overflow-x-auto"},subTab==='courses'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Course Name"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Credits"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Level"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Faculty"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6"},/*#__PURE__*/React.createElement("p",{className:"font-bold text-slate-200 text-sm"},item.course_name),/*#__PURE__*/React.createElement("p",{className:"text-xs font-mono text-indigo-400 mt-0.5"},item.course_code)),/*#__PURE__*/React.createElement("td",{className:"p-4 font-mono text-slate-400 text-xs font-semibold"},item.credit_hours," cr."),/*#__PURE__*/React.createElement("td",{className:"p-4"},/*#__PURE__*/React.createElement("span",{className:"px-2.5 py-1 bg-slate-800 border border-slate-700/50 text-slate-300 rounded-md text-[10px] font-bold tracking-widest uppercase"},item.course_level)),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs text-slate-400 font-medium"},item.faculty),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"},/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setModalType("edit");setShowModal(true);},title:"Edit Course",className:"p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"},/*#__PURE__*/React.createElement(Icon,{name:"edit-3",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),title:"Remove Course",className:"p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"})))))))),subTab==='enrollments'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Student ID"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Course"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Semester"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Status"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6 font-mono font-bold text-slate-200 text-sm"},item.student_id),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-semibold text-slate-400"},"Course ",/*#__PURE__*/React.createElement("span",{className:"text-indigo-400"},item.course_code||"Unknown")),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-medium text-slate-400"},item.semester," (",item.academic_year,")"),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs"},/*#__PURE__*/React.createElement("span",{className:"px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg font-bold tracking-wider uppercase text-[10px]"},item.status)),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"},/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setModalType("edit");setShowModal(true);},title:"Edit Enrollment",className:"p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"},/*#__PURE__*/React.createElement(Icon,{name:"edit-3",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),title:"Remove Enrollment",className:"p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"})))))))),subTab==='timetables'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Course"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Lecturer"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Day & Time"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Room"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6 font-mono text-slate-200 text-sm font-semibold"},"Course ",/*#__PURE__*/React.createElement("span",{className:"text-indigo-400"},item.course_code||"Unknown")),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono text-slate-400"},item.lecturer_id),/*#__PURE__*/React.createElement("td",{className:"p-4"},/*#__PURE__*/React.createElement("div",{className:"flex flex-col"},/*#__PURE__*/React.createElement("span",{className:"font-bold text-slate-200 text-xs tracking-wider uppercase"},item.day_of_week),/*#__PURE__*/React.createElement("span",{className:"text-slate-500 font-mono text-[10px] mt-0.5"},item.start_time," \u2013 ",item.end_time))),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono font-semibold text-slate-300"},"Node ",/*#__PURE__*/React.createElement("span",{className:"text-emerald-400"},"#",item.node_id)),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"},/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setModalType("edit");setShowModal(true);},title:"Edit Timetable",className:"p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"},/*#__PURE__*/React.createElement(Icon,{name:"edit-3",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),title:"Remove Timetable",className:"p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"})))))))),subTab==='appointments'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Guest"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Host"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Scheduled"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Status"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6 font-mono font-bold text-slate-200 text-sm"},"User ",/*#__PURE__*/React.createElement("span",{className:"text-indigo-400"},"#",item.guest_user_id)),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono font-semibold text-slate-400"},"User ",/*#__PURE__*/React.createElement("span",{className:"text-emerald-400"},"#",item.host_user_id)),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-medium text-slate-300"},item.scheduled_at," ",/*#__PURE__*/React.createElement("span",{className:"text-slate-500 ml-1"},"(",item.duration_minutes,"m)")),/*#__PURE__*/React.createElement("td",{className:"p-4"},/*#__PURE__*/React.createElement("span",{className:`px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase border ${item.status==='CONFIRMED'?'bg-emerald-500/10 text-emerald-400 border-emerald-500/20':item.status==='PENDING'?'bg-amber-500/10 text-amber-400 border-amber-500/20':'bg-slate-800 text-slate-400 border-slate-700/50'}`},item.status)),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"},/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setModalType("edit");setShowModal(true);},title:"Edit Appointment",className:"p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"},/*#__PURE__*/React.createElement(Icon,{name:"edit-3",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),title:"Cancel Appointment",className:"p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"})))))))),subTab==='notifications'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Title"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Message"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 font-semibold"},"Sent"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6 font-bold text-slate-200"},item.title),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-medium text-slate-400"},item.body),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-xs font-mono text-slate-500"},item.sent_at))))),subTab==='faculties'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Faculty ID"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Faculty Name"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Dean ID"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6 font-mono font-bold text-indigo-400 text-sm"},"FAC ",/*#__PURE__*/React.createElement("span",{className:"text-slate-300"},"#",item.faculty_id)),/*#__PURE__*/React.createElement("td",{className:"p-4 text-sm font-semibold text-slate-200"},item.faculty_name),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono font-semibold text-slate-400"},"User ",/*#__PURE__*/React.createElement("span",{className:"text-emerald-400"},"#",item.dean_id)),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"},/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setModalType("edit");setShowModal(true);},title:"Edit Faculty",className:"p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"},/*#__PURE__*/React.createElement(Icon,{name:"edit-3",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),title:"Remove Faculty",className:"p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"})))))))),subTab==='departments'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Department ID"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Department Name"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Manager ID"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6 font-mono font-bold text-indigo-400 text-sm"},"DEPT ",/*#__PURE__*/React.createElement("span",{className:"text-slate-300"},"#",item.department_id)),/*#__PURE__*/React.createElement("td",{className:"p-4 text-sm font-semibold text-slate-200"},item.department_name),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono font-semibold text-slate-400"},"User ",/*#__PURE__*/React.createElement("span",{className:"text-emerald-400"},"#",item.manager_id)),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"},/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setModalType("edit");setShowModal(true);},title:"Edit Department",className:"p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"},/*#__PURE__*/React.createElement(Icon,{name:"edit-3",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),title:"Remove Department",className:"p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"})))))))),subTab==='programmes'&&/*#__PURE__*/React.createElement("table",{className:"w-full text-left text-sm"},/*#__PURE__*/React.createElement("thead",null,/*#__PURE__*/React.createElement("tr",{className:"bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80"},/*#__PURE__*/React.createElement("th",{className:"p-4 pl-6 font-semibold"},"Programme ID"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Programme Name"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"Faculty ID"),/*#__PURE__*/React.createElement("th",{className:"p-4 font-semibold"},"HOP ID"),/*#__PURE__*/React.createElement("th",{className:"p-4 pr-6 text-right font-semibold"},"Actions"))),/*#__PURE__*/React.createElement("tbody",{className:"divide-y divide-slate-800/50"},paginatedData.map((item,idx)=>/*#__PURE__*/React.createElement("tr",{key:idx,className:"hover:bg-slate-800/40 transition-colors group"},/*#__PURE__*/React.createElement("td",{className:"p-4 pl-6 font-mono font-bold text-indigo-400 text-sm"},"PROG ",/*#__PURE__*/React.createElement("span",{className:"text-slate-300"},"#",item.programme_id)),/*#__PURE__*/React.createElement("td",{className:"p-4 text-sm font-semibold text-slate-200"},item.programme_name),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono font-semibold text-slate-400"},"FAC ",/*#__PURE__*/React.createElement("span",{className:"text-emerald-400"},"#",item.faculty_id)),/*#__PURE__*/React.createElement("td",{className:"p-4 text-xs font-mono font-semibold text-slate-400"},"User ",/*#__PURE__*/React.createElement("span",{className:"text-emerald-400"},"#",item.hop_id)),/*#__PURE__*/React.createElement("td",{className:"p-4 pr-6 text-right"},/*#__PURE__*/React.createElement("div",{className:"flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"},/*#__PURE__*/React.createElement("button",{onClick:()=>{setSelectedItem(item);setModalType("edit");setShowModal(true);},title:"Edit Programme",className:"p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"},/*#__PURE__*/React.createElement(Icon,{name:"edit-3",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{onClick:()=>handleDeleteItem(item),title:"Remove Programme",className:"p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"},/*#__PURE__*/React.createElement(Icon,{name:"trash-2",className:"w-4 h-4"})))))))))),renderPagination()),currentTab==="mapping"&&/*#__PURE__*/React.createElement(CampusMapTab,{setToast:setToast}),showModal&&/*#__PURE__*/React.createElement("div",{className:"fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in duration-200"},/*#__PURE__*/React.createElement("div",{className:"w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl relative my-4 animate-in zoom-in-95 duration-200 ease-out"},/*#__PURE__*/React.createElement("div",{className:"flex justify-between items-start mb-6"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("h3",{className:"text-xl font-bold text-slate-100 tracking-tight"},modalType==="create"?"Add New Record":modalType==="view-chatbot-query"?"Chatbot Query Details":"Edit Record"),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-400 mt-1"},modalType==="view-chatbot-query"?"Detailed inspection of user interaction and model response.":"Fill in the details below and save your changes.")),/*#__PURE__*/React.createElement("button",{onClick:()=>setShowModal(false),disabled:formSubmitting,className:"p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-all ml-4 shrink-0 bg-slate-900/50 border border-transparent hover:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"},/*#__PURE__*/React.createElement(Icon,{name:"x",className:"w-5 h-5"}))),/*#__PURE__*/React.createElement("div",{className:"max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar"},renderModalForm()),formSubmitting&&/*#__PURE__*/React.createElement("div",{className:"absolute inset-0 bg-slate-950/70 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-center gap-3 z-10"},/*#__PURE__*/React.createElement("div",{className:"w-10 h-10 border-4 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin"}),/*#__PURE__*/React.createElement("p",{className:"text-sm font-bold text-slate-100"},"Saving changes...")))),provisioningDetails&&/*#__PURE__*/React.createElement("div",{className:"fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-in fade-in duration-200"},/*#__PURE__*/React.createElement("div",{className:"w-full max-w-xl bg-slate-900 border border-amber-500/40 rounded-3xl p-6 md:p-8 shadow-2xl"},/*#__PURE__*/React.createElement("div",{className:"flex items-start gap-4 mb-6"},/*#__PURE__*/React.createElement("div",{className:"p-3 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20"},/*#__PURE__*/React.createElement(Icon,{name:"key",className:"w-6 h-6"})),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("h3",{className:"text-xl font-bold text-slate-100"},"Device provisioning secret"),/*#__PURE__*/React.createElement("p",{className:"text-sm text-slate-400 mt-1"},"The access-control setup screen is waiting for these details. Enter them there and choose ",/*#__PURE__*/React.createElement("span",{className:"font-bold text-slate-200"},"Apply and start"),"."))),/*#__PURE__*/React.createElement("div",{className:"rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4 mb-5 text-xs text-indigo-100 leading-relaxed"},/*#__PURE__*/React.createElement("div",{className:"font-bold uppercase tracking-wider text-indigo-300 mb-1"},"What to do next"),/*#__PURE__*/React.createElement("ol",{className:"list-decimal list-inside space-y-1"},/*#__PURE__*/React.createElement("li",null,"Keep this dialog open."),/*#__PURE__*/React.createElement("li",null,"On the access-control device, paste the Device ID and secret into the setup screen."),/*#__PURE__*/React.createElement("li",null,"Confirm the cloud URL, then select ",/*#__PURE__*/React.createElement("span",{className:"font-bold"},"Apply and start"),"."),/*#__PURE__*/React.createElement("li",null,"Return here after the device begins synchronization."))),/*#__PURE__*/React.createElement("div",{className:"space-y-3 text-sm mb-5"},/*#__PURE__*/React.createElement("div",{className:"flex justify-between gap-4"},/*#__PURE__*/React.createElement("span",{className:"text-slate-500"},"Device ID"),/*#__PURE__*/React.createElement("span",{className:"font-mono font-bold text-indigo-300"},provisioningDetails.deviceId)),/*#__PURE__*/React.createElement("div",{className:"flex justify-between gap-4"},/*#__PURE__*/React.createElement("span",{className:"text-slate-500"},"IP address"),/*#__PURE__*/React.createElement("span",{className:"font-mono text-slate-200"},provisioningDetails.ipAddress))),/*#__PURE__*/React.createElement("div",{className:"rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 mb-6"},/*#__PURE__*/React.createElement("div",{className:"text-[10px] font-bold uppercase tracking-widest text-amber-300 mb-2"},"One-time secret"),/*#__PURE__*/React.createElement("div",{className:"font-mono text-sm md:text-base text-amber-100 break-all select-all"},provisioningDetails.secret)),/*#__PURE__*/React.createElement("div",{className:"flex justify-end"},/*#__PURE__*/React.createElement("button",{onClick:()=>setProvisioningDetails(null),className:"bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm"},"Close provisioning")))),showFaceModal&&selectedItem&&/*#__PURE__*/React.createElement("div",{className:"fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in duration-200"},/*#__PURE__*/React.createElement("div",{className:"w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl relative overflow-hidden my-4 animate-in zoom-in-95 duration-200 ease-out"},/*#__PURE__*/React.createElement("style",null,`
+(function(){
+const { useEffect, useRef } = React;
+function Icon({ name, className = "" }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    const safeName = /^[A-Za-z0-9-]+$/.test(String(name || "")) ? name : "circle-help";
+    const safeClass = String(className).split(/\s+/).filter((token) => /^[A-Za-z0-9:_/-]+$/.test(token)).join(" ");
+    const icon = document.createElement("i");
+    icon.setAttribute("data-lucide", safeName);
+    icon.setAttribute("class", safeClass);
+    icon.setAttribute("aria-hidden", "true");
+    ref.current.replaceChildren(icon);
+    if (window.lucide && typeof window.lucide.createIcons === "function") {
+      window.lucide.createIcons();
+    }
+    if (!ref.current.querySelector("svg")) {
+      const fallback = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      fallback.setAttribute("viewBox", "0 0 24 24");
+      fallback.setAttribute("fill", "none");
+      fallback.setAttribute("stroke", "currentColor");
+      fallback.setAttribute("stroke-width", "2");
+      fallback.setAttribute("aria-hidden", "true");
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      circle.setAttribute("cx", "12");
+      circle.setAttribute("cy", "12");
+      circle.setAttribute("r", "8");
+      fallback.appendChild(circle);
+      ref.current.replaceChildren(fallback);
+    }
+  }, [name, className]);
+  return /* @__PURE__ */ React.createElement("span", { ref, className: "inline-flex items-center justify-center" });
+}
+window.Icon = Icon;
+
+})();
+(function(){
+const { useEffect } = React;
+function Toast({ message, type, onClose }) {
+  useEffect(() => {
+    const timer = setTimeout(() => onClose(), 4500);
+    return () => clearTimeout(timer);
+  }, [message, onClose]);
+  const isError = type === "error";
+  return /* @__PURE__ */ React.createElement("div", { className: `fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-4 py-3.5 rounded-2xl shadow-2xl border max-w-sm animate-in fade-in slide-in-from-bottom-4 backdrop-blur-md ${isError ? "bg-slate-950/90 border-red-900/50 shadow-red-900/10" : "bg-slate-950/90 border-emerald-900/50 shadow-emerald-900/10"}` }, /* @__PURE__ */ React.createElement("div", { className: `p-1.5 rounded-lg shrink-0 ${isError ? "bg-red-500/15 text-red-400" : "bg-emerald-500/15 text-emerald-400"}` }, /* @__PURE__ */ React.createElement(Icon, { name: isError ? "alert-circle" : "check-circle", className: "w-4 h-4" })), /* @__PURE__ */ React.createElement("p", { className: "text-sm font-semibold text-slate-100 flex-1" }, message), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: onClose,
+      className: "p-1 text-slate-500 hover:text-slate-300 rounded-lg hover:bg-slate-800 transition-colors duration-150 ml-1"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "x", className: "w-3.5 h-3.5" })
+  ));
+}
+window.Toast = Toast;
+
+})();
+(function(){
+function StatCard({ title, value, icon, changeText, color = "indigo" }) {
+  const colorMap = {
+    blue: { bg: "bg-indigo-500/10", border: "border-indigo-500/20", text: "text-indigo-400", accent: "bg-indigo-600" },
+    // Map legacy blue to indigo
+    indigo: { bg: "bg-indigo-500/10", border: "border-indigo-500/20", text: "text-indigo-400", accent: "bg-indigo-600" },
+    violet: { bg: "bg-violet-500/10", border: "border-violet-500/20", text: "text-violet-400", accent: "bg-violet-600" },
+    emerald: { bg: "bg-emerald-500/10", border: "border-emerald-500/20", text: "text-emerald-400", accent: "bg-emerald-500" },
+    amber: { bg: "bg-amber-500/10", border: "border-amber-500/20", text: "text-amber-400", accent: "bg-amber-500" }
+  };
+  const c = colorMap[color] || colorMap.indigo;
+  return /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/50 backdrop-blur-sm border border-slate-800 rounded-2xl p-5 shadow-xl hover:border-slate-700/80 hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group" }, /* @__PURE__ */ React.createElement("div", { className: `absolute top-0 left-0 right-0 h-0.5 ${c.accent} rounded-t-2xl` }), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between items-start pt-1" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 font-semibold tracking-wide uppercase" }, title), /* @__PURE__ */ React.createElement("h3", { className: "text-3xl font-extrabold mt-2 text-slate-100 tracking-tight" }, value)), /* @__PURE__ */ React.createElement("div", { className: `p-3 ${c.bg} border ${c.border} ${c.text} rounded-xl group-hover:scale-105 transition-transform duration-300` }, /* @__PURE__ */ React.createElement(Icon, { name: icon, className: "w-5 h-5" }))), changeText && /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1.5 mt-4 pt-3 border-t border-slate-800/60" }, /* @__PURE__ */ React.createElement("span", { className: `text-xs ${c.text} font-semibold` }, changeText)));
+}
+window.StatCard = StatCard;
+
+})();
+(function(){
+function SectionHeader({ title, description, searchVal, onSearchChange, searchPlaceholder, searchInputRef, onCreateClick, createLabel, customAction }) {
+  return /* @__PURE__ */ React.createElement("div", { className: "flex flex-col md:flex-row md:items-start justify-between gap-4 mb-6" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "text-xl font-bold text-slate-100 tracking-tight" }, title), description && /* @__PURE__ */ React.createElement("p", { className: "text-sm text-slate-400 mt-1 leading-relaxed" }, description)), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2.5 shrink-0" }, onSearchChange !== void 0 && /* @__PURE__ */ React.createElement("div", { className: "relative" }, /* @__PURE__ */ React.createElement("span", { className: "absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500" }, /* @__PURE__ */ React.createElement(Icon, { name: "search", className: "w-4 h-4" })), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      ref: searchInputRef,
+      type: "text",
+      value: searchVal,
+      onChange: (e) => onSearchChange(e.target.value),
+      placeholder: searchPlaceholder || "Search... (press /)",
+      className: "bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-8 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 w-52 sm:w-64 transition-all duration-200 shadow-inner"
+    }
+  ), searchVal && /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: () => onSearchChange(""),
+      "aria-label": "Clear search",
+      className: "absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-500 hover:text-slate-200"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "x", className: "w-3.5 h-3.5" })
+  )), customAction, onCreateClick && /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: onCreateClick,
+      className: "bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-xl text-sm transition-all duration-200 shadow-md shadow-indigo-900/20 flex items-center gap-2 whitespace-nowrap"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "plus", className: "w-4 h-4" }),
+    /* @__PURE__ */ React.createElement("span", null, createLabel || "Add New")
+  )));
+}
+window.SectionHeader = SectionHeader;
+
+})();
+(function(){
+const { useEffect } = React;
+function ConfirmDialog({
+  open,
+  title = "Confirm Action",
+  message = "",
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  variant = "danger",
+  busy = false,
+  onConfirm,
+  onCancel
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape" && !busy) onCancel?.();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, busy, onCancel]);
+  if (!open) return null;
+  const isDanger = variant === "danger";
+  const iconName = isDanger ? "alert-triangle" : "info";
+  return /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      className: "fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4",
+      onClick: () => {
+        if (!busy) onCancel?.();
+      },
+      role: "dialog",
+      "aria-modal": "true",
+      "aria-labelledby": "confirm-dialog-title"
+    },
+    /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        className: "w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl",
+        onClick: (e) => e.stopPropagation()
+      },
+      /* @__PURE__ */ React.createElement("div", { className: "flex items-start gap-4" }, /* @__PURE__ */ React.createElement("div", { className: `p-2.5 rounded-xl shrink-0 border ${isDanger ? "bg-red-500/10 border-red-500/20 text-red-400" : "bg-indigo-500/10 border-indigo-500/20 text-indigo-400"}` }, /* @__PURE__ */ React.createElement(Icon, { name: iconName, className: "w-5 h-5" })), /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex-1" }, /* @__PURE__ */ React.createElement("h3", { id: "confirm-dialog-title", className: "text-base font-bold text-slate-100" }, title), message && /* @__PURE__ */ React.createElement("p", { className: "text-sm text-slate-400 mt-1.5 leading-relaxed" }, message))),
+      /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-end gap-2.5 mt-6 pt-4 border-t border-slate-800/80" }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          disabled: busy,
+          onClick: onCancel,
+          className: "px-4 py-2 rounded-xl text-sm font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 transition-colors disabled:opacity-50"
+        },
+        cancelLabel
+      ), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          disabled: busy,
+          onClick: onConfirm,
+          className: `px-4 py-2 rounded-xl text-sm font-bold text-white transition-all flex items-center gap-2 disabled:opacity-50 ${isDanger ? "bg-red-600 hover:bg-red-500 shadow-md shadow-red-950/30" : "bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-950/30"}`
+        },
+        busy && /* @__PURE__ */ React.createElement("span", { className: "w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" }),
+        /* @__PURE__ */ React.createElement("span", null, confirmLabel)
+      ))
+    )
+  );
+}
+window.ConfirmDialog = ConfirmDialog;
+
+})();
+(function(){
+const { useState, useEffect } = React;
+function DetailField({ label, value, mono = false }) {
+  return /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/60 border border-slate-800/80 rounded-xl px-3.5 py-2.5" }, /* @__PURE__ */ React.createElement("div", { className: "text-[11px] font-semibold uppercase tracking-wider text-slate-500" }, label), /* @__PURE__ */ React.createElement("div", { className: `text-sm text-slate-200 mt-1 break-words ${mono ? "font-mono" : "font-medium"}` }, value !== null && value !== void 0 && value !== "" ? value : /* @__PURE__ */ React.createElement("span", { className: "text-slate-600 italic" }, "Not set")));
+}
+function formatDateTime(val) {
+  if (!val) return "Never";
+  try {
+    const d = new Date(val);
+    if (Number.isNaN(d.getTime())) return String(val);
+    return d.toLocaleString();
+  } catch {
+    return String(val);
+  }
+}
+function RecordDrawer({
+  record,
+  kind,
+  refs = {},
+  onClose,
+  onEdit,
+  onDelete,
+  onToggleUserStatus,
+  onOpenFaceEnroll,
+  onRevokeSession,
+  onRotateDeviceSecret
+}) {
+  const [activeSection, setActiveSection] = useState("profile");
+  const [detailData, setDetailData] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  useEffect(() => {
+    if (!record) return;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") onClose?.();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [record, onClose]);
+  useEffect(() => {
+    setActiveSection("profile");
+    setDetailData(null);
+    setDetailError("");
+    if (!record || kind !== "user" || !record.user_id) return;
+    let cancelled = false;
+    setDetailLoading(true);
+    fetch(`/api/iam/users/${record.user_id}/detail`).then(async (res) => {
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.detail || "Failed to load user details.");
+      if (!cancelled) setDetailData(payload);
+    }).catch((err) => {
+      if (!cancelled) setDetailError(err.message || "Failed to load user details.");
+    }).finally(() => {
+      if (!cancelled) setDetailLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [record?.user_id, record, kind]);
+  useEffect(() => {
+    if (record && window.lucide) window.lucide.createIcons();
+  }, [record, activeSection, detailData]);
+  if (!record) return null;
+  const findFacultyName = (fid) => (refs.faculties || []).find((f) => String(f.faculty_id) === String(fid))?.faculty_name || fid;
+  const findDeptName = (did) => (refs.departments || []).find((d) => String(d.department_id) === String(did))?.department_name || did;
+  const findProgName = (pid) => (refs.programmes || []).find((p) => String(p.programme_id) === String(pid))?.programme_name || pid;
+  const findNodeLabel = (nid) => {
+    if (!nid) return null;
+    const node = (refs.nodes || []).find((n) => Number(n.node_id) === Number(nid));
+    return node ? node.room_label || `Node #${node.node_id}` : `Node #${nid}`;
+  };
+  const renderUserInspector = () => {
+    const u = detailData?.user || record;
+    const biometrics = detailData?.biometrics;
+    const logs = detailData?.recent_auth_logs || [];
+    const sessions = detailData?.active_sessions || [];
+    const enrollments = detailData?.enrollments || [];
+    const appointments = detailData?.appointments || [];
+    const initials = ((u.given_name?.[0] || "") + (u.family_name?.[0] || "")).toUpperCase() || (u.full_name?.slice(0, 2).toUpperCase() || "U");
+    const sections = [
+      { id: "profile", label: "Profile" },
+      { id: "biometrics", label: "Face ID", count: biometrics ? biometrics.poses?.length : u.enrolled_poses_count || 0 },
+      { id: "activity", label: "Access & Sessions", count: logs.length + sessions.length },
+      { id: "academics", label: "Academics", count: enrollments.length + appointments.length }
+    ];
+    return /* @__PURE__ */ React.createElement("div", { className: "flex flex-col h-full" }, /* @__PURE__ */ React.createElement("div", { className: "px-6 py-5 border-b border-slate-800 bg-slate-950/60" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-start justify-between gap-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3.5 min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "w-12 h-12 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 flex items-center justify-center font-bold text-base shrink-0" }, initials), /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 flex-wrap" }, /* @__PURE__ */ React.createElement("h3", { className: "text-lg font-bold text-slate-100 truncate" }, u.full_name), /* @__PURE__ */ React.createElement("span", { className: "text-[11px] font-mono px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700/60 tabular-nums" }, "#", u.user_id)), /* @__PURE__ */ React.createElement("p", { className: "text-xs font-mono text-slate-400 truncate mt-0.5" }, u.email), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-1.5 mt-2" }, /* @__PURE__ */ React.createElement("span", { className: `inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${u.is_active ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"}` }, /* @__PURE__ */ React.createElement("span", { className: `w-1.5 h-1.5 rounded-full ${u.is_active ? "bg-emerald-400" : "bg-red-400"}` }), u.is_active ? "Active" : "Deactivated"), (u.roles || []).map((r, idx) => /* @__PURE__ */ React.createElement("span", { key: idx, className: "text-[10px] font-bold tracking-wider px-2 py-0.5 bg-indigo-950/80 text-indigo-300 border border-indigo-700/50 rounded-md uppercase" }, r.role_name))))), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: onClose,
+        "aria-label": "Close inspector",
+        className: "p-2 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors shrink-0"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "x", className: "w-5 h-5" })
+    )), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-2 mt-4" }, onEdit && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => onEdit(u),
+        className: "px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors flex items-center gap-1.5"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-3.5 h-3.5" }),
+      /* @__PURE__ */ React.createElement("span", null, "Edit Profile")
+    ), onOpenFaceEnroll && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => onOpenFaceEnroll(u),
+        className: "px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-indigo-300 text-xs font-bold transition-colors flex items-center gap-1.5"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "scan-face", className: "w-3.5 h-3.5" }),
+      /* @__PURE__ */ React.createElement("span", null, "Manage Face ID")
+    ), onToggleUserStatus && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => onToggleUserStatus(u),
+        className: "px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition-colors"
+      },
+      u.is_active ? "Deactivate" : "Activate"
+    ), onDelete && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => onDelete(u),
+        className: "px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-xs font-semibold transition-colors ml-auto flex items-center gap-1.5"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-3.5 h-3.5" }),
+      /* @__PURE__ */ React.createElement("span", null, "Delete")
+    )), /* @__PURE__ */ React.createElement("div", { className: "flex gap-1.5 mt-4 -mb-5 pb-0 overflow-x-auto" }, sections.map((s) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: s.id,
+        type: "button",
+        onClick: () => setActiveSection(s.id),
+        className: `px-3 py-2 text-xs font-bold border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${activeSection === s.id ? "border-indigo-500 text-indigo-400" : "border-transparent text-slate-400 hover:text-slate-200"}`
+      },
+      /* @__PURE__ */ React.createElement("span", null, s.label),
+      s.count !== void 0 && /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 tabular-nums" }, s.count)
+    )))), /* @__PURE__ */ React.createElement("div", { className: "flex-1 overflow-y-auto p-6 space-y-5 scrollbar-thin" }, detailLoading && /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2.5 text-xs text-slate-400 bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-3" }, /* @__PURE__ */ React.createElement("span", { className: "w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" }), /* @__PURE__ */ React.createElement("span", null, "Loading full user telemetry...")), detailError && /* @__PURE__ */ React.createElement("div", { className: "text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-xl px-4 py-3" }, detailError), activeSection === "profile" && /* @__PURE__ */ React.createElement("div", { className: "space-y-5" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-400 mb-3" }, "Account Overview"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" }, /* @__PURE__ */ React.createElement(DetailField, { label: "Given Name", value: u.given_name }), /* @__PURE__ */ React.createElement(DetailField, { label: "Family Name", value: u.family_name }), /* @__PURE__ */ React.createElement(DetailField, { label: "Email", value: u.email, mono: true }), /* @__PURE__ */ React.createElement(DetailField, { label: "Last Known Location", value: u.location_label || findNodeLabel(u.last_known_location) }), /* @__PURE__ */ React.createElement(DetailField, { label: "Enrolled At", value: formatDateTime(u.enrolled_at) }), /* @__PURE__ */ React.createElement(DetailField, { label: "Last Seen", value: formatDateTime(u.last_seen) }))), u.student && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-indigo-400 mb-3" }, "Student Profile"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" }, /* @__PURE__ */ React.createElement(DetailField, { label: "Student ID", value: u.student.student_id, mono: true }), /* @__PURE__ */ React.createElement(DetailField, { label: "Intake", value: u.student.intake, mono: true }), /* @__PURE__ */ React.createElement(DetailField, { label: "Programme", value: findProgName(u.student.programme_id || u.student.program) }), /* @__PURE__ */ React.createElement(DetailField, { label: "Faculty", value: findFacultyName(u.student.faculty_id || u.student.faculty) }), /* @__PURE__ */ React.createElement(DetailField, { label: "Enrollment Status", value: u.student.enrollment_status }), /* @__PURE__ */ React.createElement(DetailField, { label: "Enrolled Since", value: u.student.enrolled_since }))), u.lecturer && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-purple-400 mb-3" }, "Lecturer Profile"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" }, /* @__PURE__ */ React.createElement(DetailField, { label: "Lecturer ID", value: u.lecturer.lecturer_id, mono: true }), /* @__PURE__ */ React.createElement(DetailField, { label: "Position", value: u.lecturer.position }), /* @__PURE__ */ React.createElement(DetailField, { label: "Department", value: findDeptName(u.lecturer.department_id || u.lecturer.department) }), /* @__PURE__ */ React.createElement(DetailField, { label: "Faculty", value: findFacultyName(u.lecturer.faculty_id || u.lecturer.faculty) }), /* @__PURE__ */ React.createElement(DetailField, { label: "Office", value: findNodeLabel(u.lecturer.office_node_id) }), /* @__PURE__ */ React.createElement(DetailField, { label: "Head of Department", value: u.lecturer.is_head_of_department ? "Yes" : "No" }))), u.staff && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-emerald-400 mb-3" }, "Staff Profile"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" }, /* @__PURE__ */ React.createElement(DetailField, { label: "Staff ID", value: u.staff.staff_id, mono: true }), /* @__PURE__ */ React.createElement(DetailField, { label: "Staff Type", value: u.staff.staff_type }), /* @__PURE__ */ React.createElement(DetailField, { label: "Department", value: findDeptName(u.staff.department_id || u.staff.department) }), /* @__PURE__ */ React.createElement(DetailField, { label: "Position", value: u.staff.position }), /* @__PURE__ */ React.createElement(DetailField, { label: "Office", value: findNodeLabel(u.staff.office_node_id) }))), u.visitor && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-amber-400 mb-3" }, "Visitor Pass"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" }, /* @__PURE__ */ React.createElement(DetailField, { label: "Visitor ID", value: u.visitor.visitor_id, mono: true }), /* @__PURE__ */ React.createElement(DetailField, { label: "ID Number", value: u.visitor.id_number, mono: true }), /* @__PURE__ */ React.createElement(DetailField, { label: "Organization", value: u.visitor.organization }), /* @__PURE__ */ React.createElement(DetailField, { label: "Purpose", value: u.visitor.visit_purpose }), /* @__PURE__ */ React.createElement(DetailField, { label: "Access Expiry", value: formatDateTime(u.visitor.access_expiry) }))), u.admin && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-rose-400 mb-3" }, "Admin Privileges"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" }, /* @__PURE__ */ React.createElement(DetailField, { label: "Admin ID", value: u.admin.admin_id, mono: true }), /* @__PURE__ */ React.createElement(DetailField, { label: "Admin Type", value: u.admin.admin_type }), /* @__PURE__ */ React.createElement(DetailField, { label: "Department", value: findDeptName(u.admin.department_id || u.admin.department) }), /* @__PURE__ */ React.createElement(DetailField, { label: "Office", value: findNodeLabel(u.admin.office_node_id) })))), activeSection === "biometrics" && /* @__PURE__ */ React.createElement("div", { className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-3" }, /* @__PURE__ */ React.createElement(DetailField, { label: "Face ID Status", value: biometrics?.enrolled ?? u.face_enrolled ? "Enrolled" : "Not Enrolled" }), /* @__PURE__ */ React.createElement(DetailField, { label: "Stored Embeddings", value: biometrics ? `${biometrics.embedding_count} vector(s)` : `${u.enrolled_poses_count || 0} pose(s)`, mono: true })), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/60 border border-slate-800 rounded-xl p-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between mb-3" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-400" }, "Enrolled Poses"), onOpenFaceEnroll && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => onOpenFaceEnroll(u),
+        className: "text-xs font-bold text-indigo-400 hover:text-indigo-300"
+      },
+      "+ Add / Update Pose"
+    )), biometrics?.poses?.length > 0 ? /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, biometrics.poses.map((p) => /* @__PURE__ */ React.createElement("div", { key: p.pose, className: "flex items-center justify-between px-3 py-2 rounded-lg bg-slate-900 border border-slate-800" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs font-mono font-bold text-slate-200" }, p.pose), /* @__PURE__ */ React.createElement("div", { className: "flex gap-1.5 flex-wrap" }, p.models.map((m) => /* @__PURE__ */ React.createElement("span", { key: m, className: "text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20" }, m)))))) : /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500" }, "No facial templates enrolled yet for this user."))), activeSection === "activity" && /* @__PURE__ */ React.createElement("div", { className: "space-y-5" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-400 mb-3" }, "Active Sessions (", sessions.length, ")"), sessions.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 bg-slate-950/50 border border-slate-800 rounded-xl p-4" }, "No active JWT sessions.") : /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, sessions.map((s) => /* @__PURE__ */ React.createElement("div", { key: s.session_id, className: "flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800" }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "text-xs font-bold text-slate-200 flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", null, s.principal_type), s.device_id && /* @__PURE__ */ React.createElement("span", { className: "font-mono text-slate-400" }, "\xB7 ", s.device_id)), /* @__PURE__ */ React.createElement("div", { className: "text-[11px] text-slate-500 mt-0.5" }, "Expires ", formatDateTime(s.expires_at))), onRevokeSession && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => onRevokeSession(s.session_id, u.user_id),
+        className: "px-2.5 py-1 rounded-lg text-[11px] font-bold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 shrink-0"
+      },
+      "Revoke"
+    ))))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-400 mb-3" }, "Recent Access Attempts (", logs.length, ")"), logs.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 bg-slate-950/50 border border-slate-800 rounded-xl p-4" }, "No gate/door access logs recorded yet.") : /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, logs.map((log) => /* @__PURE__ */ React.createElement("div", { key: log.log_id, className: "p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex items-start justify-between gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "text-xs font-bold text-slate-200" }, log.device_name || log.device_id, log.node_label && /* @__PURE__ */ React.createElement("span", { className: "text-slate-500 font-normal" }, " \xB7 ", log.node_label)), /* @__PURE__ */ React.createElement("div", { className: "text-[11px] text-slate-500 mt-0.5" }, formatDateTime(log.timestamp), log.confidence_score != null && ` \xB7 Score ${(Number(log.confidence_score) * 100).toFixed(1)}%`), log.reason && /* @__PURE__ */ React.createElement("div", { className: "text-[11px] text-slate-400 mt-1" }, log.reason)), /* @__PURE__ */ React.createElement("span", { className: `px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${log.auth_status === "SUCCESS" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"}` }, log.auth_status)))))), activeSection === "academics" && /* @__PURE__ */ React.createElement("div", { className: "space-y-5" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-400 mb-3" }, "Course Enrollments (", enrollments.length, ")"), enrollments.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 bg-slate-950/50 border border-slate-800 rounded-xl p-4" }, "No course enrollments found.") : /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, enrollments.map((enr) => /* @__PURE__ */ React.createElement("div", { key: enr.enrollment_id, className: "p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between gap-3" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "text-xs font-bold text-slate-200" }, /* @__PURE__ */ React.createElement("span", { className: "font-mono text-indigo-400 mr-1.5" }, enr.course_code), enr.course_name), /* @__PURE__ */ React.createElement("div", { className: "text-[11px] text-slate-500 mt-0.5" }, enr.academic_year, " \xB7 Sem ", enr.semester)), /* @__PURE__ */ React.createElement("span", { className: "px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700" }, enr.status))))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-400 mb-3" }, "Appointments (", appointments.length, ")"), appointments.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 bg-slate-950/50 border border-slate-800 rounded-xl p-4" }, "No appointments found.") : /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, appointments.map((apt) => /* @__PURE__ */ React.createElement("div", { key: apt.appointment_id, className: "p-3 rounded-xl bg-slate-950/60 border border-slate-800" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs font-bold text-slate-200" }, apt.role_in_meeting === "HOST" ? "With guest" : "With host", " ", apt.counterpart), /* @__PURE__ */ React.createElement("span", { className: "px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700" }, apt.status)), /* @__PURE__ */ React.createElement("div", { className: "text-[11px] text-slate-500 mt-1" }, formatDateTime(apt.scheduled_at), " (", apt.duration_minutes, " min)", apt.location && ` \xB7 ${apt.location}`), apt.purpose && /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, apt.purpose))))))));
+  };
+  const renderGenericInspector = () => {
+    let title = "Record Details";
+    let subtitle = "";
+    let fields = [];
+    if (kind === "device") {
+      title = record.device_name || record.device_id;
+      subtitle = `Device ID: ${record.device_id}`;
+      const roleNames = (record.allowed_role_ids || []).map(
+        (rid) => (refs.roles || []).find((r) => Number(r.role_id) === Number(rid))?.role_name || `Role #${rid}`
+      );
+      fields = [
+        { label: "Device ID", value: record.device_id, mono: true },
+        { label: "Device Type", value: record.device_type },
+        { label: "Location Node", value: findNodeLabel(record.node_id) },
+        { label: "Status", value: record.is_active ? "Active" : "Inactive" },
+        { label: "IP Address", value: record.ip_address, mono: true },
+        { label: "Callback URL", value: record.callback_url, mono: true },
+        { label: "Last Heartbeat", value: formatDateTime(record.last_heartbeat) },
+        { label: "Allowed Roles", value: roleNames.length > 0 ? roleNames.join(", ") : "Inherits node RBAC" }
+      ];
+    } else if (kind === "document") {
+      title = record.title || "Document";
+      subtitle = record.filename || `Document #${record.document_id}`;
+      fields = [
+        { label: "Document ID", value: `#${record.document_id}`, mono: true },
+        { label: "Filename", value: record.filename, mono: true },
+        { label: "Access Level", value: record.allowed_roles && record.allowed_roles.length > 0 ? record.allowed_roles.join(", ") : record.access_level },
+        { label: "Status", value: record.is_active ? "Active" : "Archived" },
+        { label: "Uploaded At", value: formatDateTime(record.uploaded_at || record.created_at) }
+      ];
+    } else if (kind === "course") {
+      title = record.course_name || record.course_code;
+      subtitle = record.course_code || `Course #${record.course_id}`;
+      fields = [
+        { label: "Course Code", value: record.course_code, mono: true },
+        { label: "Course Name", value: record.course_name },
+        { label: "Level", value: record.course_level },
+        { label: "Credit Hours", value: record.credit_hours, mono: true },
+        { label: "Faculty", value: findFacultyName(record.faculty_id || record.faculty) },
+        { label: "Programme", value: findProgName(record.programme_id) },
+        { label: "Status", value: record.is_active ? "Active" : "Inactive" }
+      ];
+    } else if (kind === "auth-log") {
+      title = `Access Event #${record.log_id}`;
+      subtitle = record.email || `User #${record.user_id || "Unknown"}`;
+      fields = [
+        { label: "Status", value: record.auth_status },
+        { label: "Device", value: record.device_id, mono: true },
+        { label: "Node", value: findNodeLabel(record.node_id) },
+        { label: "Timestamp", value: formatDateTime(record.timestamp) },
+        { label: "Confidence", value: record.confidence_score != null ? `${(Number(record.confidence_score) * 100).toFixed(2)}%` : "N/A", mono: true },
+        { label: "Spoofing Passed", value: record.spoofing_passed === null || record.spoofing_passed === void 0 ? "N/A" : record.spoofing_passed ? "Yes" : "No" },
+        { label: "Reason", value: record.reason || record.decision_reason },
+        { label: "Policy Version", value: record.policy_version, mono: true }
+      ];
+    }
+    return /* @__PURE__ */ React.createElement("div", { className: "flex flex-col h-full" }, /* @__PURE__ */ React.createElement("div", { className: "px-6 py-5 border-b border-slate-800 bg-slate-950/60 flex items-start justify-between gap-4" }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("h3", { className: "text-lg font-bold text-slate-100 truncate" }, title), subtitle && /* @__PURE__ */ React.createElement("p", { className: "text-xs font-mono text-slate-400 mt-0.5 truncate" }, subtitle)), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: onClose,
+        "aria-label": "Close inspector",
+        className: "p-2 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors shrink-0"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "x", className: "w-5 h-5" })
+    )), /* @__PURE__ */ React.createElement("div", { className: "flex-1 overflow-y-auto p-6 space-y-4 scrollbar-thin" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" }, fields.map((f, i) => /* @__PURE__ */ React.createElement(DetailField, { key: i, label: f.label, value: f.value, mono: f.mono })))), (onEdit || onDelete || kind === "device" && onRotateDeviceSecret) && /* @__PURE__ */ React.createElement("div", { className: "px-6 py-4 border-t border-slate-800 bg-slate-950/60 flex flex-wrap gap-2" }, onEdit && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => onEdit(record),
+        className: "px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors flex items-center gap-1.5"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-3.5 h-3.5" }),
+      /* @__PURE__ */ React.createElement("span", null, "Edit")
+    ), kind === "device" && onRotateDeviceSecret && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => onRotateDeviceSecret(record),
+        className: "px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 text-xs font-bold transition-colors flex items-center gap-1.5"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "key-round", className: "w-3.5 h-3.5" }),
+      /* @__PURE__ */ React.createElement("span", null, "Rotate Secret")
+    ), onDelete && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => onDelete(record),
+        className: "px-3.5 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-xs font-semibold transition-colors ml-auto flex items-center gap-1.5"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-3.5 h-3.5" }),
+      /* @__PURE__ */ React.createElement("span", null, "Delete")
+    )));
+  };
+  return /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      className: "fixed inset-0 z-50 flex justify-end bg-slate-950/70 backdrop-blur-xs",
+      onClick: onClose,
+      role: "dialog",
+      "aria-modal": "true"
+    },
+    /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        className: "w-full max-w-xl h-full bg-slate-900 border-l border-slate-800 shadow-2xl overflow-hidden",
+        onClick: (e) => e.stopPropagation()
+      },
+      kind === "user" ? renderUserInspector() : renderGenericInspector()
+    )
+  );
+}
+window.RecordDrawer = RecordDrawer;
+
+})();
+(function(){
+const { useState, useEffect, useRef } = React;
+function SearchableDropdown({ list, value, onChange, placeholder, filterFn, displayFn, valueFn }) {
+  const [query, setQuery] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef(null);
+  useEffect(() => {
+    if (valueFn) {
+      const selected = list.find((item) => String(valueFn(item)) === String(value));
+      setQuery(selected ? displayFn(selected) : value || "");
+    } else {
+      setQuery(value || "");
+    }
+  }, [value, list]);
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (containerRef.current && !containerRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+  const filtered = list.filter((item) => {
+    const q = query.toLowerCase();
+    return filterFn(item, q);
+  });
+  return /* @__PURE__ */ React.createElement("div", { className: "relative", ref: containerRef }, /* @__PURE__ */ React.createElement("div", { className: "relative flex items-center" }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      placeholder,
+      value: query,
+      onChange: (e) => {
+        const val = e.target.value;
+        setQuery(val);
+        onChange(val);
+        setIsOpen(true);
+      },
+      onFocus: () => setIsOpen(true),
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl pl-4 pr-10 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-all placeholder:text-slate-600"
+    }
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: () => setIsOpen(!isOpen),
+      className: "absolute right-3 text-slate-500 hover:text-slate-300"
+    },
+    /* @__PURE__ */ React.createElement("svg", { className: `w-4 h-4 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`, fill: "none", stroke: "currentColor", strokeWidth: "2", viewBox: "0 0 24 24" }, /* @__PURE__ */ React.createElement("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M19 9l-7 7-7-7" }))
+  )), isOpen && /* @__PURE__ */ React.createElement("div", { className: "absolute left-0 z-50 w-full mt-1.5 max-h-60 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl shadow-2xl divide-y divide-slate-900 scrollbar-thin" }, filtered.map((item, idx) => /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      key: idx,
+      onClick: () => {
+        const displayVal = displayFn(item);
+        const submitVal = valueFn ? valueFn(item) : displayVal;
+        setQuery(displayVal);
+        onChange(submitVal, item);
+        setIsOpen(false);
+      },
+      className: "p-3 hover:bg-slate-900 cursor-pointer text-sm transition-colors duration-150 text-slate-200"
+    },
+    displayFn(item)
+  )), filtered.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "p-3 text-slate-500 text-xs text-center" }, "No matching options")));
+}
+function AutocompleteSearch({ list, onSelect, filterFn, renderItem, placeholder }) {
+  const [query, setQuery] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+  const filtered = list.filter((item) => filterFn(item, query.toLowerCase()));
+  return /* @__PURE__ */ React.createElement("div", { className: "relative" }, /* @__PURE__ */ React.createElement("div", { className: "relative flex items-center" }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      placeholder,
+      value: query,
+      onChange: (e) => {
+        setQuery(e.target.value);
+        setIsOpen(true);
+      },
+      onFocus: () => setIsOpen(true),
+      onBlur: () => setTimeout(() => setIsOpen(false), 250),
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl pl-4 pr-10 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-all placeholder:text-slate-600"
+    }
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: () => setIsOpen(!isOpen),
+      className: "absolute right-3 text-slate-500 hover:text-slate-300"
+    },
+    /* @__PURE__ */ React.createElement("svg", { className: `w-4 h-4 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`, fill: "none", stroke: "currentColor", strokeWidth: "2", viewBox: "0 0 24 24" }, /* @__PURE__ */ React.createElement("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M19 9l-7 7-7-7" }))
+  )), isOpen && /* @__PURE__ */ React.createElement("div", { className: "absolute top-full left-0 z-50 w-full mt-1.5 max-h-60 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl shadow-2xl divide-y divide-slate-900 scrollbar-thin" }, filtered.map((item, idx) => /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      key: idx,
+      onMouseDown: () => {
+        onSelect(item, setQuery);
+        setIsOpen(false);
+      },
+      className: "p-3 hover:bg-slate-900 cursor-pointer text-sm transition-colors duration-150 text-slate-200"
+    },
+    renderItem(item)
+  )), filtered.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "p-3 text-slate-500 text-xs text-center" }, "No matching records found")));
+}
+function UserForm({ item, roles, nodes, programmes = [], faculties = [], departments = [], onSubmit, onCancel }) {
+  const isEdit = !!item;
+  const [givenName, setGivenName] = useState(item?.given_name || "");
+  const [familyName, setFamilyName] = useState(item?.family_name || "");
+  const [email, setEmail] = useState(item?.email || "");
+  const [roleId, setRoleId] = useState(item?.role_id || item?.roles?.[0]?.role_id || "");
+  const [isActive, setIsActive] = useState(item ? item.is_active : true);
+  const [locationId, setLocationId] = useState(item?.last_known_location || "");
+  const [editRole, setEditRole] = useState(false);
+  const [linkExisting, setLinkExisting] = useState(false);
+  const [linkedUserId, setLinkedUserId] = useState(null);
+  const [systemUsers, setSystemUsers] = useState([]);
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const userSearchRef = useRef(null);
+  useEffect(() => {
+    if (isEdit || !linkExisting) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams({
+        page: "1",
+        page_size: "15",
+        q: userSearchQuery.trim()
+      });
+      fetch(`/api/iam/users/paginated?${params.toString()}`).then((res) => res.ok ? res.json() : null).then((data) => {
+        if (!cancelled && data && Array.isArray(data.items)) {
+          setSystemUsers(data.items);
+        }
+      }).catch(() => {
+      });
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isEdit, linkExisting, userSearchQuery]);
+  useEffect(() => {
+    function handleOutside(e) {
+      if (userSearchRef.current && !userSearchRef.current.contains(e.target)) setUserDropdownOpen(false);
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, []);
+  const filteredUsers = systemUsers;
+  const handleLinkUser = (u) => {
+    setLinkedUserId(u.user_id);
+    setGivenName(u.given_name || "");
+    setFamilyName(u.family_name || "");
+    setEmail(u.email);
+    setRoleId(u.role_id || u.roles?.[0]?.role_id || "");
+    setUserSearchQuery(`${u.full_name} (@${u.email})`);
+    setUserDropdownOpen(false);
+  };
+  const handleUnlink = () => {
+    setLinkedUserId(null);
+    setGivenName("");
+    setFamilyName("");
+    setEmail("");
+    setRoleId("");
+    setUserSearchQuery("");
+  };
+  const selectedRole = roles.find((r) => r.role_id === parseInt(roleId));
+  const roleName = selectedRole ? selectedRole.role_name : "";
+  const [studentId, setStudentId] = useState(item?.student?.student_id || "");
+  const [program, setProgram] = useState(item?.student?.programme_id || item?.student?.program || "");
+  const [faculty, setFaculty] = useState(item?.student?.faculty_id || item?.lecturer?.faculty_id || item?.student?.faculty || item?.lecturer?.faculty || "");
+  const [intake, setIntake] = useState(item?.student?.intake || "");
+  const [enrolledSince, setEnrolledSince] = useState(item?.student?.enrolled_since || (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
+  const [lecturerId, setLecturerId] = useState(item?.lecturer?.lecturer_id || "");
+  const [department, setDepartment] = useState(item?.lecturer?.department_id || item?.staff?.department_id || item?.admin?.department_id || item?.lecturer?.department || item?.staff?.department || item?.admin?.department || "");
+  const [position, setPosition] = useState(item?.lecturer?.position || item?.staff?.position || "");
+  const [isHoD, setIsHoD] = useState(item?.lecturer?.is_head_of_department || false);
+  const [officeNodeId, setOfficeNodeId] = useState(item?.lecturer?.office_node_id || item?.staff?.office_node_id || item?.admin?.office_node_id || "");
+  const [staffId, setStaffId] = useState(item?.staff?.staff_id || item?.admin?.staff_id || "");
+  const [staffType, setStaffType] = useState(item?.staff?.staff_type || "ADMINISTRATIVE");
+  const [visitorId, setVisitorId] = useState(item?.visitor?.visitor_id || "");
+  const [idNumber, setIdNumber] = useState(item?.visitor?.id_number || "");
+  const [organization, setOrganization] = useState(item?.visitor?.organization || "");
+  const [visitPurpose, setVisitPurpose] = useState(item?.visitor?.visit_purpose || "");
+  const [accessExpiry, setAccessExpiry] = useState(item?.visitor?.access_expiry ? new Date(item.visitor.access_expiry).toISOString().slice(0, 16) : new Date(Date.now() + 864e5).toISOString().slice(0, 16));
+  const [registeredBy, setRegisteredBy] = useState(item?.visitor?.registered_by || 1);
+  const [adminId, setAdminId] = useState(item?.admin?.admin_id || "");
+  const [adminType, setAdminType] = useState(item?.admin?.admin_type || "SYSTEM_ADMIN");
+  const [password, setPassword] = useState("");
+  useEffect(() => {
+    if (!isEdit) {
+      const cleanGiven = givenName.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const cleanFamily = familyName.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (cleanGiven || cleanFamily) {
+        setEmail(`${cleanGiven}.${cleanFamily}@qiu.edu.my`);
+      } else {
+        setEmail("");
+      }
+    }
+  }, [givenName, familyName, isEdit]);
+  const [errors, setErrors] = useState({});
+  const findProgramme = (value) => programmes.find((p) => String(p.programme_id) === String(value) || p.programme_name === value);
+  const findFaculty = (value) => faculties.find((f) => String(f.faculty_id) === String(value) || f.faculty_name === value);
+  const findDepartment = (value) => departments.find((d) => String(d.department_id) === String(value) || d.department_name === value);
+  const validate = () => {
+    let err = {};
+    if (!linkExisting || isEdit) {
+      if (!givenName.trim()) err.givenName = "Given name is required";
+      if (!familyName.trim()) err.familyName = "Family name is required";
+      if (!email.trim()) err.email = "email is required";
+    }
+    if (!roleId) err.roleId = "Role selection is required";
+    if (roleName === "STUDENT") {
+      if (!program.trim()) err.program = "Program selection is required";
+      else if (programmes.length > 0 && !findProgramme(program)) err.program = "Select a valid programme from the list";
+      if (!faculty.trim()) err.faculty = "Faculty selection is required";
+      else if (faculties.length > 0 && !findFaculty(faculty)) err.faculty = "Select a valid faculty from the list";
+      if (!/^\d{6}$/.test(String(intake).trim())) err.intake = "Intake must be exactly 6 digits, for example 202407";
+      if (!enrolledSince) err.enrolledSince = "Enrollment date is required";
+    } else if (roleName === "LECTURER") {
+      if (!department.trim()) err.department = "Department selection is required";
+      else if (departments.length > 0 && !findDepartment(department)) err.department = "Select a valid department from the list";
+      if (!faculty.trim()) err.faculty = "Faculty selection is required";
+      else if (faculties.length > 0 && !findFaculty(faculty)) err.faculty = "Select a valid faculty from the list";
+      if (!position.trim()) err.position = "Position is required";
+    } else if (roleName === "STAFF") {
+      if (!department.trim()) err.department = "Department selection is required";
+      else if (departments.length > 0 && !findDepartment(department)) err.department = "Select a valid department from the list";
+      if (!position.trim()) err.position = "Position is required";
+      if (!staffType) err.staffType = "Staff type selection is required";
+    } else if (roleName === "VISITOR") {
+      if (!idNumber.trim()) err.idNumber = "ID number is required";
+      if (!accessExpiry) err.accessExpiry = "Access expiry datetime is required";
+    } else if (roleName === "ADMIN") {
+      if (!adminType) err.adminType = "Admin type selection is required";
+      if (!isEdit && !password.trim()) err.password = "Admin setup password is required";
+      if (!department.trim()) err.department = "Department selection is required";
+      else if (departments.length > 0 && !findDepartment(department)) err.department = "Select a valid department from the list";
+    }
+    setErrors(err);
+    return Object.keys(err).length === 0;
+  };
+  const handleFormSubmit = (e) => {
+    e.preventDefault();
+    if (!validate()) return;
+    let profileData = {};
+    if (roleName === "STUDENT") {
+      const selectedProgramme = findProgramme(program);
+      const selectedFaculty = findFaculty(faculty);
+      profileData = {
+        student_id: studentId || null,
+        programme_id: selectedProgramme ? selectedProgramme.programme_id : program,
+        faculty_id: selectedFaculty ? selectedFaculty.faculty_id : faculty,
+        intake: parseInt(String(intake).trim(), 10),
+        enrolled_since: enrolledSince
+      };
+    } else if (roleName === "LECTURER") {
+      const selectedDepartment = findDepartment(department);
+      const selectedFaculty = findFaculty(faculty);
+      profileData = {
+        lecturer_id: lecturerId || null,
+        department_id: selectedDepartment ? selectedDepartment.department_id : department,
+        faculty_id: selectedFaculty ? selectedFaculty.faculty_id : faculty,
+        position,
+        is_head_of_department: isHoD,
+        office_node_id: officeNodeId ? parseInt(officeNodeId) : null
+      };
+    } else if (roleName === "STAFF") {
+      const selectedDepartment = findDepartment(department);
+      profileData = {
+        staff_id: staffId || null,
+        department_id: selectedDepartment ? selectedDepartment.department_id : department,
+        position,
+        staff_type: staffType,
+        office_node_id: officeNodeId ? parseInt(officeNodeId) : null
+      };
+    } else if (roleName === "VISITOR") {
+      profileData = {
+        visitor_id: visitorId || null,
+        id_number: idNumber,
+        organization,
+        visit_purpose: visitPurpose,
+        access_expiry: new Date(accessExpiry).toISOString(),
+        registered_by: registeredBy
+      };
+    } else if (roleName === "ADMIN") {
+      const selectedDepartment = findDepartment(department);
+      profileData = {
+        admin_id: adminId || null,
+        admin_type: adminType,
+        department_id: selectedDepartment ? selectedDepartment.department_id : department,
+        office_node_id: officeNodeId ? parseInt(officeNodeId) : null,
+        password: password || null
+      };
+    }
+    if (linkExisting && linkedUserId) {
+      profileData.user_id = linkedUserId;
+    }
+    onSubmit(e, {
+      isEdit,
+      roleName,
+      user_id: item?.user_id,
+      user_payload: {
+        given_name: givenName,
+        family_name: familyName,
+        email,
+        role_id: parseInt(roleId),
+        is_active: isActive,
+        last_known_location: locationId ? parseInt(locationId) : null
+      },
+      profile_payload: profileData
+    });
+  };
+  const getInputClass = (errFlag) => {
+    return `w-full bg-slate-950 border rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none transition-all ${errFlag ? "border-rose-500 focus:border-rose-500" : "border-slate-800 focus:border-emerald-500"}`;
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleFormSubmit, noValidate: true, className: "space-y-4 max-h-[80vh] overflow-y-auto pr-2" }, !isEdit && /* @__PURE__ */ React.createElement("div", { className: "border border-slate-700/60 rounded-xl p-4 bg-slate-900/60" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-xs font-bold uppercase tracking-wider text-slate-300" }, "Link to Existing User Account"), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500 mt-0.5" }, "Attach this profile to a user already in the system.")), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: () => {
+        setLinkExisting(!linkExisting);
+        if (linkExisting) handleUnlink();
+      },
+      className: `relative w-11 h-6 rounded-full transition-colors duration-300 focus:outline-none ${linkExisting ? "bg-emerald-500" : "bg-slate-700"}`
+    },
+    /* @__PURE__ */ React.createElement("span", { className: `absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-300 ${linkExisting ? "translate-x-5" : "translate-x-0"}` })
+  )), linkExisting && /* @__PURE__ */ React.createElement("div", { className: "mt-3 relative", ref: userSearchRef }, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-1.5" }, "Search Existing User"), /* @__PURE__ */ React.createElement("div", { className: "relative flex items-center" }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      placeholder: "Search by name, email or user ID...",
+      value: userSearchQuery,
+      onChange: (e) => {
+        setUserSearchQuery(e.target.value);
+        setUserDropdownOpen(true);
+        if (!e.target.value) handleUnlink();
+      },
+      onFocus: () => setUserDropdownOpen(true),
+      className: "w-full bg-slate-950 border border-slate-700 rounded-xl pl-4 pr-10 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-all placeholder:text-slate-600"
+    }
+  ), /* @__PURE__ */ React.createElement("svg", { className: `absolute right-3 w-4 h-4 text-slate-500 pointer-events-none transition-transform duration-200 ${userDropdownOpen ? "rotate-180" : ""}`, fill: "none", stroke: "currentColor", strokeWidth: "2", viewBox: "0 0 24 24" }, /* @__PURE__ */ React.createElement("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M19 9l-7 7-7-7" }))), userDropdownOpen && filteredUsers.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "absolute left-0 z-50 w-full mt-1.5 max-h-52 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl shadow-2xl divide-y divide-slate-900" }, filteredUsers.map((u, idx) => /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      key: idx,
+      onMouseDown: () => handleLinkUser(u),
+      className: "p-3 hover:bg-slate-900 cursor-pointer transition-colors duration-150"
+    },
+    /* @__PURE__ */ React.createElement("p", { className: "text-sm font-semibold text-slate-200" }, u.full_name),
+    /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mt-0.5" }, "@", u.email, " \u2022 UID: ", u.user_id, " \u2022 ", u.email)
+  ))), userDropdownOpen && filteredUsers.length === 0 && userSearchQuery && /* @__PURE__ */ React.createElement("div", { className: "absolute left-0 z-50 w-full mt-1.5 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl p-3 text-xs text-slate-500 text-center" }, "No matching users found"), linkedUserId && /* @__PURE__ */ React.createElement("div", { className: "mt-2 flex items-center gap-2 text-xs text-emerald-400 font-semibold" }, /* @__PURE__ */ React.createElement("span", { className: "w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse" }), "Linked to User ID: ", linkedUserId, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: handleUnlink, className: "text-slate-500 hover:text-rose-400 ml-1 font-normal transition-colors" }, "\u2715 Unlink")))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Given Name"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      value: givenName,
+      onChange: (e) => {
+        setGivenName(e.target.value);
+        if (errors.givenName) setErrors((prev) => ({ ...prev, givenName: "" }));
+      },
+      className: getInputClass(errors.givenName)
+    }
+  ), errors.givenName && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.givenName))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Family Name"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      value: familyName,
+      onChange: (e) => {
+        setFamilyName(e.target.value);
+        if (errors.familyName) setErrors((prev) => ({ ...prev, familyName: "" }));
+      },
+      className: getInputClass(errors.familyName)
+    }
+  ), errors.familyName && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.familyName)))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Email Address"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "email",
+      value: email,
+      onChange: (e) => {
+        setEmail(e.target.value);
+        if (errors.email) setErrors((prev) => ({ ...prev, email: "" }));
+      },
+      placeholder: "given_name.familyname@qiu.edu.my",
+      className: getInputClass(errors.email)
+    }
+  ), errors.email && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.email)))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, isEdit ? "Role" : "Role Access Level"), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      value: roleId,
+      onChange: (e) => {
+        setRoleId(e.target.value);
+        if (errors.roleId) setErrors((prev) => ({ ...prev, roleId: "" }));
+      },
+      className: getInputClass(errors.roleId)
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Role"),
+    roles.map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name))
+  ), errors.roleId && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.roleId)))), roleName === "STUDENT" && /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800 pt-4 mt-2 space-y-4" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-emerald-400 font-extrabold tracking-widest uppercase" }, "Student Profile Parameters"), isEdit && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Student ID"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      value: studentId,
+      onChange: (e) => setStudentId(e.target.value),
+      className: getInputClass(errors.studentId)
+    }
+  )), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Program"), /* @__PURE__ */ React.createElement(
+    SearchableDropdown,
+    {
+      list: programmes,
+      value: program,
+      onChange: (val, item2) => {
+        setProgram(val);
+        if (item2?.faculty_id) setFaculty(item2.faculty_id);
+        if (errors.program) setErrors((prev) => ({ ...prev, program: "" }));
+        if (errors.faculty) setErrors((prev) => ({ ...prev, faculty: "" }));
+      },
+      placeholder: "Search program (e.g. Computer Science)",
+      filterFn: (p, q) => p.programme_name.toLowerCase().includes(q) || p.programme_id.toLowerCase().includes(q),
+      displayFn: (p) => p.programme_name,
+      valueFn: (p) => p.programme_id
+    }
+  ), errors.program && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.program))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Faculty Department"), /* @__PURE__ */ React.createElement(
+    SearchableDropdown,
+    {
+      list: faculties,
+      value: faculty,
+      onChange: (val) => {
+        setFaculty(val);
+        if (errors.faculty) setErrors((prev) => ({ ...prev, faculty: "" }));
+      },
+      placeholder: "Search faculty (e.g. FCI)",
+      filterFn: (f, q) => f.faculty_name.toLowerCase().includes(q) || f.faculty_id.toLowerCase().includes(q),
+      displayFn: (f) => f.faculty_name,
+      valueFn: (f) => f.faculty_id
+    }
+  ), errors.faculty && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.faculty)))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Intake Semester Code"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      inputMode: "numeric",
+      maxLength: "6",
+      pattern: "\\d{6}",
+      value: intake,
+      onChange: (e) => {
+        setIntake(e.target.value.replace(/\D/g, "").slice(0, 6));
+        if (errors.intake) setErrors((prev) => ({ ...prev, intake: "" }));
+      },
+      className: getInputClass(errors.intake)
+    }
+  ), errors.intake && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.intake))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Enrolled Since"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "date",
+      value: enrolledSince,
+      onChange: (e) => {
+        setEnrolledSince(e.target.value);
+        if (errors.enrolledSince) setErrors((prev) => ({ ...prev, enrolledSince: "" }));
+      },
+      className: getInputClass(errors.enrolledSince)
+    }
+  ), errors.enrolledSince && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.enrolledSince))))), roleName === "LECTURER" && /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800 pt-4 mt-2 space-y-4" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-emerald-400 font-extrabold tracking-widest uppercase" }, "Lecturer Profile Parameters"), isEdit && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Lecturer ID"), /* @__PURE__ */ React.createElement("input", { type: "text", value: lecturerId, onChange: (e) => setLecturerId(e.target.value), className: getInputClass(errors.lecturerId) })), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Department"), /* @__PURE__ */ React.createElement(
+    SearchableDropdown,
+    {
+      list: departments,
+      value: department,
+      onChange: (val) => {
+        setDepartment(val);
+        if (errors.department) setErrors((prev) => ({ ...prev, department: "" }));
+      },
+      placeholder: "Search department",
+      filterFn: (d, q) => d.department_name.toLowerCase().includes(q) || d.department_id.toLowerCase().includes(q),
+      displayFn: (d) => d.department_name,
+      valueFn: (d) => d.department_id
+    }
+  ), errors.department && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.department))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Faculty"), /* @__PURE__ */ React.createElement(
+    SearchableDropdown,
+    {
+      list: faculties,
+      value: faculty,
+      onChange: (val) => {
+        setFaculty(val);
+        if (errors.faculty) setErrors((prev) => ({ ...prev, faculty: "" }));
+      },
+      placeholder: "Search faculty",
+      filterFn: (f, q) => f.faculty_name.toLowerCase().includes(q) || f.faculty_id.toLowerCase().includes(q),
+      displayFn: (f) => f.faculty_name,
+      valueFn: (f) => f.faculty_id
+    }
+  ), errors.faculty && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.faculty)))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Position Title"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      value: position,
+      onChange: (e) => {
+        setPosition(e.target.value);
+        if (errors.position) setErrors((prev) => ({ ...prev, position: "" }));
+      },
+      className: getInputClass(errors.position)
+    }
+  ), errors.position && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.position))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Office Room Node"), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      value: officeNodeId,
+      onChange: (e) => setOfficeNodeId(e.target.value),
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "" }, "No Assigned Office"),
+    nodes.filter((n) => n.node_type === "OFFICE").map((n) => /* @__PURE__ */ React.createElement("option", { key: n.node_id, value: n.node_id }, n.room_label || `Node ${n.node_id}`))
+  ))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "checkbox",
+      checked: isHoD,
+      onChange: (e) => setIsHoD(e.target.checked),
+      id: "isHoD",
+      className: "w-4 h-4 text-emerald-600 bg-slate-950 border-slate-800 rounded focus:ring-emerald-500"
+    }
+  ), /* @__PURE__ */ React.createElement("label", { htmlFor: "isHoD", className: "text-xs text-slate-400 font-bold uppercase tracking-wider" }, "Is Head of Department"))), roleName === "STAFF" && /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800 pt-4 mt-2 space-y-4" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-emerald-400 font-extrabold tracking-widest uppercase" }, "Staff Profile Parameters"), isEdit && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Staff ID"), /* @__PURE__ */ React.createElement("input", { type: "text", value: staffId, onChange: (e) => setStaffId(e.target.value), className: getInputClass(errors.staffId) })), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Department"), /* @__PURE__ */ React.createElement(
+    SearchableDropdown,
+    {
+      list: departments,
+      value: department,
+      onChange: (val) => {
+        setDepartment(val);
+        if (errors.department) setErrors((prev) => ({ ...prev, department: "" }));
+      },
+      placeholder: "Search department",
+      filterFn: (d, q) => d.department_name.toLowerCase().includes(q) || d.department_id.toLowerCase().includes(q),
+      displayFn: (d) => d.department_name,
+      valueFn: (d) => d.department_id
+    }
+  ), errors.department && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.department))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Staff Type"), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      value: staffType,
+      onChange: (e) => {
+        setStaffType(e.target.value);
+        if (errors.staffType) setErrors((prev) => ({ ...prev, staffType: "" }));
+      },
+      className: getInputClass(errors.staffType)
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "ADMINISTRATIVE" }, "ADMINISTRATIVE"),
+    /* @__PURE__ */ React.createElement("option", { value: "TECHNICAL" }, "TECHNICAL"),
+    /* @__PURE__ */ React.createElement("option", { value: "SECURITY" }, "SECURITY"),
+    /* @__PURE__ */ React.createElement("option", { value: "FACILITIES" }, "FACILITIES"),
+    /* @__PURE__ */ React.createElement("option", { value: "OTHER" }, "OTHER")
+  ), errors.staffType && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.staffType)))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Position Title"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      value: position,
+      onChange: (e) => {
+        setPosition(e.target.value);
+        if (errors.position) setErrors((prev) => ({ ...prev, position: "" }));
+      },
+      className: getInputClass(errors.position)
+    }
+  ), errors.position && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.position))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Office Room Node"), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      value: officeNodeId,
+      onChange: (e) => setOfficeNodeId(e.target.value),
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "" }, "No Assigned Office"),
+    nodes.filter((n) => n.node_type === "OFFICE").map((n) => /* @__PURE__ */ React.createElement("option", { key: n.node_id, value: n.node_id }, n.room_label || `Node ${n.node_id}`))
+  )))), roleName === "VISITOR" && /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800 pt-4 mt-2 space-y-4" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-emerald-400 font-extrabold tracking-widest uppercase" }, "Visitor Profile Parameters"), isEdit && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Visitor ID"), /* @__PURE__ */ React.createElement("input", { type: "text", value: visitorId, onChange: (e) => setVisitorId(e.target.value), className: getInputClass(errors.visitorId) })), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "ID Card Number"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      value: idNumber,
+      onChange: (e) => {
+        setIdNumber(e.target.value);
+        if (errors.idNumber) setErrors((prev) => ({ ...prev, idNumber: "" }));
+      },
+      className: getInputClass(errors.idNumber)
+    }
+  ), errors.idNumber && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.idNumber))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Organization"), /* @__PURE__ */ React.createElement("input", { type: "text", value: organization, onChange: (e) => setOrganization(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Access Expiry"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "datetime-local",
+      value: accessExpiry,
+      onChange: (e) => {
+        setAccessExpiry(e.target.value);
+        if (errors.accessExpiry) setErrors((prev) => ({ ...prev, accessExpiry: "" }));
+      },
+      className: getInputClass(errors.accessExpiry)
+    }
+  ), errors.accessExpiry && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.accessExpiry))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Visit Purpose"), /* @__PURE__ */ React.createElement("input", { type: "text", value: visitPurpose, onChange: (e) => setVisitPurpose(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })))), roleName === "ADMIN" && /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800 pt-4 mt-2 space-y-4" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-emerald-400 font-extrabold tracking-widest uppercase" }, "Admin Profile Parameters"), isEdit && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Admin ID"), /* @__PURE__ */ React.createElement("input", { type: "text", value: adminId, onChange: (e) => setAdminId(e.target.value), className: getInputClass(errors.adminId) })), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Admin Type"), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      value: adminType,
+      onChange: (e) => {
+        setAdminType(e.target.value);
+        if (errors.adminType) setErrors((prev) => ({ ...prev, adminType: "" }));
+      },
+      className: getInputClass(errors.adminType)
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "SUPER_ADMIN" }, "SUPER_ADMIN"),
+    /* @__PURE__ */ React.createElement("option", { value: "SYSTEM_ADMIN" }, "SYSTEM_ADMIN"),
+    /* @__PURE__ */ React.createElement("option", { value: "CONTENT_ADMIN" }, "CONTENT_ADMIN")
+  ), errors.adminType && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.adminType))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Password"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "password",
+      placeholder: isEdit ? "(Leave blank to keep unchanged)" : "Enter password",
+      value: password,
+      onChange: (e) => {
+        setPassword(e.target.value);
+        if (errors.password) setErrors((prev) => ({ ...prev, password: "" }));
+      },
+      className: getInputClass(errors.password)
+    }
+  ), errors.password && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.password)))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Department"), /* @__PURE__ */ React.createElement(
+    SearchableDropdown,
+    {
+      list: departments,
+      value: department,
+      onChange: (val) => {
+        setDepartment(val);
+        if (errors.department) setErrors((prev) => ({ ...prev, department: "" }));
+      },
+      placeholder: "Search department",
+      filterFn: (d, q) => d.department_name.toLowerCase().includes(q) || d.department_id.toLowerCase().includes(q),
+      displayFn: (d) => d.department_name,
+      valueFn: (d) => d.department_id
+    }
+  ), errors.department && /* @__PURE__ */ React.createElement("p", { className: "text-rose-500 text-xs mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-rose-500" }), /* @__PURE__ */ React.createElement("span", null, errors.department))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Office Room Node"), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      value: officeNodeId,
+      onChange: (e) => setOfficeNodeId(e.target.value),
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "" }, "No Assigned Office"),
+    nodes.filter((n) => n.node_type === "OFFICE").map((n) => /* @__PURE__ */ React.createElement("option", { key: n.node_id, value: n.node_id }, n.room_label || `Node ${n.node_id}`))
+  )))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, "Submit Setup")));
+}
+function StudentForm({ item, roles, onSubmit, onCancel }) {
+  const [studentId, setStudentId] = useState(item?.student_id || "");
+  const [program, setProgram] = useState(item?.program || "");
+  const [faculty, setFaculty] = useState(item?.faculty || "");
+  const [intake, setIntake] = useState(item?.intake || "");
+  const [enrolledSince, setEnrolledSince] = useState(item?.enrolled_since || (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
+  const [fullName, setFullName] = useState(item?.user?.full_name || "");
+  const [email, setEmail] = useState(item?.user?.email || "");
+  const [roleId, setRoleId] = useState(item?.user?.role_id || "");
+  const [editRole, setEditRole] = useState(false);
+  const [linkExisting, setLinkExisting] = useState(false);
+  const [userId, setUserId] = useState("");
+  const [systemUsers, setSystemUsers] = useState([]);
+  const isEdit = !!item;
+  useEffect(() => {
+    if (!isEdit) {
+      const token = "";
+      fetch("/api/iam/users", {
+        headers: { "Authorization": `Bearer ${token}` }
+      }).then((res) => res.json()).then((data) => {
+        if (Array.isArray(data)) {
+          setSystemUsers(data);
+        }
+      }).catch((err) => console.error("Error loading system users:", err));
+    }
+  }, []);
+  const handleSubmit = (e) => {
+    onSubmit(e, {
+      student_id: studentId || null,
+      program,
+      faculty,
+      intake: parseInt(String(intake).trim(), 10),
+      enrolled_since: enrolledSince,
+      user_id: !isEdit && linkExisting && userId ? parseInt(userId) : null,
+      user: isEdit || !linkExisting ? {
+        full_name: fullName,
+        email,
+        role_id: parseInt(roleId),
+        is_active: true
+      } : null
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Student ID"), /* @__PURE__ */ React.createElement("input", { type: "text", disabled: isEdit, value: studentId, onChange: (e) => setStudentId(e.target.value), placeholder: "(Leave blank to auto-generate)", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" })), !isEdit && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-4 mt-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-slate-300 font-bold uppercase tracking-wider" }, "Link to Existing User Account?"), /* @__PURE__ */ React.createElement("label", { className: "relative inline-flex items-center cursor-pointer" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: linkExisting, onChange: (e) => {
+    setLinkExisting(e.target.checked);
+    if (!e.target.checked) {
+      setUserId("");
+    }
+  }, className: "sr-only peer" }), /* @__PURE__ */ React.createElement("div", { className: "w-11 h-6 bg-slate-800 rounded-full peer peer-focus:ring-2 peer-focus:ring-emerald-500/50 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 peer-checked:after:bg-slate-100" }))), linkExisting && /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Search Existing User (Similarity Search)"), /* @__PURE__ */ React.createElement(
+    AutocompleteSearch,
+    {
+      list: systemUsers,
+      placeholder: "Type name, email or user ID...",
+      filterFn: (u, q) => u.full_name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q) || String(u.user_id).includes(q),
+      renderItem: (u) => /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "font-bold text-slate-200" }, u.full_name), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-400" }, "ID: ", u.user_id, " | Email: ", u.email)),
+      onSelect: (u, setQ) => {
+        setUserId(u.user_id);
+        setQ(`${u.full_name} (${u.email})`);
+      }
+    }
+  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Linked User ID"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "number",
+      value: userId,
+      onChange: (e) => setUserId(e.target.value),
+      placeholder: "(Leave blank for new user, or search/select existing user to link)",
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"
+    }
+  ), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mt-1 leading-relaxed" }, "Leave blank for a new user. If a User ID is manually typed, the server will reject it if not found.")))), (isEdit || !linkExisting) && /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800 pt-4 mt-2 space-y-4" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-emerald-400 font-extrabold tracking-widest uppercase" }, "Associated System User"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Full Name"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: fullName, onChange: (e) => setFullName(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Email"), /* @__PURE__ */ React.createElement("input", { type: "email", required: true, value: email, onChange: (e) => setEmail(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, isEdit ? "Role" : "System Role"), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      required: true,
+      value: roleId,
+      disabled: isEdit && !editRole,
+      onChange: (e) => setRoleId(e.target.value),
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Role"),
+    isEdit && !editRole ? roles.filter((r) => r.role_id === item?.user?.role_id).map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name)) : roles.map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name))
+  ), isEdit && /* @__PURE__ */ React.createElement("div", { className: "mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "checkbox",
+      id: "editStudentRoleCheck",
+      checked: editRole,
+      onChange: (e) => setEditRole(e.target.checked),
+      className: "w-3.5 h-3.5 text-emerald-600 bg-slate-950 border-slate-800 rounded focus:ring-emerald-500"
+    }
+  ), /* @__PURE__ */ React.createElement("label", { htmlFor: "editStudentRoleCheck", className: "text-[11px] text-slate-400 font-medium" }, "Edit Role")))), /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800 pt-4 mt-2 grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Degree/Program"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: program, onChange: (e) => setProgram(e.target.value), placeholder: "e.g. Computer Science", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Faculty Department"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: faculty, onChange: (e) => setFaculty(e.target.value), placeholder: "e.g. FCI", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Intake Semester Code"), /* @__PURE__ */ React.createElement("input", { type: "text", inputMode: "numeric", maxLength: "6", pattern: "\\d{6}", required: true, value: intake, onChange: (e) => setIntake(e.target.value.replace(/\D/g, "").slice(0, 6)), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Enrolled Since"), /* @__PURE__ */ React.createElement("input", { type: "date", required: true, value: enrolledSince, onChange: (e) => setEnrolledSince(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, "Enroll Student")));
+}
+function LecturerForm({ item, roles, nodes, onSubmit, onCancel }) {
+  const [lecturerId, setLecturerId] = useState(item?.lecturer_id || "");
+  const [department, setDepartment] = useState(item?.department || "");
+  const [faculty, setFaculty] = useState(item?.faculty || "");
+  const [position, setPosition] = useState(item?.position || "");
+  const [isHoD, setIsHoD] = useState(item ? item.is_head_of_department : false);
+  const [officeNodeId, setOfficeNodeId] = useState(item?.office_node_id || "");
+  const [fullName, setFullName] = useState(item?.user?.full_name || "");
+  const [email, setEmail] = useState(item?.user?.email || "");
+  const [roleId, setRoleId] = useState(item?.user?.role_id || "");
+  const [editRole, setEditRole] = useState(false);
+  const [linkExisting, setLinkExisting] = useState(false);
+  const [userId, setUserId] = useState("");
+  const [systemUsers, setSystemUsers] = useState([]);
+  const isEdit = !!item;
+  useEffect(() => {
+    if (!isEdit) {
+      const token = "";
+      fetch("/api/iam/users", {
+        headers: { "Authorization": `Bearer ${token}` }
+      }).then((res) => res.json()).then((data) => {
+        if (Array.isArray(data)) {
+          setSystemUsers(data);
+        }
+      }).catch((err) => console.error("Error loading system users:", err));
+    }
+  }, []);
+  const handleSubmit = (e) => {
+    onSubmit(e, {
+      lecturer_id: lecturerId || null,
+      department,
+      faculty,
+      position,
+      is_head_of_department: isHoD,
+      office_node_id: officeNodeId ? parseInt(officeNodeId) : null,
+      user_id: !isEdit && linkExisting && userId ? parseInt(userId) : null,
+      user: isEdit || !linkExisting ? {
+        full_name: fullName,
+        email,
+        role_id: parseInt(roleId),
+        is_active: true
+      } : null
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Lecturer ID"), /* @__PURE__ */ React.createElement("input", { type: "text", disabled: isEdit, value: lecturerId, onChange: (e) => setLecturerId(e.target.value), placeholder: "(Leave blank to auto-generate)", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" })), !isEdit && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-4 mt-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-slate-300 font-bold uppercase tracking-wider" }, "Link to Existing User Account?"), /* @__PURE__ */ React.createElement("label", { className: "relative inline-flex items-center cursor-pointer" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: linkExisting, onChange: (e) => {
+    setLinkExisting(e.target.checked);
+    if (!e.target.checked) {
+      setUserId("");
+    }
+  }, className: "sr-only peer" }), /* @__PURE__ */ React.createElement("div", { className: "w-11 h-6 bg-slate-800 rounded-full peer peer-focus:ring-2 peer-focus:ring-emerald-500/50 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 peer-checked:after:bg-slate-100" }))), linkExisting && /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Search Existing User (Similarity Search)"), /* @__PURE__ */ React.createElement(
+    AutocompleteSearch,
+    {
+      list: systemUsers,
+      placeholder: "Type name, email or user ID...",
+      filterFn: (u, q) => u.full_name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q) || String(u.user_id).includes(q),
+      renderItem: (u) => /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "font-bold text-slate-200" }, u.full_name), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-400" }, "ID: ", u.user_id, " | Email: ", u.email)),
+      onSelect: (u, setQ) => {
+        setUserId(u.user_id);
+        setQ(`${u.full_name} (${u.email})`);
+      }
+    }
+  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Linked User ID"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "number",
+      value: userId,
+      onChange: (e) => setUserId(e.target.value),
+      placeholder: "(Leave blank for new user, or search/select existing user to link)",
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"
+    }
+  ), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mt-1 leading-relaxed" }, "Leave blank for a new user. If a User ID is manually typed, the server will reject it if not found.")))), (isEdit || !linkExisting) && /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800 pt-4 mt-2 space-y-4" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-emerald-400 font-extrabold tracking-widest uppercase" }, "Associated System User"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Full Name"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: fullName, onChange: (e) => setFullName(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Email"), /* @__PURE__ */ React.createElement("input", { type: "email", required: true, value: email, onChange: (e) => setEmail(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, isEdit ? "Role" : "System Role"), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      required: true,
+      value: roleId,
+      disabled: isEdit && !editRole,
+      onChange: (e) => setRoleId(e.target.value),
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Role"),
+    isEdit && !editRole ? roles.filter((r) => r.role_id === item?.user?.role_id).map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name)) : roles.map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name))
+  ), isEdit && /* @__PURE__ */ React.createElement("div", { className: "mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "checkbox",
+      id: "editLecturerRoleCheck",
+      checked: editRole,
+      onChange: (e) => setEditRole(e.target.checked),
+      className: "w-3.5 h-3.5 text-emerald-600 bg-slate-950 border-slate-800 rounded focus:ring-emerald-500"
+    }
+  ), /* @__PURE__ */ React.createElement("label", { htmlFor: "editLecturerRoleCheck", className: "text-[11px] text-slate-400 font-medium" }, "Edit Role")))), /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800 pt-4 mt-2 grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Department"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: department, onChange: (e) => setDepartment(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Faculty"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: faculty, onChange: (e) => setFaculty(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Position Title"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: position, onChange: (e) => setPosition(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Office Room Node"), /* @__PURE__ */ React.createElement("select", { value: officeNodeId, onChange: (e) => setOfficeNodeId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "No Assigned Office"), nodes.filter((n) => n.node_type === "OFFICE").map((n) => /* @__PURE__ */ React.createElement("option", { key: n.node_id, value: n.node_id }, n.room_label || `Node ${n.node_id}`))))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: isHoD, onChange: (e) => setIsHoD(e.target.checked), id: "isHoD", className: "w-4 h-4 text-emerald-600 bg-slate-950 border-slate-800 rounded focus:ring-emerald-500" }), /* @__PURE__ */ React.createElement("label", { htmlFor: "isHoD", className: "text-xs text-slate-400 font-bold uppercase tracking-wider" }, "Is Head of Department")), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, "Submit Setup")));
+}
+function StaffForm({ item, roles, nodes, onSubmit, onCancel }) {
+  const [staffId, setStaffId] = useState(item?.staff_id || "");
+  const [department, setDepartment] = useState(item?.department || "");
+  const [position, setPosition] = useState(item?.position || "");
+  const [staffType, setStaffType] = useState(item?.staff_type || "ADMINISTRATIVE");
+  const [officeNodeId, setOfficeNodeId] = useState(item?.office_node_id || "");
+  const [fullName, setFullName] = useState(item?.user?.full_name || "");
+  const [email, setEmail] = useState(item?.user?.email || "");
+  const [roleId, setRoleId] = useState(item?.user?.role_id || "");
+  const [editRole, setEditRole] = useState(false);
+  const [linkExisting, setLinkExisting] = useState(false);
+  const [userId, setUserId] = useState("");
+  const [systemUsers, setSystemUsers] = useState([]);
+  const isEdit = !!item;
+  useEffect(() => {
+    if (!isEdit) {
+      const token = "";
+      fetch("/api/iam/users", {
+        headers: { "Authorization": `Bearer ${token}` }
+      }).then((res) => res.json()).then((data) => {
+        if (Array.isArray(data)) {
+          setSystemUsers(data);
+        }
+      }).catch((err) => console.error("Error loading system users:", err));
+    }
+  }, []);
+  const handleSubmit = (e) => {
+    onSubmit(e, {
+      staff_id: staffId || null,
+      department,
+      position,
+      staff_type: staffType,
+      office_node_id: officeNodeId ? parseInt(officeNodeId) : null,
+      user_id: !isEdit && linkExisting && userId ? parseInt(userId) : null,
+      user: isEdit || !linkExisting ? {
+        full_name: fullName,
+        email,
+        role_id: parseInt(roleId),
+        is_active: true
+      } : null
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Staff Profile ID"), /* @__PURE__ */ React.createElement("input", { type: "text", disabled: isEdit, value: staffId, onChange: (e) => setStaffId(e.target.value), placeholder: "(Leave blank to auto-generate)", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" })), !isEdit && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-4 mt-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-slate-300 font-bold uppercase tracking-wider" }, "Link to Existing User Account?"), /* @__PURE__ */ React.createElement("label", { className: "relative inline-flex items-center cursor-pointer" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: linkExisting, onChange: (e) => {
+    setLinkExisting(e.target.checked);
+    if (!e.target.checked) {
+      setUserId("");
+    }
+  }, className: "sr-only peer" }), /* @__PURE__ */ React.createElement("div", { className: "w-11 h-6 bg-slate-800 rounded-full peer peer-focus:ring-2 peer-focus:ring-emerald-500/50 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 peer-checked:after:bg-slate-100" }))), linkExisting && /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Search Existing User (Similarity Search)"), /* @__PURE__ */ React.createElement(
+    AutocompleteSearch,
+    {
+      list: systemUsers,
+      placeholder: "Type name, email or user ID...",
+      filterFn: (u, q) => u.full_name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q) || String(u.user_id).includes(q),
+      renderItem: (u) => /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "font-bold text-slate-200" }, u.full_name), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-400" }, "ID: ", u.user_id, " | Email: ", u.email)),
+      onSelect: (u, setQ) => {
+        setUserId(u.user_id);
+        setQ(`${u.full_name} (${u.email})`);
+      }
+    }
+  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Linked User ID"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "number",
+      value: userId,
+      onChange: (e) => setUserId(e.target.value),
+      placeholder: "(Leave blank for new user, or search/select existing user to link)",
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"
+    }
+  ), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mt-1 leading-relaxed" }, "Leave blank for a new user. If a User ID is manually typed, the server will reject it if not found.")))), (isEdit || !linkExisting) && /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800 pt-4 mt-2 space-y-4" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-emerald-400 font-extrabold tracking-widest uppercase" }, "Associated System User"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Full Name"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: fullName, onChange: (e) => setFullName(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Email"), /* @__PURE__ */ React.createElement("input", { type: "email", required: true, value: email, onChange: (e) => setEmail(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, isEdit ? "Role" : "System Role"), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      required: true,
+      value: roleId,
+      disabled: isEdit && !editRole,
+      onChange: (e) => setRoleId(e.target.value),
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Role"),
+    isEdit && !editRole ? roles.filter((r) => r.role_id === item?.user?.role_id).map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name)) : roles.map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name))
+  ), isEdit && /* @__PURE__ */ React.createElement("div", { className: "mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "checkbox",
+      id: "editStaffRoleCheck",
+      checked: editRole,
+      onChange: (e) => setEditRole(e.target.checked),
+      className: "w-3.5 h-3.5 text-emerald-600 bg-slate-950 border-slate-800 rounded focus:ring-emerald-500"
+    }
+  ), /* @__PURE__ */ React.createElement("label", { htmlFor: "editStaffRoleCheck", className: "text-[11px] text-slate-400 font-medium" }, "Edit Role")))), /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800 pt-4 mt-2 grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Department"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: department, onChange: (e) => setDepartment(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Position"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: position, onChange: (e) => setPosition(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Staff Category Type"), /* @__PURE__ */ React.createElement("select", { value: staffType, onChange: (e) => setStaffType(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "ADMINISTRATIVE" }, "ADMINISTRATIVE"), /* @__PURE__ */ React.createElement("option", { value: "TECHNICAL" }, "TECHNICAL"), /* @__PURE__ */ React.createElement("option", { value: "SECURITY" }, "SECURITY"), /* @__PURE__ */ React.createElement("option", { value: "FACILITIES" }, "FACILITIES"), /* @__PURE__ */ React.createElement("option", { value: "OTHER" }, "OTHER"))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Office Room Node"), /* @__PURE__ */ React.createElement("select", { value: officeNodeId, onChange: (e) => setOfficeNodeId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "No Assigned Office"), nodes.filter((n) => n.node_type === "OFFICE").map((n) => /* @__PURE__ */ React.createElement("option", { key: n.node_id, value: n.node_id }, n.room_label || `Node ${n.node_id}`))))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, "Submit Setup")));
+}
+function VisitorForm({ item, roles, onSubmit, onCancel, currentUserId }) {
+  const [visitorId, setVisitorId] = useState(item?.visitor_id || "");
+  const [idNumber, setIdNumber] = useState(item?.id_number || "");
+  const [organization, setOrganization] = useState(item?.organization || "");
+  const [visitPurpose, setVisitPurpose] = useState(item?.visit_purpose || "");
+  const [accessExpiry, setAccessExpiry] = useState(item?.access_expiry || new Date(Date.now() + 24 * 3600 * 1e3).toISOString().slice(0, 16));
+  const [fullName, setFullName] = useState(item?.user?.full_name || "");
+  const [email, setEmail] = useState(item?.user?.email || "");
+  const [roleId, setRoleId] = useState(item?.user?.role_id || "");
+  const [editRole, setEditRole] = useState(false);
+  const [linkExisting, setLinkExisting] = useState(false);
+  const [userId, setUserId] = useState("");
+  const [systemUsers, setSystemUsers] = useState([]);
+  const isEdit = !!item;
+  useEffect(() => {
+    if (!isEdit) {
+      const token = "";
+      fetch("/api/iam/users", {
+        headers: { "Authorization": `Bearer ${token}` }
+      }).then((res) => res.json()).then((data) => {
+        if (Array.isArray(data)) {
+          setSystemUsers(data);
+        }
+      }).catch((err) => console.error("Error loading system users:", err));
+    }
+  }, []);
+  const handleSubmit = (e) => {
+    onSubmit(e, {
+      visitor_id: visitorId || null,
+      id_number: idNumber,
+      organization,
+      visit_purpose: visitPurpose,
+      access_expiry: accessExpiry,
+      registered_by: currentUserId,
+      user_id: !isEdit && linkExisting && userId ? parseInt(userId) : null,
+      user: isEdit || !linkExisting ? {
+        full_name: fullName,
+        email,
+        role_id: parseInt(roleId),
+        is_active: true
+      } : null
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, !isEdit && /* @__PURE__ */ React.createElement("div", { className: "rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4 text-xs text-indigo-100 leading-relaxed" }, /* @__PURE__ */ React.createElement("div", { className: "font-bold uppercase tracking-wider text-indigo-300 mb-1" }, "Guided device setup"), "Start the access-control module first. After you submit this form, the dashboard generates the device ID and one-time secret. Copy both into the setup screen shown on the access-control device, then choose ", /* @__PURE__ */ React.createElement("span", { className: "font-bold" }, "Apply and start"), "."), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Visitor Profile ID"), /* @__PURE__ */ React.createElement("input", { type: "text", disabled: isEdit, value: visitorId, onChange: (e) => setVisitorId(e.target.value), placeholder: "(Leave blank to auto-generate)", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Passport/National ID"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, disabled: isEdit, value: idNumber, onChange: (e) => setIdNumber(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" }))), !isEdit && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-4 mt-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-slate-300 font-bold uppercase tracking-wider" }, "Link to Existing User Account?"), /* @__PURE__ */ React.createElement("label", { className: "relative inline-flex items-center cursor-pointer" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: linkExisting, onChange: (e) => {
+    setLinkExisting(e.target.checked);
+    if (!e.target.checked) {
+      setUserId("");
+    }
+  }, className: "sr-only peer" }), /* @__PURE__ */ React.createElement("div", { className: "w-11 h-6 bg-slate-800 rounded-full peer peer-focus:ring-2 peer-focus:ring-emerald-500/50 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 peer-checked:after:bg-slate-100" }))), linkExisting && /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Search Existing User (Similarity Search)"), /* @__PURE__ */ React.createElement(
+    AutocompleteSearch,
+    {
+      list: systemUsers,
+      placeholder: "Type name, email or user ID...",
+      filterFn: (u, q) => u.full_name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q) || String(u.user_id).includes(q),
+      renderItem: (u) => /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "font-bold text-slate-200" }, u.full_name), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-400" }, "ID: ", u.user_id, " | Email: ", u.email)),
+      onSelect: (u, setQ) => {
+        setUserId(u.user_id);
+        setQ(`${u.full_name} (${u.email})`);
+      }
+    }
+  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Linked User ID"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "number",
+      value: userId,
+      onChange: (e) => setUserId(e.target.value),
+      placeholder: "(Leave blank for new user, or search/select existing user to link)",
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"
+    }
+  ), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mt-1 leading-relaxed" }, "Leave blank for a new user. If a User ID is manually typed, the server will reject it if not found.")))), (isEdit || !linkExisting) && /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800 pt-4 mt-2 space-y-4" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-emerald-400 font-extrabold tracking-widest uppercase" }, "Associated System User"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Full Name"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: fullName, onChange: (e) => setFullName(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Email"), /* @__PURE__ */ React.createElement("input", { type: "email", required: true, value: email, onChange: (e) => setEmail(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, isEdit ? "Role" : "System Role"), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      required: true,
+      value: roleId,
+      disabled: isEdit && !editRole,
+      onChange: (e) => setRoleId(e.target.value),
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Role"),
+    isEdit && !editRole ? roles.filter((r) => r.role_id === item?.user?.role_id).map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name)) : roles.map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name))
+  ), isEdit && /* @__PURE__ */ React.createElement("div", { className: "mt-1.5 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "checkbox",
+      id: "editVisitorRoleCheck",
+      checked: editRole,
+      onChange: (e) => setEditRole(e.target.checked),
+      className: "w-3.5 h-3.5 text-emerald-600 bg-slate-950 border-slate-800 rounded focus:ring-emerald-500"
+    }
+  ), /* @__PURE__ */ React.createElement("label", { htmlFor: "editVisitorRoleCheck", className: "text-[11px] text-slate-400 font-medium" }, "Edit Role")))), /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800 pt-4 mt-2 grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Organization/Affiliation"), /* @__PURE__ */ React.createElement("input", { type: "text", value: organization, onChange: (e) => setOrganization(e.target.value), placeholder: "e.g. Guest Company", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Access Expiry Date"), /* @__PURE__ */ React.createElement("input", { type: "datetime-local", required: true, value: accessExpiry, onChange: (e) => setAccessExpiry(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono" }))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Purpose of Visit"), /* @__PURE__ */ React.createElement("textarea", { value: visitPurpose, onChange: (e) => setVisitPurpose(e.target.value), placeholder: "State the reason for visiting the smart campus area...", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 h-20" })), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, "Grant Access Pass")));
+}
+function AdminForm({ item, roles, nodes, onSubmit, onCancel }) {
+  const [adminId, setAdminId] = useState(item?.admin_id || "");
+  const [adminType, setAdminType] = useState(item?.admin_type || "SYSTEM_ADMIN");
+  const [password, setPassword] = useState("");
+  const [userId, setUserId] = useState(item?.user_id || "");
+  const [staffList, setStaffList] = useState([]);
+  const isEdit = !!item;
+  useEffect(() => {
+    if (!isEdit) {
+      const token = "";
+      fetch("/api/iam/staff", {
+        headers: { "Authorization": `Bearer ${token}` }
+      }).then((res) => res.json()).then((data) => {
+        if (Array.isArray(data)) {
+          setStaffList(data);
+        }
+      }).catch((err) => console.error("Error loading staff members:", err));
+    }
+  }, []);
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSubmit(e, {
+      admin_id: adminId || null,
+      admin_type: adminType,
+      password: password || void 0,
+      user_id: !isEdit && userId ? parseInt(userId) : null
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, isEdit && item?.user && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-slate-400 font-bold uppercase tracking-wider block" }, "Linked Staff Member"), /* @__PURE__ */ React.createElement("div", { className: "text-sm font-bold text-slate-200" }, item.user.full_name), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-400" }, "email: ", item.user.email, " | Email: ", item.user.email)), !isEdit && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Search Existing Staff (Name, Staff ID)"), /* @__PURE__ */ React.createElement(
+    AutocompleteSearch,
+    {
+      list: staffList,
+      placeholder: "Search by Name, Staff ID or User ID...",
+      filterFn: (s, q) => s.user?.full_name?.toLowerCase().includes(q) || s.staff_id?.toLowerCase().includes(q) || String(s.user_id).includes(q),
+      renderItem: (s) => /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "font-bold text-slate-200" }, s.user?.full_name), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-400" }, "Staff ID: ", s.staff_id, " | User ID: ", s.user_id, " | Dept: ", s.department)),
+      onSelect: (s, setQ) => {
+        setUserId(s.user_id);
+        setQ(`${s.user?.full_name} (${s.staff_id})`);
+      }
+    }
+  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Selected Staff User ID"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "number",
+      required: true,
+      value: userId,
+      onChange: (e) => setUserId(e.target.value),
+      placeholder: "Insert staff user ID...",
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"
+    }
+  ))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Admin Authority Tier"), /* @__PURE__ */ React.createElement("select", { value: adminType, onChange: (e) => setAdminType(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "SUPER_ADMIN" }, "SUPER ADMIN"), /* @__PURE__ */ React.createElement("option", { value: "SYSTEM_ADMIN" }, "SYSTEM ADMIN"), /* @__PURE__ */ React.createElement("option", { value: "CONTENT_ADMIN" }, "CONTENT ADMIN"))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Portal Access Password"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "password",
+      required: !isEdit,
+      value: password,
+      onChange: (e) => setPassword(e.target.value),
+      placeholder: isEdit ? "(Leave blank to keep unchanged)" : "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+    }
+  ))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, "Grant Admin Rights")));
+}
+function DocumentForm({ item, onSubmit, onCancel }) {
+  const [title, setTitle] = useState(item?.title || "");
+  const [uploadedBy, setUploadedBy] = useState(item?.uploaded_by || 1);
+  const initialRoles = (() => {
+    if (item?.allowed_roles) {
+      if (Array.isArray(item.allowed_roles)) {
+        return item.allowed_roles.includes("VISITOR") ? ["VISITOR", "STUDENT", "LECTURER", "STAFF", "ADMIN"] : item.allowed_roles;
+      }
+      try {
+        const parsed = JSON.parse(item.allowed_roles);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.includes("VISITOR") ? ["VISITOR", "STUDENT", "LECTURER", "STAFF", "ADMIN"] : parsed;
+        }
+      } catch (e) {
+      }
+    }
+    if (item?.access_level) {
+      return item.access_level === "PUBLIC" || item.access_level === "VISITOR" ? ["VISITOR", "STUDENT", "LECTURER", "STAFF", "ADMIN"] : [item.access_level];
+    }
+    return ["VISITOR", "STUDENT", "LECTURER", "STAFF", "ADMIN"];
+  })();
+  const [selectedRoles, setSelectedRoles] = useState(initialRoles);
+  const [file, setFile] = useState(null);
+  const ALL_SYSTEM_ROLES = [
+    { id: "VISITOR", label: "Visitor", badge: "All Roles / Public", desc: "Selecting Visitor automatically grants access to all system roles" },
+    { id: "STUDENT", label: "Student", badge: "Students", desc: "Enrolled university students" },
+    { id: "LECTURER", label: "Lecturer", badge: "Faculty", desc: "Academic teaching staff and professors" },
+    { id: "STAFF", label: "Staff", badge: "Operations", desc: "Administrative, technical, and facility staff" },
+    { id: "ADMIN", label: "Admin", badge: "Admins", desc: "System and content administrators" }
+  ];
+  const toggleRole = (roleId) => {
+    const allRoleIds = ALL_SYSTEM_ROLES.map((r) => r.id);
+    const nonVisitorRoleIds = ["STUDENT", "LECTURER", "STAFF", "ADMIN"];
+    if (roleId === "VISITOR") {
+      if (selectedRoles.includes("VISITOR")) {
+        const remaining = selectedRoles.filter((r) => r !== "VISITOR");
+        setSelectedRoles(remaining.length > 0 ? remaining : ["STUDENT"]);
+      } else {
+        setSelectedRoles(allRoleIds);
+      }
+    } else {
+      if (selectedRoles.includes(roleId)) {
+        const next = selectedRoles.filter((r) => r !== roleId && r !== "VISITOR");
+        if (next.length === 0) return;
+        setSelectedRoles(next);
+      } else {
+        const next = [...selectedRoles, roleId];
+        const hasAllNonVisitor = nonVisitorRoleIds.every((r) => next.includes(r));
+        if (hasAllNonVisitor && !next.includes("VISITOR")) {
+          next.push("VISITOR");
+        }
+        setSelectedRoles(next);
+      }
+    }
+  };
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const formData = new FormData();
+    formData.append("title", title);
+    formData.append("uploaded_by", uploadedBy);
+    formData.append("allowed_roles", JSON.stringify(selectedRoles));
+    formData.append("access_level", selectedRoles[0] || "VISITOR");
+    formData.append("is_active", true);
+    if (file) {
+      formData.append("file", file);
+    }
+    onSubmit(e, formData);
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-5" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Document Title"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: title, onChange: (e) => setTitle(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Document File (PDF, Word, Text, Markdown, CSV)"), /* @__PURE__ */ React.createElement("input", { type: "file", required: !item?.document_id, onChange: (e) => setFile(e.target.files[0]), accept: ".txt,.md,.csv,.pdf,.docx,.doc", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-900/30 file:text-indigo-400 hover:file:bg-indigo-900/50" }), item?.file_path && !file && /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mt-1" }, "Current file: ", item.filename)), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between mb-2" }, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider" }, "Who Can Access (Select Multiple Roles)"), /* @__PURE__ */ React.createElement("span", { className: "text-[11px] text-slate-500 font-medium" }, "Selected: ", selectedRoles.join(", "))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-2.5" }, ALL_SYSTEM_ROLES.map((r) => {
+    const isChecked = selectedRoles.includes(r.id);
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        key: r.id,
+        onClick: () => toggleRole(r.id),
+        className: `flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all duration-200 ${isChecked ? "bg-indigo-950/40 border-indigo-500/60 shadow-sm" : "bg-slate-950/60 border-slate-800/80 hover:border-slate-700 opacity-70 hover:opacity-100"}`
+      },
+      /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          type: "checkbox",
+          checked: isChecked,
+          onChange: () => {
+          },
+          className: "mt-0.5 rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-900 pointer-events-none"
+        }
+      ),
+      /* @__PURE__ */ React.createElement("div", { className: "flex-1 min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: `text-xs font-bold ${isChecked ? "text-indigo-200" : "text-slate-300"}` }, r.label), /* @__PURE__ */ React.createElement("span", { className: "text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/50 uppercase" }, r.badge)), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500 mt-0.5 leading-tight" }, r.desc))
+    );
+  }))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6 pt-2 border-t border-slate-800/60" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all duration-300 shadow-sm" }, "Save Document")));
+}
+function DeviceForm({ item, nodes, roles = [], onSubmit, onCancel }) {
+  const [deviceId, setDeviceId] = useState(item?.device_id || "");
+  const [deviceName, setDeviceName] = useState(item?.device_name || "");
+  const [nodeId, setNodeId] = useState(item?.node_id || "");
+  const [deviceType, setDeviceType] = useState(item?.device_type || "KIOSK");
+  const [ipAddress, setIpAddress] = useState(item?.ip_address || "");
+  const [allowedRoleIds, setAllowedRoleIds] = useState(item?.allowed_role_ids || []);
+  const toggleRole = (roleId) => {
+    setAllowedRoleIds(
+      (prev) => prev.includes(roleId) ? prev.filter((id) => id !== roleId) : [...prev, roleId]
+    );
+  };
+  const handleSubmit = (e) => {
+    onSubmit(e, {
+      ...deviceId ? { device_id: deviceId } : {},
+      device_name: deviceName,
+      node_id: parseInt(nodeId),
+      device_type: deviceType,
+      ip_address: ipAddress || null,
+      is_active: true,
+      allowed_role_ids: allowedRoleIds
+    });
+  };
+  const isEdit = !!item;
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Device ID"), isEdit ? /* @__PURE__ */ React.createElement("input", { type: "text", disabled: true, value: deviceId, className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-60 font-mono" }) : /* @__PURE__ */ React.createElement("div", { className: "w-full min-h-[42px] flex items-center bg-slate-950/60 border border-dashed border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-400" }, "Generated automatically when you submit")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Device Label Name"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: deviceName, onChange: (e) => setDeviceName(e.target.value), placeholder: "e.g. Main Lobby Stand", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Device Node Location"), /* @__PURE__ */ React.createElement("select", { required: true, value: nodeId, onChange: (e) => setNodeId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Node"), nodes.map((n) => /* @__PURE__ */ React.createElement("option", { key: n.node_id, value: n.node_id }, n.room_label || `Node ${n.node_id}`)))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Hardware Type"), /* @__PURE__ */ React.createElement("select", { value: deviceType, onChange: (e) => setDeviceType(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "KIOSK" }, "KIOSK"), /* @__PURE__ */ React.createElement("option", { value: "ENTRY_GATE" }, "ENTRY GATE"), /* @__PURE__ */ React.createElement("option", { value: "CLASSROOM" }, "CLASSROOM"), /* @__PURE__ */ React.createElement("option", { value: "OFFICE" }, "OFFICE"), /* @__PURE__ */ React.createElement("option", { value: "OTHER" }, "OTHER")))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Authorized Roles (Device RBAC)"), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500 mb-2" }, "Select which roles are permitted access on this physical device. If none selected, access will be denied."), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 sm:grid-cols-3 gap-2 bg-slate-950/60 p-3 rounded-xl border border-slate-800" }, roles && roles.length > 0 ? roles.map((r) => {
+    const isChecked = allowedRoleIds.includes(r.role_id);
+    return /* @__PURE__ */ React.createElement("label", { key: r.role_id, className: `flex items-center gap-2 p-2 rounded-lg cursor-pointer border transition-all text-xs select-none ${isChecked ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300 font-medium" : "border-slate-800 text-slate-400 hover:bg-slate-900/50 hover:text-slate-300"}` }, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "checkbox",
+        checked: isChecked,
+        onChange: () => toggleRole(r.role_id),
+        className: "rounded border-slate-700 text-emerald-500 focus:ring-emerald-500/20 bg-slate-900"
+      }
+    ), /* @__PURE__ */ React.createElement("span", null, r.role_name));
+  }) : /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 col-span-full" }, "No roles loaded."))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Edge control address ", /* @__PURE__ */ React.createElement("span", { className: "text-slate-600" }, "(optional)")), /* @__PURE__ */ React.createElement("input", { type: "text", value: ipAddress, onChange: (e) => setIpAddress(e.target.value), placeholder: "e.g. https://192.168.1.100:8443", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono" }), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500 mt-1.5" }, "Leave blank if the device only sends signed synchronization to the cloud.")), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, "Submit Setup")));
+}
+function NodeRBACForm({ nodes, roles, onSubmit, onCancel }) {
+  const [nodeId, setNodeId] = useState("");
+  const [roleId, setRoleId] = useState("");
+  const handleSubmit = (e) => {
+    onSubmit(e, {
+      node_id: parseInt(nodeId),
+      role_id: parseInt(roleId)
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Select Campus Node Location"), /* @__PURE__ */ React.createElement("select", { required: true, value: nodeId, onChange: (e) => setNodeId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Node"), nodes.map((n) => /* @__PURE__ */ React.createElement("option", { key: n.node_id, value: n.node_id }, n.room_label || `Node ${n.node_id}`, " (", n.node_type, ")")))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Granted Role clearance level"), /* @__PURE__ */ React.createElement("select", { required: true, value: roleId, onChange: (e) => setRoleId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Role"), roles.map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name)))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, "Grant Clearance")));
+}
+function EdgeRBACForm({ edges = [], roles = [], onSubmit, onCancel }) {
+  const [edgeId, setEdgeId] = useState("");
+  const [roleId, setRoleId] = useState("");
+  const handleSubmit = (e) => {
+    onSubmit(e, {
+      edge_id: parseInt(edgeId),
+      role_id: parseInt(roleId)
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Select Campus Path (Edge)"), /* @__PURE__ */ React.createElement("select", { required: true, value: edgeId, onChange: (e) => setEdgeId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Path / Edge"), edges.map((ed) => /* @__PURE__ */ React.createElement("option", { key: ed.edge_id, value: ed.edge_id }, "Edge #", ed.edge_id, " (Node ", ed.source_node_id, " \u2192 Node ", ed.destination_node_id, ") ", ed.weight_distance ? `[${ed.weight_distance}m]` : "")))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Granted Role clearance level"), /* @__PURE__ */ React.createElement("select", { required: true, value: roleId, onChange: (e) => setRoleId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Role"), roles.map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name)))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, "Grant Path Clearance")));
+}
+function CourseForm({ item, programmes = [], faculties = [], onSubmit, onCancel }) {
+  const isEdit = !!item;
+  const [courseCode, setCourseCode] = useState(item?.course_code || "");
+  const [courseName, setCourseName] = useState(item?.course_name || "");
+  const [credits, setCredits] = useState(item?.credit_hours || 3);
+  const [programmeId, setProgrammeId] = useState(item?.programme_id || item?.department || "");
+  const [facultyId, setFacultyId] = useState(item?.faculty_id || item?.faculty || "");
+  const [level, setLevel] = useState(item?.course_level || "UNDERGRADUATE");
+  const findProgramme = (value) => programmes.find((p) => String(p.programme_id) === String(value) || p.programme_name === value);
+  const findFaculty = (value) => faculties.find((f) => String(f.faculty_id) === String(value) || f.faculty_name === value);
+  const handleSubmit = (e) => {
+    const selectedProgramme = findProgramme(programmeId);
+    const selectedFaculty = findFaculty(facultyId);
+    onSubmit(e, {
+      course_code: courseCode,
+      course_name: courseName,
+      credit_hours: parseInt(credits),
+      programme_id: selectedProgramme ? selectedProgramme.programme_id : programmeId,
+      faculty_id: selectedFaculty ? selectedFaculty.faculty_id : facultyId,
+      course_level: level,
+      is_active: true
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Course Code"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, disabled: isEdit, value: courseCode, onChange: (e) => setCourseCode(e.target.value), placeholder: "e.g. TCS3111", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-55 disabled:cursor-not-allowed focus:outline-none focus:border-emerald-500 uppercase" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Credit Hours"), /* @__PURE__ */ React.createElement("input", { type: "number", required: true, value: credits, onChange: (e) => setCredits(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Course Subject Name"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: courseName, onChange: (e) => setCourseName(e.target.value), placeholder: "e.g. Distributed Computing Systems", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Programme"), /* @__PURE__ */ React.createElement(
+    SearchableDropdown,
+    {
+      list: programmes,
+      value: programmeId,
+      onChange: (val, item2) => {
+        setProgrammeId(val);
+        if (item2?.faculty_id) setFacultyId(item2.faculty_id);
+      },
+      placeholder: "Search programme",
+      filterFn: (p, q) => p.programme_name.toLowerCase().includes(q) || p.programme_id.toLowerCase().includes(q),
+      displayFn: (p) => p.programme_name,
+      valueFn: (p) => p.programme_id
+    }
+  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Faculty"), /* @__PURE__ */ React.createElement(
+    SearchableDropdown,
+    {
+      list: faculties,
+      value: facultyId,
+      onChange: setFacultyId,
+      placeholder: "Search faculty",
+      filterFn: (f, q) => f.faculty_name.toLowerCase().includes(q) || f.faculty_id.toLowerCase().includes(q),
+      displayFn: (f) => f.faculty_name,
+      valueFn: (f) => f.faculty_id
+    }
+  ))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Course Education Level"), /* @__PURE__ */ React.createElement("select", { value: level, onChange: (e) => setLevel(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "UNDERGRADUATE" }, "UNDERGRADUATE"), /* @__PURE__ */ React.createElement("option", { value: "POSTGRADUATE" }, "POSTGRADUATE"))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, isEdit ? "Update Subject" : "Submit Subject")));
+}
+function EnrollmentForm({ item, students = [], courses = [], onSubmit, onCancel }) {
+  const isEdit = !!item;
+  const [studentId, setStudentId] = useState(item?.student_id || "");
+  const [courseId, setCourseId] = useState(item?.course_id || "");
+  const [semester, setSemester] = useState(item?.semester || 202607);
+  const [academicYear, setAcademicYear] = useState(item?.academic_year || "2025/2026");
+  const [studentOptions, setStudentOptions] = useState(students);
+  const [courseOptions, setCourseOptions] = useState(courses);
+  useEffect(() => {
+    const token = "";
+    const headers = { "Authorization": `Bearer ${token}` };
+    if (!students || students.length === 0) {
+      fetch("/api/iam/students", { headers }).then((res) => res.json()).then((data) => {
+        if (Array.isArray(data)) setStudentOptions(data);
+      }).catch(() => {
+      });
+    }
+    if (!courses || courses.length === 0) {
+      fetch("/api/academics/courses", { headers }).then((res) => res.json()).then((data) => {
+        if (Array.isArray(data)) setCourseOptions(data);
+      }).catch(() => {
+      });
+    }
+  }, []);
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSubmit(e, {
+      student_id: studentId,
+      course_id: parseInt(courseId),
+      semester: parseInt(semester),
+      academic_year: academicYear,
+      status: "ENROLLED"
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Student Profile (Search by Name or Student ID)"), /* @__PURE__ */ React.createElement(
+    SearchableDropdown,
+    {
+      list: studentOptions,
+      value: studentId,
+      onChange: (val, s) => setStudentId(val),
+      placeholder: "Search student by name, email, or student ID...",
+      filterFn: (s, q) => {
+        const name = (s.user?.full_name || s.full_name || s.user?.given_name || "").toLowerCase();
+        const email = (s.user?.email || s.email || "").toLowerCase();
+        const sid = String(s.student_id || "").toLowerCase();
+        return name.includes(q) || email.includes(q) || sid.includes(q);
+      },
+      displayFn: (s) => {
+        const name = s.user?.full_name || s.full_name || (s.user?.given_name ? `${s.user.given_name} ${s.user.family_name || ""}` : "");
+        return `${s.student_id}${name ? " \u2014 " + name : ""}`;
+      },
+      valueFn: (s) => s.student_id
+    }
+  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Course (Search by Course Code or Course Name)"), /* @__PURE__ */ React.createElement(
+    SearchableDropdown,
+    {
+      list: courseOptions,
+      value: courseId,
+      onChange: (val, c) => setCourseId(val),
+      placeholder: "Search course by code, name, or ID...",
+      filterFn: (c, q) => {
+        const code = (c.course_code || "").toLowerCase();
+        const name = (c.course_name || "").toLowerCase();
+        const id = String(c.course_id || "").toLowerCase();
+        return code.includes(q) || name.includes(q) || id.includes(q);
+      },
+      displayFn: (c) => `[${c.course_code}] ${c.course_name}`,
+      valueFn: (c) => c.course_id
+    }
+  )), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Semester Code"), /* @__PURE__ */ React.createElement("input", { type: "number", required: true, value: semester, onChange: (e) => setSemester(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Academic Year"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: academicYear, onChange: (e) => setAcademicYear(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, isEdit ? "Update Enrollment" : "Register Enrollment")));
+}
+function TimetableForm({ item, nodes, onSubmit, onCancel }) {
+  const isEdit = !!item;
+  const [courseId, setCourseId] = useState(item?.course_id || "");
+  const [lecturerId, setLecturerId] = useState(item?.lecturer_id || "");
+  const [dayOfWeek, setDayOfWeek] = useState(item?.day_of_week || "MONDAY");
+  const [startTime, setStartTime] = useState(item?.start_time ? item.start_time.slice(0, 5) : "09:00");
+  const [endTime, setEndTime] = useState(item?.end_time ? item.end_time.slice(0, 5) : "11:00");
+  const [nodeId, setNodeId] = useState(item?.node_id || "");
+  const [semester, setSemester] = useState(item?.semester || 202607);
+  const [academicYear, setAcademicYear] = useState(item?.academic_year || "2025/2026");
+  const handleSubmit = (e) => {
+    onSubmit(e, {
+      course_id: parseInt(courseId),
+      lecturer_id: lecturerId,
+      day_of_week: dayOfWeek,
+      start_time: startTime.slice(0, 5) + ":00",
+      end_time: endTime.slice(0, 5) + ":00",
+      node_id: parseInt(nodeId),
+      semester: parseInt(semester),
+      academic_year: academicYear
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Course Index ID"), /* @__PURE__ */ React.createElement("input", { type: "number", required: true, value: courseId, onChange: (e) => setCourseId(e.target.value), placeholder: "e.g. 1", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Lecturer Profile ID"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: lecturerId, onChange: (e) => setLecturerId(e.target.value), placeholder: "e.g. LEC-20030", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 gap-3" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Day of Week"), /* @__PURE__ */ React.createElement("select", { value: dayOfWeek, onChange: (e) => setDayOfWeek(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "MONDAY" }, "MONDAY"), /* @__PURE__ */ React.createElement("option", { value: "TUESDAY" }, "TUESDAY"), /* @__PURE__ */ React.createElement("option", { value: "WEDNESDAY" }, "WEDNESDAY"), /* @__PURE__ */ React.createElement("option", { value: "THURSDAY" }, "THURSDAY"), /* @__PURE__ */ React.createElement("option", { value: "FRIDAY" }, "FRIDAY"), /* @__PURE__ */ React.createElement("option", { value: "SATURDAY" }, "SATURDAY"), /* @__PURE__ */ React.createElement("option", { value: "SUNDAY" }, "SUNDAY"))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Start Time"), /* @__PURE__ */ React.createElement("input", { type: "time", required: true, value: startTime, onChange: (e) => setStartTime(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "End Time"), /* @__PURE__ */ React.createElement("input", { type: "time", required: true, value: endTime, onChange: (e) => setEndTime(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono" }))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 gap-3" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Classroom Node"), /* @__PURE__ */ React.createElement("select", { required: true, value: nodeId, onChange: (e) => setNodeId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Room"), nodes.filter((n) => n.node_type === "CLASSROOM").map((n) => /* @__PURE__ */ React.createElement("option", { key: n.node_id, value: n.node_id }, n.room_label || `Node ${n.node_id}`)))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Semester Code"), /* @__PURE__ */ React.createElement("input", { type: "number", required: true, value: semester, onChange: (e) => setSemester(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Academic Year"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: academicYear, onChange: (e) => setAcademicYear(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, isEdit ? "Update Class Slot" : "Schedule Class Slot")));
+}
+function AppointmentForm({ item, nodes, onSubmit, onCancel }) {
+  const [guestId, setGuestId] = useState(item?.guest_user_id || "");
+  const [hostId, setHostId] = useState(item?.host_user_id || "");
+  const [scheduledAt, setScheduledAt] = useState(item?.scheduled_at || (/* @__PURE__ */ new Date()).toISOString().slice(0, 16));
+  const [duration, setDuration] = useState(item?.duration_minutes || 30);
+  const [nodeId, setNodeId] = useState(item?.node_id || "");
+  const [purpose, setPurpose] = useState(item?.purpose || "");
+  const [status, setStatus] = useState(item?.status || "PENDING");
+  const handleSubmit = (e) => {
+    onSubmit(e, {
+      guest_user_id: parseInt(guestId),
+      host_user_id: parseInt(hostId),
+      scheduled_at: scheduledAt,
+      duration_minutes: parseInt(duration),
+      node_id: nodeId ? parseInt(nodeId) : null,
+      purpose,
+      status
+    });
+  };
+  const isEdit = !!item;
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, isEdit && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Appointment Status"), /* @__PURE__ */ React.createElement("select", { value: status, onChange: (e) => setStatus(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "PENDING" }, "PENDING"), /* @__PURE__ */ React.createElement("option", { value: "CONFIRMED" }, "CONFIRMED"), /* @__PURE__ */ React.createElement("option", { value: "CANCELLED" }, "CANCELLED"), /* @__PURE__ */ React.createElement("option", { value: "COMPLETED" }, "COMPLETED"))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Guest User Index ID"), /* @__PURE__ */ React.createElement("input", { type: "number", required: true, disabled: isEdit, value: guestId, onChange: (e) => setGuestId(e.target.value), placeholder: "e.g. 2 (verified Student)", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Host User Index ID"), /* @__PURE__ */ React.createElement("input", { type: "number", required: true, disabled: isEdit, value: hostId, onChange: (e) => setHostId(e.target.value), placeholder: "e.g. 3 (verified Lecturer)", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-40 focus:outline-none focus:border-emerald-500" }))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "col-span-2" }, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Scheduled Date & Time"), /* @__PURE__ */ React.createElement("input", { type: "datetime-local", required: true, value: scheduledAt, onChange: (e) => setScheduledAt(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Duration (mins)"), /* @__PURE__ */ React.createElement("input", { type: "number", required: true, value: duration, onChange: (e) => setDuration(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono" }))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Meeting Node Location"), /* @__PURE__ */ React.createElement("select", { value: nodeId, onChange: (e) => setNodeId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Node"), nodes.map((n) => /* @__PURE__ */ React.createElement("option", { key: n.node_id, value: n.node_id }, n.room_label || `Node ${n.node_id}`, " (", n.node_type, ")"))))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Appointment Purpose"), /* @__PURE__ */ React.createElement("textarea", { value: purpose, onChange: (e) => setPurpose(e.target.value), placeholder: "State meeting notes, agenda, discussion points...", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 h-20" })), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, "Book Appointment Slot")));
+}
+function RoleForm({ item, onSubmit, onCancel }) {
+  const isEdit = !!item;
+  const [roleName, setRoleName] = useState(item?.role_name || "");
+  const [description, setDescription] = useState(item?.description || "");
+  const handleSubmit = (e) => {
+    onSubmit(e, {
+      role_name: roleName.toUpperCase(),
+      description
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Role Name"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, disabled: isEdit, value: roleName, onChange: (e) => setRoleName(e.target.value), placeholder: "e.g. GUEST_STUDENT", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-55 disabled:cursor-not-allowed focus:outline-none focus:border-emerald-500 uppercase font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Description"), /* @__PURE__ */ React.createElement("textarea", { value: description, onChange: (e) => setDescription(e.target.value), placeholder: "Explain security clearance privileges...", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 h-24" })), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, isEdit ? "Update Role" : "Create Role")));
+}
+function FacultyForm({ item, staff = [], onSubmit, onCancel }) {
+  const isEdit = !!item;
+  const [facultyId, setFacultyId] = useState(item?.faculty_id || "");
+  const [facultyName, setFacultyName] = useState(item?.faculty_name || "");
+  const [deanId, setDeanId] = useState(item?.dean_id || "");
+  const handleSubmit = (e) => {
+    onSubmit(e, {
+      faculty_id: facultyId,
+      faculty_name: facultyName,
+      dean_id: deanId
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Faculty ID"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, disabled: isEdit, value: facultyId, onChange: (e) => setFacultyId(e.target.value), placeholder: "e.g. FCI", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-55 disabled:cursor-not-allowed focus:outline-none focus:border-emerald-500 uppercase font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Faculty Name"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: facultyName, onChange: (e) => setFacultyName(e.target.value), placeholder: "e.g. Faculty of Computing and Informatics", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Dean"), /* @__PURE__ */ React.createElement("select", { required: true, value: deanId, onChange: (e) => setDeanId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Dean"), staff.map((s) => /* @__PURE__ */ React.createElement("option", { key: s.staff_id, value: s.staff_id }, s.user?.full_name ? `${s.user.full_name} (${s.staff_id})` : s.staff_id)))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, isEdit ? "Update Faculty" : "Create Faculty")));
+}
+function DepartmentForm({ item, staff = [], onSubmit, onCancel }) {
+  const isEdit = !!item;
+  const [departmentId, setDepartmentId] = useState(item?.department_id || "");
+  const [departmentName, setDepartmentName] = useState(item?.department_name || "");
+  const [managerId, setManagerId] = useState(item?.manager_id || "");
+  const handleSubmit = (e) => {
+    onSubmit(e, {
+      department_id: departmentId,
+      department_name: departmentName,
+      manager_id: managerId
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Department ID"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, disabled: isEdit, value: departmentId, onChange: (e) => setDepartmentId(e.target.value), placeholder: "e.g. DEPT-CS", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-55 disabled:cursor-not-allowed focus:outline-none focus:border-emerald-500 uppercase font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Department Name"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: departmentName, onChange: (e) => setDepartmentName(e.target.value), placeholder: "e.g. Department of Computer Science", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Manager"), /* @__PURE__ */ React.createElement("select", { required: true, value: managerId, onChange: (e) => setManagerId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Manager"), staff.map((s) => /* @__PURE__ */ React.createElement("option", { key: s.staff_id, value: s.staff_id }, s.user?.full_name ? `${s.user.full_name} (${s.staff_id})` : s.staff_id)))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, isEdit ? "Update Department" : "Create Department")));
+}
+function ProgrammeForm({ item, staff = [], faculties = [], onSubmit, onCancel }) {
+  const isEdit = !!item;
+  const [programmeId, setProgrammeId] = useState(item?.programme_id || "");
+  const [programmeName, setProgrammeName] = useState(item?.programme_name || "");
+  const [facultyId, setFacultyId] = useState(item?.faculty_id || "");
+  const [hopId, setHopId] = useState(item?.hop_id || "");
+  const handleSubmit = (e) => {
+    onSubmit(e, {
+      programme_id: programmeId,
+      programme_name: programmeName,
+      faculty_id: facultyId,
+      hop_id: hopId
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Programme ID"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, disabled: isEdit, value: programmeId, onChange: (e) => setProgrammeId(e.target.value), placeholder: "e.g. BCS", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 disabled:opacity-55 disabled:cursor-not-allowed focus:outline-none focus:border-emerald-500 uppercase font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Programme Name"), /* @__PURE__ */ React.createElement("input", { type: "text", required: true, value: programmeName, onChange: (e) => setProgrammeName(e.target.value), placeholder: "e.g. Bachelor of Computer Science", className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" })), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Faculty"), /* @__PURE__ */ React.createElement("select", { required: true, value: facultyId, onChange: (e) => setFacultyId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Select Faculty"), faculties.map((f) => /* @__PURE__ */ React.createElement("option", { key: f.faculty_id, value: f.faculty_id }, f.faculty_name, " (", f.faculty_id, ")")))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Head of Programme (HOP)"), /* @__PURE__ */ React.createElement("select", { required: true, value: hopId, onChange: (e) => setHopId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Select HOP"), staff.map((s) => /* @__PURE__ */ React.createElement("option", { key: s.staff_id, value: s.staff_id }, s.user?.full_name ? `${s.user.full_name} (${s.staff_id})` : s.staff_id))))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-300" }, isEdit ? "Update Programme" : "Create Programme")));
+}
+function SpeechAdaptationPhraseForm({ item, onSubmit, onCancel }) {
+  const isEdit = !!item;
+  const [acronym, setAcronym] = useState(item?.phrase || "");
+  const parseInitialTranslations = () => {
+    if (!item?.description) return [{ id: 1, lang: "en", text: "" }];
+    try {
+      const parsed = JSON.parse(item.description);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((t, idx) => ({
+          id: idx + 1,
+          lang: t.lang || "en",
+          text: t.text || (typeof t === "string" ? t : "")
+        }));
+      }
+      if (typeof parsed === "object" && parsed !== null) {
+        return Object.entries(parsed).map(([lang, text], idx) => ({
+          id: idx + 1,
+          lang,
+          text: String(text)
+        }));
+      }
+    } catch (e) {
+      return [{ id: 1, lang: "en", text: item.description }];
+    }
+    return [{ id: 1, lang: "en", text: "" }];
+  };
+  const [translations, setTranslations] = useState(parseInitialTranslations);
+  const handleAddRow = () => {
+    setTranslations((prev) => [...prev, { id: Date.now(), lang: "en", text: "" }]);
+  };
+  const handleRemoveRow = (id) => {
+    setTranslations((prev) => {
+      if (prev.length <= 1) return [{ id: Date.now(), lang: "en", text: "" }];
+      return prev.filter((row) => row.id !== id);
+    });
+  };
+  const handleUpdateRow = (id, field, value) => {
+    setTranslations((prev) => prev.map((row) => row.id === id ? { ...row, [field]: value } : row));
+  };
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const cleanAcronym = acronym.trim();
+    if (!cleanAcronym) return;
+    const validTranslations = translations.map((t) => ({ lang: t.lang, text: t.text.trim() })).filter((t) => t.text.length > 0);
+    onSubmit(e, {
+      phrase: cleanAcronym,
+      language_category: "ACRONYM",
+      description: validTranslations.length > 0 ? JSON.stringify(validTranslations) : null,
+      is_active: true
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-5" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Acronym"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      required: true,
+      value: acronym,
+      onChange: (e) => setAcronym(e.target.value),
+      placeholder: "e.g. FOCS, QIU, PTPTN, LIB",
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-bold tracking-wide"
+    }
+  ), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500 mt-1" }, "Short acronym, abbreviation, or keyword.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between mb-2" }, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider" }, "Translations"), /* @__PURE__ */ React.createElement("span", { className: "text-[11px] text-slate-500" }, "List all language translations for this acronym")), /* @__PURE__ */ React.createElement("div", { className: "space-y-2.5" }, translations.map((row, idx) => /* @__PURE__ */ React.createElement("div", { key: row.id || idx, className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      value: row.lang,
+      onChange: (e) => handleUpdateRow(row.id, "lang", e.target.value),
+      className: "bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-200 focus:outline-none focus:border-indigo-500 shrink-0 w-36"
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "en" }, "English (EN)"),
+    /* @__PURE__ */ React.createElement("option", { value: "ms" }, "Bahasa Melayu (MS)"),
+    /* @__PURE__ */ React.createElement("option", { value: "zh" }, "Chinese (ZH)"),
+    /* @__PURE__ */ React.createElement("option", { value: "ta" }, "Tamil (TA)"),
+    /* @__PURE__ */ React.createElement("option", { value: "yue" }, "Cantonese (YUE)"),
+    /* @__PURE__ */ React.createElement("option", { value: "ar" }, "Arabic (AR)")
+  ), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      value: row.text,
+      onChange: (e) => handleUpdateRow(row.id, "text", e.target.value),
+      placeholder: "e.g. Faculty of Computing and Science",
+      className: "flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+    }
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: () => handleRemoveRow(row.id),
+      className: "p-2 text-slate-500 hover:text-rose-400 transition-colors rounded-lg hover:bg-rose-500/10",
+      title: "Remove this translation"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+  )))), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: handleAddRow,
+      className: "mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "plus", className: "w-3.5 h-3.5" }),
+    /* @__PURE__ */ React.createElement("span", null, "Add another translation")
+  )), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6 pt-4 border-t border-slate-800" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all duration-300" }, isEdit ? "Update Acronym" : "Add Acronym")));
+}
+function SpeechLanguageForm({ item, onSubmit, onCancel }) {
+  const isEdit = !!item;
+  const [languageName, setLanguageName] = useState(item?.language_name || "");
+  const [languageCode, setLanguageCode] = useState(item?.language_code || "");
+  const [isDefault, setIsDefault] = useState(item?.is_default || false);
+  const [isActive, setIsActive] = useState(item?.is_active ?? true);
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const code = languageCode.trim().toLowerCase();
+    const name = languageName.trim();
+    if (!code || !name) return;
+    onSubmit(e, {
+      language_code: code,
+      language_name: name,
+      is_default: isDefault,
+      is_active: isActive
+    });
+  };
+  return /* @__PURE__ */ React.createElement("form", { onSubmit: handleSubmit, className: "space-y-5" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Language Name"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      required: true,
+      value: languageName,
+      onChange: (e) => setLanguageName(e.target.value),
+      placeholder: "e.g. Japanese, Korean, German, Spanish",
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-medium"
+    }
+  ), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500 mt-1" }, "Common or official name of the language.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs text-slate-400 font-bold uppercase tracking-wider mb-2" }, "Language Code (BCP-47)"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      required: true,
+      disabled: isEdit,
+      value: languageCode,
+      onChange: (e) => setLanguageCode(e.target.value),
+      placeholder: "e.g. ja, ko, de, es, vi, fr",
+      maxLength: 10,
+      className: `w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-mono ${isEdit ? "opacity-60 cursor-not-allowed" : ""}`
+    }
+  ), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500 mt-1" }, "Standard 2-letter or 3-letter BCP-47 / ISO code (e.g. ja, ko, de).")), /* @__PURE__ */ React.createElement("div", { className: "pt-2 space-y-3" }, /* @__PURE__ */ React.createElement("label", { className: "flex items-start gap-3 cursor-pointer select-none group" }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "checkbox",
+      checked: isDefault,
+      onChange: (e) => {
+        setIsDefault(e.target.checked);
+        if (e.target.checked) setIsActive(true);
+      },
+      className: "mt-1 rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900"
+    }
+  ), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("span", { className: "text-xs font-bold text-slate-200 group-hover:text-indigo-300 transition-colors" }, "Listen by Default"), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500 leading-snug" }, "Pre-load this language into the speech recognition hypothesis hints at the start of every session."))), /* @__PURE__ */ React.createElement("label", { className: "flex items-start gap-3 cursor-pointer select-none group" }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "checkbox",
+      checked: isActive,
+      disabled: isDefault,
+      onChange: (e) => setIsActive(e.target.checked),
+      className: "mt-1 rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900 disabled:opacity-50"
+    }
+  ), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("span", { className: "text-xs font-bold text-slate-200 group-hover:text-indigo-300 transition-colors" }, "Active in Campus Directory"), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500 leading-snug" }, "Mark as an officially active and supported language across the campus system.")))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-3 mt-6 pt-4 border-t border-slate-800" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: onCancel, className: "px-4 py-2 text-sm text-slate-400 hover:text-slate-200" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all duration-300" }, isEdit ? "Update Language" : "Add Language")));
+}
+window.UserForm = UserForm;
+window.StudentForm = StudentForm;
+window.LecturerForm = LecturerForm;
+window.StaffForm = StaffForm;
+window.VisitorForm = VisitorForm;
+window.AdminForm = AdminForm;
+window.DocumentForm = DocumentForm;
+window.DeviceForm = DeviceForm;
+window.NodeRBACForm = NodeRBACForm;
+window.EdgeRBACForm = EdgeRBACForm;
+window.CourseForm = CourseForm;
+window.EnrollmentForm = EnrollmentForm;
+window.TimetableForm = TimetableForm;
+window.AppointmentForm = AppointmentForm;
+window.RoleForm = RoleForm;
+window.FacultyForm = FacultyForm;
+window.DepartmentForm = DepartmentForm;
+window.ProgrammeForm = ProgrammeForm;
+window.SpeechAdaptationPhraseForm = SpeechAdaptationPhraseForm;
+window.SpeechLanguageForm = SpeechLanguageForm;
+
+})();
+(function(){
+const { useState, useEffect, useRef, useMemo } = React;
+const DASHBOARD_SUB_TABS = {
+  iam: ["users", "roles", "facial-recognition"],
+  rag: ["documents", "chatbot-queries", "adaptation-phrases", "speech-languages"],
+  infra: ["devices", "node-rbac", "edge-rbac", "auth-logs", "jwt-sessions"],
+  academics: ["courses", "enrollments", "timetables", "appointments", "notifications", "faculties", "departments", "programmes"]
+};
+const DASHBOARD_DEFAULT_SUB_TAB = { iam: "users", rag: "documents", infra: "devices", academics: "courses" };
+const DASHBOARD_TABS = ["overview", "iam", "rag", "infra", "academics", "mapping"];
+function readDashboardRoute() {
+  const parts = window.location.pathname.replace(/^\/dashboard\/?/, "").split("/").filter(Boolean);
+  const storedTab = localStorage.getItem("dashboard_current_tab");
+  const storedSubTab = localStorage.getItem("dashboard_current_sub_tab");
+  const candidateTab = parts[0] || storedTab || "overview";
+  const tab = DASHBOARD_TABS.includes(candidateTab) ? candidateTab : "overview";
+  const allowedSubTabs = DASHBOARD_SUB_TABS[tab] || [];
+  const candidateSubTab = parts[1] || storedSubTab || DASHBOARD_DEFAULT_SUB_TAB[tab] || "";
+  const subTab = allowedSubTabs.includes(candidateSubTab) ? candidateSubTab : DASHBOARD_DEFAULT_SUB_TAB[tab] || "";
+  return { tab, subTab };
+}
+function dashboardPath(tab, subTab) {
+  if (!tab || tab === "overview") return "/dashboard/overview";
+  return subTab ? `/dashboard/${tab}/${subTab}` : `/dashboard/${tab}`;
+}
+function CampusMapTab() {
+  return /* @__PURE__ */ React.createElement("div", { className: "w-full h-[calc(100vh-6rem)] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl" }, /* @__PURE__ */ React.createElement(
+    "iframe",
+    {
+      src: "/static/vite/index.html",
+      className: "w-full h-full border-none",
+      title: "Campus Map Editor"
+    }
+  ));
+}
+function App() {
+  const initialRoute = useMemo(() => readDashboardRoute(), []);
+  const [token, setToken] = useState("");
+  const [authChecked, setAuthChecked] = useState(false);
+  const [adminType, setAdminType] = useState(localStorage.getItem("admin_type") || "");
+  const [email, setEmail] = useState(localStorage.getItem("email") || "");
+  const [fullName, setFullName] = useState(localStorage.getItem("full_name") || "");
+  const [adminId, setAdminId] = useState(localStorage.getItem("admin_id") || "");
+  const [currentTab, setCurrentTab] = useState(initialRoute.tab);
+  const [subTab, setSubTab] = useState(initialRoute.subTab);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [reembedding, setReembedding] = useState(false);
+  const [formSubmitting, setFormSubmitting] = useState(false);
+  const [pendingActionKey, setPendingActionKey] = useState("");
+  const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
+  useEffect(() => {
+    if (theme === "light") {
+      document.documentElement.classList.add("light");
+      document.documentElement.classList.remove("dark");
+    } else {
+      document.documentElement.classList.add("dark");
+      document.documentElement.classList.remove("light");
+    }
+    localStorage.setItem("theme", theme);
+  }, [theme]);
+  const toggleTheme = () => {
+    setTheme((prev) => prev === "dark" ? "light" : "dark");
+  };
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPass, setLoginPass] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  useEffect(() => {
+    let active = true;
+    fetch("/api/auth/me", { credentials: "include" }).then(async (response) => {
+      if (!response.ok) throw new Error("Not authenticated");
+      return response.json();
+    }).then((admin) => {
+      if (!active) return;
+      localStorage.setItem("admin_type", admin.admin_type || "");
+      localStorage.setItem("email", admin.user?.email || admin.email || "");
+      localStorage.setItem("full_name", admin.user?.full_name || admin.full_name || "");
+      localStorage.setItem("admin_id", String(admin.admin_id || ""));
+      setAdminType(admin.admin_type || "");
+      setEmail(admin.user?.email || admin.email || "");
+      setFullName(admin.user?.full_name || admin.full_name || "");
+      setAdminId(admin.admin_id || "");
+      setToken("cookie-authenticated");
+    }).catch(() => {
+      if (active) setToken("");
+    }).finally(() => {
+      if (active) setAuthChecked(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const [dashboardStats, setDashboardStats] = useState({
+    users: 0,
+    active_users: 0,
+    inactive_users: 0,
+    face_enrolled_users: 0,
+    devices: 0,
+    online_devices: 0,
+    offline_devices: 0,
+    documents: 0,
+    courses: 0,
+    active_sessions: 0,
+    auth_attempts_24h: 0,
+    auth_failures_24h: 0,
+    db_latency_ms: 0
+  });
+  const [listData, setListData] = useState([]);
+  const [listLoading, setListLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const searchInputRef = useRef(null);
+  const [roleFilter, setRoleFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [userFaceFilter, setUserFaceFilter] = useState("ALL");
+  const [facultyFilter, setFacultyFilter] = useState("ALL");
+  const [departmentFilter, setDepartmentFilter] = useState("ALL");
+  const [accessLevelFilter, setAccessLevelFilter] = useState("ALL");
+  const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [faceStatusFilter, setFaceStatusFilter] = useState("ALL");
+  const [faceRoleFilter, setFaceRoleFilter] = useState("ALL");
+  const [speechLanguages, setSpeechLanguages] = useState([]);
+  const [adaptationCategories, setAdaptationCategories] = useState([]);
+  const [serverPagination, setServerPagination] = useState({ total: 0, page: 1, page_size: 25, total_pages: 1 });
+  const [userSummary, setUserSummary] = useState({ total_users: 0, active_users: 0, inactive_users: 0, face_enrolled_users: 0 });
+  const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const [bulkRoleId, setBulkRoleId] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [drawerState, setDrawerState] = useState({ record: null, kind: "" });
+  const [confirmState, setConfirmState] = useState({ open: false, title: "", message: "", confirmLabel: "Confirm", variant: "danger", onConfirm: null });
+  const [tableDensity, setTableDensity] = useState(localStorage.getItem("dashboard_table_density") || "comfortable");
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [jumpPageInput, setJumpPageInput] = useState("");
+  const [showFaceModal, setShowFaceModal] = useState(false);
+  const [selectedPhotoFile, setSelectedPhotoFile] = useState(null);
+  const [uploadedPhoto, setUploadedPhoto] = useState(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanStep, setScanStep] = useState(0);
+  const [confidence, setConfidence] = useState(0);
+  const [scanLogs, setScanLogs] = useState([]);
+  const logEndRef = useRef(null);
+  const [enrollMethod, setEnrollMethod] = useState("photo");
+  const [photoPose, setPhotoPose] = useState("front");
+  const [activeCameraPoseIndex, setActiveCameraPoseIndex] = useState(0);
+  const [liveFeedback, setLiveFeedback] = useState("Align your face in the center of the camera.");
+  const [liveScanActive, setLiveScanActive] = useState(false);
+  const [cameraStream, setCameraStream] = useState(null);
+  const [selectedVideoFile, setSelectedVideoFile] = useState(null);
+  const [videoProcessing, setVideoProcessing] = useState(false);
+  const [videoError, setVideoError] = useState("");
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [recordingPhase, setRecordingPhase] = useState("idle");
+  const [recordingCountdown, setRecordingCountdown] = useState(3);
+  const [guidePoseIndex, setGuidePoseIndex] = useState(0);
+  const [enrollFeedback, setEnrollFeedback] = useState("");
+  const [recordingProgress, setRecordingProgress] = useState(0);
+  const [embeddingProgress, setEmbeddingProgress] = useState(0);
+  const guidedCaptureRef = useRef({ active: false });
+  const [showModal, setShowModal] = useState(false);
+  const [modalType, setModalType] = useState("");
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [provisioningDetails, setProvisioningDetails] = useState(null);
+  const [sortKey, setSortKey] = useState("");
+  const [sortOrder, setSortOrder] = useState("asc");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(() => {
+    const saved = parseInt(localStorage.getItem("dashboard_page_size") || "25", 10);
+    return [10, 25, 50, 100].includes(saved) ? saved : 25;
+  });
+  const isServerPaginatedUsers = currentTab === "iam" && (subTab === "users" || subTab === "facial-recognition");
+  useEffect(() => {
+    localStorage.setItem("dashboard_table_density", tableDensity);
+  }, [tableDensity]);
+  useEffect(() => {
+    localStorage.setItem("dashboard_page_size", String(itemsPerPage));
+  }, [itemsPerPage]);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 220);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) {
+        if (searchInputRef.current) {
+          e.preventDefault();
+          searchInputRef.current.focus();
+        }
+      } else if (e.key === "Escape") {
+        if (confirmState.open) setConfirmState((prev) => ({ ...prev, open: false }));
+        else if (drawerState.record) setDrawerState({ record: null, kind: "" });
+        else if (showModal) setShowModal(false);
+        else if (mobileSidebarOpen) setMobileSidebarOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [confirmState.open, drawerState.record, showModal, mobileSidebarOpen]);
+  const [refs, setRefs] = useState({
+    buildings: [],
+    floorplans: [],
+    nodes: [],
+    edges: [],
+    roles: [],
+    faculties: [],
+    programmes: [],
+    departments: [],
+    staff: []
+  });
+  const refsLoadedRef = useRef(false);
+  const refsLoadingRef = useRef(false);
+  const tabRequestIdRef = useRef(0);
+  const subTabLabel = (t) => ({
+    "users": "Users",
+    "roles": "Access Roles",
+    "facial-recognition": "Face ID",
+    "documents": "Documents",
+    "chunks": "Content Chunks",
+    "chatbot-queries": "Chatbot Logs",
+    "adaptation-phrases": "Acronyms & Translations",
+    "speech-languages": "Supported Languages",
+    "devices": "Devices",
+    "node-rbac": "Room Access",
+    "edge-rbac": "Path Access",
+    "auth-logs": "Access Logs",
+    "jwt-sessions": "Active Sessions",
+    "courses": "Courses",
+    "enrollments": "Enrollments",
+    "timetables": "Timetables",
+    "appointments": "Appointments",
+    "notifications": "Notifications",
+    "faculties": "Faculties",
+    "departments": "Departments",
+    "programmes": "Programmes"
+  })[t] || t;
+  const getSingleTabLabel = (t) => {
+    if (t === "faculties") return "Faculty";
+    if (t === "categories") return "Category";
+    const label = subTabLabel(t);
+    if (label.endsWith("ies")) return label.replace(/ies$/, "y");
+    if (label.endsWith("s")) return label.replace(/s$/, "");
+    return label;
+  };
+  useEffect(() => {
+    if (window.lucide) window.lucide.createIcons();
+  }, [currentTab, subTab, listData, showModal, showFaceModal, toast]);
+  useEffect(() => {
+    if (logEndRef.current) logEndRef.current.scrollIntoView({ behavior: "smooth" });
+  }, [scanLogs]);
+  const showErrorToast = (msg) => setToast({ message: msg, type: "error" });
+  const showSuccessToast = (msg) => setToast({ message: msg, type: "success" });
+  const parseTranslations = (desc) => {
+    if (!desc) return [];
+    try {
+      const parsed = JSON.parse(desc);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((t) => t && (t.text || typeof t === "string")).map((t) => {
+          if (typeof t === "string") return { lang: "en", text: t };
+          return { lang: t.lang || "en", text: t.text || "" };
+        });
+      }
+      if (typeof parsed === "object" && parsed !== null) {
+        return Object.entries(parsed).map(([lang, text]) => ({ lang, text: String(text) }));
+      }
+    } catch (e) {
+      return [{ lang: "en", text: desc }];
+    }
+    return [];
+  };
+  const getLangBadge = (lang) => {
+    const l = (lang || "en").toLowerCase();
+    const map = {
+      "en": { name: "English", cls: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30" },
+      "ms": { name: "Bahasa Melayu", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
+      "zh": { name: "Chinese", cls: "bg-rose-500/15 text-rose-300 border-rose-500/30" },
+      "ta": { name: "Tamil", cls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
+      "yue": { name: "Cantonese", cls: "bg-purple-500/15 text-purple-300 border-purple-500/30" },
+      "ar": { name: "Arabic", cls: "bg-teal-500/15 text-teal-300 border-teal-500/30" }
+    };
+    return map[l] || { name: l.toUpperCase(), cls: "bg-slate-800 text-slate-300 border-slate-700" };
+  };
+  const getRecordKey = (item, tab = currentTab, activeSubTab = subTab) => {
+    if (!item) return "";
+    const keyMap = {
+      iam: { users: "user_id", roles: "role_id", "facial-recognition": "user_id" },
+      rag: { documents: "document_id", "chatbot-queries": "query_id", "adaptation-phrases": "phrase_id", "speech-languages": "language_code" },
+      infra: { devices: "device_id", "auth-logs": "log_id", "jwt-sessions": "session_id" },
+      academics: {
+        courses: "course_id",
+        enrollments: "enrollment_id",
+        timetables: "timetable_id",
+        appointments: "appointment_id",
+        notifications: "notification_id",
+        faculties: "faculty_id",
+        departments: "department_id",
+        programmes: "programme_id"
+      }
+    };
+    if (tab === "infra" && activeSubTab === "node-rbac") return `${item.node_id}:${item.role_id}`;
+    if (tab === "infra" && activeSubTab === "edge-rbac") return `${item.edge_id}:${item.role_id}`;
+    const key = keyMap[tab]?.[activeSubTab];
+    return key ? String(item[key] ?? "") : "";
+  };
+  const mergeRecordIntoList = (record) => {
+    const recordKey = getRecordKey(record);
+    if (!recordKey) return;
+    setListData((prev) => {
+      const index = prev.findIndex((item) => getRecordKey(item) === recordKey);
+      if (index === -1) return modalType === "create" ? [record, ...prev] : prev;
+      const next = [...prev];
+      next[index] = { ...next[index], ...record };
+      return next;
+    });
+  };
+  const removeRecordFromList = (record) => {
+    const recordKey = getRecordKey(record);
+    if (!recordKey) return;
+    setListData((prev) => prev.filter((item) => getRecordKey(item) !== recordKey));
+  };
+  const userHasRole = (item, roleId) => {
+    const targetRoleId = Number(roleId);
+    if (!targetRoleId) return false;
+    if (Array.isArray(item?.roles) && item.roles.some((role) => Number(role.role_id) === targetRoleId)) return true;
+    return Number(item?.role_id) === targetRoleId;
+  };
+  const primaryRoleName = (item) => {
+    if (Array.isArray(item?.roles) && item.roles.length > 0) return item.roles[0].role_name;
+    return refs.roles.find((r) => r.role_id === item?.role_id)?.role_name || "USER";
+  };
+  const refreshAfterMutation = async ({ refreshRefs = false } = {}) => {
+    if (refreshRefs) await fetchReferences(true);
+    await fetchTabData();
+    if (currentTab === "overview") await fetchOverviewStats();
+  };
+  useEffect(() => {
+    const nextSubTab = DASHBOARD_SUB_TABS[currentTab]?.includes(subTab) ? subTab : DASHBOARD_DEFAULT_SUB_TAB[currentTab] || "";
+    if (nextSubTab !== subTab) {
+      setSubTab(nextSubTab);
+      return;
+    }
+    localStorage.setItem("dashboard_current_tab", currentTab);
+    if (nextSubTab) localStorage.setItem("dashboard_current_sub_tab", nextSubTab);
+    else localStorage.removeItem("dashboard_current_sub_tab");
+    const nextPath = dashboardPath(currentTab, nextSubTab);
+    if (window.location.pathname !== nextPath) window.history.pushState({}, "", nextPath);
+  }, [currentTab, subTab]);
+  useEffect(() => {
+    const handlePopState = () => {
+      const route = readDashboardRoute();
+      setCurrentTab(route.tab);
+      setSubTab(route.subTab);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    setLoginError("");
+    try {
+      const formData = new URLSearchParams();
+      formData.append("email", loginEmail);
+      formData.append("password", loginPass);
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Authentication failed. Please check your credentials.");
+      localStorage.setItem("admin_type", data.admin_type);
+      localStorage.setItem("email", data.email);
+      localStorage.setItem("full_name", data.full_name);
+      localStorage.setItem("admin_id", data.admin_id);
+      setToken("cookie-authenticated");
+      setAdminType(data.admin_type);
+      setEmail(data.email);
+      setFullName(data.full_name);
+      setAdminId(data.admin_id);
+      showSuccessToast("Welcome back! You are now signed in.");
+    } catch (err) {
+      showErrorToast(err.message);
+      setLoginError(err.message);
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", headers: { "Authorization": `Bearer ${token}` } });
+    } catch (e) {
+    }
+    localStorage.clear();
+    setToken("");
+    setAdminType("");
+    setEmail("");
+    setFullName("");
+    setAdminId("");
+    setSelectedPhotoFile(null);
+    if (uploadedPhoto) {
+      URL.revokeObjectURL(uploadedPhoto);
+      setUploadedPhoto(null);
+    }
+    setCurrentTab("overview");
+    setSubTab("");
+    window.history.replaceState({}, "", "/dashboard/overview");
+  };
+  useEffect(() => {
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args);
+      if (response.status === 401) {
+        const url = args[0];
+        if (!(typeof url === "string" && url.includes("/api/auth/login"))) handleLogout();
+      }
+      return response;
+    };
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, [token, uploadedPhoto]);
+  const handleReembedAll = async () => {
+    if (!window.confirm("Re-embed all facial vectors from disk? This may take a moment.")) return;
+    setReembedding(true);
+    try {
+      const response = await fetch("/api/iam/users/reembed-all", { method: "POST", headers: { "Authorization": `Bearer ${token}` } });
+      const resData = await response.json();
+      if (response.ok) showSuccessToast(resData.detail || "Re-embedded all facial vectors successfully!");
+      else showErrorToast(resData.detail || "Failed to re-embed vectors.");
+    } catch (err) {
+      showErrorToast("Error: " + err.message);
+    } finally {
+      setReembedding(false);
+    }
+  };
+  const fetchReferences = async (force = false) => {
+    if (!token) return;
+    if (!force && (refsLoadedRef.current || refsLoadingRef.current)) return;
+    refsLoadingRef.current = true;
+    try {
+      const headers = { "Authorization": `Bearer ${token}` };
+      const [resBuildings, resFloorplans, resNodes, resRoles, resFaculties, resProgrammes, resDepartments, resStaff] = await Promise.all([
+        fetch("/api/refs/buildings", { headers }),
+        fetch("/api/refs/floorplans", { headers }),
+        fetch("/api/refs/nodes", { headers }),
+        fetch("/api/iam/roles", { headers }),
+        fetch("/api/refs/faculties", { headers }),
+        fetch("/api/refs/programmes", { headers }),
+        fetch("/api/refs/departments", { headers }),
+        fetch("/api/iam/staff", { headers })
+      ]);
+      const [dBuildings, dFloorplans, dNodes, dRoles, dFaculties, dProgrammes, dDepartments, dStaff] = await Promise.all([
+        resBuildings.ok ? resBuildings.json() : [],
+        resFloorplans.ok ? resFloorplans.json() : [],
+        resNodes.ok ? resNodes.json() : [],
+        resRoles.ok ? resRoles.json() : [],
+        resFaculties.ok ? resFaculties.json() : [],
+        resProgrammes.ok ? resProgrammes.json() : [],
+        resDepartments.ok ? resDepartments.json() : [],
+        resStaff.ok ? resStaff.json() : []
+      ]);
+      setRefs({
+        buildings: Array.isArray(dBuildings) ? dBuildings : [],
+        floorplans: Array.isArray(dFloorplans) ? dFloorplans : [],
+        nodes: Array.isArray(dNodes) ? dNodes : [],
+        roles: Array.isArray(dRoles) ? dRoles : [],
+        faculties: Array.isArray(dFaculties) ? dFaculties : [],
+        programmes: Array.isArray(dProgrammes) ? dProgrammes : [],
+        departments: Array.isArray(dDepartments) ? dDepartments : [],
+        staff: Array.isArray(dStaff) ? dStaff : [],
+        edges: []
+      });
+      refsLoadedRef.current = true;
+    } catch (err) {
+      console.error("Failed to fetch references:", err);
+    } finally {
+      refsLoadingRef.current = false;
+    }
+  };
+  const fetchOverviewStats = async () => {
+    if (!token) return;
+    try {
+      const headers = { "Authorization": `Bearer ${token}` };
+      const response = await fetch("/api/infra/dashboard-stats", { headers });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Failed to load overview stats.");
+      setDashboardStats({
+        users: Number(data.users) || 0,
+        active_users: Number(data.active_users) || 0,
+        inactive_users: Number(data.inactive_users) || 0,
+        face_enrolled_users: Number(data.face_enrolled_users) || 0,
+        devices: Number(data.devices) || 0,
+        online_devices: Number(data.online_devices) || 0,
+        offline_devices: Number(data.offline_devices) || 0,
+        documents: Number(data.documents) || 0,
+        courses: Number(data.courses) || 0,
+        active_sessions: Number(data.active_sessions) || 0,
+        auth_attempts_24h: Number(data.auth_attempts_24h) || 0,
+        auth_failures_24h: Number(data.auth_failures_24h) || 0,
+        db_latency_ms: Number(data.db_latency_ms) || 0
+      });
+    } catch (err) {
+      console.error("Overview stats failed:", err);
+    }
+  };
+  const fetchTabData = async (overrides = {}) => {
+    if (!token) return;
+    const requestId = ++tabRequestIdRef.current;
+    setListLoading(true);
+    try {
+      const headers = { "Authorization": `Bearer ${token}` };
+      if (currentTab === "iam" && (subTab === "users" || subTab === "facial-recognition")) {
+        const params = new URLSearchParams();
+        params.set("page", String(overrides.page ?? currentPage));
+        params.set("page_size", String(overrides.page_size ?? itemsPerPage));
+        const qVal = (overrides.q ?? debouncedSearch ?? "").trim();
+        if (qVal) params.set("q", qVal);
+        const activeRole = subTab === "facial-recognition" ? faceRoleFilter : roleFilter;
+        if (activeRole && activeRole !== "ALL") params.set("role_id", String(activeRole));
+        if (subTab === "users" && statusFilter !== "ALL") params.set("status", statusFilter);
+        const activeFace = subTab === "facial-recognition" ? faceStatusFilter : userFaceFilter;
+        if (activeFace && activeFace !== "ALL") params.set("face_status", activeFace);
+        if (subTab === "users" && facultyFilter !== "ALL") params.set("faculty_id", facultyFilter);
+        if (subTab === "users" && departmentFilter !== "ALL") params.set("department_id", departmentFilter);
+        if (sortKey) {
+          params.set("sort_by", sortKey);
+          params.set("sort_order", sortOrder);
+        }
+        const response2 = await fetch(`/api/iam/users/paginated?${params.toString()}`, { headers });
+        const data2 = await response2.json();
+        if (!response2.ok) throw new Error(data2.detail || "Failed to load users.");
+        if (requestId === tabRequestIdRef.current) {
+          setListData(Array.isArray(data2.items) ? data2.items : []);
+          setServerPagination({
+            total: Number(data2.total) || 0,
+            page: Number(data2.page) || 1,
+            page_size: Number(data2.page_size) || itemsPerPage,
+            total_pages: Number(data2.total_pages) || 1
+          });
+          if (data2.summary) setUserSummary(data2.summary);
+        }
+        return;
+      }
+      const endpointMap = {
+        iam: { roles: "/api/iam/roles" },
+        rag: { documents: "/api/rag/documents", "chatbot-queries": "/api/rag/chatbot-queries", "adaptation-phrases": "/api/rag/adaptation-phrases", "speech-languages": "/api/rag/speech-languages" },
+        infra: { devices: "/api/infra/devices", "node-rbac": "/api/infra/node-rbac", "edge-rbac": "/api/infra/edge-rbac", "auth-logs": "/api/infra/auth-logs", "jwt-sessions": "/api/infra/jwt-sessions" },
+        academics: { courses: "/api/academics/courses", enrollments: "/api/academics/enrollments", timetables: "/api/academics/timetables", appointments: "/api/academics/appointments", notifications: "/api/academics/notifications", faculties: "/api/refs/faculties", departments: "/api/refs/departments", programmes: "/api/refs/programmes" }
+      };
+      const endpoint = endpointMap[currentTab]?.[subTab];
+      if (!endpoint) {
+        setListData([]);
+        return;
+      }
+      const response = await fetch(endpoint, { headers });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Failed to load data.");
+      if (requestId === tabRequestIdRef.current) setListData(Array.isArray(data) ? data : []);
+    } catch (err) {
+      showErrorToast(err.message);
+    } finally {
+      if (requestId === tabRequestIdRef.current) setListLoading(false);
+    }
+  };
+  const fetchSpeechLanguages = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch("/api/rag/speech-languages", { headers: { "Authorization": `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setSpeechLanguages(Array.isArray(data) ? data : []);
+      }
+    } catch (e) {
+      console.error("Failed to load speech languages", e);
+    }
+  };
+  const fetchAdaptationCategories = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch("/api/rag/adaptation-phrases/categories", { headers: { "Authorization": `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setAdaptationCategories(Array.isArray(data) ? data : []);
+      }
+    } catch (e) {
+      console.error("Failed to load adaptation categories", e);
+    }
+  };
+  const handleToggleLanguageDefault = async (code) => {
+    try {
+      const res = await fetch(`/api/rag/speech-languages/${code}/toggle-default`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.detail || "Failed to toggle default language status.");
+      }
+      showSuccessToast("Default language status updated.");
+      await fetchSpeechLanguages();
+      if (currentTab === "rag" && subTab === "speech-languages") await fetchTabData();
+    } catch (err) {
+      showErrorToast(err.message);
+    }
+  };
+  const handleToggleLanguageActive = async (code) => {
+    try {
+      const res = await fetch(`/api/rag/speech-languages/${code}/toggle-active`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.detail || "Failed to toggle language active status.");
+      }
+      showSuccessToast("Language active status updated.");
+      await fetchSpeechLanguages();
+      if (currentTab === "rag" && subTab === "speech-languages") await fetchTabData();
+    } catch (err) {
+      showErrorToast(err.message);
+    }
+  };
+  useEffect(() => {
+    if (token) {
+      fetchReferences();
+      if (currentTab === "overview") fetchOverviewStats();
+      else if (!isServerPaginatedUsers && (subTab || !DASHBOARD_DEFAULT_SUB_TAB[currentTab])) {
+        fetchTabData();
+        if (currentTab === "rag" && subTab === "adaptation-phrases") {
+          fetchSpeechLanguages();
+          fetchAdaptationCategories();
+        }
+      }
+    }
+  }, [token, currentTab, subTab]);
+  useEffect(() => {
+    if (token && isServerPaginatedUsers) {
+      fetchTabData();
+    }
+  }, [
+    token,
+    isServerPaginatedUsers,
+    subTab,
+    currentPage,
+    itemsPerPage,
+    debouncedSearch,
+    roleFilter,
+    statusFilter,
+    userFaceFilter,
+    faceStatusFilter,
+    faceRoleFilter,
+    facultyFilter,
+    departmentFilter,
+    sortKey,
+    sortOrder
+  ]);
+  useEffect(() => {
+    const allowed = DASHBOARD_SUB_TABS[currentTab];
+    if (!allowed) {
+      if (subTab) setSubTab("");
+      return;
+    }
+    if (!allowed.includes(subTab)) setSubTab(DASHBOARD_DEFAULT_SUB_TAB[currentTab]);
+  }, [currentTab, subTab]);
+  useEffect(() => {
+    setSearchQuery("");
+    setDebouncedSearch("");
+    setRoleFilter("ALL");
+    setStatusFilter("ALL");
+    setUserFaceFilter("ALL");
+    setFacultyFilter("ALL");
+    setDepartmentFilter("ALL");
+    setAccessLevelFilter("ALL");
+    setCategoryFilter("ALL");
+    setFaceStatusFilter("ALL");
+    setFaceRoleFilter("ALL");
+    setSortKey("");
+    setSortOrder("asc");
+    setSelectedUserIds([]);
+    setDrawerState({ record: null, kind: "" });
+    setMobileSidebarOpen(false);
+  }, [currentTab, subTab]);
+  useEffect(() => {
+    setCurrentPage(1);
+    setSelectedUserIds([]);
+  }, [debouncedSearch, currentTab, subTab, roleFilter, statusFilter, userFaceFilter, facultyFilter, departmentFilter, accessLevelFilter, categoryFilter, faceStatusFilter, faceRoleFilter, itemsPerPage]);
+  const handleFormSubmit = async (e, payload) => {
+    e.preventDefault();
+    if (formSubmitting) return;
+    setFormSubmitting(true);
+    try {
+      const headers = { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" };
+      let endpoint = "", method = "POST", finalBody = null, createdUser = null, savedRecord = null;
+      if (currentTab === "iam") {
+        if (subTab === "users") {
+          const { roleName, isEdit, user_id, user_payload, profile_payload } = payload;
+          if (!isEdit) {
+            const endpointMap = { STUDENT: "/api/iam/students", LECTURER: "/api/iam/lecturers", STAFF: "/api/iam/staff", VISITOR: "/api/iam/visitors", ADMIN: "/api/iam/admins" };
+            endpoint = endpointMap[roleName] || "/api/iam/users";
+            finalBody = endpointMap[roleName] ? { ...profile_payload, user: user_payload } : user_payload;
+            const res = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(finalBody) });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || "Operation Failed");
+            createdUser = data.user || data;
+            savedRecord = createdUser;
+          } else {
+            const ur = await fetch(`/api/iam/users/${user_id}`, { method: "PUT", headers, body: JSON.stringify(user_payload) });
+            const updatedUser = await ur.json();
+            if (!ur.ok) {
+              throw new Error(updatedUser.detail || "Failed to update user.");
+            }
+            savedRecord = updatedUser;
+            const profileMap = {
+              STUDENT: { hasProfile: !!selectedItem.student, idKey: "student_id", base: "/api/iam/students" },
+              LECTURER: { hasProfile: !!selectedItem.lecturer, idKey: "lecturer_id", base: "/api/iam/lecturers" },
+              STAFF: { hasProfile: !!selectedItem.staff, idKey: "staff_id", base: "/api/iam/staff" },
+              VISITOR: { hasProfile: !!selectedItem.visitor, idKey: "visitor_id", base: "/api/iam/visitors" },
+              ADMIN: { hasProfile: !!selectedItem.admin, idKey: "admin_id", base: "/api/iam/admins" }
+            };
+            const pm = profileMap[roleName];
+            if (pm) {
+              endpoint = pm.hasProfile ? `${pm.base}/${selectedItem[roleName.toLowerCase()][pm.idKey]}` : pm.base;
+              method = pm.hasProfile ? "PUT" : "POST";
+              finalBody = pm.hasProfile ? profile_payload : { ...profile_payload, user_id };
+              const pr = await fetch(endpoint, { method, headers, body: JSON.stringify(finalBody) });
+              if (!pr.ok) {
+                const d = await pr.json();
+                throw new Error(d.detail || "Failed to update profile.");
+              }
+            }
+          }
+          endpoint = "";
+          finalBody = null;
+        } else if (subTab === "roles") {
+          endpoint = modalType === "create" ? "/api/iam/roles" : `/api/iam/roles/${selectedItem.role_id}`;
+          method = modalType === "create" ? "POST" : "PUT";
+          finalBody = payload;
+        }
+      } else if (currentTab === "rag") {
+        if (subTab === "documents") {
+          endpoint = modalType === "create" ? "/api/rag/documents" : `/api/rag/documents/${selectedItem.document_id}`;
+          method = modalType === "create" ? "POST" : "PUT";
+          finalBody = payload;
+        } else if (subTab === "adaptation-phrases") {
+          endpoint = modalType === "create" ? "/api/rag/adaptation-phrases" : `/api/rag/adaptation-phrases/${selectedItem.phrase_id}`;
+          method = modalType === "create" ? "POST" : "PUT";
+          finalBody = payload;
+        } else if (subTab === "speech-languages") {
+          endpoint = "/api/rag/speech-languages";
+          method = "POST";
+          finalBody = payload;
+        }
+      } else if (currentTab === "infra") {
+        if (subTab === "devices") {
+          endpoint = modalType === "create" ? "/api/infra/devices" : `/api/infra/devices/${selectedItem.device_id}`;
+          method = modalType === "create" ? "POST" : "PUT";
+          finalBody = payload;
+        } else if (subTab === "node-rbac") {
+          endpoint = "/api/infra/node-rbac";
+          method = "POST";
+          finalBody = payload;
+        } else if (subTab === "edge-rbac") {
+          endpoint = "/api/infra/edge-rbac";
+          method = "POST";
+          finalBody = payload;
+        }
+      } else if (currentTab === "academics") {
+        if (subTab === "courses") {
+          endpoint = modalType === "create" ? "/api/academics/courses" : `/api/academics/courses/${selectedItem.course_id}`;
+          method = modalType === "create" ? "POST" : "PUT";
+          finalBody = payload;
+        } else if (subTab === "enrollments") {
+          endpoint = modalType === "create" ? "/api/academics/enrollments" : `/api/academics/enrollments/${selectedItem.enrollment_id}`;
+          method = modalType === "create" ? "POST" : "PUT";
+          finalBody = payload;
+        } else if (subTab === "timetables") {
+          endpoint = modalType === "create" ? "/api/academics/timetables" : `/api/academics/timetables/${selectedItem.timetable_id}`;
+          method = modalType === "create" ? "POST" : "PUT";
+          finalBody = payload;
+        } else if (subTab === "faculties") {
+          endpoint = modalType === "create" ? "/api/refs/faculties" : `/api/refs/faculties/${selectedItem.faculty_id}`;
+          method = modalType === "create" ? "POST" : "PUT";
+          finalBody = payload;
+        } else if (subTab === "departments") {
+          endpoint = modalType === "create" ? "/api/refs/departments" : `/api/refs/departments/${selectedItem.department_id}`;
+          method = modalType === "create" ? "POST" : "PUT";
+          finalBody = payload;
+        } else if (subTab === "programmes") {
+          endpoint = modalType === "create" ? "/api/refs/programmes" : `/api/refs/programmes/${selectedItem.programme_id}`;
+          method = modalType === "create" ? "POST" : "PUT";
+          finalBody = payload;
+        } else if (subTab === "appointments") {
+          endpoint = modalType === "create" ? "/api/academics/appointments" : `/api/academics/appointments/${selectedItem?.appointment_id}`;
+          method = modalType === "create" ? "POST" : "PUT";
+          finalBody = payload;
+        }
+      }
+      if (finalBody && endpoint) {
+        let fetchOptions = { method, headers };
+        if (finalBody instanceof FormData) {
+          delete headers["Content-Type"];
+          fetchOptions.body = finalBody;
+        } else {
+          fetchOptions.body = JSON.stringify(finalBody);
+        }
+        const response = await fetch(endpoint, fetchOptions);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Operation Failed");
+        savedRecord = data;
+      }
+      mergeRecordIntoList(savedRecord);
+      showSuccessToast(`Record ${modalType === "create" ? "created" : "updated"} successfully!`);
+      setShowModal(false);
+      if (currentTab === "infra" && subTab === "devices" && modalType === "create" && savedRecord?.provisioned_secret) {
+        setProvisioningDetails({
+          deviceId: savedRecord.device_id,
+          deviceName: savedRecord.device_name,
+          secret: savedRecord.provisioned_secret,
+          ipAddress: savedRecord.ip_address || "Not configured"
+        });
+      }
+      refreshAfterMutation({ refreshRefs: currentTab === "academics" && ["faculties", "departments", "programmes"].includes(subTab) });
+      if (currentTab === "iam" && subTab === "users" && modalType === "create" && createdUser) {
+        setSelectedItem(createdUser);
+        setConfidence(0);
+        setScanStep(0);
+        setScanning(false);
+        setUploadedPhoto(null);
+        setSelectedPhotoFile(null);
+        setPhotoPose("front");
+        setEnrollMethod("video");
+        setShowFaceModal(true);
+      }
+    } catch (err) {
+      showErrorToast(err.message);
+    } finally {
+      setFormSubmitting(false);
+    }
+  };
+  const executeDeleteItem = async (item) => {
+    const actionKey = `delete:${getRecordKey(item)}`;
+    if (pendingActionKey) return;
+    setPendingActionKey(actionKey);
+    try {
+      const headers = { "Authorization": `Bearer ${token}` };
+      const epMap = {
+        iam: { users: `/api/iam/users/${item.user_id}`, roles: `/api/iam/roles/${item.role_id}` },
+        rag: { documents: `/api/rag/documents/${item.document_id}`, "adaptation-phrases": `/api/rag/adaptation-phrases/${item.phrase_id}`, "speech-languages": `/api/rag/speech-languages/${item.language_code}` },
+        infra: { devices: `/api/infra/devices/${item.device_id}`, "node-rbac": `/api/infra/node-rbac/${item.node_id}/${item.role_id}`, "edge-rbac": `/api/infra/edge-rbac/${item.edge_id}/${item.role_id}` },
+        academics: { courses: `/api/academics/courses/${item.course_id}`, enrollments: `/api/academics/enrollments/${item.enrollment_id}`, timetables: `/api/academics/timetables/${item.timetable_id}`, appointments: `/api/academics/appointments/${item.appointment_id}`, faculties: `/api/refs/faculties/${item.faculty_id}`, departments: `/api/refs/departments/${item.department_id}`, programmes: `/api/refs/programmes/${item.programme_id}` }
+      };
+      const endpoint = epMap[currentTab]?.[subTab];
+      if (!endpoint) return;
+      const response = await fetch(endpoint, { method: "DELETE", headers });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Delete failed.");
+      if (data.deactivated) {
+        showSuccessToast(data.detail || "Device deactivated; audit history was preserved.");
+      } else {
+        removeRecordFromList(item);
+        showSuccessToast("Record deleted successfully.");
+      }
+      setDrawerState((prev) => prev.record && getRecordKey(prev.record) === getRecordKey(item) ? { record: null, kind: "" } : prev);
+      refreshAfterMutation({ refreshRefs: currentTab === "academics" && ["faculties", "departments", "programmes"].includes(subTab) });
+    } catch (err) {
+      showErrorToast(err.message);
+    } finally {
+      setPendingActionKey("");
+    }
+  };
+  const handleDeleteItem = (item) => {
+    const label = item.full_name || item.device_name || item.title || item.course_name || item.role_name || getRecordKey(item) || "this record";
+    setConfirmState({
+      open: true,
+      title: "Delete Record",
+      message: `Are you sure you want to permanently delete "${label}"? This action cannot be undone.`,
+      confirmLabel: "Delete",
+      variant: "danger",
+      onConfirm: async () => {
+        setConfirmState((prev) => ({ ...prev, open: false }));
+        await executeDeleteItem(item);
+      }
+    });
+  };
+  const toggleSelectUser = (userId) => {
+    setSelectedUserIds((prev) => prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]);
+  };
+  const toggleSelectAllPageUsers = () => {
+    const pageIds = paginatedData.map((u) => u.user_id).filter(Boolean);
+    const allSelected = pageIds.length > 0 && pageIds.every((id) => selectedUserIds.includes(id));
+    if (allSelected) {
+      setSelectedUserIds((prev) => prev.filter((id) => !pageIds.includes(id)));
+    } else {
+      setSelectedUserIds((prev) => Array.from(/* @__PURE__ */ new Set([...prev, ...pageIds])));
+    }
+  };
+  const handleBulkUserStatus = async (isActive) => {
+    if (selectedUserIds.length === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    try {
+      const res = await fetch("/api/iam/users/bulk-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_ids: selectedUserIds, is_active: isActive })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Bulk status update failed.");
+      showSuccessToast(data.detail || "Users updated.");
+      setSelectedUserIds([]);
+      await fetchTabData();
+    } catch (err) {
+      showErrorToast(err.message);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+  const handleBulkUserRole = async () => {
+    if (selectedUserIds.length === 0 || !bulkRoleId || bulkBusy) return;
+    setBulkBusy(true);
+    try {
+      const res = await fetch("/api/iam/users/bulk-role", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_ids: selectedUserIds, role_id: parseInt(bulkRoleId, 10), mode: "add" })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Bulk role assignment failed.");
+      showSuccessToast(data.detail || "Roles assigned.");
+      setBulkRoleId("");
+      setSelectedUserIds([]);
+      await fetchTabData();
+    } catch (err) {
+      showErrorToast(err.message);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+  const handleBulkUserDelete = () => {
+    if (selectedUserIds.length === 0 || bulkBusy) return;
+    const count = selectedUserIds.length;
+    setConfirmState({
+      open: true,
+      title: `Delete ${count} User${count > 1 ? "s" : ""}`,
+      message: `This will permanently remove ${count} selected user account${count > 1 ? "s" : ""} and associated biometric profiles. This cannot be undone.`,
+      confirmLabel: `Delete ${count} User${count > 1 ? "s" : ""}`,
+      variant: "danger",
+      onConfirm: async () => {
+        setConfirmState((prev) => ({ ...prev, open: false }));
+        setBulkBusy(true);
+        try {
+          const res = await fetch("/api/iam/users/bulk-delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_ids: selectedUserIds })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || "Bulk delete failed.");
+          showSuccessToast(data.detail || "Selected users deleted.");
+          setSelectedUserIds([]);
+          await fetchTabData();
+        } catch (err) {
+          showErrorToast(err.message);
+        } finally {
+          setBulkBusy(false);
+        }
+      }
+    });
+  };
+  const handleExportUsersCsv = () => {
+    const sourceRows = selectedUserIds.length > 0 ? paginatedData.filter((u) => selectedUserIds.includes(u.user_id)) : paginatedData;
+    if (sourceRows.length === 0) {
+      showErrorToast("No user rows to export.");
+      return;
+    }
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const header = ["User ID", "Full Name", "Email", "Roles", "Status", "Face Enrolled", "Identity ID", "Enrolled At"];
+    const rows = sourceRows.map((u) => {
+      const idCode = u.student?.student_id || u.lecturer?.lecturer_id || u.staff?.staff_id || u.visitor?.id_number || u.admin?.admin_id || "";
+      const roleNames = (u.roles || []).map((r) => r.role_name).join("; ");
+      return [u.user_id, u.full_name, u.email, roleNames, u.is_active ? "Active" : "Deactivated", u.face_enrolled ? "Yes" : "No", idCode, u.enrolled_at || ""].map(esc).join(",");
+    });
+    const blob = new Blob([[header.map(esc).join(","), ...rows].join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `smart-campus-users-page${pageToRender}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showSuccessToast(`Exported ${sourceRows.length} user record(s) to CSV.`);
+  };
+  const handleRevokeUserSession = async (sessionId, userId) => {
+    try {
+      const res = await fetch(`/api/infra/jwt-sessions/${sessionId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "Failed to revoke session.");
+      showSuccessToast("Session revoked.");
+      setDrawerState((prev) => prev.record && prev.record.user_id === userId ? { ...prev, record: { ...prev.record } } : prev);
+    } catch (err) {
+      showErrorToast(err.message);
+    }
+  };
+  const handleToggleStatus = async (item) => {
+    const actionKey = `toggle:${getRecordKey(item)}`;
+    if (pendingActionKey) return;
+    setPendingActionKey(actionKey);
+    try {
+      const headers = { "Authorization": `Bearer ${token}` };
+      const epMap = {
+        iam: { users: `/api/iam/users/${item.user_id}/toggle-active` },
+        rag: {
+          documents: `/api/rag/documents/${item.document_id}/toggle-active`,
+          "adaptation-phrases": `/api/rag/adaptation-phrases/${item.phrase_id}/toggle-active`
+        }
+      };
+      const endpoint = epMap[currentTab]?.[subTab];
+      if (!endpoint) return;
+      const response = await fetch(endpoint, { method: "POST", headers });
+      if (!response.ok) {
+        const d = await response.json();
+        throw new Error(d.detail || "Toggle failed.");
+      }
+      mergeRecordIntoList({ ...item, is_active: !item.is_active });
+      showSuccessToast("Status updated.");
+      refreshAfterMutation();
+    } catch (err) {
+      showErrorToast(err.message);
+    } finally {
+      setPendingActionKey("");
+    }
+  };
+  const handlePingDevice = async (item) => {
+    const actionKey = `ping:${item.device_id}`;
+    if (pendingActionKey) return;
+    setPendingActionKey(actionKey);
+    try {
+      const response = await fetch(`/api/infra/devices/${item.device_id}/heartbeat`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Device did not respond.");
+      mergeRecordIntoList({ ...item, last_heartbeat: data.last_heartbeat });
+      showSuccessToast("Ping successful.");
+      fetchTabData();
+    } catch (err) {
+      showErrorToast(err.message);
+    } finally {
+      setPendingActionKey("");
+    }
+  };
+  const startPhotoAnalysis = () => {
+    setScanning(true);
+    setScanStep(1);
+    setConfidence(15);
+    setScanLogs(["Initializing face analysis module...", "Image loaded and decoded."]);
+    setTimeout(() => {
+      setConfidence(38);
+      setScanLogs((p) => [...p, "Loading detection network...", "Adjusting image contrast..."]);
+    }, 500);
+    setTimeout(() => {
+      setConfidence(62);
+      setScanLogs((p) => [...p, "Face region detected.", "Extracting 68 facial landmarks..."]);
+    }, 1e3);
+    setTimeout(() => {
+      setConfidence(85);
+      setScanLogs((p) => [...p, "Building 512-dimension embedding..."]);
+    }, 1500);
+    setTimeout(() => {
+      setConfidence(100);
+      setScanLogs((p) => [...p, "Embedding complete.", "Quality check: PASSED.", "Confidence: 99%."]);
+      setScanning(false);
+      setScanStep(2);
+    }, 2e3);
+  };
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setSelectedPhotoFile(file);
+    if (uploadedPhoto) URL.revokeObjectURL(uploadedPhoto);
+    setUploadedPhoto(URL.createObjectURL(file));
+    setScanning(false);
+    setConfidence(0);
+    setScanStep(1);
+    setScanLogs(["Loading image..."]);
+    startPhotoAnalysis();
+  };
+  const saveFacialEnrollment = async () => {
+    try {
+      if (!selectedPhotoFile) throw new Error("No photo selected. Please upload a face photo first.");
+      const formData = new FormData();
+      formData.append("file", selectedPhotoFile);
+      formData.append("pose", photoPose);
+      const response = await fetch(`/api/iam/users/${selectedItem.user_id}/upload-photo`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
+        body: formData
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Failed to save Face ID.");
+      showSuccessToast(`Face ID ${photoPose === "front" ? "photo" : `${photoPose} pose`} updated for ${selectedItem.full_name}!`);
+      setShowFaceModal(false);
+      setSelectedPhotoFile(null);
+      if (uploadedPhoto) {
+        URL.revokeObjectURL(uploadedPhoto);
+        setUploadedPhoto(null);
+      }
+      fetchTabData();
+    } catch (err) {
+      showErrorToast(err.message);
+    }
+  };
+  const stopCamera = () => {
+    guidedCaptureRef.current.active = false;
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((t) => t.stop());
+      setCameraStream(null);
+    }
+    setLiveScanActive(false);
+  };
+  const GUIDE_POSES = [
+    { id: "front", dir: null, label: "Face the camera \u2014 stay still" }
+  ];
+  const startCamera = async () => {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("Camera access is restricted by your browser. Ensure you are accessing via HTTPS or http://localhost, and browser permissions are granted.");
+      }
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } } });
+      } catch (e1) {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      }
+      setCameraStream(stream);
+      setRecordingPhase("idle");
+      setGuidePoseIndex(0);
+      setEnrollFeedback("");
+      setRecordingProgress(0);
+      setEmbeddingProgress(0);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch((e) => console.warn("Video play exception:", e));
+      }
+    } catch (err) {
+      setRecordingPhase("failed");
+      let hint = "";
+      if (err.name === "NotAllowedError" || err.message && err.message.toLowerCase().includes("permission")) {
+        hint = " Recommended Checks:\n1. Windows Settings -> Privacy & security -> Camera -> Enable 'Allow desktop apps to access your camera'.\n2. Ensure no other application (Zoom, Teams, Python script, OpenCV, OBS) is currently using your webcam.";
+      }
+      setEnrollFeedback(`Could not access camera (${err.name || "Error"}): ${err.message || "Permission denied"}.${hint}`);
+    }
+  };
+  const completeLiveEnrollment = async () => {
+    setRecordingPhase("embedding");
+    setEmbeddingProgress(0);
+    setEnrollFeedback("");
+    let progressTimer;
+    const pollProgress = async () => {
+      try {
+        const res = await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/progress`, {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.progress !== void 0) {
+            setEmbeddingProgress(data.progress);
+          }
+        }
+      } catch (err) {
+        console.error("Error polling progress:", err);
+      }
+    };
+    pollProgress();
+    progressTimer = setInterval(pollProgress, 250);
+    try {
+      const response = await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/complete`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Face embedding failed.");
+      setEmbeddingProgress(100);
+      setRecordingPhase("success");
+      showSuccessToast(`Face ID enrolled for ${selectedItem.full_name}!`);
+      setTimeout(() => {
+        stopCamera();
+        setShowFaceModal(false);
+        fetchTabData();
+      }, 1200);
+    } catch (err) {
+      setRecordingPhase("failed");
+      setEnrollFeedback(err.message);
+    } finally {
+      clearInterval(progressTimer);
+    }
+  };
+  const startGuidedRecording = async () => {
+    if (!cameraStream) return;
+    try {
+      const startResponse = await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/start`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      const startData = await startResponse.json();
+      if (!startResponse.ok) throw new Error(startData.detail || "Could not start live enrollment.");
+    } catch (err) {
+      setRecordingPhase("failed");
+      setEnrollFeedback(err.message);
+      return;
+    }
+    setRecordingPhase("countdown");
+    setRecordingCountdown(3);
+    setRecordingProgress(0);
+    setEmbeddingProgress(0);
+    setEnrollFeedback("");
+    guidedCaptureRef.current.active = true;
+    let c = 3;
+    const cdTimer = setInterval(() => {
+      c--;
+      setRecordingCountdown(c);
+      if (c <= 0) {
+        clearInterval(cdTimer);
+        setRecordingPhase("recording");
+        setGuidePoseIndex(0);
+        setRecordingProgress(0);
+        let pIdx = 0;
+        const pollVideoFrame = async () => {
+          if (!guidedCaptureRef.current.active) return;
+          if (pIdx >= GUIDE_POSES.length) return;
+          if (videoRef.current && canvasRef.current) {
+            const ctx = canvasRef.current.getContext("2d");
+            ctx.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
+            canvasRef.current.toBlob(async (blob) => {
+              if (blob) {
+                const fd = new FormData();
+                fd.append("file", new File([blob], "frame.jpg", { type: "image/jpeg" }));
+                try {
+                  const r = await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/frame?target_pose=${GUIDE_POSES[pIdx].id}`, { method: "POST", headers: { "Authorization": `Bearer ${token}` }, body: fd });
+                  const d = await r.json();
+                  if (d.success) {
+                    pIdx++;
+                    setRecordingProgress(Math.round(pIdx / GUIDE_POSES.length * 100));
+                    if (pIdx < GUIDE_POSES.length) {
+                      setGuidePoseIndex(pIdx);
+                      setTimeout(pollVideoFrame, 500);
+                    } else {
+                      guidedCaptureRef.current.active = false;
+                      setRecordingProgress(100);
+                      await completeLiveEnrollment();
+                    }
+                    return;
+                  }
+                  setEnrollFeedback(d.guidance || "Adjust your pose and try again.");
+                } catch (e) {
+                  console.error("Poll error:", e);
+                }
+              }
+              if (guidedCaptureRef.current.active) setTimeout(pollVideoFrame, 300);
+            }, "image/jpeg", 0.78);
+          } else {
+            if (guidedCaptureRef.current.active) setTimeout(pollVideoFrame, 300);
+          }
+        };
+        pollVideoFrame();
+      }
+    }, 1e3);
+  };
+  const retryRecording = () => {
+    guidedCaptureRef.current.active = false;
+    setRecordingPhase("idle");
+    setGuidePoseIndex(0);
+    setEnrollFeedback("");
+    setRecordingProgress(0);
+    setEmbeddingProgress(0);
+  };
+  const handleVideoFileChange = (e) => {
+    setSelectedVideoFile(e.target.files[0]);
+    setVideoError("");
+  };
+  const uploadVideoEnrollment = async () => {
+    if (!selectedVideoFile) {
+      setVideoError("Please select a video file first.");
+      return;
+    }
+    setVideoProcessing(true);
+    setVideoError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedVideoFile);
+      const response = await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-video`, { method: "POST", headers: { "Authorization": `Bearer ${token}` }, body: formData });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Video processing failed.");
+      showSuccessToast(`Face ID enrolled for ${selectedItem.full_name}!`);
+      setShowFaceModal(false);
+      setSelectedVideoFile(null);
+      fetchTabData();
+    } catch (err) {
+      setVideoError(err.message);
+    } finally {
+      setVideoProcessing(false);
+    }
+  };
+  const handleSort = (key) => {
+    if (sortKey === key) setSortOrder((o) => o === "asc" ? "desc" : "asc");
+    else {
+      setSortKey(key);
+      setSortOrder("asc");
+    }
+  };
+  const renderSortIcon = (key) => {
+    if (sortKey !== key) return /* @__PURE__ */ React.createElement(Icon, { name: "chevrons-up-down", className: "w-3 h-3 ml-1 opacity-30" });
+    return sortOrder === "asc" ? /* @__PURE__ */ React.createElement(Icon, { name: "chevron-up", className: "w-3 h-3 ml-1 text-blue-400" }) : /* @__PURE__ */ React.createElement(Icon, { name: "chevron-down", className: "w-3 h-3 ml-1 text-blue-400" });
+  };
+  const getFilteredSortedData = () => {
+    let items = [...listData];
+    const q = searchQuery.toLowerCase().trim();
+    items = items.filter((item) => {
+      if (currentTab === "iam") {
+        if (subTab === "roles") return q === "" || item.role_name?.toLowerCase().includes(q) || item.description?.toLowerCase().includes(q);
+        if (subTab === "facial-recognition") {
+          const mQ = q === "" || item.full_name?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q) || String(item.user_id).includes(q);
+          const mR = faceRoleFilter === "ALL" || userHasRole(item, faceRoleFilter);
+          const mS = faceStatusFilter === "ALL" || (faceStatusFilter === "ENROLLED" ? !!item.face_vector : !item.face_vector);
+          return mQ && mR && mS;
+        }
+        if (subTab === "users") {
+          const mQ = q === "" || item.full_name?.toLowerCase().includes(q) || item.email?.toLowerCase().includes(q) || String(item.user_id).includes(q) || item.student?.student_id?.toLowerCase().includes(q) || item.lecturer?.lecturer_id?.toLowerCase().includes(q) || item.staff?.staff_id?.toLowerCase().includes(q);
+          const mR = roleFilter === "ALL" || userHasRole(item, roleFilter);
+          const mS = statusFilter === "ALL" || (statusFilter === "ACTIVE" ? item.is_active : !item.is_active);
+          return mQ && mR && mS;
+        }
+      }
+      if (currentTab === "rag") {
+        if (subTab === "documents") {
+          const matchesQuery = q === "" || item.title?.toLowerCase().includes(q) || item.filename?.toLowerCase().includes(q);
+          const roles = item.allowed_roles && item.allowed_roles.length > 0 ? item.allowed_roles : item.access_level === "PUBLIC" ? ["VISITOR"] : [item.access_level || "VISITOR"];
+          const isUniversal = roles.includes("VISITOR") || roles.includes("PUBLIC");
+          const matchesRole = accessLevelFilter === "ALL" || accessLevelFilter === "VISITOR" && isUniversal || roles.includes(accessLevelFilter) || isUniversal;
+          return matchesQuery && matchesRole;
+        }
+        if (subTab === "chunks") {
+          const matchesQuery = q === "" || item.chunk_text?.toLowerCase().includes(q);
+          const roles = item.allowed_roles && item.allowed_roles.length > 0 ? item.allowed_roles : item.access_level === "PUBLIC" ? ["VISITOR"] : [item.access_level || "VISITOR"];
+          const isUniversal = roles.includes("VISITOR") || roles.includes("PUBLIC");
+          const matchesRole = accessLevelFilter === "ALL" || accessLevelFilter === "VISITOR" && isUniversal || roles.includes(accessLevelFilter) || isUniversal;
+          return matchesQuery && matchesRole;
+        }
+        if (subTab === "chatbot-queries") {
+          const matchesQuery = q === "" || item.query_text?.toLowerCase().includes(q) || item.response_text?.toLowerCase().includes(q) || item.user_name?.toLowerCase().includes(q) || item.user_email?.toLowerCase().includes(q);
+          const matchesRole = roleFilter === "ALL" || item.user_role?.toUpperCase() === roleFilter.toUpperCase() || roleFilter === "VISITOR" && (!item.user_role || item.user_role === "VISITOR");
+          const matchesNav = accessLevelFilter === "ALL" || accessLevelFilter === "NAV" && item.is_navigational || accessLevelFilter === "INFO" && !item.is_navigational;
+          return matchesQuery && matchesRole && matchesNav;
+        }
+        if (subTab === "adaptation-phrases") {
+          return q === "" || item.phrase?.toLowerCase().includes(q) || item.description?.toLowerCase().includes(q);
+        }
+        if (subTab === "speech-languages") {
+          return q === "" || item.language_name?.toLowerCase().includes(q) || item.language_code?.toLowerCase().includes(q);
+        }
+      }
+      if (currentTab === "infra") {
+        if (subTab === "devices") return q === "" || item.device_name?.toLowerCase().includes(q) || item.device_id?.toLowerCase().includes(q);
+        if (subTab === "auth-logs") return q === "" || item.email?.toLowerCase().includes(q) || item.auth_status?.toLowerCase().includes(q);
+        if (subTab === "jwt-sessions") return q === "" || item.user?.email?.toLowerCase().includes(q) || item.ip_address?.toLowerCase().includes(q);
+      }
+      if (currentTab === "academics") {
+        if (subTab === "courses") return q === "" || item.course_name?.toLowerCase().includes(q) || item.course_code?.toLowerCase().includes(q);
+        if (subTab === "enrollments") return q === "" || item.student_id?.toLowerCase().includes(q);
+        if (subTab === "appointments") return q === "" || item.purpose?.toLowerCase().includes(q) || item.status?.toLowerCase().includes(q);
+        if (subTab === "notifications") return q === "" || item.title?.toLowerCase().includes(q) || item.body?.toLowerCase().includes(q);
+        if (subTab === "faculties") return q === "" || item.faculty_name?.toLowerCase().includes(q) || item.faculty_id?.toLowerCase().includes(q);
+        if (subTab === "departments") return q === "" || item.department_name?.toLowerCase().includes(q) || item.department_id?.toLowerCase().includes(q);
+        if (subTab === "programmes") return q === "" || item.programme_name?.toLowerCase().includes(q) || item.programme_id?.toLowerCase().includes(q);
+      }
+      return true;
+    });
+    if (sortKey) {
+      items.sort((a, b) => {
+        let vA = a[sortKey] ?? "", vB = b[sortKey] ?? "";
+        if (typeof vA === "string") vA = vA.toLowerCase();
+        if (typeof vB === "string") vB = vB.toLowerCase();
+        if (vA < vB) return sortOrder === "asc" ? -1 : 1;
+        if (vA > vB) return sortOrder === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return items;
+  };
+  const processedData = useMemo(
+    () => isServerPaginatedUsers ? listData : getFilteredSortedData(),
+    [isServerPaginatedUsers, listData, searchQuery, currentTab, subTab, roleFilter, statusFilter, accessLevelFilter, faceStatusFilter, faceRoleFilter, sortKey, sortOrder]
+  );
+  const totalItems = isServerPaginatedUsers ? serverPagination.total : processedData.length;
+  const totalPages = isServerPaginatedUsers ? Math.max(1, serverPagination.total_pages) : Math.ceil(totalItems / itemsPerPage) || 1;
+  const pageToRender = Math.min(currentPage, totalPages);
+  const startIndex = (pageToRender - 1) * itemsPerPage;
+  const paginatedData = isServerPaginatedUsers ? listData : processedData.slice(startIndex, startIndex + itemsPerPage);
+  const handleJumpToPage = (e) => {
+    e.preventDefault();
+    const parsed = parseInt(jumpPageInput, 10);
+    if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= totalPages) {
+      setCurrentPage(parsed);
+      setJumpPageInput("");
+    }
+  };
+  const renderPagination = () => {
+    if (totalItems === 0) return null;
+    return /* @__PURE__ */ React.createElement("div", { className: "flex flex-col lg:flex-row justify-between items-center gap-4 mt-5 bg-slate-900/50 border border-slate-800 px-4 py-3.5 rounded-2xl" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-4 text-xs text-slate-400" }, /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, "Showing ", /* @__PURE__ */ React.createElement("span", { className: "text-slate-100 font-bold" }, totalItems === 0 ? 0 : startIndex + 1), "\u2013", /* @__PURE__ */ React.createElement("span", { className: "text-slate-100 font-bold" }, Math.min(startIndex + paginatedData.length, totalItems)), " of ", /* @__PURE__ */ React.createElement("span", { className: "text-slate-100 font-bold" }, totalItems.toLocaleString()), " records"), /* @__PURE__ */ React.createElement("label", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-slate-500 font-medium" }, "Rows"), /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        value: itemsPerPage,
+        onChange: (e) => {
+          setItemsPerPage(parseInt(e.target.value, 10));
+          setCurrentPage(1);
+        },
+        className: "bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs font-semibold text-slate-200 focus:outline-none focus:border-indigo-500"
+      },
+      [10, 25, 50, 100].map((sz) => /* @__PURE__ */ React.createElement("option", { key: sz, value: sz }, sz))
+    ))), totalPages > 1 && /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1" }, [["chevrons-left", 1], ["chevron-left", Math.max(pageToRender - 1, 1)]].map(([ic, pg], i) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: i,
+        onClick: () => setCurrentPage(pg),
+        disabled: pageToRender === 1,
+        className: "p-2 rounded-xl bg-slate-800 border border-slate-700/50 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: ic, className: "w-4 h-4" })
+    )), Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+      let pn = pageToRender <= 3 ? i + 1 : pageToRender >= totalPages - 2 ? totalPages - 4 + i : pageToRender - 2 + i;
+      if (pn < 1 || pn > totalPages) return null;
+      return /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          key: pn,
+          onClick: () => setCurrentPage(pn),
+          className: `min-w-[36px] h-9 px-2 rounded-xl text-xs font-bold tabular-nums transition-all ${pageToRender === pn ? "bg-indigo-600 text-white shadow-md shadow-indigo-900/30" : "bg-slate-800 border border-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-white"}`
+        },
+        pn
+      );
+    }), [["chevron-right", Math.min(pageToRender + 1, totalPages)], ["chevrons-right", totalPages]].map(([ic, pg], i) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: i,
+        onClick: () => setCurrentPage(pg),
+        disabled: pageToRender === totalPages,
+        className: "p-2 rounded-xl bg-slate-800 border border-slate-700/50 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: ic, className: "w-4 h-4" })
+    ))), totalPages > 5 && /* @__PURE__ */ React.createElement("form", { onSubmit: handleJumpToPage, className: "flex items-center gap-1.5 pl-2 border-l border-slate-800" }, /* @__PURE__ */ React.createElement("span", { className: "text-[11px] text-slate-500" }, "Go to"), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "number",
+        min: "1",
+        max: totalPages,
+        value: jumpPageInput,
+        onChange: (e) => setJumpPageInput(e.target.value),
+        placeholder: String(pageToRender),
+        className: "w-14 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-200 tabular-nums focus:outline-none focus:border-indigo-500"
+      }
+    ))));
+  };
+  useEffect(() => {
+    let active = true, timerId = null;
+    const validPoses = ["front"];
+    async function pollFrame() {
+      if (!active || enrollMethod !== "live" || !liveScanActive || !cameraStream || !selectedItem) return;
+      if (!videoRef.current || !canvasRef.current) {
+        timerId = setTimeout(pollFrame, 500);
+        return;
+      }
+      const ctx = canvasRef.current.getContext("2d");
+      ctx.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
+      canvasRef.current.toBlob(async (blob) => {
+        if (!blob) {
+          if (active) timerId = setTimeout(pollFrame, 500);
+          return;
+        }
+        const fd = new FormData();
+        fd.append("file", new File([blob], "frame.jpg", { type: "image/jpeg" }));
+        try {
+          const r = await fetch(`/api/iam/users/${selectedItem.user_id}/enroll-live/frame?target_pose=${validPoses[activeCameraPoseIndex]}`, { method: "POST", headers: { "Authorization": `Bearer ${token}` }, body: fd });
+          const d = await r.json();
+          if (!active) return;
+          if (d.success) {
+            setLiveFeedback("Pose captured!");
+            if (activeCameraPoseIndex < validPoses.length - 1) setActiveCameraPoseIndex((p) => p + 1);
+            else {
+              setLiveScanActive(false);
+              await completeLiveEnrollment();
+            }
+          } else {
+            setLiveFeedback(d.guidance || "Adjust your pose and try again.");
+          }
+        } catch (e) {
+          console.error("Poll error:", e);
+        } finally {
+          if (active) timerId = setTimeout(pollFrame, 800);
+        }
+      }, "image/jpeg", 0.85);
+    }
+    if (enrollMethod === "live" && liveScanActive && cameraStream && selectedItem) timerId = setTimeout(pollFrame, 200);
+    return () => {
+      active = false;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [enrollMethod, liveScanActive, cameraStream, activeCameraPoseIndex, selectedItem]);
+  useEffect(() => {
+    if (cameraStream && videoRef.current) {
+      videoRef.current.srcObject = cameraStream;
+      videoRef.current.play().catch((e) => console.warn("Video play exception:", e));
+    }
+  }, [cameraStream]);
+  const renderModalForm = () => {
+    if (modalType === "view-chatbot-query" && selectedItem) {
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-5 text-sm" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/60 p-4 rounded-2xl border border-slate-800 space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs font-bold text-slate-400 uppercase tracking-wider" }, "User / Requester"), /* @__PURE__ */ React.createElement("span", { className: `px-2.5 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider border ${selectedItem.user_role === "ADMIN" ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : selectedItem.user_role === "LECTURER" ? "bg-violet-500/10 text-violet-400 border-violet-500/20" : selectedItem.user_role === "STUDENT" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : selectedItem.user_role === "STAFF" ? "bg-sky-500/10 text-sky-400 border-sky-500/20" : "bg-slate-800 text-slate-400 border-slate-700/50"}` }, selectedItem.user_role || "VISITOR")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "font-bold text-slate-100 text-base" }, selectedItem.user_name || "Anonymous Visitor"), selectedItem.user_email && /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400 font-mono mt-0.5" }, selectedItem.user_email), selectedItem.user_id && /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500 font-mono mt-0.5" }, "User ID: #", selectedItem.user_id, " ", selectedItem.session_id ? `\u2022 Session ID: #${selectedItem.session_id}` : ""))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5" }, "Question Asked"), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-slate-100 text-sm font-medium leading-relaxed" }, selectedItem.query_text)), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5" }, "Chatbot Response"), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-slate-300 text-xs font-normal leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap" }, selectedItem.response_text || "No response recorded.")), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 sm:grid-cols-3 gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/40 border border-slate-800/80 rounded-xl p-3" }, /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 uppercase tracking-wider block mb-1" }, "Response Time"), /* @__PURE__ */ React.createElement("span", { className: "text-xs font-mono font-bold text-indigo-400" }, selectedItem.response_time_ms ? `${selectedItem.response_time_ms} ms` : "N/A")), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/40 border border-slate-800/80 rounded-xl p-3" }, /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 uppercase tracking-wider block mb-1" }, "Intent / Type"), /* @__PURE__ */ React.createElement("span", { className: "text-xs font-bold text-slate-300" }, selectedItem.is_navigational ? "Navigation" : "Information")), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/40 border border-slate-800/80 rounded-xl p-3 col-span-2 sm:col-span-1" }, /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 uppercase tracking-wider block mb-1" }, "Source Chunks"), /* @__PURE__ */ React.createElement("span", { className: "text-xs font-mono text-slate-300" }, selectedItem.retrieved_chunks?.length ? `${selectedItem.retrieved_chunks.length} chunk${selectedItem.retrieved_chunks.length > 1 ? "s" : ""}` : "None"))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between items-center text-xs text-slate-500 font-mono pt-2 border-t border-slate-800" }, /* @__PURE__ */ React.createElement("span", null, "Query ID: #", selectedItem.query_id), /* @__PURE__ */ React.createElement("span", null, selectedItem.timestamp ? new Date(selectedItem.timestamp).toLocaleString() : "")), /* @__PURE__ */ React.createElement("div", { className: "pt-2" }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => setShowModal(false),
+          className: "w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition-colors"
+        },
+        "Close Details"
+      )));
+    }
+    if (subTab === "users") return /* @__PURE__ */ React.createElement(UserForm, { item: selectedItem, roles: refs.roles, nodes: refs.nodes, programmes: refs.programmes, faculties: refs.faculties, departments: refs.departments, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (subTab === "roles") return /* @__PURE__ */ React.createElement(RoleForm, { item: selectedItem, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (currentTab === "rag" && subTab === "documents") return /* @__PURE__ */ React.createElement(DocumentForm, { item: selectedItem, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (currentTab === "rag" && subTab === "adaptation-phrases") return /* @__PURE__ */ React.createElement(SpeechAdaptationPhraseForm, { item: selectedItem, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (currentTab === "rag" && subTab === "speech-languages") return /* @__PURE__ */ React.createElement(SpeechLanguageForm, { item: selectedItem, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (currentTab === "infra" && subTab === "devices") return /* @__PURE__ */ React.createElement(DeviceForm, { item: selectedItem, nodes: refs.nodes, roles: refs.roles, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (currentTab === "infra" && subTab === "node-rbac") return /* @__PURE__ */ React.createElement(NodeRBACForm, { nodes: refs.nodes, roles: refs.roles, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (currentTab === "infra" && subTab === "edge-rbac") return /* @__PURE__ */ React.createElement(EdgeRBACForm, { edges: refs.edges, roles: refs.roles, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (currentTab === "academics" && subTab === "courses") return /* @__PURE__ */ React.createElement(CourseForm, { item: selectedItem, programmes: refs.programmes, faculties: refs.faculties, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (currentTab === "academics" && subTab === "enrollments") return /* @__PURE__ */ React.createElement(EnrollmentForm, { item: selectedItem, courses: refs.courses, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (currentTab === "academics" && subTab === "timetables") return /* @__PURE__ */ React.createElement(TimetableForm, { item: selectedItem, nodes: refs.nodes, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (currentTab === "academics" && subTab === "appointments") return /* @__PURE__ */ React.createElement(AppointmentForm, { item: selectedItem, nodes: refs.nodes, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (currentTab === "academics" && subTab === "faculties") return /* @__PURE__ */ React.createElement(FacultyForm, { item: selectedItem, staff: refs.staff, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (currentTab === "academics" && subTab === "departments") return /* @__PURE__ */ React.createElement(DepartmentForm, { item: selectedItem, staff: refs.staff, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    if (currentTab === "academics" && subTab === "programmes") return /* @__PURE__ */ React.createElement(ProgrammeForm, { item: selectedItem, staff: refs.staff, faculties: refs.faculties, onSubmit: handleFormSubmit, onCancel: () => setShowModal(false) });
+    return /* @__PURE__ */ React.createElement("div", { className: "text-slate-400 text-sm py-4 text-center" }, "Form not configured for this section.");
+  };
+  if (!token) {
+    return /* @__PURE__ */ React.createElement("div", { className: "min-h-screen flex items-center justify-center bg-slate-950 px-4 relative overflow-hidden" }, /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 pointer-events-none overflow-hidden" }, /* @__PURE__ */ React.createElement("div", { className: "absolute top-[-15%] left-[-10%] w-[55%] h-[55%] bg-blue-900/10 rounded-full blur-[120px]" }), /* @__PURE__ */ React.createElement("div", { className: "absolute bottom-[-15%] right-[-10%] w-[55%] h-[55%] bg-indigo-900/10 rounded-full blur-[120px]" })), /* @__PURE__ */ React.createElement("div", { className: "w-full max-w-md relative z-10" }, /* @__PURE__ */ React.createElement("div", { className: "text-center mb-8" }, /* @__PURE__ */ React.createElement("div", { className: "inline-flex p-4 bg-blue-600/10 border border-blue-500/20 text-blue-400 rounded-2xl mb-5 shadow-lg shadow-blue-900/10" }, /* @__PURE__ */ React.createElement(Icon, { name: "graduation-cap", className: "w-10 h-10" })), /* @__PURE__ */ React.createElement("h1", { className: "text-3xl font-extrabold text-slate-100 tracking-tight" }, "Smart Campus"), /* @__PURE__ */ React.createElement("p", { className: "text-slate-400 text-sm mt-2 font-medium" }, "Admin Management Portal")), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl" }, /* @__PURE__ */ React.createElement("h2", { className: "text-lg font-bold text-slate-100 mb-0.5" }, "Welcome back"), /* @__PURE__ */ React.createElement("p", { className: "text-slate-500 text-sm mb-6" }, "Sign in to manage your campus systems"), /* @__PURE__ */ React.createElement("form", { onSubmit: handleLogin, className: "space-y-5" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider" }, "Email"), /* @__PURE__ */ React.createElement("div", { className: "relative" }, /* @__PURE__ */ React.createElement("span", { className: "absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-600" }, /* @__PURE__ */ React.createElement(Icon, { name: "user", className: "w-4 h-4" })), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "email",
+        required: true,
+        value: loginEmail,
+        onChange: (e) => setLoginEmail(e.target.value),
+        placeholder: "Enter your email",
+        className: "w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-slate-100 focus:outline-none focus:border-blue-500 placeholder-slate-700 text-sm transition-all duration-200"
+      }
+    ))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider" }, "Password"), /* @__PURE__ */ React.createElement("div", { className: "relative" }, /* @__PURE__ */ React.createElement("span", { className: "absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-600" }, /* @__PURE__ */ React.createElement(Icon, { name: "lock", className: "w-4 h-4" })), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "password",
+        required: true,
+        value: loginPass,
+        onChange: (e) => setLoginPass(e.target.value),
+        placeholder: "Enter your password",
+        className: "w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-slate-100 focus:outline-none focus:border-blue-500 placeholder-slate-700 text-sm transition-all duration-200"
+      }
+    )), loginError && /* @__PURE__ */ React.createElement("div", { className: "mt-2.5 flex items-center gap-2 text-red-400 text-xs bg-red-900/10 border border-red-900/20 rounded-xl px-3 py-2.5" }, /* @__PURE__ */ React.createElement(Icon, { name: "alert-circle", className: "w-3.5 h-3.5 shrink-0" }), /* @__PURE__ */ React.createElement("span", null, loginError))), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "submit",
+        disabled: loginLoading,
+        className: "w-full bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold py-3 px-4 rounded-xl transition-all duration-200 shadow-lg shadow-blue-900/30 flex justify-center items-center gap-2 text-sm mt-2"
+      },
+      loginLoading ? /* @__PURE__ */ React.createElement("div", { className: "w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" }) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Icon, { name: "log-in", className: "w-4 h-4" }), /* @__PURE__ */ React.createElement("span", null, "Sign In"))
+    )), /* @__PURE__ */ React.createElement("div", { className: "mt-6 pt-5 border-t border-slate-800" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 gap-3" }, [
+      { icon: "shield-check", label: "Secure Access" },
+      { icon: "users", label: "User Management" },
+      { icon: "cpu", label: "IoT Monitoring" }
+    ].map((f, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "flex flex-col items-center gap-1.5" }, /* @__PURE__ */ React.createElement("div", { className: "p-2 bg-slate-800 border border-slate-700/50 rounded-xl text-slate-400" }, /* @__PURE__ */ React.createElement(Icon, { name: f.icon, className: "w-4 h-4" })), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-600 font-medium text-center leading-tight" }, f.label))))))), toast && /* @__PURE__ */ React.createElement(Toast, { message: toast.message, type: toast.type, onClose: () => setToast(null) }));
+  }
+  const isTabDisabled = (tabName) => {
+    if (adminType !== "SUPER_ADMIN" && (tabName === "infra" || tabName === "mapping")) return true;
+    if (adminType === "CONTENT_ADMIN" && tabName !== "rag" && tabName !== "overview") return true;
+    if (adminType === "SYSTEM_ADMIN" && tabName === "rag") return true;
+    return false;
+  };
+  const navItems = [
+    { id: "overview", label: "Overview", icon: "layout-dashboard", section: "main" },
+    { id: "iam", label: "User Management", icon: "users", section: "manage" },
+    { id: "rag", label: "Knowledge Base", icon: "book-open", section: "manage" },
+    { id: "infra", label: "Devices & Security", icon: "shield", section: "manage" },
+    { id: "academics", label: "Scheduling", icon: "calendar", section: "manage" },
+    { id: "mapping", label: "Campus Map", icon: "map", section: "manage" }
+  ];
+  return /* @__PURE__ */ React.createElement("div", { className: "min-h-screen flex bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30" }, mobileSidebarOpen && /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      className: "fixed inset-0 z-30 bg-slate-950/75 backdrop-blur-xs lg:hidden",
+      onClick: () => setMobileSidebarOpen(false)
+    }
+  ), /* @__PURE__ */ React.createElement("aside", { className: `fixed inset-y-0 left-0 lg:static bg-slate-950 border-r border-slate-800 flex flex-col justify-between shrink-0 z-40 transition-all duration-300 ${mobileSidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"} ${sidebarCollapsed ? "w-[72px]" : "w-[272px]"}` }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "h-[72px] px-4 border-b border-slate-800 flex items-center justify-between gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3 overflow-hidden" }, /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-xl flex items-center justify-center shrink-0" }, /* @__PURE__ */ React.createElement(Icon, { name: "graduation-cap", className: "w-5 h-5" })), !sidebarCollapsed && /* @__PURE__ */ React.createElement("div", { className: "overflow-hidden flex flex-col justify-center" }, /* @__PURE__ */ React.createElement("h1", { className: "font-extrabold text-[14px] text-slate-100 tracking-wide leading-none whitespace-nowrap" }, "Smart Campus"), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-indigo-400 font-bold tracking-widest uppercase mt-1" }, "Admin Portal"))), !sidebarCollapsed && /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => setSidebarCollapsed(true),
+      className: "p-1.5 hover:bg-slate-800 rounded-lg text-slate-500 hover:text-slate-300 transition-colors shrink-0"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "chevron-left", className: "w-4 h-4" })
+  )), /* @__PURE__ */ React.createElement("nav", { className: "p-4 space-y-1 mt-2" }, sidebarCollapsed && /* @__PURE__ */ React.createElement("div", { className: "flex justify-center mb-6" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setSidebarCollapsed(false), className: "p-1.5 hover:bg-slate-800 rounded-lg text-slate-500 hover:text-slate-300 transition-colors" }, /* @__PURE__ */ React.createElement(Icon, { name: "chevron-right", className: "w-4 h-4" }))), !sidebarCollapsed && /* @__PURE__ */ React.createElement("p", { className: "text-[11px] font-bold text-slate-500 uppercase tracking-wider px-3 pb-2" }, "Main"), navItems.filter((n) => n.section === "main").map(
+    (n) => !isTabDisabled(n.id) && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: n.id,
+        onClick: () => setCurrentTab(n.id),
+        title: sidebarCollapsed ? n.label : "",
+        className: `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 group relative ${sidebarCollapsed ? "justify-center" : ""} ${currentTab === n.id ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/50 border border-transparent"}`
+      },
+      currentTab === n.id && /* @__PURE__ */ React.createElement("div", { className: "absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-indigo-500 rounded-r-full" }),
+      /* @__PURE__ */ React.createElement(Icon, { name: n.icon, className: `w-5 h-5 shrink-0 ${currentTab === n.id ? "text-indigo-400" : "text-slate-500 group-hover:text-slate-300"}` }),
+      !sidebarCollapsed && /* @__PURE__ */ React.createElement("span", null, n.label)
+    )
+  ), !sidebarCollapsed ? /* @__PURE__ */ React.createElement("p", { className: "text-[11px] font-bold text-slate-500 uppercase tracking-wider px-3 pt-6 pb-2" }, "Manage") : /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800/80 my-4 mx-2" }), navItems.filter((n) => n.section === "manage").map(
+    (n) => !isTabDisabled(n.id) && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: n.id,
+        onClick: () => setCurrentTab(n.id),
+        title: sidebarCollapsed ? n.label : "",
+        className: `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 group relative ${sidebarCollapsed ? "justify-center" : ""} ${currentTab === n.id ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/50 border border-transparent"}`
+      },
+      currentTab === n.id && /* @__PURE__ */ React.createElement("div", { className: "absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-indigo-500 rounded-r-full" }),
+      /* @__PURE__ */ React.createElement(Icon, { name: n.icon, className: `w-5 h-5 shrink-0 ${currentTab === n.id ? "text-indigo-400" : "text-slate-500 group-hover:text-slate-300"}` }),
+      !sidebarCollapsed && /* @__PURE__ */ React.createElement("span", null, n.label)
+    )
+  ))), /* @__PURE__ */ React.createElement("div", { className: "p-4 border-t border-slate-800 bg-slate-950/50" }, /* @__PURE__ */ React.createElement("div", { className: `flex items-center gap-3 mb-4 ${sidebarCollapsed ? "justify-center" : "px-2"}` }, /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-white text-sm shrink-0 shadow-md border-2 border-slate-800" }, fullName ? fullName.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase() : "AD"), !sidebarCollapsed && /* @__PURE__ */ React.createElement("div", { className: "overflow-hidden flex flex-col justify-center" }, /* @__PURE__ */ React.createElement("p", { className: "text-sm font-bold text-slate-200 truncate" }, fullName || "Admin User"), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 font-semibold uppercase tracking-wider" }, adminType.replace("_", " ")))), /* @__PURE__ */ React.createElement("div", { className: `flex ${sidebarCollapsed ? "flex-col" : "gap-2"}` }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: toggleTheme,
+      title: sidebarCollapsed ? theme === "dark" ? "Light Mode" : "Dark Mode" : "",
+      className: `flex-1 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 py-2.5 rounded-xl text-xs flex justify-center items-center transition-all border border-slate-800 ${sidebarCollapsed ? "mb-2" : ""}`
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: theme === "dark" ? "sun" : "moon", className: "w-4 h-4" })
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: handleLogout,
+      title: sidebarCollapsed ? "Sign Out" : "",
+      className: "flex-1 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-red-400 py-2.5 rounded-xl text-xs flex justify-center items-center transition-all border border-slate-800"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "log-out", className: "w-4 h-4" })
+  )))), /* @__PURE__ */ React.createElement("div", { className: "flex-1 flex flex-col min-w-0 h-screen overflow-hidden bg-slate-900 relative" }, /* @__PURE__ */ React.createElement("header", { className: "h-[72px] shrink-0 border-b border-slate-800/60 bg-slate-900/80 backdrop-blur-md px-4 sm:px-8 flex items-center justify-between z-10" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3 text-sm min-w-0" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: () => setMobileSidebarOpen(true),
+      "aria-label": "Open navigation menu",
+      className: "lg:hidden p-2 rounded-xl bg-slate-800/80 text-slate-300 hover:text-white border border-slate-700/60"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "menu", className: "w-4 h-4" })
+  ), /* @__PURE__ */ React.createElement("span", { className: "hidden sm:inline text-slate-500 font-medium" }, navItems.find((n) => n.id === currentTab)?.section === "main" ? "Main" : "Manage"), /* @__PURE__ */ React.createElement(Icon, { name: "chevron-right", className: "hidden sm:inline w-3.5 h-3.5 text-slate-600" }), /* @__PURE__ */ React.createElement("span", { className: "text-slate-200 font-bold truncate" }, navItems.find((n) => n.id === currentTab)?.label), subTab && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Icon, { name: "chevron-right", className: "w-3.5 h-3.5 text-slate-600 shrink-0" }), /* @__PURE__ */ React.createElement("span", { className: "text-indigo-400 font-semibold truncate" }, subTabLabel(subTab)))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "hidden md:flex items-center gap-2 text-xs bg-slate-800/50 border border-slate-700/50 px-3 py-1.5 rounded-full text-slate-300 tabular-nums" }, /* @__PURE__ */ React.createElement("span", { className: "w-2 h-2 rounded-full bg-emerald-500" }), /* @__PURE__ */ React.createElement("span", null, "System Online"), dashboardStats.db_latency_ms > 0 && /* @__PURE__ */ React.createElement("span", { className: "text-slate-500 font-mono" }, "\xB7 ", dashboardStats.db_latency_ms, "ms")), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: () => {
+        if (adminType !== "CONTENT_ADMIN") {
+          setCurrentTab("academics");
+          setSubTab("notifications");
+        }
+      },
+      title: "View Notifications",
+      className: "relative p-2 text-slate-400 hover:text-slate-200 rounded-xl hover:bg-slate-800/60 transition-colors"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "bell", className: "w-5 h-5" })
+  ))), /* @__PURE__ */ React.createElement("main", { className: "flex-1 overflow-y-auto p-6 md:p-8 relative scrollbar-thin" }, /* @__PURE__ */ React.createElement("div", { className: "max-w-[1600px] mx-auto" }, currentTab === "overview" && /* @__PURE__ */ React.createElement("div", { className: "space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col sm:flex-row justify-between sm:items-end gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "text-3xl font-extrabold text-slate-100 tracking-tight" }, "Overview"), /* @__PURE__ */ React.createElement("p", { className: "text-slate-400 text-sm mt-1" }, "Here's a summary of your Smart Campus today.")), /* @__PURE__ */ React.createElement("div", { className: "text-right" }, /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 font-medium mb-1" }, "Today's Date"), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-slate-300 font-bold" }, (/* @__PURE__ */ new Date()).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5" }, adminType !== "CONTENT_ADMIN" && /* @__PURE__ */ React.createElement(
+    StatCard,
+    {
+      title: "Total Users",
+      value: dashboardStats.users.toLocaleString(),
+      icon: "users",
+      changeText: `${dashboardStats.active_users.toLocaleString()} active \xB7 ${dashboardStats.inactive_users.toLocaleString()} inactive`,
+      color: "indigo"
+    }
+  ), adminType !== "CONTENT_ADMIN" && /* @__PURE__ */ React.createElement(
+    StatCard,
+    {
+      title: "Face ID Coverage",
+      value: dashboardStats.users > 0 ? `${Math.round(dashboardStats.face_enrolled_users / dashboardStats.users * 100)}%` : "0%",
+      icon: "scan-face",
+      changeText: `${dashboardStats.face_enrolled_users.toLocaleString()} of ${dashboardStats.users.toLocaleString()} users enrolled`,
+      color: "emerald"
+    }
+  ), adminType !== "CONTENT_ADMIN" && /* @__PURE__ */ React.createElement(
+    StatCard,
+    {
+      title: "IoT Devices",
+      value: dashboardStats.devices.toLocaleString(),
+      icon: "cpu",
+      changeText: `${dashboardStats.online_devices} online \xB7 ${dashboardStats.offline_devices} offline`,
+      color: "amber"
+    }
+  ), adminType !== "SYSTEM_ADMIN" ? /* @__PURE__ */ React.createElement(
+    StatCard,
+    {
+      title: "Knowledge Docs",
+      value: dashboardStats.documents.toLocaleString(),
+      icon: "book-open",
+      changeText: `${dashboardStats.courses.toLocaleString()} active courses`,
+      color: "violet"
+    }
+  ) : /* @__PURE__ */ React.createElement(
+    StatCard,
+    {
+      title: "Active Courses",
+      value: dashboardStats.courses.toLocaleString(),
+      icon: "graduation-cap",
+      changeText: "Current catalog",
+      color: "violet"
+    }
+  )), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 lg:grid-cols-3 gap-6" }, /* @__PURE__ */ React.createElement("div", { className: "lg:col-span-2 bg-slate-800/30 border border-slate-700/50 rounded-2xl p-6 shadow-sm" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between mb-6" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "p-2 bg-emerald-500/10 text-emerald-400 rounded-xl" }, /* @__PURE__ */ React.createElement(Icon, { name: "activity", className: "w-5 h-5" })), /* @__PURE__ */ React.createElement("h3", { className: "text-lg font-bold text-slate-100" }, "Live Telemetry")), adminType === "SUPER_ADMIN" && /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: () => {
+        setCurrentTab("infra");
+        setSubTab("auth-logs");
+      },
+      className: "text-xs text-indigo-400 font-semibold hover:text-indigo-300 transition-colors"
+    },
+    "View Access Logs \u2192"
+  )), /* @__PURE__ */ React.createElement("div", { className: "space-y-3.5" }, [
+    {
+      status: "ok",
+      title: "Database Connection",
+      desc: "Central cloud database responding to live telemetry query.",
+      metric: `${dashboardStats.db_latency_ms}ms`
+    },
+    {
+      status: dashboardStats.offline_devices > 0 && dashboardStats.online_devices === 0 && dashboardStats.devices > 0 ? "warn" : "ok",
+      title: "Edge Device Fleet",
+      desc: `${dashboardStats.online_devices} device(s) reported heartbeat in the last 5 minutes.`,
+      metric: `${dashboardStats.online_devices}/${dashboardStats.devices} online`
+    },
+    {
+      status: dashboardStats.auth_failures_24h > 0 ? "warn" : "ok",
+      title: "Access Control Activity (24h)",
+      desc: `${dashboardStats.auth_attempts_24h} authentication attempt(s) logged \xB7 ${dashboardStats.active_sessions} active JWT session(s).`,
+      metric: `${dashboardStats.auth_failures_24h} failed`
+    }
+  ].map((s, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "flex items-center justify-between gap-4 p-4 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-slate-700 transition-colors" }, /* @__PURE__ */ React.createElement("div", { className: "flex gap-3.5 items-start" }, /* @__PURE__ */ React.createElement("span", { className: `w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${s.status === "ok" ? "bg-emerald-500" : "bg-amber-400"}` }), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-sm font-bold text-slate-200" }, s.title), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400 mt-0.5" }, s.desc))), /* @__PURE__ */ React.createElement("span", { className: "text-xs font-mono font-semibold text-slate-300 bg-slate-950 border border-slate-800 px-2.5 py-1 rounded-lg tabular-nums shrink-0" }, s.metric))))), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-800/30 border border-slate-700/50 rounded-2xl p-6 shadow-sm" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3 mb-6" }, /* @__PURE__ */ React.createElement("div", { className: "p-2 bg-indigo-500/10 text-indigo-400 rounded-xl" }, /* @__PURE__ */ React.createElement(Icon, { name: "shield-check", className: "w-5 h-5" })), /* @__PURE__ */ React.createElement("h3", { className: "text-lg font-bold text-slate-100" }, "My Access")), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400 mb-6 leading-relaxed" }, "Your assigned role determines which modules you can view and edit."), /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, [
+    { label: "User Management", granted: adminType !== "CONTENT_ADMIN" },
+    { label: "Knowledge Base", granted: adminType !== "SYSTEM_ADMIN" },
+    { label: "Devices & Security", granted: adminType === "SUPER_ADMIN" },
+    { label: "Scheduling", granted: adminType !== "CONTENT_ADMIN" }
+  ].map((p, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "flex justify-between items-center py-3 border-b border-slate-700/50 last:border-0 last:pb-0" }, /* @__PURE__ */ React.createElement("span", { className: "text-sm text-slate-300 font-medium" }, p.label), /* @__PURE__ */ React.createElement("span", { className: `text-[10px] font-bold px-2.5 py-1 rounded-lg ${p.granted ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"}` }, p.granted ? "Allowed" : "Restricted")))))), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-800/30 border border-slate-700/50 rounded-2xl p-6 shadow-sm" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3 mb-5" }, /* @__PURE__ */ React.createElement("div", { className: "p-2 bg-amber-500/10 text-amber-400 rounded-xl" }, /* @__PURE__ */ React.createElement(Icon, { name: "zap", className: "w-5 h-5" })), /* @__PURE__ */ React.createElement("h3", { className: "text-lg font-bold text-slate-100" }, "Quick Actions")), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 sm:grid-cols-4 gap-4" }, [
+    { tab: "iam", sub: "users", label: "Manage Users", icon: "users", cls: "bg-indigo-500/15 text-indigo-400", disabled: adminType === "CONTENT_ADMIN" },
+    { tab: "rag", sub: "documents", label: "Upload Document", icon: "upload", cls: "bg-violet-500/15 text-violet-400", disabled: adminType === "SYSTEM_ADMIN" },
+    { tab: "infra", sub: "devices", label: "View Devices", icon: "cpu", cls: "bg-amber-500/15 text-amber-400", disabled: adminType !== "SUPER_ADMIN" },
+    { tab: "academics", sub: "courses", label: "Manage Courses", icon: "book-open", cls: "bg-emerald-500/15 text-emerald-400", disabled: adminType === "CONTENT_ADMIN" }
+  ].map((a, i) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: i,
+      onClick: () => {
+        if (!a.disabled) {
+          setCurrentTab(a.tab);
+          setSubTab(a.sub);
+        }
+      },
+      disabled: a.disabled,
+      className: `flex items-center gap-3 p-4 rounded-xl border text-left transition-all duration-200 ${a.disabled ? "opacity-30 cursor-not-allowed border-slate-800 bg-slate-900/50" : "border-slate-700 bg-slate-800/80 hover:bg-slate-800 hover:border-indigo-500/40 cursor-pointer shadow-sm"}`
+    },
+    /* @__PURE__ */ React.createElement("div", { className: `p-2.5 rounded-lg shrink-0 ${a.cls}` }, /* @__PURE__ */ React.createElement(Icon, { name: a.icon, className: "w-5 h-5" })),
+    /* @__PURE__ */ React.createElement("span", { className: "text-sm font-bold text-slate-200 leading-tight" }, a.label)
+  ))))), currentTab === "iam" && (() => {
+    const cellPad = tableDensity === "compact" ? "py-2.5 px-3.5" : "p-4";
+    const hasUserFilters = Boolean(searchQuery.trim()) || roleFilter !== "ALL" || statusFilter !== "ALL" || userFaceFilter !== "ALL" || facultyFilter !== "ALL" || departmentFilter !== "ALL";
+    const hasFaceFilters = Boolean(searchQuery.trim()) || faceStatusFilter !== "ALL" || faceRoleFilter !== "ALL";
+    const resetIamFilters = () => {
+      setSearchQuery("");
+      setDebouncedSearch("");
+      setRoleFilter("ALL");
+      setStatusFilter("ALL");
+      setUserFaceFilter("ALL");
+      setFacultyFilter("ALL");
+      setDepartmentFilter("ALL");
+      setFaceStatusFilter("ALL");
+      setFaceRoleFilter("ALL");
+    };
+    const pageUserIds = paginatedData.map((u) => u.user_id).filter(Boolean);
+    const allPageSelected = pageUserIds.length > 0 && pageUserIds.every((id) => selectedUserIds.includes(id));
+    const facePct = userSummary.total_users > 0 ? Math.round(userSummary.face_enrolled_users / userSummary.total_users * 100) : 0;
+    return /* @__PURE__ */ React.createElement("div", { className: "animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4 mb-5" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-2" }, ["users", "roles", "facial-recognition"].map((t) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: t,
+        onClick: () => setSubTab(t),
+        className: `px-4 py-2 rounded-xl text-sm font-bold transition-all duration-200 border ${subTab === t ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-sm" : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800/80 hover:border-slate-700"}`
+      },
+      subTabLabel(t)
+    ))), (subTab === "users" || subTab === "facial-recognition") && /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "inline-flex bg-slate-950 border border-slate-800 rounded-xl p-0.5" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setTableDensity("comfortable"),
+        title: "Comfortable density",
+        className: `px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${tableDensity === "comfortable" ? "bg-slate-800 text-slate-100" : "text-slate-500 hover:text-slate-300"}`
+      },
+      "Comfortable"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setTableDensity("compact"),
+        title: "Compact density",
+        className: `px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${tableDensity === "compact" ? "bg-slate-800 text-slate-100" : "text-slate-500 hover:text-slate-300"}`
+      },
+      "Compact"
+    )), subTab === "users" && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: handleExportUsersCsv,
+        className: "bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "download", className: "w-3.5 h-3.5" }),
+      /* @__PURE__ */ React.createElement("span", null, selectedUserIds.length > 0 ? `Export (${selectedUserIds.length})` : "Export CSV")
+    ))), (subTab === "users" || subTab === "facial-recognition") && /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: resetIamFilters,
+        className: "text-left p-3.5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-indigo-500/40 transition-colors"
+      },
+      /* @__PURE__ */ React.createElement("div", { className: "text-[11px] font-semibold uppercase tracking-wider text-slate-500" }, "Total Users"),
+      /* @__PURE__ */ React.createElement("div", { className: "text-2xl font-extrabold text-slate-100 mt-1 tabular-nums" }, userSummary.total_users.toLocaleString())
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => {
+          if (subTab === "users") setStatusFilter(statusFilter === "ACTIVE" ? "ALL" : "ACTIVE");
+        },
+        className: `text-left p-3.5 rounded-2xl border transition-colors ${subTab === "users" && statusFilter === "ACTIVE" ? "bg-emerald-500/10 border-emerald-500/40" : "bg-slate-900/70 border-slate-800 hover:border-slate-700"}`
+      },
+      /* @__PURE__ */ React.createElement("div", { className: "text-[11px] font-semibold uppercase tracking-wider text-emerald-400" }, "Active Accounts"),
+      /* @__PURE__ */ React.createElement("div", { className: "text-2xl font-extrabold text-slate-100 mt-1 tabular-nums" }, userSummary.active_users.toLocaleString())
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => {
+          if (subTab === "users") setStatusFilter(statusFilter === "DEACTIVATED" ? "ALL" : "DEACTIVATED");
+        },
+        className: `text-left p-3.5 rounded-2xl border transition-colors ${subTab === "users" && statusFilter === "DEACTIVATED" ? "bg-red-500/10 border-red-500/40" : "bg-slate-900/70 border-slate-800 hover:border-slate-700"}`
+      },
+      /* @__PURE__ */ React.createElement("div", { className: "text-[11px] font-semibold uppercase tracking-wider text-red-400" }, "Deactivated"),
+      /* @__PURE__ */ React.createElement("div", { className: "text-2xl font-extrabold text-slate-100 mt-1 tabular-nums" }, userSummary.inactive_users.toLocaleString())
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => {
+          if (subTab === "users") setUserFaceFilter(userFaceFilter === "ENROLLED" ? "ALL" : "ENROLLED");
+          else setFaceStatusFilter(faceStatusFilter === "ENROLLED" ? "ALL" : "ENROLLED");
+        },
+        className: `text-left p-3.5 rounded-2xl border transition-colors ${subTab === "users" && userFaceFilter === "ENROLLED" || subTab === "facial-recognition" && faceStatusFilter === "ENROLLED" ? "bg-indigo-500/10 border-indigo-500/40" : "bg-slate-900/70 border-slate-800 hover:border-slate-700"}`
+      },
+      /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("span", { className: "text-[11px] font-semibold uppercase tracking-wider text-indigo-400" }, "Face ID Enrolled"), /* @__PURE__ */ React.createElement("span", { className: "text-[11px] font-mono text-indigo-300 tabular-nums" }, facePct, "%")),
+      /* @__PURE__ */ React.createElement("div", { className: "text-2xl font-extrabold text-slate-100 mt-1 tabular-nums" }, userSummary.face_enrolled_users.toLocaleString())
+    )), /* @__PURE__ */ React.createElement(
+      SectionHeader,
+      {
+        title: subTab === "facial-recognition" ? "Face ID Enrollment" : subTab === "roles" ? "Access Roles" : "Users Directory",
+        description: subTab === "roles" ? "Manage campus access roles and their permission levels." : subTab === "facial-recognition" ? "Inspect and enroll facial recognition profiles. Click any user row to view enrolled poses." : "Server-paginated directory. Click any user row to open their 360\xB0 profile, biometrics, and access logs.",
+        searchVal: searchQuery,
+        onSearchChange: setSearchQuery,
+        searchInputRef,
+        searchPlaceholder: subTab === "roles" ? "Search roles..." : "Search name, email, ID... (/)",
+        onCreateClick: subTab === "facial-recognition" ? null : () => {
+          setSelectedItem(null);
+          setModalType("create");
+          setShowModal(true);
+        },
+        createLabel: subTab === "roles" ? "Add Role" : "Register User",
+        customAction: subTab === "facial-recognition" && adminType === "SUPER_ADMIN" ? /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            onClick: handleReembedAll,
+            disabled: reembedding,
+            className: "bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/50 px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+          },
+          reembedding ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" }), /* @__PURE__ */ React.createElement("span", null, "Processing...")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Icon, { name: "refresh-cw", className: "w-4 h-4" }), /* @__PURE__ */ React.createElement("span", null, "Re-process All"))
+        ) : null
+      }
+    ), subTab === "users" && /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2 mb-4" }, /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        value: roleFilter,
+        onChange: (e) => setRoleFilter(e.target.value),
+        className: "bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "ALL" }, "All Roles"),
+      refs.roles.map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name))
+    ), /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        value: statusFilter,
+        onChange: (e) => setStatusFilter(e.target.value),
+        className: "bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "ALL" }, "All Status"),
+      /* @__PURE__ */ React.createElement("option", { value: "ACTIVE" }, "Active"),
+      /* @__PURE__ */ React.createElement("option", { value: "DEACTIVATED" }, "Deactivated")
+    ), /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        value: userFaceFilter,
+        onChange: (e) => setUserFaceFilter(e.target.value),
+        className: "bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "ALL" }, "All Face ID"),
+      /* @__PURE__ */ React.createElement("option", { value: "ENROLLED" }, "Face ID Enrolled"),
+      /* @__PURE__ */ React.createElement("option", { value: "NOT_ENROLLED" }, "Not Enrolled")
+    ), refs.faculties.length > 0 && /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        value: facultyFilter,
+        onChange: (e) => setFacultyFilter(e.target.value),
+        className: "bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer max-w-[190px]"
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "ALL" }, "All Faculties"),
+      refs.faculties.map((f) => /* @__PURE__ */ React.createElement("option", { key: f.faculty_id, value: f.faculty_id }, f.faculty_name))
+    ), refs.departments.length > 0 && /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        value: departmentFilter,
+        onChange: (e) => setDepartmentFilter(e.target.value),
+        className: "bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer max-w-[190px]"
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "ALL" }, "All Departments"),
+      refs.departments.map((d) => /* @__PURE__ */ React.createElement("option", { key: d.department_id, value: d.department_id }, d.department_name))
+    ), hasUserFilters && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: resetIamFilters,
+        className: "px-3 py-2 rounded-xl text-xs font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 transition-colors"
+      },
+      "Reset Filters"
+    )), subTab === "facial-recognition" && /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2 mb-4" }, /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        value: faceStatusFilter,
+        onChange: (e) => setFaceStatusFilter(e.target.value),
+        className: "bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "ALL" }, "All Face ID Status"),
+      /* @__PURE__ */ React.createElement("option", { value: "ENROLLED" }, "Face ID Enrolled"),
+      /* @__PURE__ */ React.createElement("option", { value: "NOT_ENROLLED" }, "Not Enrolled")
+    ), /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        value: faceRoleFilter,
+        onChange: (e) => setFaceRoleFilter(e.target.value),
+        className: "bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "ALL" }, "All Roles"),
+      refs.roles.map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name))
+    ), hasFaceFilters && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: resetIamFilters,
+        className: "px-3 py-2 rounded-xl text-xs font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 transition-colors"
+      },
+      "Reset Filters"
+    )), subTab === "users" && selectedUserIds.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "mb-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-indigo-950/60 border border-indigo-500/40 shadow-lg" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2.5 text-sm font-bold text-indigo-200 tabular-nums" }, /* @__PURE__ */ React.createElement("span", { className: "px-2 py-0.5 rounded-lg bg-indigo-600 text-white text-xs" }, selectedUserIds.length), /* @__PURE__ */ React.createElement("span", null, "user", selectedUserIds.length > 1 ? "s" : "", " selected")), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        disabled: bulkBusy,
+        onClick: () => handleBulkUserStatus(true),
+        className: "px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 disabled:opacity-50"
+      },
+      "Activate"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        disabled: bulkBusy,
+        onClick: () => handleBulkUserStatus(false),
+        className: "px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 disabled:opacity-50"
+      },
+      "Deactivate"
+    ), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        value: bulkRoleId,
+        onChange: (e) => setBulkRoleId(e.target.value),
+        className: "bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "" }, "Add role..."),
+      refs.roles.map((r) => /* @__PURE__ */ React.createElement("option", { key: r.role_id, value: r.role_id }, r.role_name))
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        disabled: !bulkRoleId || bulkBusy,
+        onClick: handleBulkUserRole,
+        className: "px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40"
+      },
+      "Apply"
+    )), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        disabled: bulkBusy,
+        onClick: handleBulkUserDelete,
+        className: "px-3 py-1.5 rounded-xl text-xs font-bold bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 disabled:opacity-50"
+      },
+      "Delete"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setSelectedUserIds([]),
+        className: "px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white"
+      },
+      "Clear"
+    ))), listLoading ? /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-center justify-center py-24 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800" }, /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4" }), /* @__PURE__ */ React.createElement("span", { className: "text-sm font-semibold" }, "Loading directory...")) : paginatedData.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-center justify-center border-2 border-dashed border-slate-800 bg-slate-900/30 rounded-3xl py-20 px-4" }, /* @__PURE__ */ React.createElement("div", { className: "p-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-2xl mb-4" }, /* @__PURE__ */ React.createElement(Icon, { name: "users", className: "w-7 h-7" })), /* @__PURE__ */ React.createElement("h4", { className: "text-base font-bold text-slate-200" }, hasUserFilters || hasFaceFilters ? "No matching records" : "No records yet"), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-slate-400 mt-1 max-w-sm text-center" }, hasUserFilters || hasFaceFilters ? "No users match your active search or filter criteria." : "Register a user to get started."), (hasUserFilters || hasFaceFilters) && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: resetIamFilters,
+        className: "mt-4 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+      },
+      "Reset All Filters"
+    )) : /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/80 border border-slate-800 rounded-2xl shadow-sm overflow-hidden backdrop-blur-sm" }, /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto max-h-[68vh] overflow-y-auto scrollbar-thin" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", { className: "sticky top-0 z-10 bg-slate-900/95 backdrop-blur-sm" }, subTab === "roles" && /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/70 text-slate-400 font-bold text-xs tracking-wider uppercase border-b border-slate-800" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Role Name"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Description"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Role ID"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 text-right font-semibold" }, "Actions")), subTab === "facial-recognition" && /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/70 text-slate-400 font-bold text-xs tracking-wider uppercase border-b border-slate-800" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold cursor-pointer select-none hover:text-slate-200", onClick: () => handleSort("name") }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center" }, "User Profile ", renderSortIcon("name"))), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Face ID Status"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Enrolled Poses"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 text-right font-semibold" }, "Actions")), subTab === "users" && /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/70 text-slate-400 font-bold text-xs tracking-wider uppercase border-b border-slate-800" }, /* @__PURE__ */ React.createElement("th", { className: "p-3.5 pl-5 w-10" }, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "checkbox",
+        "aria-label": "Select all users on page",
+        checked: allPageSelected,
+        onChange: toggleSelectAllPageUsers,
+        className: "w-4 h-4 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+      }
+    )), /* @__PURE__ */ React.createElement("th", { className: "p-3.5 font-semibold cursor-pointer select-none hover:text-slate-200", onClick: () => handleSort("name") }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center" }, "User Profile ", renderSortIcon("name"))), /* @__PURE__ */ React.createElement("th", { className: "p-3.5 font-semibold" }, "Identity Details"), /* @__PURE__ */ React.createElement("th", { className: "p-3.5 font-semibold" }, "Face ID"), /* @__PURE__ */ React.createElement("th", { className: "p-3.5 font-semibold cursor-pointer select-none hover:text-slate-200", onClick: () => handleSort("is_active") }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center" }, "Status ", renderSortIcon("is_active"))), /* @__PURE__ */ React.createElement("th", { className: "p-3.5 pr-5 text-right font-semibold" }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => {
+      if (subTab === "roles") return /* @__PURE__ */ React.createElement("tr", { key: item.role_id ?? idx, className: "hover:bg-slate-800/40 transition-colors" }, /* @__PURE__ */ React.createElement("td", { className: `${cellPad} pl-6` }, /* @__PURE__ */ React.createElement("div", { className: "inline-flex px-2 py-1 rounded-md bg-slate-800 border border-slate-700/50 text-slate-200 uppercase font-mono text-xs font-bold tracking-wider" }, item.role_name)), /* @__PURE__ */ React.createElement("td", { className: `${cellPad} text-sm text-slate-400 max-w-xs` }, item.description || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: `${cellPad} text-xs font-mono text-slate-500 tabular-nums` }, "#", item.role_id), /* @__PURE__ */ React.createElement("td", { className: `${cellPad} pr-6 text-right` }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-1.5" }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => {
+            setSelectedItem(item);
+            setModalType("edit");
+            setShowModal(true);
+          },
+          title: "Edit Role",
+          className: "p-2 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"
+        },
+        /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-4 h-4" })
+      ), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => handleDeleteItem(item),
+          title: "Remove Role",
+          className: "p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"
+        },
+        /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+      ))));
+      if (subTab === "facial-recognition") return /* @__PURE__ */ React.createElement(
+        "tr",
+        {
+          key: item.user_id ?? idx,
+          onClick: () => setDrawerState({ record: item, kind: "user" }),
+          className: "hover:bg-slate-800/40 transition-colors cursor-pointer"
+        },
+        /* @__PURE__ */ React.createElement("td", { className: `${cellPad} pl-6` }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "w-9 h-9 rounded-full bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden shrink-0" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs font-bold text-slate-300" }, ((item.given_name?.[0] || "") + (item.family_name?.[0] || "")).toUpperCase() || (item.full_name?.slice(0, 2).toUpperCase() || "U"))), /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "font-bold text-slate-200 text-sm flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "truncate" }, item.full_name), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60 tabular-nums" }, "#", item.user_id)), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-400 font-mono truncate" }, item.email), /* @__PURE__ */ React.createElement("div", { className: "flex gap-1 mt-1 flex-wrap" }, (item.roles || []).map((r, rI) => /* @__PURE__ */ React.createElement("span", { key: rI, className: "text-[10px] font-bold tracking-wider px-1.5 py-0.2 bg-slate-800 text-indigo-300 border border-slate-700/50 rounded uppercase" }, r.role_name)))))),
+        /* @__PURE__ */ React.createElement("td", { className: cellPad }, item.face_enrolled || item.face_vector ? /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-emerald-400" }), "Enrolled") : /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 text-slate-400 border border-slate-700/50 rounded-full text-xs font-bold" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-slate-500" }), "Not Enrolled")),
+        /* @__PURE__ */ React.createElement("td", { className: `${cellPad} text-xs font-mono text-slate-400` }, item.enrolled_poses?.length > 0 ? `${item.enrolled_poses.length} pose(s): ${item.enrolled_poses.join(", ")}` : item.face_enrolled ? "Enrolled" : "No biometric templates"),
+        /* @__PURE__ */ React.createElement("td", { className: `${cellPad} pr-6 text-right`, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-1.5" }, /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            onClick: () => setDrawerState({ record: item, kind: "user" }),
+            title: "Inspect User",
+            className: "p-2 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"
+          },
+          /* @__PURE__ */ React.createElement(Icon, { name: "eye", className: "w-4 h-4" })
+        ), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            onClick: () => {
+              setSelectedItem(item);
+              setSelectedPhotoFile(null);
+              setUploadedPhoto(null);
+              setPhotoPose("front");
+              setEnrollMethod("photo");
+              setScanStep(0);
+              setScanning(false);
+              setShowFaceModal(true);
+            },
+            title: "Manage Biometrics",
+            className: "p-2 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/50 text-indigo-400 rounded-xl transition-all hover:text-white"
+          },
+          /* @__PURE__ */ React.createElement(Icon, { name: "scan-face", className: "w-4 h-4" })
+        )))
+      );
+      if (subTab === "users") {
+        const studentObj = item.student;
+        const lecturerObj = item.lecturer;
+        const staffObj = item.staff;
+        const visitorObj = item.visitor;
+        const adminObj = item.admin;
+        const isSelected = selectedUserIds.includes(item.user_id);
+        return /* @__PURE__ */ React.createElement(
+          "tr",
+          {
+            key: item.user_id ?? idx,
+            onClick: () => setDrawerState({ record: item, kind: "user" }),
+            className: `transition-colors cursor-pointer ${isSelected ? "bg-indigo-950/35 hover:bg-indigo-950/50" : "hover:bg-slate-800/40"}`
+          },
+          /* @__PURE__ */ React.createElement("td", { className: `${cellPad} pl-5`, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              type: "checkbox",
+              "aria-label": `Select ${item.full_name}`,
+              checked: isSelected,
+              onChange: () => toggleSelectUser(item.user_id),
+              className: "w-4 h-4 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+            }
+          )),
+          /* @__PURE__ */ React.createElement("td", { className: cellPad }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "w-9 h-9 rounded-full bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden shrink-0" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs font-bold text-slate-300" }, ((item.given_name?.[0] || "") + (item.family_name?.[0] || "")).toUpperCase() || (item.full_name?.slice(0, 2).toUpperCase() || "U"))), /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "font-bold text-slate-200 text-sm flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "truncate" }, item.full_name), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60 tabular-nums shrink-0" }, "#", item.user_id)), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-400 font-mono truncate" }, item.email), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-1 mt-1" }, (item.roles || []).map((r, rI) => /* @__PURE__ */ React.createElement("span", { key: rI, className: "text-[10px] font-bold tracking-wider px-1.5 py-0.5 bg-indigo-950/80 text-indigo-300 border border-indigo-700/50 rounded uppercase" }, r.role_name)))))),
+          /* @__PURE__ */ React.createElement("td", { className: cellPad }, /* @__PURE__ */ React.createElement("div", { className: "space-y-1" }, studentObj && /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-300 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(Icon, { name: "graduation-cap", className: "w-3.5 h-3.5 text-indigo-400 shrink-0" }), /* @__PURE__ */ React.createElement("span", { className: "font-mono text-indigo-400 font-semibold" }, studentObj.student_id), studentObj.program && /* @__PURE__ */ React.createElement("span", { className: "text-slate-400 truncate max-w-[180px]" }, "\xB7 ", studentObj.program)), lecturerObj && /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-300 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(Icon, { name: "book-open", className: "w-3.5 h-3.5 text-purple-400 shrink-0" }), /* @__PURE__ */ React.createElement("span", { className: "font-mono text-purple-400 font-semibold" }, lecturerObj.lecturer_id), lecturerObj.position && /* @__PURE__ */ React.createElement("span", { className: "text-slate-400 truncate max-w-[180px]" }, "\xB7 ", lecturerObj.position)), staffObj && /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-300 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(Icon, { name: "briefcase", className: "w-3.5 h-3.5 text-emerald-400 shrink-0" }), /* @__PURE__ */ React.createElement("span", { className: "font-mono text-emerald-400 font-semibold" }, staffObj.staff_id), staffObj.position && /* @__PURE__ */ React.createElement("span", { className: "text-slate-400 truncate max-w-[180px]" }, "\xB7 ", staffObj.position)), visitorObj && /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-300 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(Icon, { name: "user-check", className: "w-3.5 h-3.5 text-amber-400 shrink-0" }), /* @__PURE__ */ React.createElement("span", { className: "font-mono text-amber-400 font-semibold" }, visitorObj.id_number), visitorObj.organization && /* @__PURE__ */ React.createElement("span", { className: "text-slate-400 truncate max-w-[180px]" }, "\xB7 ", visitorObj.organization)), adminObj && /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-300 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(Icon, { name: "shield", className: "w-3.5 h-3.5 text-rose-400 shrink-0" }), /* @__PURE__ */ React.createElement("span", { className: "font-mono text-rose-400 font-semibold" }, adminObj.admin_id), /* @__PURE__ */ React.createElement("span", { className: "text-slate-400" }, "\xB7 ", adminObj.admin_type)), !studentObj && !lecturerObj && !staffObj && !visitorObj && !adminObj && /* @__PURE__ */ React.createElement("span", { className: "text-xs text-slate-500 italic" }, "No sub-profile"))),
+          /* @__PURE__ */ React.createElement("td", { className: cellPad }, item.face_enrolled ? /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-[11px] font-bold tabular-nums" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-emerald-400" }), item.enrolled_poses_count ? `${item.enrolled_poses_count} pose${item.enrolled_poses_count > 1 ? "s" : ""}` : "Enrolled") : /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-slate-800/80 text-slate-500 border border-slate-700/60 rounded-full text-[11px] font-semibold" }, "None")),
+          /* @__PURE__ */ React.createElement("td", { className: cellPad, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              onClick: () => handleToggleStatus(item),
+              className: `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border transition-all ${item.is_active ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500 hover:text-white hover:border-emerald-500" : "bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500 hover:text-white"}`
+            },
+            /* @__PURE__ */ React.createElement("span", { className: `w-1.5 h-1.5 rounded-full ${item.is_active ? "bg-emerald-400" : "bg-red-400"}` }),
+            item.is_active ? "Active" : "Deactivated"
+          )),
+          /* @__PURE__ */ React.createElement("td", { className: `${cellPad} pr-5 text-right`, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-1.5" }, /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              onClick: () => setDrawerState({ record: item, kind: "user" }),
+              title: "Inspect User 360\xB0",
+              className: "p-2 bg-slate-800/70 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"
+            },
+            /* @__PURE__ */ React.createElement(Icon, { name: "eye", className: "w-4 h-4" })
+          ), /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              onClick: () => {
+                setSelectedItem(item);
+                setSelectedPhotoFile(null);
+                setUploadedPhoto(null);
+                setPhotoPose("front");
+                setEnrollMethod("photo");
+                setScanStep(0);
+                setScanning(false);
+                setShowFaceModal(true);
+              },
+              title: "Manage Face ID",
+              className: "p-2 bg-slate-800/70 hover:bg-slate-700 border border-slate-700/50 text-indigo-400 rounded-xl transition-all hover:text-white"
+            },
+            /* @__PURE__ */ React.createElement(Icon, { name: "scan-face", className: "w-4 h-4" })
+          ), /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              onClick: () => {
+                setSelectedItem(item);
+                setModalType("edit");
+                setShowModal(true);
+              },
+              title: "Edit User",
+              className: "p-2 bg-slate-800/70 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"
+            },
+            /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-4 h-4" })
+          ), /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              onClick: () => handleDeleteItem(item),
+              title: "Remove User",
+              className: "p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"
+            },
+            /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+          )))
+        );
+      }
+      return null;
+    }))))), renderPagination());
+  })(), currentTab === "rag" && /* @__PURE__ */ React.createElement("div", { className: "animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-2 border-b border-slate-800 pb-4 mb-6" }, DASHBOARD_SUB_TABS.rag.map((t) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: t,
+      onClick: () => setSubTab(t),
+      className: `px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 border ${subTab === t ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-sm" : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800/80 hover:border-slate-700"}`
+    },
+    subTabLabel(t)
+  ))), /* @__PURE__ */ React.createElement(
+    SectionHeader,
+    {
+      title: subTab === "documents" ? "Uploaded Documents" : subTab === "adaptation-phrases" ? "Acronyms & Translations" : subTab === "speech-languages" ? "Supported Languages" : "Chatbot Conversations",
+      description: subTab === "documents" ? "Upload and manage documents that the campus chatbot uses to answer questions." : subTab === "adaptation-phrases" ? "List of campus acronyms and all their language translations." : subTab === "speech-languages" ? "Configure recognized campus languages and default voice recognition settings." : "Review and analyze user queries submitted to the chatbot, response quality, and latency.",
+      searchVal: searchQuery,
+      onSearchChange: setSearchQuery,
+      onCreateClick: ["documents", "adaptation-phrases", "speech-languages"].includes(subTab) ? () => {
+        setSelectedItem(null);
+        setModalType("create");
+        setShowModal(true);
+      } : null,
+      createLabel: subTab === "adaptation-phrases" ? "Add Acronym" : subTab === "speech-languages" ? "Add Language" : "Upload Document",
+      customAction: subTab === "documents" ? /* @__PURE__ */ React.createElement(
+        "select",
+        {
+          value: accessLevelFilter,
+          onChange: (e) => setAccessLevelFilter(e.target.value),
+          className: "bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer"
+        },
+        /* @__PURE__ */ React.createElement("option", { value: "ALL" }, "All Roles"),
+        /* @__PURE__ */ React.createElement("option", { value: "VISITOR" }, "Visitor (Public)"),
+        /* @__PURE__ */ React.createElement("option", { value: "STUDENT" }, "Students"),
+        /* @__PURE__ */ React.createElement("option", { value: "LECTURER" }, "Lecturers"),
+        /* @__PURE__ */ React.createElement("option", { value: "STAFF" }, "Staff"),
+        /* @__PURE__ */ React.createElement("option", { value: "ADMIN" }, "Admins")
+      ) : subTab === "chatbot-queries" ? /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2" }, /* @__PURE__ */ React.createElement(
+        "select",
+        {
+          value: roleFilter,
+          onChange: (e) => setRoleFilter(e.target.value),
+          className: "bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer"
+        },
+        /* @__PURE__ */ React.createElement("option", { value: "ALL" }, "All Roles"),
+        /* @__PURE__ */ React.createElement("option", { value: "VISITOR" }, "Visitor"),
+        /* @__PURE__ */ React.createElement("option", { value: "STUDENT" }, "Student"),
+        /* @__PURE__ */ React.createElement("option", { value: "LECTURER" }, "Lecturer"),
+        /* @__PURE__ */ React.createElement("option", { value: "STAFF" }, "Staff"),
+        /* @__PURE__ */ React.createElement("option", { value: "ADMIN" }, "Admin")
+      ), /* @__PURE__ */ React.createElement(
+        "select",
+        {
+          value: accessLevelFilter,
+          onChange: (e) => setAccessLevelFilter(e.target.value),
+          className: "bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 hover:border-slate-600 transition-colors cursor-pointer"
+        },
+        /* @__PURE__ */ React.createElement("option", { value: "ALL" }, "All Types"),
+        /* @__PURE__ */ React.createElement("option", { value: "INFO" }, "Information"),
+        /* @__PURE__ */ React.createElement("option", { value: "NAV" }, "Navigation")
+      )) : null
+    }
+  ), listLoading ? /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-center justify-center py-24 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800" }, /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4" }), /* @__PURE__ */ React.createElement("span", { className: "text-sm font-semibold" }, "Loading knowledge base...")) : listData.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-center justify-center border-2 border-dashed border-slate-800 bg-slate-900/30 rounded-3xl py-24" }, /* @__PURE__ */ React.createElement("div", { className: "p-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-2xl mb-5" }, /* @__PURE__ */ React.createElement(Icon, { name: "book-open", className: "w-8 h-8" })), /* @__PURE__ */ React.createElement("h4", { className: "text-base font-bold text-slate-200" }, "No records found"), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-slate-500 mt-1 max-w-sm text-center" }, subTab === "adaptation-phrases" ? "Add campus acronyms and their translations to get started." : subTab === "speech-languages" ? "No languages configured." : "Upload documents to build the knowledge base.")) : subTab === "adaptation-phrases" ? /* @__PURE__ */ React.createElement("div", { className: "space-y-3.5" }, paginatedData.map((item, idx) => {
+    const translations = parseTranslations(item.description);
+    return /* @__PURE__ */ React.createElement("div", { key: item.phrase_id || idx, className: "bg-slate-900/80 border border-slate-800/80 hover:border-slate-700/80 rounded-2xl p-5 transition-all shadow-sm" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between pb-3.5 border-b border-slate-800/80 mb-3.5" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, /* @__PURE__ */ React.createElement("span", { className: "text-lg font-black text-white tracking-tight" }, item.phrase), /* @__PURE__ */ React.createElement("span", { className: "text-[11px] font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-0.5 rounded-md" }, translations.length, " ", translations.length === 1 ? "translation" : "translations")), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => {
+          setSelectedItem(item);
+          setModalType("edit");
+          setShowModal(true);
+        },
+        className: "px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 transition-colors inline-flex items-center gap-1.5",
+        title: "Edit Acronym & Translations"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-3.5 h-3.5" }),
+      /* @__PURE__ */ React.createElement("span", null, "Edit")
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => handleDeleteItem(item),
+        className: "p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors",
+        title: "Delete Acronym"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+    ))), translations.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 italic py-1" }, "No translations added yet.") : /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, translations.map((t, tIdx) => {
+      const badge = getLangBadge(t.lang);
+      return /* @__PURE__ */ React.createElement("div", { key: tIdx, className: "flex items-center justify-between bg-slate-950/60 border border-slate-800/60 rounded-xl px-3.5 py-2 text-xs" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3 min-w-0" }, /* @__PURE__ */ React.createElement("span", { className: `inline-flex items-center justify-center font-bold text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md border shrink-0 min-w-[70px] ${badge.cls}` }, badge.name), /* @__PURE__ */ React.createElement("span", { className: "text-slate-200 font-medium truncate" }, t.text)));
+    })));
+  })) : subTab === "speech-languages" ? /* @__PURE__ */ React.createElement("div", { className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/60 border border-slate-800 rounded-2xl p-5 backdrop-blur-sm" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col sm:flex-row sm:items-center justify-between gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "text-sm font-bold text-slate-100 flex items-center gap-2" }, /* @__PURE__ */ React.createElement(Icon, { name: "languages", className: "w-4 h-4 text-indigo-400" }), "Speech Recognition & Voice Understanding"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed" }, "The chatbot can dynamically converse and switch to ", /* @__PURE__ */ React.createElement("strong", { className: "text-slate-200" }, "any language"), " requested by the user during conversation. Use ", /* @__PURE__ */ React.createElement("strong", { className: "text-slate-200" }, '"Listen by Default"'), " to pre-load speech recognition models immediately at session start, or add new supported languages to the campus directory.")), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 shrink-0" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-xl" }, listData.filter((l) => l.is_default).length, " Active Defaults"), /* @__PURE__ */ React.createElement("span", { className: "text-xs font-semibold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-xl" }, listData.filter((l) => l.is_active).length, " Enabled")))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3.5" }, paginatedData.map((lang, idx) => /* @__PURE__ */ React.createElement("div", { key: lang.language_code || idx, className: `p-4 rounded-2xl border transition-all ${lang.is_default ? "bg-slate-900/90 border-indigo-500/30 shadow-sm" : lang.is_active ? "bg-slate-900/70 border-slate-800 hover:border-slate-700" : "bg-slate-950/40 border-slate-900 opacity-60"}` }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-3 mb-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, /* @__PURE__ */ React.createElement("div", { className: `w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs uppercase border ${lang.is_default ? "bg-indigo-500/15 text-indigo-300 border-indigo-500/30" : "bg-slate-800 text-slate-300 border-slate-700"}` }, lang.language_code), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", { className: "font-bold text-slate-100 text-sm" }, lang.language_name), /* @__PURE__ */ React.createElement("span", { className: "text-[11px] text-slate-500 font-mono" }, "Code: ", lang.language_code))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1.5" }, lang.is_default && /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full uppercase tracking-wider" }, "Primary ASR"), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: () => handleDeleteItem(lang),
+      className: "p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors",
+      title: `Delete ${lang.language_name} (${lang.language_code})`
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+  ))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between pt-3 border-t border-slate-800/80 text-xs" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: () => handleToggleLanguageDefault(lang.language_code),
+      className: `px-3 py-1.5 rounded-xl font-semibold text-xs border transition-all flex items-center gap-1.5 ${lang.is_default ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25" : "bg-slate-800/80 text-slate-400 border-slate-700/60 hover:text-slate-200 hover:bg-slate-800"}`,
+      title: "Toggle whether this language is loaded by default in Live ASR"
+    },
+    /* @__PURE__ */ React.createElement("span", { className: `w-1.5 h-1.5 rounded-full ${lang.is_default ? "bg-emerald-400" : "bg-slate-500"}` }),
+    lang.is_default ? "Listening by Default" : "Standby"
+  )), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: () => handleToggleLanguageActive(lang.language_code),
+      className: `px-3 py-1.5 rounded-xl font-semibold text-xs border transition-all ${lang.is_active ? "bg-indigo-500/15 text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/25" : "bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20"}`,
+      title: "Toggle whether this language is active in the campus directory"
+    },
+    lang.is_active ? "Enabled" : "Disabled"
+  )))))) : /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/80 border border-slate-800 rounded-2xl shadow-sm overflow-hidden backdrop-blur-sm" }, /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto" }, subTab === "documents" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Document"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Who Can Access"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Uploaded On"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Chunked Status"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Status"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 text-right font-semibold" }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: item.document_id ?? idx, onClick: () => setDrawerState({ record: item, kind: "document" }), className: "hover:bg-slate-800/40 transition-colors cursor-pointer group" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-4" }, /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-xl flex items-center justify-center shrink-0 shadow-sm" }, /* @__PURE__ */ React.createElement(Icon, { name: "file-text", className: "w-5 h-5" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "font-bold text-slate-200 text-sm" }, item.title), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mt-0.5" }, item.filename)))), /* @__PURE__ */ React.createElement("td", { className: "p-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-1.5 max-w-xs" }, (item.allowed_roles && item.allowed_roles.length > 0 ? item.allowed_roles : item.access_level === "PUBLIC" ? ["VISITOR"] : [item.access_level || "VISITOR"]).map((role, rIdx) => /* @__PURE__ */ React.createElement("span", { key: rIdx, className: "text-[10px] font-bold tracking-wider px-2.5 py-0.5 rounded-md uppercase border bg-indigo-950/80 text-indigo-300 border-indigo-700/50" }, role === "PUBLIC" ? "VISITOR" : role)))), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-mono text-slate-400" }, item.uploaded_at), /* @__PURE__ */ React.createElement("td", { className: "p-4" }, item.chunking_status === "COMPLETED" && /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-emerald-400" }), "Chunked"), item.chunking_status === "PROCESSING" && /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full text-xs font-bold" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" }), "Processing"), item.chunking_status === "PENDING" && /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5 px-3 py-1 bg-slate-500/10 text-slate-400 border border-slate-500/20 rounded-full text-xs font-bold" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-slate-400" }), "Pending"), item.chunking_status === "FAILED" && /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5 px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-full text-xs font-bold" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-red-400" }), "Failed")), /* @__PURE__ */ React.createElement("td", { className: "p-4" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => handleToggleStatus(item),
+      className: `inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-all ${item.is_active ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500 hover:text-white hover:border-emerald-500" : "bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500 hover:text-white"}`
+    },
+    /* @__PURE__ */ React.createElement("span", { className: `w-1.5 h-1.5 rounded-full ${item.is_active ? "bg-emerald-400" : "bg-red-400"}` }),
+    item.is_active ? "Active" : "Disabled"
+  )), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-right" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => {
+        setSelectedItem(item);
+        setModalType("edit");
+        setShowModal(true);
+      },
+      title: "Edit Document",
+      className: "p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-4 h-4" })
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => handleDeleteItem(item),
+      title: "Remove Document",
+      className: "p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+  ))))))), subTab === "chatbot-queries" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "User / Requester"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Question Asked"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Response"), /* @__PURE__ */ React.createElement("th", { className: "p-4 w-32 font-semibold" }, "Latency"), /* @__PURE__ */ React.createElement("th", { className: "p-4 w-36 font-semibold" }, "Type"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 w-24 text-right font-semibold" }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: idx, className: "hover:bg-slate-800/40 transition-colors group" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6 align-top" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-start gap-3" }, /* @__PURE__ */ React.createElement("div", { className: `w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${item.user_role === "ADMIN" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : item.user_role === "LECTURER" ? "bg-violet-500/10 text-violet-400 border border-violet-500/20" : item.user_role === "STUDENT" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : item.user_role === "STAFF" ? "bg-sky-500/10 text-sky-400 border border-sky-500/20" : "bg-slate-800 text-slate-400 border border-slate-700/50"}` }, item.user_name ? item.user_name.charAt(0).toUpperCase() : /* @__PURE__ */ React.createElement(Icon, { name: "user", className: "w-4 h-4" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "font-bold text-slate-200 text-xs" }, item.user_name || "Anonymous Visitor"), /* @__PURE__ */ React.createElement("span", { className: `inline-block mt-0.5 text-[9px] font-bold tracking-wider px-1.5 py-0.2 rounded uppercase border ${item.user_role === "ADMIN" ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : item.user_role === "LECTURER" ? "bg-violet-500/10 text-violet-400 border-violet-500/20" : item.user_role === "STUDENT" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : item.user_role === "STAFF" ? "bg-sky-500/10 text-sky-400 border-sky-500/20" : "bg-slate-800 text-slate-400 border-slate-700/50"}` }, item.user_role || "VISITOR"), item.user_email && /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-slate-500 truncate max-w-[140px] mt-0.5" }, item.user_email)))), /* @__PURE__ */ React.createElement("td", { className: "p-4 align-top max-w-xs" }, /* @__PURE__ */ React.createElement("p", { className: "font-bold text-slate-200 text-xs leading-snug line-clamp-2" }, item.query_text), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 font-mono mt-1 block" }, item.timestamp ? new Date(item.timestamp).toLocaleString() : "")), /* @__PURE__ */ React.createElement("td", { className: "p-4 align-top text-xs text-slate-400 leading-relaxed max-w-sm" }, /* @__PURE__ */ React.createElement("p", { className: "line-clamp-2" }, item.response_text || "No response recorded."), item.retrieved_chunks && item.retrieved_chunks.length > 0 && /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-indigo-400 font-mono mt-1 inline-flex items-center gap-1" }, /* @__PURE__ */ React.createElement(Icon, { name: "book-open", className: "w-3 h-3" }), " ", item.retrieved_chunks.length, " source chunk", item.retrieved_chunks.length > 1 ? "s" : "")), /* @__PURE__ */ React.createElement("td", { className: "p-4 align-top text-xs font-mono" }, item.response_time_ms ? /* @__PURE__ */ React.createElement("span", { className: "px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-semibold" }, item.response_time_ms, "ms") : /* @__PURE__ */ React.createElement("span", { className: "text-slate-600" }, "N/A")), /* @__PURE__ */ React.createElement("td", { className: "p-4 align-top text-xs" }, item.is_navigational ? /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-bold uppercase tracking-wider text-[9px]" }, /* @__PURE__ */ React.createElement(Icon, { name: "map", className: "w-3 h-3" }), " Navigation") : /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 border border-slate-700/50 text-slate-400 font-bold uppercase tracking-wider text-[9px]" }, /* @__PURE__ */ React.createElement(Icon, { name: "info", className: "w-3 h-3" }), " Information")), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 align-top text-right" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => {
+        setSelectedItem(item);
+        setModalType("view-chatbot-query");
+        setShowModal(true);
+      },
+      title: "View Details",
+      className: "p-1.5 bg-slate-800 hover:bg-indigo-600 hover:text-white border border-slate-700/50 text-slate-300 rounded-lg transition-colors inline-flex items-center gap-1 text-xs font-medium"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "eye", className: "w-3.5 h-3.5" })
+  )))))))), renderPagination()), currentTab === "infra" && /* @__PURE__ */ React.createElement("div", { className: "animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-2 border-b border-slate-800 pb-4 mb-6" }, ["devices", "auth-logs", "jwt-sessions"].map((t) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: t,
+      onClick: () => setSubTab(t),
+      className: `px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 border ${subTab === t ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-sm" : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800/80 hover:border-slate-700"}`
+    },
+    subTabLabel(t)
+  ))), /* @__PURE__ */ React.createElement(
+    SectionHeader,
+    {
+      title: subTab === "devices" ? "Hardware Devices" : subTab === "node-rbac" ? "Room Access Rules" : subTab === "edge-rbac" ? "Path Access Rules" : subTab === "auth-logs" ? "Access Logs" : "Active Sessions",
+      description: subTab === "devices" ? "Monitor all IoT devices on the campus network." : subTab === "node-rbac" ? "Control which roles can enter which rooms or locations." : subTab === "edge-rbac" ? "Control which roles can use which paths between locations." : subTab === "auth-logs" ? "History of all door/gate access attempts." : "View all currently active admin login sessions.",
+      searchVal: subTab === "devices" || subTab === "auth-logs" ? searchQuery : void 0,
+      onSearchChange: subTab === "devices" || subTab === "auth-logs" ? setSearchQuery : void 0,
+      onCreateClick: ["devices"].includes(subTab) ? () => {
+        setSelectedItem(null);
+        setModalType("create");
+        setShowModal(true);
+      } : null,
+      createLabel: subTab === "devices" ? "Add Device" : "Create Rule"
+    }
+  ), listLoading ? /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-center justify-center py-24 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800" }, /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4" }), /* @__PURE__ */ React.createElement("span", { className: "text-sm font-semibold" }, "Loading data...")) : listData.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-center justify-center border-2 border-dashed border-slate-800 bg-slate-900/30 rounded-3xl py-24" }, /* @__PURE__ */ React.createElement("div", { className: "p-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-2xl mb-5" }, /* @__PURE__ */ React.createElement(Icon, { name: "cpu", className: "w-8 h-8" })), /* @__PURE__ */ React.createElement("h4", { className: "text-base font-bold text-slate-200" }, "No records found"), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-slate-500 mt-1 max-w-sm text-center" }, "Add devices or create access rules to get started.")) : /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/80 border border-slate-800 rounded-2xl shadow-sm overflow-hidden backdrop-blur-sm" }, /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto" }, subTab === "devices" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Device"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "IP Address"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Type"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Authorized Roles"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Last Seen"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 text-right font-semibold" }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: item.device_id ?? idx, onClick: () => setDrawerState({ record: item, kind: "device" }), className: "hover:bg-slate-800/40 transition-colors cursor-pointer group" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-4" }, /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-xl flex items-center justify-center shrink-0 shadow-sm" }, /* @__PURE__ */ React.createElement(Icon, { name: "cpu", className: "w-5 h-5" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "font-bold text-slate-200 text-sm" }, item.device_name), /* @__PURE__ */ React.createElement("p", { className: "text-xs font-mono text-slate-500 mt-0.5" }, item.device_id)))), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-mono text-slate-400" }, item.ip_address || "N/A"), /* @__PURE__ */ React.createElement("td", { className: "p-4" }, /* @__PURE__ */ React.createElement("span", { className: "px-2.5 py-1 bg-slate-800 border border-slate-700/50 text-slate-300 rounded-md font-bold text-[10px] tracking-wider uppercase" }, item.device_type)), /* @__PURE__ */ React.createElement("td", { className: "p-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-1 max-w-xs" }, item.allowed_role_ids && item.allowed_role_ids.length > 0 ? item.allowed_role_ids.map((roleId) => {
+    const roleObj = refs.roles?.find((r) => r.role_id === roleId);
+    const roleName = roleObj ? roleObj.role_name : `Role ${roleId}`;
+    return /* @__PURE__ */ React.createElement("span", { key: roleId, className: "px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded text-[11px] font-medium" }, roleName);
+  }) : /* @__PURE__ */ React.createElement("span", { className: "text-xs text-rose-400/80 italic font-mono" }, "None (Deny-All)"))), /* @__PURE__ */ React.createElement("td", { className: "p-4" }, (() => {
+    if (!item.last_heartbeat) {
+      return /* @__PURE__ */ React.createElement("div", { className: "inline-flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg" }, /* @__PURE__ */ React.createElement("span", { className: "w-2 h-2 rounded-full shrink-0 shadow-sm bg-red-500 shadow-red-500/50" }), /* @__PURE__ */ React.createElement("span", { className: "text-xs font-semibold text-slate-300" }, "Offline"));
+    }
+    const lastSeenStr = item.last_heartbeat.endsWith("Z") ? item.last_heartbeat : item.last_heartbeat + "Z";
+    const dateObj = new Date(lastSeenStr);
+    const isOnline = (() => {
+      if (!item.is_active) return false;
+      const diffMs = /* @__PURE__ */ new Date() - dateObj;
+      return diffMs >= 0 && diffMs <= 6e4;
+    })();
+    const localTimeStr = `${String(dateObj.getHours()).padStart(2, "0")}:${String(dateObj.getMinutes()).padStart(2, "0")}`;
+    return /* @__PURE__ */ React.createElement("div", { className: "inline-flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg" }, /* @__PURE__ */ React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 shadow-sm ${isOnline ? "bg-emerald-400 shadow-emerald-500/50 animate-pulse" : "bg-red-500 shadow-red-500/50"}` }), /* @__PURE__ */ React.createElement("span", { className: "text-xs font-semibold text-slate-300" }, isOnline ? `Active ${localTimeStr}` : "Offline"));
+  })()), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-right" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity" }, /* @__PURE__ */ React.createElement("button", { onClick: () => handlePingDevice(item), disabled: pendingActionKey === `ping:${item.device_id}`, title: "Ping Device", className: "p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700/50 transition-all hover:text-indigo-400 hover:border-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed" }, pendingActionKey === `ping:${item.device_id}` ? /* @__PURE__ */ React.createElement("span", { className: "block w-4 h-4 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" }) : /* @__PURE__ */ React.createElement(Icon, { name: "radio", className: "w-4 h-4" })), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => {
+        setSelectedItem(item);
+        setModalType("edit");
+        setShowModal(true);
+      },
+      title: "Edit Device",
+      className: "p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-4 h-4" })
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => handleDeleteItem(item),
+      title: "Remove Device",
+      className: "p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+  ))))))), subTab === "node-rbac" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Room / Location"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Allowed Role"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 text-right font-semibold" }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: idx, className: "hover:bg-slate-800/40 transition-colors group" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6 font-mono text-slate-200 text-sm font-bold" }, "Node ", /* @__PURE__ */ React.createElement("span", { className: "text-indigo-400" }, "#", item.node_id)), /* @__PURE__ */ React.createElement("td", { className: "p-4" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs font-bold px-3 py-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-lg" }, refs.roles.find((r) => r.role_id === item.role_id)?.role_name || `Role #${item.role_id}`)), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-right" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => handleDeleteItem(item),
+      title: "Remove Rule",
+      className: "p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all opacity-0 group-hover:opacity-100"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+  )))))), subTab === "edge-rbac" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Path / Route"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Allowed Role"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 text-right font-semibold" }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: idx, className: "hover:bg-slate-800/40 transition-colors group" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6 font-mono text-slate-200 text-sm font-bold" }, "Path ", /* @__PURE__ */ React.createElement("span", { className: "text-indigo-400" }, "#", item.edge_id)), /* @__PURE__ */ React.createElement("td", { className: "p-4" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs font-bold px-3 py-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-lg" }, refs.roles.find((r) => r.role_id === item.role_id)?.role_name || `Role #${item.role_id}`)), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-right" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => handleDeleteItem(item),
+      title: "Remove Rule",
+      className: "p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all opacity-0 group-hover:opacity-100"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+  )))))), subTab === "auth-logs" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "User"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Device"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Result"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 font-semibold" }, "When"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: item.log_id ?? idx, onClick: () => setDrawerState({ record: item, kind: "auth-log" }), className: "hover:bg-slate-800/40 transition-colors cursor-pointer" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6 font-mono text-slate-200 text-sm font-semibold" }, item.email || "Unknown"), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-mono text-slate-500" }, item.device_id || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-bold" }, item.auth_status === "SUCCESS" || item.auth_status === "GRANTED" ? /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-lg" }, /* @__PURE__ */ React.createElement(Icon, { name: "check-circle", className: "w-3.5 h-3.5" }), " ", item.auth_status) : /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5 text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-lg" }, /* @__PURE__ */ React.createElement(Icon, { name: "x-circle", className: "w-3.5 h-3.5" }), " ", item.auth_status)), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-xs text-slate-400 font-mono" }, item.timestamp || item.created_at || "\u2014"))))), subTab === "jwt-sessions" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Admin User"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "IP Address"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Expires"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 font-semibold" }, "Status"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: idx, className: "hover:bg-slate-800/40 transition-colors" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6 font-mono text-slate-200 text-sm font-bold" }, /* @__PURE__ */ React.createElement(Icon, { name: "shield", className: "inline-block w-4 h-4 mr-2 text-indigo-400" }), item.user?.email || item.admin_id || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-mono text-slate-500" }, item.ip_address || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-mono text-slate-400" }, item.expires_at), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-xs font-bold" }, item.is_revoked ? /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5 text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-lg" }, /* @__PURE__ */ React.createElement(Icon, { name: "x-circle", className: "w-3.5 h-3.5" }), " Revoked") : /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-lg" }, /* @__PURE__ */ React.createElement(Icon, { name: "check-circle", className: "w-3.5 h-3.5" }), " Active")))))))), renderPagination()), currentTab === "academics" && /* @__PURE__ */ React.createElement("div", { className: "animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-2 border-b border-slate-800 pb-4 mb-6" }, ["courses", "enrollments", "timetables", "faculties", "departments", "programmes", "appointments", "notifications"].map((t) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: t,
+      onClick: () => setSubTab(t),
+      className: `px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 border ${subTab === t ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-sm" : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800/80 hover:border-slate-700"}`
+    },
+    subTabLabel(t)
+  ))), /* @__PURE__ */ React.createElement(
+    SectionHeader,
+    {
+      title: subTabLabel(subTab),
+      description: subTab === "courses" ? "Manage the course catalog and academic programs." : subTab === "enrollments" ? "View and manage student course enrollments." : subTab === "timetables" ? "Schedule class sessions and manage time slots." : subTab === "appointments" ? "Manage student-lecturer appointment bookings." : "System notification announcements sent to users.",
+      onCreateClick: subTab !== "notifications" ? () => {
+        setSelectedItem(null);
+        setModalType("create");
+        setShowModal(true);
+      } : null,
+      createLabel: `Add ${getSingleTabLabel(subTab)}`
+    }
+  ), listLoading ? /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-center justify-center py-24 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800" }, /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4" }), /* @__PURE__ */ React.createElement("span", { className: "text-sm font-semibold" }, "Loading scheduling data...")) : listData.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-center justify-center border-2 border-dashed border-slate-800 bg-slate-900/30 rounded-3xl py-24" }, /* @__PURE__ */ React.createElement("div", { className: "p-4 bg-slate-800 border border-slate-700 text-slate-400 rounded-2xl mb-5" }, /* @__PURE__ */ React.createElement(Icon, { name: "calendar", className: "w-8 h-8" })), /* @__PURE__ */ React.createElement("h4", { className: "text-base font-bold text-slate-200" }, "No records found"), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-slate-500 mt-1 max-w-sm text-center" }, "Add items to get started.")) : /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/80 border border-slate-800 rounded-2xl shadow-sm overflow-hidden backdrop-blur-sm" }, /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto" }, subTab === "courses" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Course Name"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Credits"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Level"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Faculty"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 text-right font-semibold" }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: item.course_id ?? idx, onClick: () => setDrawerState({ record: item, kind: "course" }), className: "hover:bg-slate-800/40 transition-colors cursor-pointer group" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6" }, /* @__PURE__ */ React.createElement("p", { className: "font-bold text-slate-200 text-sm" }, item.course_name), /* @__PURE__ */ React.createElement("p", { className: "text-xs font-mono text-indigo-400 mt-0.5" }, item.course_code)), /* @__PURE__ */ React.createElement("td", { className: "p-4 font-mono text-slate-400 text-xs font-semibold" }, item.credit_hours, " cr."), /* @__PURE__ */ React.createElement("td", { className: "p-4" }, /* @__PURE__ */ React.createElement("span", { className: "px-2.5 py-1 bg-slate-800 border border-slate-700/50 text-slate-300 rounded-md text-[10px] font-bold tracking-widest uppercase" }, item.course_level)), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs text-slate-400 font-medium" }, item.faculty), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-right" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => {
+        setSelectedItem(item);
+        setModalType("edit");
+        setShowModal(true);
+      },
+      title: "Edit Course",
+      className: "p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-4 h-4" })
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => handleDeleteItem(item),
+      title: "Remove Course",
+      className: "p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+  ))))))), subTab === "enrollments" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Student ID"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Course"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Semester"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Status"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 text-right font-semibold" }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: idx, className: "hover:bg-slate-800/40 transition-colors group" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6 font-mono font-bold text-slate-200 text-sm" }, item.student_id), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-semibold text-slate-400" }, "Course ", /* @__PURE__ */ React.createElement("span", { className: "text-indigo-400" }, item.course_code || "Unknown")), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-medium text-slate-400" }, item.semester, " (", item.academic_year, ")"), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg font-bold tracking-wider uppercase text-[10px]" }, item.status)), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-right" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => {
+        setSelectedItem(item);
+        setModalType("edit");
+        setShowModal(true);
+      },
+      title: "Edit Enrollment",
+      className: "p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-4 h-4" })
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => handleDeleteItem(item),
+      title: "Remove Enrollment",
+      className: "p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+  ))))))), subTab === "timetables" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Course"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Lecturer"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Day & Time"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Room"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 text-right font-semibold" }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: idx, className: "hover:bg-slate-800/40 transition-colors group" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6 font-mono text-slate-200 text-sm font-semibold" }, "Course ", /* @__PURE__ */ React.createElement("span", { className: "text-indigo-400" }, item.course_code || "Unknown")), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-mono text-slate-400" }, item.lecturer_id), /* @__PURE__ */ React.createElement("td", { className: "p-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col" }, /* @__PURE__ */ React.createElement("span", { className: "font-bold text-slate-200 text-xs tracking-wider uppercase" }, item.day_of_week), /* @__PURE__ */ React.createElement("span", { className: "text-slate-500 font-mono text-[10px] mt-0.5" }, item.start_time, " \u2013 ", item.end_time))), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-mono font-semibold text-slate-300" }, "Node ", /* @__PURE__ */ React.createElement("span", { className: "text-emerald-400" }, "#", item.node_id)), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-right" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => {
+        setSelectedItem(item);
+        setModalType("edit");
+        setShowModal(true);
+      },
+      title: "Edit Timetable",
+      className: "p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-4 h-4" })
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => handleDeleteItem(item),
+      title: "Remove Timetable",
+      className: "p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+  ))))))), subTab === "appointments" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Guest"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Host"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Scheduled"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Status"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 text-right font-semibold" }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: idx, className: "hover:bg-slate-800/40 transition-colors group" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6 font-mono font-bold text-slate-200 text-sm" }, "User ", /* @__PURE__ */ React.createElement("span", { className: "text-indigo-400" }, "#", item.guest_user_id)), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-mono font-semibold text-slate-400" }, "User ", /* @__PURE__ */ React.createElement("span", { className: "text-emerald-400" }, "#", item.host_user_id)), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-medium text-slate-300" }, item.scheduled_at, " ", /* @__PURE__ */ React.createElement("span", { className: "text-slate-500 ml-1" }, "(", item.duration_minutes, "m)")), /* @__PURE__ */ React.createElement("td", { className: "p-4" }, /* @__PURE__ */ React.createElement("span", { className: `px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase border ${item.status === "CONFIRMED" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : item.status === "PENDING" ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : "bg-slate-800 text-slate-400 border-slate-700/50"}` }, item.status)), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-right" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => {
+        setSelectedItem(item);
+        setModalType("edit");
+        setShowModal(true);
+      },
+      title: "Edit Appointment",
+      className: "p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-4 h-4" })
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => handleDeleteItem(item),
+      title: "Cancel Appointment",
+      className: "p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+  ))))))), subTab === "notifications" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Title"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Message"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 font-semibold" }, "Sent"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: idx, className: "hover:bg-slate-800/40 transition-colors" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6 font-bold text-slate-200" }, item.title), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-medium text-slate-400" }, item.body), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-xs font-mono text-slate-500" }, item.sent_at))))), subTab === "faculties" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Faculty ID"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Faculty Name"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Dean ID"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 text-right font-semibold" }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: idx, className: "hover:bg-slate-800/40 transition-colors group" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6 font-mono font-bold text-indigo-400 text-sm" }, "FAC ", /* @__PURE__ */ React.createElement("span", { className: "text-slate-300" }, "#", item.faculty_id)), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-sm font-semibold text-slate-200" }, item.faculty_name), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-mono font-semibold text-slate-400" }, "User ", /* @__PURE__ */ React.createElement("span", { className: "text-emerald-400" }, "#", item.dean_id)), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-right" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => {
+        setSelectedItem(item);
+        setModalType("edit");
+        setShowModal(true);
+      },
+      title: "Edit Faculty",
+      className: "p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-4 h-4" })
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => handleDeleteItem(item),
+      title: "Remove Faculty",
+      className: "p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+  ))))))), subTab === "departments" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Department ID"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Department Name"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Manager ID"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 text-right font-semibold" }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: idx, className: "hover:bg-slate-800/40 transition-colors group" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6 font-mono font-bold text-indigo-400 text-sm" }, "DEPT ", /* @__PURE__ */ React.createElement("span", { className: "text-slate-300" }, "#", item.department_id)), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-sm font-semibold text-slate-200" }, item.department_name), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-mono font-semibold text-slate-400" }, "User ", /* @__PURE__ */ React.createElement("span", { className: "text-emerald-400" }, "#", item.manager_id)), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-right" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => {
+        setSelectedItem(item);
+        setModalType("edit");
+        setShowModal(true);
+      },
+      title: "Edit Department",
+      className: "p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-4 h-4" })
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => handleDeleteItem(item),
+      title: "Remove Department",
+      className: "p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+  ))))))), subTab === "programmes" && /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-800/50 text-slate-400 font-bold text-xs tracking-wider uppercase border-b-2 border-slate-800/80" }, /* @__PURE__ */ React.createElement("th", { className: "p-4 pl-6 font-semibold" }, "Programme ID"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Programme Name"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "Faculty ID"), /* @__PURE__ */ React.createElement("th", { className: "p-4 font-semibold" }, "HOP ID"), /* @__PURE__ */ React.createElement("th", { className: "p-4 pr-6 text-right font-semibold" }, "Actions"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50" }, paginatedData.map((item, idx) => /* @__PURE__ */ React.createElement("tr", { key: idx, className: "hover:bg-slate-800/40 transition-colors group" }, /* @__PURE__ */ React.createElement("td", { className: "p-4 pl-6 font-mono font-bold text-indigo-400 text-sm" }, "PROG ", /* @__PURE__ */ React.createElement("span", { className: "text-slate-300" }, "#", item.programme_id)), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-sm font-semibold text-slate-200" }, item.programme_name), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-mono font-semibold text-slate-400" }, "FAC ", /* @__PURE__ */ React.createElement("span", { className: "text-emerald-400" }, "#", item.faculty_id)), /* @__PURE__ */ React.createElement("td", { className: "p-4 text-xs font-mono font-semibold text-slate-400" }, "User ", /* @__PURE__ */ React.createElement("span", { className: "text-emerald-400" }, "#", item.hop_id)), /* @__PURE__ */ React.createElement("td", { className: "p-4 pr-6 text-right" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => {
+        setSelectedItem(item);
+        setModalType("edit");
+        setShowModal(true);
+      },
+      title: "Edit Programme",
+      className: "p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 text-slate-300 rounded-xl transition-all hover:text-white"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "edit-3", className: "w-4 h-4" })
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => handleDeleteItem(item),
+      title: "Remove Programme",
+      className: "p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl transition-all"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "trash-2", className: "w-4 h-4" })
+  ))))))))), renderPagination()), currentTab === "mapping" && /* @__PURE__ */ React.createElement(CampusMapTab, { setToast }), showModal && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in duration-200" }, /* @__PURE__ */ React.createElement("div", { className: "w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl relative my-4 animate-in zoom-in-95 duration-200 ease-out" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-between items-start mb-6" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { className: "text-xl font-bold text-slate-100 tracking-tight" }, modalType === "create" ? "Add New Record" : modalType === "view-chatbot-query" ? "Chatbot Query Details" : "Edit Record"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, modalType === "view-chatbot-query" ? "Detailed inspection of user interaction and model response." : "Fill in the details below and save your changes.")), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => setShowModal(false),
+      disabled: formSubmitting,
+      className: "p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-all ml-4 shrink-0 bg-slate-900/50 border border-transparent hover:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "x", className: "w-5 h-5" })
+  )), /* @__PURE__ */ React.createElement("div", { className: "max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar" }, renderModalForm()), formSubmitting && /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 bg-slate-950/70 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-center gap-3 z-10" }, /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 border-4 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" }), /* @__PURE__ */ React.createElement("p", { className: "text-sm font-bold text-slate-100" }, "Saving changes...")))), provisioningDetails && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-in fade-in duration-200" }, /* @__PURE__ */ React.createElement("div", { className: "w-full max-w-xl bg-slate-900 border border-amber-500/40 rounded-3xl p-6 md:p-8 shadow-2xl" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-start gap-4 mb-6" }, /* @__PURE__ */ React.createElement("div", { className: "p-3 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20" }, /* @__PURE__ */ React.createElement(Icon, { name: "key", className: "w-6 h-6" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { className: "text-xl font-bold text-slate-100" }, "Device provisioning secret"), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-slate-400 mt-1" }, "The access-control setup screen is waiting for these details. Enter them there and choose ", /* @__PURE__ */ React.createElement("span", { className: "font-bold text-slate-200" }, "Apply and start"), "."))), /* @__PURE__ */ React.createElement("div", { className: "rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4 mb-5 text-xs text-indigo-100 leading-relaxed" }, /* @__PURE__ */ React.createElement("div", { className: "font-bold uppercase tracking-wider text-indigo-300 mb-1" }, "What to do next"), /* @__PURE__ */ React.createElement("ol", { className: "list-decimal list-inside space-y-1" }, /* @__PURE__ */ React.createElement("li", null, "Keep this dialog open."), /* @__PURE__ */ React.createElement("li", null, "On the access-control device, paste the Device ID and secret into the setup screen."), /* @__PURE__ */ React.createElement("li", null, "Confirm the cloud URL, then select ", /* @__PURE__ */ React.createElement("span", { className: "font-bold" }, "Apply and start"), "."), /* @__PURE__ */ React.createElement("li", null, "Return here after the device begins synchronization."))), /* @__PURE__ */ React.createElement("div", { className: "space-y-3 text-sm mb-5" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-between gap-4" }, /* @__PURE__ */ React.createElement("span", { className: "text-slate-500" }, "Device ID"), /* @__PURE__ */ React.createElement("span", { className: "font-mono font-bold text-indigo-300" }, provisioningDetails.deviceId)), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between gap-4" }, /* @__PURE__ */ React.createElement("span", { className: "text-slate-500" }, "IP address"), /* @__PURE__ */ React.createElement("span", { className: "font-mono text-slate-200" }, provisioningDetails.ipAddress))), /* @__PURE__ */ React.createElement("div", { className: "rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 mb-6" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] font-bold uppercase tracking-widest text-amber-300 mb-2" }, "One-time secret"), /* @__PURE__ */ React.createElement("div", { className: "font-mono text-sm md:text-base text-amber-100 break-all select-all" }, provisioningDetails.secret)), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setProvisioningDetails(null), className: "bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm" }, "Close provisioning")))), showFaceModal && selectedItem && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in duration-200" }, /* @__PURE__ */ React.createElement("div", { className: "w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl relative overflow-hidden my-4 animate-in zoom-in-95 duration-200 ease-out" }, /* @__PURE__ */ React.createElement("style", null, `
                                         @keyframes scanline-anim {
                                             0% { top: 0%; }
                                             50% { top: 100%; }
@@ -133,9 +4664,83 @@ return diffMs>=0&&diffMs<=60000;})();const localTimeStr=`${String(dateObj.getHou
                                             box-shadow: 0 0 10px rgba(99, 102, 241, 0.8);
                                             animation: scanline-anim 2.5s linear infinite;
                                         }
-                                    `),/*#__PURE__*/React.createElement("div",{className:"flex justify-between items-start mb-6"},/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("h3",{className:"text-xl font-bold text-slate-100 tracking-tight"},"Face ID Enrollment"),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-400 mt-1"},"Setting up for: ",/*#__PURE__*/React.createElement("span",{className:"text-indigo-400 font-semibold"},selectedItem.full_name))),/*#__PURE__*/React.createElement("button",{onClick:()=>{stopCamera();setShowFaceModal(false);setScanning(false);setScanStep(0);setConfidence(0);setSelectedPhotoFile(null);setPhotoPose("front");setSelectedVideoFile(null);setVideoError("");setEmbeddingProgress(0);setRecordingProgress(0);setRecordingPhase('idle');if(uploadedPhoto){URL.revokeObjectURL(uploadedPhoto);setUploadedPhoto(null);}},className:"p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-all ml-4 shrink-0 bg-slate-900/50 border border-transparent hover:border-slate-700"},/*#__PURE__*/React.createElement(Icon,{name:"x",className:"w-5 h-5"}))),/*#__PURE__*/React.createElement("div",{className:"flex bg-slate-950 p-1 rounded-xl mb-6 border border-slate-800 shadow-inner"},[{id:"photo",label:"📷 Photo"},{id:"live",label:"🎥 Live Camera"},{id:"video",label:"🎞️ Video"}].map(m=>/*#__PURE__*/React.createElement("button",{key:m.id,onClick:()=>{stopCamera();setEnrollMethod(m.id);setScanStep(0);setConfidence(0);setSelectedPhotoFile(null);setSelectedVideoFile(null);setVideoError("");setEmbeddingProgress(0);setRecordingProgress(0);setRecordingPhase('idle');},className:`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${enrollMethod===m.id?'bg-indigo-600 text-white shadow-sm':'text-slate-500 hover:text-slate-200 hover:bg-slate-900'}`},m.label))),enrollMethod==="photo"&&/*#__PURE__*/React.createElement("div",{className:"space-y-5"},/*#__PURE__*/React.createElement("div",{className:"space-y-2"},/*#__PURE__*/React.createElement("label",{className:"text-xs font-bold text-slate-300"},"Pose to add or update"),/*#__PURE__*/React.createElement("select",{value:photoPose,onChange:e=>setPhotoPose(e.target.value),className:"w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"},/*#__PURE__*/React.createElement("option",{value:"front"},"Front (also refresh low-light template)"),/*#__PURE__*/React.createElement("option",{value:"left_30"},"Turn left 30\xB0"),/*#__PURE__*/React.createElement("option",{value:"right_30"},"Turn right 30\xB0"),/*#__PURE__*/React.createElement("option",{value:"left_60"},"Turn left 60\xB0"),/*#__PURE__*/React.createElement("option",{value:"right_60"},"Turn right 60\xB0"),/*#__PURE__*/React.createElement("option",{value:"slightly_up"},"Look slightly up")),/*#__PURE__*/React.createElement("p",{className:"text-[11px] text-slate-500"},"Existing face poses are kept. Upload another pose later to complete or update the enrollment.")),/*#__PURE__*/React.createElement("div",{className:"relative aspect-video bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden flex items-center justify-center shadow-inner"},uploadedPhoto&&/*#__PURE__*/React.createElement("img",{src:uploadedPhoto,className:"absolute inset-0 w-full h-full object-cover opacity-60",alt:"Face"}),/*#__PURE__*/React.createElement("div",{className:"absolute top-3 left-3 flex items-center gap-1.5 bg-slate-900/80 border border-slate-800 px-2.5 py-1 rounded-lg text-[10px] font-bold"},scanning?/*#__PURE__*/React.createElement(React.Fragment,null,/*#__PURE__*/React.createElement("span",{className:"w-2 h-2 rounded-full bg-indigo-500 animate-ping"}),/*#__PURE__*/React.createElement("span",{className:"text-indigo-400"},"ANALYZING...")):/*#__PURE__*/React.createElement(React.Fragment,null,/*#__PURE__*/React.createElement("span",{className:"w-2 h-2 rounded-full bg-emerald-500"}),/*#__PURE__*/React.createElement("span",{className:"text-emerald-400"},"READY"))),/*#__PURE__*/React.createElement("div",{className:"absolute inset-8 border border-transparent pointer-events-none"},/*#__PURE__*/React.createElement("div",{className:"absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-indigo-500/70"}),/*#__PURE__*/React.createElement("div",{className:"absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-indigo-500/70"}),/*#__PURE__*/React.createElement("div",{className:"absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-indigo-500/70"}),/*#__PURE__*/React.createElement("div",{className:"absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-indigo-500/70"})),scanning&&/*#__PURE__*/React.createElement("div",{className:"scanner-scanline"}),/*#__PURE__*/React.createElement("div",{className:"text-slate-800 flex flex-col items-center"},scanStep===2?/*#__PURE__*/React.createElement("div",{className:"p-4 bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 rounded-full animate-bounce"},/*#__PURE__*/React.createElement(Icon,{name:"check",className:"w-10 h-10"})):/*#__PURE__*/React.createElement(Icon,{name:"user",className:`w-16 h-16 ${scanning?'text-indigo-500/40 animate-pulse':'text-slate-800'}`})),scanning&&/*#__PURE__*/React.createElement("div",{className:"absolute bottom-3 right-3 bg-slate-900/80 border border-slate-800 px-2 py-1 rounded-lg font-mono text-xs text-indigo-400 font-bold"},confidence,"%")),scanStep===0&&/*#__PURE__*/React.createElement("label",{className:"w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl transition-all flex justify-center items-center gap-2 cursor-pointer text-sm shadow-md shadow-indigo-900/20"},/*#__PURE__*/React.createElement(Icon,{name:"upload",className:"w-4 h-4"}),/*#__PURE__*/React.createElement("span",null,"Choose Face Photo"),/*#__PURE__*/React.createElement("input",{type:"file",accept:"image/*",className:"hidden",onChange:handlePhotoUpload})),scanStep===1&&/*#__PURE__*/React.createElement("div",{className:"space-y-3"},/*#__PURE__*/React.createElement("div",{className:"w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800 shadow-inner"},/*#__PURE__*/React.createElement("div",{className:"bg-indigo-500 h-full transition-all duration-300",style:{width:`${confidence}%`}})),/*#__PURE__*/React.createElement("div",{className:"bg-slate-950 rounded-xl p-3 border border-slate-800 font-mono text-[10px] text-slate-500 h-28 overflow-y-auto space-y-1 custom-scrollbar"},scanLogs.map((log,lIdx)=>/*#__PURE__*/React.createElement("div",{key:lIdx,className:"flex gap-1.5 items-start"},/*#__PURE__*/React.createElement("span",{className:"text-indigo-500 shrink-0"},">"),/*#__PURE__*/React.createElement("span",{className:lIdx===scanLogs.length-1?"text-slate-100 font-semibold":""},log))),/*#__PURE__*/React.createElement("div",{ref:logEndRef}))),scanStep===2&&/*#__PURE__*/React.createElement("div",{className:"space-y-4"},/*#__PURE__*/React.createElement("div",{className:"p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-center"},/*#__PURE__*/React.createElement("h4",{className:"text-sm font-bold text-emerald-400 mb-1"},"\u2713 Analysis Complete"),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-400"},"Face data is ready to save.")),/*#__PURE__*/React.createElement("div",{className:"flex gap-3"},/*#__PURE__*/React.createElement("label",{className:"flex-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold py-2.5 px-4 rounded-xl transition-all text-sm cursor-pointer text-center flex justify-center items-center gap-1.5 shadow-sm"},/*#__PURE__*/React.createElement(Icon,{name:"upload",className:"w-3.5 h-3.5"}),/*#__PURE__*/React.createElement("span",null,"Try Another"),/*#__PURE__*/React.createElement("input",{type:"file",accept:"image/*",className:"hidden",onChange:handlePhotoUpload})),/*#__PURE__*/React.createElement("button",{type:"button",onClick:()=>saveFacialEnrollment(),className:"flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-1.5 shadow-md shadow-indigo-900/20"},/*#__PURE__*/React.createElement(Icon,{name:"check",className:"w-4 h-4"}),/*#__PURE__*/React.createElement("span",null,"Save Face ID"))))),enrollMethod==="live"&&(()=>{// High-contrast SVG arrow: double-stroke (dark outline + white fill)
-// visible on ANY background color
-const ArrowSVG=({direction,size=72})=>{const style={filter:'drop-shadow(0 0 6px rgba(0,0,0,0.7))',animation:'arrowPulse 0.9s ease-in-out infinite',display:'block'};const paths={left:'M58 36H22M22 36L40 18M22 36L40 54',right:'M22 36H58M58 36L40 18M58 36L40 54',up:'M36 58V22M36 22L18 40M36 22L54 40',down:'M36 22V58M36 58L18 40M36 58L54 40'};if(direction===null)return/*#__PURE__*/React.createElement("svg",{width:size,height:size,viewBox:"0 0 72 72",fill:"none",style:style},/*#__PURE__*/React.createElement("circle",{cx:"36",cy:"36",r:"20",stroke:"black",strokeWidth:"7",strokeDasharray:"9 5"}),/*#__PURE__*/React.createElement("circle",{cx:"36",cy:"36",r:"20",stroke:"white",strokeWidth:"4",strokeDasharray:"9 5"}),/*#__PURE__*/React.createElement("circle",{cx:"36",cy:"36",r:"7",fill:"black"}),/*#__PURE__*/React.createElement("circle",{cx:"36",cy:"36",r:"4",fill:"white"}));const d=paths[direction];if(!d)return null;return/*#__PURE__*/React.createElement("svg",{width:size,height:size,viewBox:"0 0 72 72",fill:"none",style:style},/*#__PURE__*/React.createElement("path",{d:d,stroke:"black",strokeWidth:"12",strokeLinecap:"round",strokeLinejoin:"round"}),/*#__PURE__*/React.createElement("path",{d:d,stroke:"white",strokeWidth:"6",strokeLinecap:"round",strokeLinejoin:"round"}));};const positionClass=dir=>({left:'absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none',right:'absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none',up:'absolute top-2 left-1/2 -translate-x-1/2 pointer-events-none',down:'absolute bottom-16 left-1/2 -translate-x-1/2 pointer-events-none'})[dir]||'absolute inset-0 flex items-center justify-center pointer-events-none';const curPose=GUIDE_POSES[guidePoseIndex]||GUIDE_POSES[0];const phaseProgress=recordingPhase==='embedding'?embeddingProgress:recordingProgress;return/*#__PURE__*/React.createElement("div",{className:"space-y-4"},/*#__PURE__*/React.createElement("style",null,`
+                                    `), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between items-start mb-6" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { className: "text-xl font-bold text-slate-100 tracking-tight" }, "Face ID Enrollment"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, "Setting up for: ", /* @__PURE__ */ React.createElement("span", { className: "text-indigo-400 font-semibold" }, selectedItem.full_name))), /* @__PURE__ */ React.createElement("button", { onClick: () => {
+    stopCamera();
+    setShowFaceModal(false);
+    setScanning(false);
+    setScanStep(0);
+    setConfidence(0);
+    setSelectedPhotoFile(null);
+    setPhotoPose("front");
+    setSelectedVideoFile(null);
+    setVideoError("");
+    setEmbeddingProgress(0);
+    setRecordingProgress(0);
+    setRecordingPhase("idle");
+    if (uploadedPhoto) {
+      URL.revokeObjectURL(uploadedPhoto);
+      setUploadedPhoto(null);
+    }
+  }, className: "p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-all ml-4 shrink-0 bg-slate-900/50 border border-transparent hover:border-slate-700" }, /* @__PURE__ */ React.createElement(Icon, { name: "x", className: "w-5 h-5" }))), /* @__PURE__ */ React.createElement("div", { className: "flex bg-slate-950 p-1 rounded-xl mb-6 border border-slate-800 shadow-inner" }, [{ id: "photo", label: "\u{1F4F7} Photo" }, { id: "live", label: "\u{1F3A5} Live Camera" }, { id: "video", label: "\u{1F39E}\uFE0F Video" }].map((m) => /* @__PURE__ */ React.createElement("button", { key: m.id, onClick: () => {
+    stopCamera();
+    setEnrollMethod(m.id);
+    setScanStep(0);
+    setConfidence(0);
+    setSelectedPhotoFile(null);
+    setSelectedVideoFile(null);
+    setVideoError("");
+    setEmbeddingProgress(0);
+    setRecordingProgress(0);
+    setRecordingPhase("idle");
+  }, className: `flex-1 py-2 text-xs font-bold rounded-lg transition-all ${enrollMethod === m.id ? "bg-indigo-600 text-white shadow-sm" : "text-slate-500 hover:text-slate-200 hover:bg-slate-900"}` }, m.label))), enrollMethod === "photo" && /* @__PURE__ */ React.createElement("div", { className: "space-y-5" }, /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("label", { className: "text-xs font-bold text-slate-300" }, "Pose to add or update"), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      value: photoPose,
+      onChange: (e) => setPhotoPose(e.target.value),
+      className: "w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "front" }, "Front (also refresh low-light template)"),
+    /* @__PURE__ */ React.createElement("option", { value: "left_30" }, "Turn left 30\xB0"),
+    /* @__PURE__ */ React.createElement("option", { value: "right_30" }, "Turn right 30\xB0"),
+    /* @__PURE__ */ React.createElement("option", { value: "left_60" }, "Turn left 60\xB0"),
+    /* @__PURE__ */ React.createElement("option", { value: "right_60" }, "Turn right 60\xB0"),
+    /* @__PURE__ */ React.createElement("option", { value: "slightly_up" }, "Look slightly up")
+  ), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500" }, "Existing face poses are kept. Upload another pose later to complete or update the enrollment.")), /* @__PURE__ */ React.createElement("div", { className: "relative aspect-video bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden flex items-center justify-center shadow-inner" }, uploadedPhoto && /* @__PURE__ */ React.createElement("img", { src: uploadedPhoto, className: "absolute inset-0 w-full h-full object-cover opacity-60", alt: "Face" }), /* @__PURE__ */ React.createElement("div", { className: "absolute top-3 left-3 flex items-center gap-1.5 bg-slate-900/80 border border-slate-800 px-2.5 py-1 rounded-lg text-[10px] font-bold" }, scanning ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "w-2 h-2 rounded-full bg-indigo-500 animate-ping" }), /* @__PURE__ */ React.createElement("span", { className: "text-indigo-400" }, "ANALYZING...")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "w-2 h-2 rounded-full bg-emerald-500" }), /* @__PURE__ */ React.createElement("span", { className: "text-emerald-400" }, "READY"))), /* @__PURE__ */ React.createElement("div", { className: "absolute inset-8 border border-transparent pointer-events-none" }, /* @__PURE__ */ React.createElement("div", { className: "absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-indigo-500/70" }), /* @__PURE__ */ React.createElement("div", { className: "absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-indigo-500/70" }), /* @__PURE__ */ React.createElement("div", { className: "absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-indigo-500/70" }), /* @__PURE__ */ React.createElement("div", { className: "absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-indigo-500/70" })), scanning && /* @__PURE__ */ React.createElement("div", { className: "scanner-scanline" }), /* @__PURE__ */ React.createElement("div", { className: "text-slate-800 flex flex-col items-center" }, scanStep === 2 ? /* @__PURE__ */ React.createElement("div", { className: "p-4 bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 rounded-full animate-bounce" }, /* @__PURE__ */ React.createElement(Icon, { name: "check", className: "w-10 h-10" })) : /* @__PURE__ */ React.createElement(Icon, { name: "user", className: `w-16 h-16 ${scanning ? "text-indigo-500/40 animate-pulse" : "text-slate-800"}` })), scanning && /* @__PURE__ */ React.createElement("div", { className: "absolute bottom-3 right-3 bg-slate-900/80 border border-slate-800 px-2 py-1 rounded-lg font-mono text-xs text-indigo-400 font-bold" }, confidence, "%")), scanStep === 0 && /* @__PURE__ */ React.createElement("label", { className: "w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl transition-all flex justify-center items-center gap-2 cursor-pointer text-sm shadow-md shadow-indigo-900/20" }, /* @__PURE__ */ React.createElement(Icon, { name: "upload", className: "w-4 h-4" }), /* @__PURE__ */ React.createElement("span", null, "Choose Face Photo"), /* @__PURE__ */ React.createElement("input", { type: "file", accept: "image/*", className: "hidden", onChange: handlePhotoUpload })), scanStep === 1 && /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800 shadow-inner" }, /* @__PURE__ */ React.createElement("div", { className: "bg-indigo-500 h-full transition-all duration-300", style: { width: `${confidence}%` } })), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950 rounded-xl p-3 border border-slate-800 font-mono text-[10px] text-slate-500 h-28 overflow-y-auto space-y-1 custom-scrollbar" }, scanLogs.map((log, lIdx) => /* @__PURE__ */ React.createElement("div", { key: lIdx, className: "flex gap-1.5 items-start" }, /* @__PURE__ */ React.createElement("span", { className: "text-indigo-500 shrink-0" }, ">"), /* @__PURE__ */ React.createElement("span", { className: lIdx === scanLogs.length - 1 ? "text-slate-100 font-semibold" : "" }, log))), /* @__PURE__ */ React.createElement("div", { ref: logEndRef }))), scanStep === 2 && /* @__PURE__ */ React.createElement("div", { className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-center" }, /* @__PURE__ */ React.createElement("h4", { className: "text-sm font-bold text-emerald-400 mb-1" }, "\u2713 Analysis Complete"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400" }, "Face data is ready to save.")), /* @__PURE__ */ React.createElement("div", { className: "flex gap-3" }, /* @__PURE__ */ React.createElement("label", { className: "flex-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold py-2.5 px-4 rounded-xl transition-all text-sm cursor-pointer text-center flex justify-center items-center gap-1.5 shadow-sm" }, /* @__PURE__ */ React.createElement(Icon, { name: "upload", className: "w-3.5 h-3.5" }), /* @__PURE__ */ React.createElement("span", null, "Try Another"), /* @__PURE__ */ React.createElement("input", { type: "file", accept: "image/*", className: "hidden", onChange: handlePhotoUpload })), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: () => saveFacialEnrollment(),
+      className: "flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-1.5 shadow-md shadow-indigo-900/20"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "check", className: "w-4 h-4" }),
+    /* @__PURE__ */ React.createElement("span", null, "Save Face ID")
+  )))), enrollMethod === "live" && (() => {
+    const ArrowSVG = ({ direction, size = 72 }) => {
+      const style = {
+        filter: "drop-shadow(0 0 6px rgba(0,0,0,0.7))",
+        animation: "arrowPulse 0.9s ease-in-out infinite",
+        display: "block"
+      };
+      const paths = {
+        left: "M58 36H22M22 36L40 18M22 36L40 54",
+        right: "M22 36H58M58 36L40 18M58 36L40 54",
+        up: "M36 58V22M36 22L18 40M36 22L54 40",
+        down: "M36 22V58M36 58L18 40M36 58L54 40"
+      };
+      if (direction === null) return /* @__PURE__ */ React.createElement("svg", { width: size, height: size, viewBox: "0 0 72 72", fill: "none", style }, /* @__PURE__ */ React.createElement("circle", { cx: "36", cy: "36", r: "20", stroke: "black", strokeWidth: "7", strokeDasharray: "9 5" }), /* @__PURE__ */ React.createElement("circle", { cx: "36", cy: "36", r: "20", stroke: "white", strokeWidth: "4", strokeDasharray: "9 5" }), /* @__PURE__ */ React.createElement("circle", { cx: "36", cy: "36", r: "7", fill: "black" }), /* @__PURE__ */ React.createElement("circle", { cx: "36", cy: "36", r: "4", fill: "white" }));
+      const d = paths[direction];
+      if (!d) return null;
+      return /* @__PURE__ */ React.createElement("svg", { width: size, height: size, viewBox: "0 0 72 72", fill: "none", style }, /* @__PURE__ */ React.createElement("path", { d, stroke: "black", strokeWidth: "12", strokeLinecap: "round", strokeLinejoin: "round" }), /* @__PURE__ */ React.createElement("path", { d, stroke: "white", strokeWidth: "6", strokeLinecap: "round", strokeLinejoin: "round" }));
+    };
+    const positionClass = (dir) => ({
+      left: "absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none",
+      right: "absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none",
+      up: "absolute top-2 left-1/2 -translate-x-1/2 pointer-events-none",
+      down: "absolute bottom-16 left-1/2 -translate-x-1/2 pointer-events-none"
+    })[dir] || "absolute inset-0 flex items-center justify-center pointer-events-none";
+    const curPose = GUIDE_POSES[guidePoseIndex] || GUIDE_POSES[0];
+    const phaseProgress = recordingPhase === "embedding" ? embeddingProgress : recordingProgress;
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-4" }, /* @__PURE__ */ React.createElement("style", null, `
                                                     @keyframes arrowPulse {
                                                         0%,100% { opacity:1; transform:scale(1); }
                                                         50% { opacity:0.45; transform:scale(0.82); }
@@ -144,5 +4749,118 @@ const ArrowSVG=({direction,size=72})=>{const style={filter:'drop-shadow(0 0 6px 
                                                         0% { transform:scale(2); opacity:0; }
                                                         100% { transform:scale(1); opacity:1; }
                                                     }
-                                                `),/*#__PURE__*/React.createElement("div",{className:"relative bg-black rounded-2xl border border-slate-800 overflow-hidden shadow-inner",style:{aspectRatio:'16/9'}},cameraStream?/*#__PURE__*/React.createElement("video",{ref:el=>{videoRef.current=el;if(el&&cameraStream&&el.srcObject!==cameraStream){el.srcObject=cameraStream;el.play().catch(()=>{});}},autoPlay:true,playsInline:true,muted:true,className:"absolute inset-0 w-full h-full object-cover -scale-x-100"}):/*#__PURE__*/React.createElement("div",{className:"absolute inset-0 flex flex-col items-center justify-center text-slate-700 gap-2"},/*#__PURE__*/React.createElement(Icon,{name:"camera",className:"w-14 h-14 opacity-50"}),/*#__PURE__*/React.createElement("p",{className:"text-xs font-semibold"},"Camera preview")),/*#__PURE__*/React.createElement("canvas",{ref:canvasRef,style:{display:'none'},width:640,height:480}),cameraStream&&/*#__PURE__*/React.createElement("div",{className:"absolute inset-8 pointer-events-none"},/*#__PURE__*/React.createElement("div",{className:"absolute top-0 left-0 w-8 h-8 border-t-[3px] border-l-[3px] border-white/70"}),/*#__PURE__*/React.createElement("div",{className:"absolute top-0 right-0 w-8 h-8 border-t-[3px] border-r-[3px] border-white/70"}),/*#__PURE__*/React.createElement("div",{className:"absolute bottom-0 left-0 w-8 h-8 border-b-[3px] border-l-[3px] border-white/70"}),/*#__PURE__*/React.createElement("div",{className:"absolute bottom-0 right-0 w-8 h-8 border-b-[3px] border-r-[3px] border-white/70"})),recordingPhase==='countdown'&&/*#__PURE__*/React.createElement("div",{className:"absolute inset-0 bg-black/60 flex items-center justify-center pointer-events-none"},/*#__PURE__*/React.createElement("div",{key:recordingCountdown,className:"text-white font-black text-8xl",style:{animation:'countdownPop 0.4s ease-out forwards'}},recordingCountdown)),recordingPhase==='embedding'&&/*#__PURE__*/React.createElement("div",{className:"absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-4 pointer-events-none px-8"},/*#__PURE__*/React.createElement("div",{className:"w-12 h-12 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin"}),/*#__PURE__*/React.createElement("div",{className:"text-center space-y-1.5 w-full max-w-[240px]"},/*#__PURE__*/React.createElement("p",{className:"text-white font-bold text-sm"},"Embedding Face ID..."),/*#__PURE__*/React.createElement("p",{className:"text-slate-400 text-xs"},embeddingProgress,"% complete"),/*#__PURE__*/React.createElement("div",{className:"h-2 w-full bg-slate-950/80 rounded-full border border-white/5 overflow-hidden shadow-inner mt-2"},/*#__PURE__*/React.createElement("div",{className:"h-full bg-gradient-to-r from-teal-400 to-indigo-500 rounded-full transition-all duration-300",style:{width:`${embeddingProgress}%`}})))),recordingPhase==='success'&&/*#__PURE__*/React.createElement("div",{className:"absolute inset-0 bg-emerald-950/80 flex flex-col items-center justify-center gap-3 pointer-events-none"},/*#__PURE__*/React.createElement("div",{className:"w-16 h-16 bg-emerald-500/20 border-2 border-emerald-500 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/20"},/*#__PURE__*/React.createElement(Icon,{name:"check",className:"w-8 h-8 text-emerald-400"})),/*#__PURE__*/React.createElement("p",{className:"text-emerald-300 font-bold text-sm"},"Face ID Enrolled!")),recordingPhase==='recording'&&cameraStream&&(curPose.dir!==null?/*#__PURE__*/React.createElement("div",{className:positionClass(curPose.dir)},/*#__PURE__*/React.createElement(ArrowSVG,{direction:curPose.dir})):/*#__PURE__*/React.createElement("div",{className:"absolute inset-0 flex items-center justify-center pointer-events-none"},/*#__PURE__*/React.createElement(ArrowSVG,{direction:null}))),recordingPhase==='recording'&&cameraStream&&/*#__PURE__*/React.createElement("div",{className:"absolute bottom-3 left-3 right-3 pointer-events-none"},/*#__PURE__*/React.createElement("div",{className:"bg-black/75 border border-white/15 backdrop-blur-md rounded-xl px-3 py-2 text-center shadow-lg"},/*#__PURE__*/React.createElement("p",{className:"text-sm font-bold text-white tracking-wide"},enrollFeedback||curPose.label))),/*#__PURE__*/React.createElement("div",{className:"absolute top-3 left-3 flex items-center gap-1.5 bg-black/70 border border-white/10 px-2.5 py-1 rounded-lg text-[10px] font-bold"},recordingPhase==='recording'?/*#__PURE__*/React.createElement(React.Fragment,null,/*#__PURE__*/React.createElement("span",{className:"w-2 h-2 rounded-full bg-red-500 animate-ping"}),/*#__PURE__*/React.createElement("span",{className:"text-red-400"},"CAPTURING")):cameraStream?/*#__PURE__*/React.createElement(React.Fragment,null,/*#__PURE__*/React.createElement("span",{className:"w-2 h-2 rounded-full bg-emerald-500"}),/*#__PURE__*/React.createElement("span",{className:"text-emerald-400"},"READY")):/*#__PURE__*/React.createElement(React.Fragment,null,/*#__PURE__*/React.createElement("span",{className:"w-2 h-2 rounded-full bg-slate-600"}),/*#__PURE__*/React.createElement("span",{className:"text-slate-400"},"NO CAMERA")))),(recordingPhase==='recording'||recordingPhase==='embedding')&&/*#__PURE__*/React.createElement("div",{className:"space-y-1.5"},/*#__PURE__*/React.createElement("div",{className:"flex justify-between text-[10px] font-mono font-bold text-slate-500"},/*#__PURE__*/React.createElement("span",null,recordingPhase==='embedding'?'Embedding Face ID...':'Capturing front photo...'),/*#__PURE__*/React.createElement("span",null,phaseProgress,"%")),/*#__PURE__*/React.createElement("div",{className:"w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800 shadow-inner"},/*#__PURE__*/React.createElement("div",{className:"h-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-200 rounded-full",style:{width:`${phaseProgress}%`}}))),(recordingPhase==='idle'||recordingPhase==='failed')&&cameraStream&&/*#__PURE__*/React.createElement("div",{className:"bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-2 shadow-inner"},/*#__PURE__*/React.createElement("p",{className:"text-xs font-bold text-slate-400 uppercase tracking-wider"},"Front-Facing Photo Capture"),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-400 leading-relaxed"},"Position your face in the center of the frame and look directly into the camera. Only a single front-facing image will be captured for Face ID enrollment.")),recordingPhase==='failed'&&enrollFeedback&&/*#__PURE__*/React.createElement("div",{className:"flex items-start gap-3 bg-red-950/40 border border-red-900/40 rounded-2xl p-4 shadow-sm"},/*#__PURE__*/React.createElement(Icon,{name:"alert-circle",className:"w-4 h-4 text-red-400 shrink-0 mt-0.5"}),/*#__PURE__*/React.createElement("div",null,/*#__PURE__*/React.createElement("p",{className:"text-sm font-bold text-red-400"},"Capture failed"),/*#__PURE__*/React.createElement("p",{className:"text-xs text-red-400/80 mt-0.5 leading-relaxed"},enrollFeedback),/*#__PURE__*/React.createElement("p",{className:"text-xs text-slate-500 mt-1.5"},"Try again \u2014 look straight at the camera and ensure good lighting."))),/*#__PURE__*/React.createElement("div",{className:"flex gap-3"},!cameraStream?/*#__PURE__*/React.createElement("button",{type:"button",onClick:startCamera,className:"flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-md shadow-indigo-900/20"},/*#__PURE__*/React.createElement(Icon,{name:"camera",className:"w-4 h-4"}),/*#__PURE__*/React.createElement("span",null,"Enable Camera")):recordingPhase==='idle'||recordingPhase==='failed'?/*#__PURE__*/React.createElement(React.Fragment,null,/*#__PURE__*/React.createElement("button",{type:"button",onClick:stopCamera,className:"bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-sm"},/*#__PURE__*/React.createElement(Icon,{name:"video-off",className:"w-4 h-4"})),/*#__PURE__*/React.createElement("button",{type:"button",onClick:startGuidedRecording,className:"flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-lg shadow-indigo-900/30"},/*#__PURE__*/React.createElement(Icon,{name:"camera",className:"w-4 h-4"}),/*#__PURE__*/React.createElement("span",null,recordingPhase==='failed'?'Capture Again':'Capture Photo'))):recordingPhase==='countdown'?/*#__PURE__*/React.createElement("div",{className:"flex-1 bg-slate-900 border border-slate-800 rounded-xl py-3 text-center text-sm font-bold text-slate-400 shadow-inner"},"Get ready..."):recordingPhase==='recording'?/*#__PURE__*/React.createElement("button",{type:"button",onClick:()=>{guidedCaptureRef.current.active=false;setRecordingPhase('failed');setEnrollFeedback('Capture stopped before enrollment completed.');},className:"flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-md shadow-red-900/20"},/*#__PURE__*/React.createElement(Icon,{name:"square",className:"w-3.5 h-3.5 fill-white"}),/*#__PURE__*/React.createElement("span",null,"Cancel")):null));})(),enrollMethod==="video"&&/*#__PURE__*/React.createElement("div",{className:"space-y-5"},/*#__PURE__*/React.createElement("div",{className:"border-2 border-dashed border-slate-700/60 rounded-2xl p-8 text-center bg-slate-950/40 shadow-inner"},/*#__PURE__*/React.createElement(Icon,{name:"video",className:"w-12 h-12 mx-auto text-slate-600 mb-4"}),/*#__PURE__*/React.createElement("p",{className:"text-sm text-slate-400 mb-5"},"Upload a short video slowly rotating your head"),/*#__PURE__*/React.createElement("label",{className:"inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2.5 rounded-xl cursor-pointer text-sm transition-all shadow-md shadow-indigo-900/20"},/*#__PURE__*/React.createElement(Icon,{name:"upload",className:"w-4 h-4"}),/*#__PURE__*/React.createElement("span",null,selectedVideoFile?selectedVideoFile.name:"Choose Video File"),/*#__PURE__*/React.createElement("input",{type:"file",accept:"video/*",className:"hidden",onChange:handleVideoFileChange}))),videoError&&/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-2 text-red-400 text-xs bg-red-950/40 border border-red-900/40 rounded-xl px-4 py-3 shadow-sm"},/*#__PURE__*/React.createElement(Icon,{name:"alert-circle",className:"w-4 h-4 shrink-0"}),/*#__PURE__*/React.createElement("span",null,videoError)),/*#__PURE__*/React.createElement("button",{type:"button",onClick:uploadVideoEnrollment,disabled:!selectedVideoFile||videoProcessing,className:"w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-md disabled:shadow-none"},videoProcessing?/*#__PURE__*/React.createElement("div",{className:"w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"}):/*#__PURE__*/React.createElement(Icon,{name:"upload",className:"w-4 h-4"}),/*#__PURE__*/React.createElement("span",null,videoProcessing?"Processing video...":"Process & Enroll")))))),toast&&/*#__PURE__*/React.createElement(Toast,{message:toast.message,type:toast.type,onClose:()=>setToast(null)}))));}window.App = App;})();
+                                                `), /* @__PURE__ */ React.createElement("div", { className: "relative bg-black rounded-2xl border border-slate-800 overflow-hidden shadow-inner", style: { aspectRatio: "16/9" } }, cameraStream ? /* @__PURE__ */ React.createElement("video", { ref: (el) => {
+      videoRef.current = el;
+      if (el && cameraStream && el.srcObject !== cameraStream) {
+        el.srcObject = cameraStream;
+        el.play().catch(() => {
+        });
+      }
+    }, autoPlay: true, playsInline: true, muted: true, className: "absolute inset-0 w-full h-full object-cover -scale-x-100" }) : /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 flex flex-col items-center justify-center text-slate-700 gap-2" }, /* @__PURE__ */ React.createElement(Icon, { name: "camera", className: "w-14 h-14 opacity-50" }), /* @__PURE__ */ React.createElement("p", { className: "text-xs font-semibold" }, "Camera preview")), /* @__PURE__ */ React.createElement("canvas", { ref: canvasRef, style: { display: "none" }, width: 640, height: 480 }), cameraStream && /* @__PURE__ */ React.createElement("div", { className: "absolute inset-8 pointer-events-none" }, /* @__PURE__ */ React.createElement("div", { className: "absolute top-0 left-0 w-8 h-8 border-t-[3px] border-l-[3px] border-white/70" }), /* @__PURE__ */ React.createElement("div", { className: "absolute top-0 right-0 w-8 h-8 border-t-[3px] border-r-[3px] border-white/70" }), /* @__PURE__ */ React.createElement("div", { className: "absolute bottom-0 left-0 w-8 h-8 border-b-[3px] border-l-[3px] border-white/70" }), /* @__PURE__ */ React.createElement("div", { className: "absolute bottom-0 right-0 w-8 h-8 border-b-[3px] border-r-[3px] border-white/70" })), recordingPhase === "countdown" && /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 bg-black/60 flex items-center justify-center pointer-events-none" }, /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        key: recordingCountdown,
+        className: "text-white font-black text-8xl",
+        style: { animation: "countdownPop 0.4s ease-out forwards" }
+      },
+      recordingCountdown
+    )), recordingPhase === "embedding" && /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-4 pointer-events-none px-8" }, /* @__PURE__ */ React.createElement("div", { className: "w-12 h-12 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin" }), /* @__PURE__ */ React.createElement("div", { className: "text-center space-y-1.5 w-full max-w-[240px]" }, /* @__PURE__ */ React.createElement("p", { className: "text-white font-bold text-sm" }, "Embedding Face ID..."), /* @__PURE__ */ React.createElement("p", { className: "text-slate-400 text-xs" }, embeddingProgress, "% complete"), /* @__PURE__ */ React.createElement("div", { className: "h-2 w-full bg-slate-950/80 rounded-full border border-white/5 overflow-hidden shadow-inner mt-2" }, /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        className: "h-full bg-gradient-to-r from-teal-400 to-indigo-500 rounded-full transition-all duration-300",
+        style: { width: `${embeddingProgress}%` }
+      }
+    )))), recordingPhase === "success" && /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 bg-emerald-950/80 flex flex-col items-center justify-center gap-3 pointer-events-none" }, /* @__PURE__ */ React.createElement("div", { className: "w-16 h-16 bg-emerald-500/20 border-2 border-emerald-500 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/20" }, /* @__PURE__ */ React.createElement(Icon, { name: "check", className: "w-8 h-8 text-emerald-400" })), /* @__PURE__ */ React.createElement("p", { className: "text-emerald-300 font-bold text-sm" }, "Face ID Enrolled!")), recordingPhase === "recording" && cameraStream && (curPose.dir !== null ? /* @__PURE__ */ React.createElement("div", { className: positionClass(curPose.dir) }, /* @__PURE__ */ React.createElement(ArrowSVG, { direction: curPose.dir })) : /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 flex items-center justify-center pointer-events-none" }, /* @__PURE__ */ React.createElement(ArrowSVG, { direction: null }))), recordingPhase === "recording" && cameraStream && /* @__PURE__ */ React.createElement("div", { className: "absolute bottom-3 left-3 right-3 pointer-events-none" }, /* @__PURE__ */ React.createElement("div", { className: "bg-black/75 border border-white/15 backdrop-blur-md rounded-xl px-3 py-2 text-center shadow-lg" }, /* @__PURE__ */ React.createElement("p", { className: "text-sm font-bold text-white tracking-wide" }, enrollFeedback || curPose.label))), /* @__PURE__ */ React.createElement("div", { className: "absolute top-3 left-3 flex items-center gap-1.5 bg-black/70 border border-white/10 px-2.5 py-1 rounded-lg text-[10px] font-bold" }, recordingPhase === "recording" ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "w-2 h-2 rounded-full bg-red-500 animate-ping" }), /* @__PURE__ */ React.createElement("span", { className: "text-red-400" }, "CAPTURING")) : cameraStream ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "w-2 h-2 rounded-full bg-emerald-500" }), /* @__PURE__ */ React.createElement("span", { className: "text-emerald-400" }, "READY")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "w-2 h-2 rounded-full bg-slate-600" }), /* @__PURE__ */ React.createElement("span", { className: "text-slate-400" }, "NO CAMERA")))), (recordingPhase === "recording" || recordingPhase === "embedding") && /* @__PURE__ */ React.createElement("div", { className: "space-y-1.5" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-[10px] font-mono font-bold text-slate-500" }, /* @__PURE__ */ React.createElement("span", null, recordingPhase === "embedding" ? "Embedding Face ID..." : "Capturing front photo..."), /* @__PURE__ */ React.createElement("span", null, phaseProgress, "%")), /* @__PURE__ */ React.createElement("div", { className: "w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800 shadow-inner" }, /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        className: "h-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-200 rounded-full",
+        style: { width: `${phaseProgress}%` }
+      }
+    ))), (recordingPhase === "idle" || recordingPhase === "failed") && cameraStream && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-2 shadow-inner" }, /* @__PURE__ */ React.createElement("p", { className: "text-xs font-bold text-slate-400 uppercase tracking-wider" }, "Front-Facing Photo Capture"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400 leading-relaxed" }, "Position your face in the center of the frame and look directly into the camera. Only a single front-facing image will be captured for Face ID enrollment.")), recordingPhase === "failed" && enrollFeedback && /* @__PURE__ */ React.createElement("div", { className: "flex items-start gap-3 bg-red-950/40 border border-red-900/40 rounded-2xl p-4 shadow-sm" }, /* @__PURE__ */ React.createElement(Icon, { name: "alert-circle", className: "w-4 h-4 text-red-400 shrink-0 mt-0.5" }), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-sm font-bold text-red-400" }, "Capture failed"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-red-400/80 mt-0.5 leading-relaxed" }, enrollFeedback), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mt-1.5" }, "Try again \u2014 look straight at the camera and ensure good lighting."))), /* @__PURE__ */ React.createElement("div", { className: "flex gap-3" }, !cameraStream ? /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: startCamera,
+        className: "flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-md shadow-indigo-900/20"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "camera", className: "w-4 h-4" }),
+      /* @__PURE__ */ React.createElement("span", null, "Enable Camera")
+    ) : recordingPhase === "idle" || recordingPhase === "failed" ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: stopCamera,
+        className: "bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-sm"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "video-off", className: "w-4 h-4" })
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: startGuidedRecording,
+        className: "flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-lg shadow-indigo-900/30"
+      },
+      /* @__PURE__ */ React.createElement(Icon, { name: "camera", className: "w-4 h-4" }),
+      /* @__PURE__ */ React.createElement("span", null, recordingPhase === "failed" ? "Capture Again" : "Capture Photo")
+    )) : recordingPhase === "countdown" ? /* @__PURE__ */ React.createElement("div", { className: "flex-1 bg-slate-900 border border-slate-800 rounded-xl py-3 text-center text-sm font-bold text-slate-400 shadow-inner" }, "Get ready...") : recordingPhase === "recording" ? /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => {
+      guidedCaptureRef.current.active = false;
+      setRecordingPhase("failed");
+      setEnrollFeedback("Capture stopped before enrollment completed.");
+    }, className: "flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-md shadow-red-900/20" }, /* @__PURE__ */ React.createElement(Icon, { name: "square", className: "w-3.5 h-3.5 fill-white" }), /* @__PURE__ */ React.createElement("span", null, "Cancel")) : null));
+  })(), enrollMethod === "video" && /* @__PURE__ */ React.createElement("div", { className: "space-y-5" }, /* @__PURE__ */ React.createElement("div", { className: "border-2 border-dashed border-slate-700/60 rounded-2xl p-8 text-center bg-slate-950/40 shadow-inner" }, /* @__PURE__ */ React.createElement(Icon, { name: "video", className: "w-12 h-12 mx-auto text-slate-600 mb-4" }), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-slate-400 mb-5" }, "Upload a short video slowly rotating your head"), /* @__PURE__ */ React.createElement("label", { className: "inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2.5 rounded-xl cursor-pointer text-sm transition-all shadow-md shadow-indigo-900/20" }, /* @__PURE__ */ React.createElement(Icon, { name: "upload", className: "w-4 h-4" }), /* @__PURE__ */ React.createElement("span", null, selectedVideoFile ? selectedVideoFile.name : "Choose Video File"), /* @__PURE__ */ React.createElement("input", { type: "file", accept: "video/*", className: "hidden", onChange: handleVideoFileChange }))), videoError && /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 text-red-400 text-xs bg-red-950/40 border border-red-900/40 rounded-xl px-4 py-3 shadow-sm" }, /* @__PURE__ */ React.createElement(Icon, { name: "alert-circle", className: "w-4 h-4 shrink-0" }), /* @__PURE__ */ React.createElement("span", null, videoError)), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      type: "button",
+      onClick: uploadVideoEnrollment,
+      disabled: !selectedVideoFile || videoProcessing,
+      className: "w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl transition-all text-sm flex justify-center items-center gap-2 shadow-md disabled:shadow-none"
+    },
+    videoProcessing ? /* @__PURE__ */ React.createElement("div", { className: "w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" }) : /* @__PURE__ */ React.createElement(Icon, { name: "upload", className: "w-4 h-4" }),
+    /* @__PURE__ */ React.createElement("span", null, videoProcessing ? "Processing video..." : "Process & Enroll")
+  ))))), /* @__PURE__ */ React.createElement(
+    RecordDrawer,
+    {
+      record: drawerState.record,
+      kind: drawerState.kind,
+      refs,
+      onClose: () => setDrawerState({ record: null, kind: "" }),
+      onEdit: (rec) => {
+        setDrawerState({ record: null, kind: "" });
+        setSelectedItem(rec);
+        setModalType("edit");
+        setShowModal(true);
+      },
+      onDelete: (rec) => handleDeleteItem(rec),
+      onToggleUserStatus: (rec) => handleToggleStatus(rec),
+      onOpenFaceEnroll: (rec) => {
+        setDrawerState({ record: null, kind: "" });
+        setSelectedItem(rec);
+        setSelectedPhotoFile(null);
+        setUploadedPhoto(null);
+        setPhotoPose("front");
+        setEnrollMethod("photo");
+        setScanStep(0);
+        setScanning(false);
+        setShowFaceModal(true);
+      },
+      onRevokeSession: handleRevokeUserSession,
+      onRotateDeviceSecret: null
+    }
+  ), /* @__PURE__ */ React.createElement(
+    ConfirmDialog,
+    {
+      open: confirmState.open,
+      title: confirmState.title,
+      message: confirmState.message,
+      confirmLabel: confirmState.confirmLabel,
+      variant: confirmState.variant,
+      busy: bulkBusy || Boolean(pendingActionKey),
+      onConfirm: confirmState.onConfirm,
+      onCancel: () => setConfirmState((prev) => ({ ...prev, open: false }))
+    }
+  ), toast && /* @__PURE__ */ React.createElement(Toast, { message: toast.message, type: toast.type, onClose: () => setToast(null) }))));
+}
+window.App = App;
+
+})();
 const root = ReactDOM.createRoot(document.getElementById('root')); root.render(React.createElement(App));
