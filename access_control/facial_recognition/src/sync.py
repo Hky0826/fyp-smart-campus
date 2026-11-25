@@ -804,6 +804,43 @@ class SQLiteEdgeDB:
                 conn.close()
 
 
+    def prune_offline_outbox(self, max_rows: Optional[int] = None) -> int:
+        """Keep local device_auth_logs bounded during prolonged offline periods (FIFO pruning)."""
+        limit = max_rows if max_rows is not None else int(os.getenv("EDGE_MAX_OFFLINE_LOGS", "10000"))
+        if limit <= 0:
+            return 0
+        with self.lock:
+            conn = self._get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM device_auth_logs")
+                total = int(cur.fetchone()[0] or 0)
+                excess = total - limit
+                if excess <= 0:
+                    return 0
+                cur.execute(
+                    """
+                    DELETE FROM device_auth_logs
+                    WHERE log_id IN (
+                        SELECT log_id FROM device_auth_logs
+                        ORDER BY sync_status DESC, log_id ASC
+                        LIMIT ?
+                    )
+                    """,
+                    (excess,),
+                )
+                deleted = cur.rowcount or 0
+                conn.commit()
+                if deleted:
+                    logger.warning("Pruned %s oldest local authentication logs to stay under %s-row cap", deleted, limit)
+                return deleted
+            except Exception:
+                conn.rollback()
+                return 0
+            finally:
+                conn.close()
+
+
 class DeactivatePayload(BaseModel):
     user_id: int
     is_active: int
@@ -1039,16 +1076,43 @@ class UpstreamSyncClient:
 
     def _check_connection_and_heartbeat(self) -> None:
         url = f"{self.cloud_url}/api/sync/upstream/heartbeat"
+        cached_users = None
+        pending_logs = None
+        last_sync_at = None
+        try:
+            cached_users = len(self.db.get_local_user_ids())
+            pending_logs = len(self.db.get_unsynced_logs())
+            last_sync_at = self.db.get_last_sync_timestamp()
+        except Exception:
+            pass
         payload = {
             "device_id": self.device_id,
             "device_name": self.device_name,
             "ip_address": f"{self.local_ip}:{self.local_port}",
+            "app_version": "access-control-1.0",
+            "embedding_model": DEFAULT_EMBEDDING_MODEL,
+            "cached_users": cached_users,
+            "pending_logs": pending_logs,
+            "last_sync_at": last_sync_at,
+            "ws_connected": bool(getattr(self, "ws_status_fn", lambda: False)()),
+            "device_utc_time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         try:
-            import json
             body = json.dumps(payload, separators=(",", ":")).encode()
             response = requests.post(url, data=body, headers={**signed_headers(self.device_secret, self.device_id, "POST", url, body), "Content-Type": "application/json"}, timeout=5.0)
             online = response.status_code == 200
+            if online:
+                try:
+                    srv_time = response.json().get("server_utc_time")
+                    if srv_time:
+                        parsed = datetime.datetime.fromisoformat(str(srv_time).replace("Z", "+00:00"))
+                        if parsed.tzinfo is None:
+                            parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+                        skew = abs((datetime.datetime.now(datetime.timezone.utc) - parsed).total_seconds())
+                        if skew > 60:
+                            logger.warning("Clock skew detected (%.1fs vs cloud); check NTP synchronization", skew)
+                except Exception:
+                    pass
             if online and not self.is_online:
                 logger.info("Cloud link restored; sync status ONLINE")
             if not online and self.is_online:
@@ -1066,6 +1130,10 @@ class UpstreamSyncClient:
                     self.replay_pending_logs()
                 except Exception:
                     logger.exception("Error in chronological log replay queue")
+            try:
+                self.db.prune_offline_outbox()
+            except Exception:
+                pass
             self._stop_event.wait(self.log_push_interval)
 
     def replay_pending_logs(self) -> None:
@@ -1194,6 +1262,114 @@ def _find_available_sync_port(host: str, starting_port: int, max_attempts: int =
     return starting_port
 
 
+class EdgeWebSocketClient:
+    """Maintains an outbound WebSocket control channel to the cloud for instant push behind NAT."""
+
+    def __init__(
+        self,
+        *,
+        cloud_url: str,
+        device_id: str,
+        device_secret: str,
+        on_deactivate,
+        on_trigger_sync,
+        on_rotate_secret=None,
+    ) -> None:
+        self.cloud_url = cloud_url.rstrip("/")
+        self.device_id = device_id
+        self.device_secret = device_secret
+        self._on_deactivate = on_deactivate
+        self._on_trigger_sync = on_trigger_sync
+        self._on_rotate_secret = on_rotate_secret
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self.connected = False
+
+    def start(self) -> None:
+        if not self.device_secret or not self.cloud_url or not self.device_id:
+            return
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="edge-ws-client")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self.connected = False
+        if self._thread:
+            self._thread.join(timeout=3)
+
+    def _ws_urls(self) -> tuple[str, str]:
+        http_url = f"{self.cloud_url}/api/sync/downstream/ws"
+        if http_url.startswith("https://"):
+            ws_url = "wss://" + http_url[len("https://"):]
+        elif http_url.startswith("http://"):
+            ws_url = "ws://" + http_url[len("http://"):]
+        else:
+            ws_url = http_url
+        return http_url, ws_url
+
+    def _handle_message(self, raw: str) -> None:
+        try:
+            msg = json.loads(raw)
+        except Exception:
+            return
+        msg_type = msg.get("type")
+        if msg_type == "deactivate" and msg.get("user_id") is not None:
+            try:
+                self._on_deactivate(int(msg["user_id"]))
+            except Exception:
+                logger.exception("WebSocket deactivate handler failed")
+        elif msg_type == "trigger_sync":
+            try:
+                threading.Thread(target=self._on_trigger_sync, daemon=True).start()
+            except Exception:
+                logger.exception("WebSocket trigger_sync handler failed")
+        elif msg_type == "rotate_secret" and msg.get("device_secret") and callable(self._on_rotate_secret):
+            try:
+                new_secret = str(msg["device_secret"]).strip()
+                if len(new_secret) >= 32:
+                    self._on_rotate_secret(new_secret)
+                    self.device_secret = new_secret
+            except Exception:
+                logger.exception("WebSocket rotate_secret handler failed")
+
+    def _run_loop(self) -> None:
+        try:
+            from websockets.sync.client import connect as ws_connect
+        except Exception:
+            logger.warning("websockets package unavailable; falling back to polling only")
+            return
+
+        backoff = 1.0
+        while not self._stop_event.is_set():
+            http_url, ws_url = self._ws_urls()
+            try:
+                headers = signed_headers(self.device_secret, self.device_id, "GET", http_url)
+                with ws_connect(ws_url, additional_headers=headers, open_timeout=8, ping_interval=20, ping_timeout=10) as ws:
+                    self.connected = True
+                    backoff = 1.0
+                    logger.info("Edge WebSocket control channel connected to %s", ws_url)
+                    while not self._stop_event.is_set():
+                        try:
+                            raw = ws.recv(timeout=25)
+                        except TimeoutError:
+                            ws.send(json.dumps({"type": "ping"}))
+                            continue
+                        if isinstance(raw, bytes):
+                            raw = raw.decode("utf-8", errors="ignore")
+                        if raw:
+                            self._handle_message(raw)
+            except Exception as exc:
+                if not self._stop_event.is_set():
+                    logger.debug("Edge WebSocket disconnected (%s); retrying in %.1fs", type(exc).__name__, backoff)
+            finally:
+                self.connected = False
+            self._stop_event.wait(backoff)
+            backoff = min(backoff * 2.0, 30.0)
+
+
 class SyncEngine:
     """Owns all background sync components for a pipeline process."""
 
@@ -1231,6 +1407,7 @@ class SyncEngine:
         self.db: Optional[SQLiteEdgeDB] = None
         self.downstream: Optional[DownstreamSyncWorker] = None
         self.upstream: Optional[UpstreamSyncClient] = None
+        self.ws_client: Optional[EdgeWebSocketClient] = None
         self._server: Optional[uvicorn.Server] = None
         self._server_thread: Optional[threading.Thread] = None
         self._running = False
@@ -1303,8 +1480,36 @@ class SyncEngine:
         uvicorn_config = uvicorn.Config(app, host=self.local_ip, port=actual_sync_port, log_level="warning")
         self._server = uvicorn.Server(uvicorn_config)
 
+        def _apply_rotated_secret(new_secret: str) -> None:
+            from .config import persist_runtime_configuration
+            persist_runtime_configuration(
+                cloud_url=self.cloud_url,
+                device_id=self.device_id,
+                device_secret=new_secret,
+                local_ip=self.local_ip,
+                remote_api_enabled=self.remote_api_enabled,
+            )
+            os.environ["EDGE_SYNC_DEVICE_SECRET"] = new_secret
+            self.device_secret = new_secret
+            if self.downstream:
+                self.downstream.device_secret = new_secret
+            if self.upstream:
+                self.upstream.device_secret = new_secret
+            logger.info("Applied remotely rotated device secret over WebSocket for %s", self.device_id)
+
+        self.ws_client = EdgeWebSocketClient(
+            cloud_url=self.cloud_url,
+            device_id=self.device_id,
+            device_secret=self.device_secret,
+            on_deactivate=self.db.deactivate_user_instantly,
+            on_trigger_sync=self.downstream.perform_sync,
+            on_rotate_secret=_apply_rotated_secret,
+        )
+        self.upstream.ws_status_fn = lambda: bool(self.ws_client and self.ws_client.connected)
+
         self.upstream.start()
         self.downstream.start()
+        self.ws_client.start()
 
         def _safe_run_server():
             try:
@@ -1320,6 +1525,8 @@ class SyncEngine:
     def stop(self) -> None:
         if not self._running:
             return
+        if self.ws_client:
+            self.ws_client.stop()
         if self.upstream:
             self.upstream.stop()
         if self.downstream:

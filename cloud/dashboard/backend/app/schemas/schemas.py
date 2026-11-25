@@ -525,6 +525,29 @@ class DeviceResponse(DeviceBase):
     # Returned only by the provisioning endpoint, never persisted in the
     # response model for normal device reads.
     provisioned_secret: Optional[str] = None
+    pairing_code: Optional[str] = None
+    pairing_expires_at: Optional[datetime.datetime] = None
+    pairing_claimed_at: Optional[datetime.datetime] = None
+    pairing_qr_payload: Optional[str] = None
+    pairing_qr_svg_data_uri: Optional[str] = None
+    ws_connected: Optional[bool] = None
+    telemetry: Optional[dict] = None
+
+
+class DeviceClaimRequest(BaseModel):
+    pairing_code: str = Field(..., min_length=6, max_length=32)
+    device_name: Optional[str] = Field(None, max_length=100)
+    embedding_model: Optional[str] = Field(None, max_length=100)
+    app_version: Optional[str] = Field(None, max_length=50)
+
+
+class DeviceClaimResponse(BaseModel):
+    device_id: str
+    device_name: str
+    device_type: str
+    node_id: int
+    device_secret: str
+    server_utc_time: str
 
 class DeviceRBACBase(BaseSchema):
     device_id: str

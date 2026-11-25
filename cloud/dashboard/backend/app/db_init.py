@@ -391,6 +391,38 @@ def run_migrations():
         print(f"Migration error: {e}")
 
 
+def ensure_device_provisioning_columns(db) -> None:
+    """Idempotently add pairing & telemetry columns to devices table."""
+    bind = db.get_bind()
+    dialect = bind.dialect.name
+    columns_to_add = [
+        ("pairing_code_hash", "VARCHAR(128) NULL"),
+        ("pairing_expires_at", "DATETIME NULL"),
+        ("pairing_claimed_at", "DATETIME NULL"),
+        ("telemetry_json", "TEXT NULL"),
+    ]
+    existing = set()
+    if dialect == "sqlite":
+        rows = db.execute(text("PRAGMA table_info(devices)")).fetchall()
+        existing = {row[1] for row in rows}
+    else:
+        rows = db.execute(
+            text(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'devices'"
+            )
+        ).fetchall()
+        existing = {row[0] for row in rows}
+
+    changed = False
+    for col_name, col_def in columns_to_add:
+        if col_name not in existing:
+            db.execute(text(f"ALTER TABLE devices ADD COLUMN {col_name} {col_def}"))
+            changed = True
+    if changed:
+        db.commit()
+
+
 def main():
     create_database()
     run_migrations()

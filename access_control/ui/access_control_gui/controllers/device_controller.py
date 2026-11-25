@@ -31,9 +31,11 @@ class DeviceController(QObject):
     setupChanged = Signal()
     errorChanged = Signal()
 
-    def __init__(self, api: KioskApiClient) -> None:
+    def __init__(self, api: KioskApiClient, camera: Any = None) -> None:
         super().__init__()
         self._api = api
+        self._camera = camera
+        self._qr_scan_busy = False
         self._setup_required = False
         self._database_ok = True
         self._models_ok = True
@@ -108,6 +110,61 @@ class DeviceController(QObject):
         self._setup_cloud_url = str(result.get("cloud_url") or cloud_url.strip())
         self._setup_local_address = str(result.get("local_address") or self._setup_local_address)
         self._setup_required = not (self._database_ok and self._models_ok)
+        self._error = ""
+        self.setupChanged.emit()
+        self.errorChanged.emit()
+
+    @Slot(str, str, bool)
+    def claimSetup(self, cloud_url: str, pairing_code: str, remote_push: bool = False) -> None:
+        try:
+            result = self._api.claim_setup(
+                cloud_url=cloud_url.strip(),
+                pairing_code=pairing_code.strip(),
+                remote_push=remote_push,
+            )
+        except Exception as exc:  # pragma: no cover - exercised in GUI runtime
+            self._error = str(exc)
+            self.errorChanged.emit()
+            return
+        self._first_time_setup = False
+        self._setup_secret = ""
+        self._setup_device_id = str(result.get("device_id") or "")
+        self._setup_cloud_url = str(result.get("cloud_url") or cloud_url.strip())
+        self._setup_local_address = str(result.get("local_address") or self._setup_local_address)
+        self._setup_required = not (self._database_ok and self._models_ok)
+        self._error = ""
+        self.setupChanged.emit()
+        self.errorChanged.emit()
+
+    @Slot()
+    def scanQrFromCamera(self) -> None:
+        if not self._first_time_setup or self._camera is None or self._qr_scan_busy:
+            return
+        jpeg = self._camera.latest_jpeg()
+        if not jpeg:
+            return
+        self._qr_scan_busy = True
+        try:
+            result = self._api.scan_setup_qr(jpeg)
+            if result.get("found") and result.get("cloud_url") and result.get("pairing_code"):
+                self.claimSetup(str(result["cloud_url"]), str(result["pairing_code"]), False)
+        except Exception:
+            pass
+        finally:
+            self._qr_scan_busy = False
+
+    @Slot(str)
+    def resetSetup(self, admin_pin: str = "") -> None:
+        try:
+            self._api.reset_setup(admin_pin.strip())
+        except Exception as exc:  # pragma: no cover - exercised in GUI runtime
+            self._error = str(exc)
+            self.errorChanged.emit()
+            return
+        self._first_time_setup = True
+        self._setup_secret = ""
+        self._setup_device_id = ""
+        self._setup_required = True
         self._error = ""
         self.setupChanged.emit()
         self.errorChanged.emit()

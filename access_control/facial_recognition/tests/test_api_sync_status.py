@@ -49,18 +49,24 @@ class ApiSyncStatusTests(unittest.TestCase):
             allow_insecure_loopback=True,
         )
 
+        signed_bodies = []
+
+        def fake_signed_headers(secret, device_id, method, url, body=b"", params=None):
+            signed_bodies.append(body)
+            return {}
+
         with patch.object(sync_module.requests, "post", side_effect=fake_post), patch.object(
-            sync_module, "signed_headers", return_value={}
+            sync_module, "signed_headers", side_effect=fake_signed_headers
         ):
             client._check_connection_and_heartbeat()
 
-        payload = {
-            "device_id": "edge-1",
-            "device_name": "Test Edge",
-            "ip_address": "192.168.1.50:8001",
-        }
-        expected_body = json.dumps(payload, separators=(",", ":")).encode()
-        self.assertEqual(captured["data"], expected_body)
+        self.assertEqual(len(signed_bodies), 1)
+        self.assertEqual(captured["data"], signed_bodies[0])
+        sent = json.loads(captured["data"].decode("utf-8"))
+        self.assertEqual(sent["device_id"], "edge-1")
+        self.assertEqual(sent["device_name"], "Test Edge")
+        self.assertEqual(sent["ip_address"], "192.168.1.50:8001")
+        self.assertIn("device_utc_time", sent)
         self.assertNotIn("json", captured)
 
 

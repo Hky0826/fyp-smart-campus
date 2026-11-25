@@ -118,6 +118,61 @@ ApplicationWindow {
         onClicked: Qt.quit()
     }
 
+    Button {
+        id: repairButton
+        anchors.top: parent.top
+        anchors.right: exitAppButton.left
+        anchors.topMargin: 12
+        anchors.rightMargin: 8
+        z: 120
+        visible: !deviceController.setupRequired
+        text: "Re-Pair"
+        padding: 8
+        contentItem: Text {
+            text: repairButton.text
+            color: "#e2e8f0"
+            font.pixelSize: 12
+            font.bold: true
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+        background: Rectangle {
+            color: repairButton.down ? "#1e3a8a" : (repairButton.hovered ? "#334155" : "#1e293b")
+            border.color: "#64748b"
+            border.width: 1
+            radius: 8
+            opacity: 0.85
+        }
+        onClicked: repairDialog.open()
+    }
+
+    Dialog {
+        id: repairDialog
+        anchors.centerIn: parent
+        title: "Re-Pair Device"
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        Column {
+            spacing: 8
+            width: 320
+            Text {
+                width: parent.width
+                text: "Clear local credentials and return to the pairing screen?"
+                wrapMode: Text.WordWrap
+            }
+            TextField {
+                id: repairPinField
+                width: parent.width
+                placeholderText: "Admin PIN (if configured)"
+                echoMode: TextInput.Password
+            }
+        }
+        onAccepted: {
+            deviceController.resetSetup(repairPinField.text)
+            repairPinField.text = ""
+        }
+    }
+
     SessionLockedOverlay {
         anchors.fill: parent
         z: 95
@@ -141,6 +196,10 @@ ApplicationWindow {
         setupCloudUrl: deviceController.setupCloudUrl
         onRefreshRequested: deviceController.refresh()
         onSetupCompleted: deviceController.completeSetup()
+        onScanQrRequested: deviceController.scanQrFromCamera()
+        onClaimRequested: function(cloudUrl, pairingCode, remotePush) {
+            deviceController.claimSetup(cloudUrl, pairingCode, remotePush)
+        }
         onProvisionRequested: function(cloudUrl, deviceId, deviceSecret, remotePush) {
             deviceController.applySetup(cloudUrl, deviceId, deviceSecret, remotePush)
         }

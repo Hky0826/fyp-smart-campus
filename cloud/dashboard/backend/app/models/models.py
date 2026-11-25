@@ -525,6 +525,10 @@ class Device(Base):
     installed_at = Column(DateTime, default=datetime.datetime.utcnow)
     device_secret_ciphertext = Column(Text, nullable=True)
     credential_rotated_at = Column(DateTime, nullable=True)
+    pairing_code_hash = Column(String(128), nullable=True, index=True)
+    pairing_expires_at = Column(DateTime, nullable=True)
+    pairing_claimed_at = Column(DateTime, nullable=True)
+    telemetry_json = Column(Text, nullable=True)
     
     node = relationship("Node")
     device_rbac = relationship("DeviceRBAC", back_populates="device", cascade="all, delete-orphan")

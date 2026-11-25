@@ -4,6 +4,7 @@ import os
 import sys
 import base64
 import binascii
+import json
 import logging
 import datetime
 import secrets
@@ -74,7 +75,14 @@ class SurveillanceIngestionRequest(BaseModel):
 class HeartbeatPayload(BaseModel):
     device_id: str
     device_name: str
-    ip_address: str = Field(..., description="LAN IP address and port of the edge device listener (e.g. 192.168.1.100:8001)")
+    ip_address: str = Field(default="", description="Optional LAN IP address and port of the edge device listener")
+    app_version: Optional[str] = None
+    embedding_model: Optional[str] = None
+    cached_users: Optional[int] = None
+    pending_logs: Optional[int] = None
+    last_sync_at: Optional[str] = None
+    ws_connected: Optional[bool] = None
+    device_utc_time: Optional[str] = None
 
 # =====================================================================
 # Abstract Design / Interface for Upstream Operations
@@ -330,8 +338,30 @@ class SQLAlchemyUpstreamHandler(AbstractUpstreamHandler):
                     device.callback_url = validate_callback_host(device.ip_address)
                 except ValueError as exc:
                     raise HTTPException(status_code=400, detail="Device callback is not securely provisioned") from exc
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
             device.last_heartbeat = datetime.datetime.utcnow()
             device.is_active = True
+
+            telemetry: Dict[str, Any] = {}
+            if device.telemetry_json:
+                try:
+                    telemetry = json.loads(device.telemetry_json)
+                except Exception:
+                    telemetry = {}
+            for field_name in ("app_version", "embedding_model", "cached_users", "pending_logs", "last_sync_at", "ws_connected"):
+                val = getattr(hb, field_name, None)
+                if val is not None:
+                    telemetry[field_name] = val
+            if hb.device_utc_time:
+                try:
+                    parsed = datetime.datetime.fromisoformat(hb.device_utc_time.replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+                    telemetry["clock_skew_seconds"] = round(abs((now_utc - parsed).total_seconds()), 1)
+                except Exception:
+                    pass
+            telemetry["reported_at"] = now_utc.isoformat()
+            device.telemetry_json = json.dumps(telemetry)
             logger.debug(f"Heartbeat received from device: {hb.device_id}")
             
         try:
@@ -341,7 +371,12 @@ class SQLAlchemyUpstreamHandler(AbstractUpstreamHandler):
             logger.error(f"Failed to register heartbeat for device {hb.device_id}: {str(e)}")
             raise HTTPException(status_code=500, detail="Database error committing heartbeat")
             
-        return {"status": "alive", "device_id": hb.device_id, "timestamp": datetime.datetime.utcnow().isoformat()}
+        return {
+            "status": "alive",
+            "device_id": hb.device_id,
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "server_utc_time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
 
 
 # =====================================================================

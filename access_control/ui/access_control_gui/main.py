@@ -135,7 +135,7 @@ def main() -> int:
     camera = CameraController(provider)
     chatbot = ChatbotController(api)
     access = AccessController(api, camera, chatbot)
-    device = DeviceController(api)
+    device = DeviceController(api, camera=camera)
 
     # Keep Python-owned QObject wrappers alive for the full Qt application
     # lifetime. This is especially important for the setup controller, which

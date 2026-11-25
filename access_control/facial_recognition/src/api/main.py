@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import asyncio
 import hmac
+import json
 import os
 import socket
 import sqlite3
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+import requests
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -25,11 +27,13 @@ from pydantic import BaseModel, Field
 from ..config import (
     AccessControlConfig,
     RuntimeConfig,
+    clear_runtime_configuration,
     default_cloud_url,
     default_sync_local_ip,
     detect_local_ip,
     persist_runtime_configuration,
 )
+from ..device_signing import signed_headers, validate_cloud_url
 from ..face.database import DeviceUserDatabaseError, DeviceUserRepository
 from ..hardware.door_controller import reset_door_controller
 from ..pipelines.access_control import build_pipeline as build_access_pipeline
@@ -325,53 +329,233 @@ class SetupProvisionRequest(BaseModel):
     device_id: str = Field(..., min_length=3, max_length=100)
     device_secret: str = Field(..., min_length=32, max_length=500)
     remote_push: bool = False
+    verify_handshake: bool = True
 
 
-@app.post("/setup/provision")
-def provision_setup(payload: SetupProvisionRequest) -> dict:
-    """Apply dashboard provisioning without requiring manual .env editing."""
+class SetupClaimRequest(BaseModel):
+    """One-step pairing via 8-character pairing code or scanned QR JSON payload."""
+
+    cloud_url: Optional[str] = Field(default=None, max_length=500)
+    pairing_code: Optional[str] = Field(default=None, max_length=64)
+    qr_payload: Optional[str] = Field(default=None, max_length=2000)
+    remote_push: bool = False
+
+
+class SetupResetRequest(BaseModel):
+    admin_pin: str = ""
+
+
+def _parse_qr_pairing_payload(raw_text: str) -> tuple[str, str]:
+    text = (raw_text or "").strip()
+    if not text:
+        raise ValueError("Empty QR payload")
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError("QR payload must be a JSON object")
+    cloud_url = str(data.get("cloud_url") or "").strip().rstrip("/")
+    code = str(data.get("code") or data.get("pairing_code") or "").strip()
+    if not cloud_url or not code:
+        raise ValueError("QR payload is missing cloud_url or pairing code")
+    return cloud_url, code
+
+
+def _check_clock_skew(server_utc_time: str | None) -> float:
+    if not server_utc_time:
+        return 0.0
+    try:
+        parsed = datetime.fromisoformat(server_utc_time.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        skew = abs((datetime.now(timezone.utc) - parsed).total_seconds())
+        return skew
+    except Exception:
+        return 0.0
+
+
+def _verify_cloud_handshake(cloud_url: str, device_id: str, device_secret: str) -> None:
+    """Confirm HMAC credentials are accepted by the cloud before completing setup."""
+    url = f"{cloud_url.rstrip('/')}/api/sync/downstream/user-ids"
+    try:
+        resp = requests.get(
+            url,
+            headers=signed_headers(device_secret, device_id, "GET", url),
+            timeout=8.0,
+        )
+    except requests.exceptions.RequestException as exc:
+        raise ValueError(f"Could not reach cloud server at {cloud_url}: {type(exc).__name__}") from exc
+    if resp.status_code == 401:
+        raise ValueError("Cloud rejected device credentials (401). Check your secret or system clock (NTP).")
+    if resp.status_code != 200:
+        raise ValueError(f"Cloud verification failed with HTTP {resp.status_code}")
+
+
+def _activate_provisioned_device(
+    *,
+    cloud_url: str,
+    device_id: str,
+    device_secret: str,
+    remote_push: bool,
+    verify_handshake: bool = True,
+) -> AccessControlConfig:
     global _sync_engine
+    remote_api_enabled = bool(remote_push)
+    local_ip = detect_local_ip(cloud_url) if remote_api_enabled else "127.0.0.1"
+    candidate = AccessControlConfig(
+        sync_cloud_url=cloud_url.strip().rstrip("/"),
+        sync_device_id=device_id.strip(),
+        sync_device_secret=device_secret.strip(),
+        sync_local_ip=local_ip,
+        remote_api_enabled=remote_api_enabled,
+    )
+    candidate.validate_security()
+    if verify_handshake:
+        _verify_cloud_handshake(candidate.sync_cloud_url, candidate.sync_device_id, candidate.sync_device_secret)
+
+    persist_runtime_configuration(
+        cloud_url=candidate.sync_cloud_url,
+        device_id=candidate.sync_device_id,
+        device_secret=candidate.sync_device_secret,
+        local_ip=local_ip,
+        remote_api_enabled=remote_api_enabled,
+    )
+    os.environ["EDGE_SYNC_CLOUD_URL"] = candidate.sync_cloud_url
+    os.environ["EDGE_SYNC_DEVICE_ID"] = candidate.sync_device_id
+    os.environ["EDGE_SYNC_DEVICE_SECRET"] = candidate.sync_device_secret
+    os.environ["EDGE_SYNC_LOCAL_IP"] = local_ip
+    os.environ["EDGE_REMOTE_API_ENABLED"] = "true" if remote_api_enabled else "false"
+
+    if _sync_engine is not None:
+        _sync_engine.stop()
+        _sync_engine = None
+    access_config.cache_clear()
+    runtime_config.cache_clear()
+    _chatbot_client.cache_clear()
+    new_config = access_config()
+    _sync_engine = SyncEngine.from_config(new_config)
+    _sync_engine.start()
+    if verify_handshake and _sync_engine.downstream is not None:
+        _sync_engine.downstream.perform_sync()
+
+    marker = new_config.setup_marker_path
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
+    return new_config
+
+
+@app.post("/setup/claim")
+def claim_setup(payload: SetupClaimRequest) -> dict:
+    """Pair this kiosk using a one-time dashboard pairing code or scanned QR code."""
     current = access_config()
     if current.setup_marker_path.is_file() and current.sync_device_secret:
         raise HTTPException(status_code=409, detail="This device is already provisioned")
 
     try:
-        remote_api_enabled = bool(payload.remote_push)
-        local_ip = detect_local_ip(payload.cloud_url) if remote_api_enabled else "127.0.0.1"
-        candidate = AccessControlConfig(
-            sync_cloud_url=payload.cloud_url.strip(),
-            sync_device_id=payload.device_id.strip(),
-            sync_device_secret=payload.device_secret.strip(),
-            sync_local_ip=local_ip,
-            remote_api_enabled=remote_api_enabled,
+        if payload.qr_payload:
+            cloud_url, pairing_code = _parse_qr_pairing_payload(payload.qr_payload)
+        else:
+            cloud_url = (payload.cloud_url or "").strip().rstrip("/")
+            pairing_code = (payload.pairing_code or "").strip()
+        if not cloud_url or not pairing_code:
+            raise ValueError("Cloud URL and pairing code are required")
+        validate_cloud_url(cloud_url, current.allow_insecure_loopback)
+
+        claim_url = f"{cloud_url}/api/infra/devices/claim"
+        try:
+            resp = requests.post(
+                claim_url,
+                json={
+                    "pairing_code": pairing_code,
+                    "device_name": current.sync_device_name,
+                    "embedding_model": "openvc_sface",
+                    "app_version": app.version,
+                },
+                timeout=10.0,
+            )
+        except requests.exceptions.RequestException as exc:
+            raise ValueError(f"Could not reach cloud server at {cloud_url}: {type(exc).__name__}") from exc
+
+        if resp.status_code != 200:
+            detail = ""
+            try:
+                detail = str(resp.json().get("detail") or "")
+            except Exception:
+                detail = resp.text[:200]
+            raise ValueError(detail or f"Pairing failed (HTTP {resp.status_code})")
+
+        claimed = resp.json()
+        skew = _check_clock_skew(claimed.get("server_utc_time"))
+        if skew > 120:
+            raise ValueError(
+                f"Device system clock is off by {int(skew)} seconds compared to the cloud server. "
+                "Please enable NTP time sync and try again."
+            )
+
+        new_config = _activate_provisioned_device(
+            cloud_url=cloud_url,
+            device_id=str(claimed["device_id"]),
+            device_secret=str(claimed["device_secret"]),
+            remote_push=payload.remote_push,
+            verify_handshake=True,
         )
-        candidate.validate_security()
-        persist_runtime_configuration(
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Edge QR/code pairing failed")
+        raise HTTPException(status_code=503, detail="Device pairing could not be completed") from exc
+
+    return {
+        "success": True,
+        "setup_complete": True,
+        "device_id": new_config.sync_device_id,
+        "cloud_url": new_config.sync_cloud_url,
+        "local_address": _setup_local_address(new_config),
+    }
+
+
+@app.post("/setup/scan-qr")
+async def scan_setup_qr(file: UploadFile = File(...)) -> dict:
+    """Decode a dashboard provisioning QR code from a camera frame (unprovisioned devices only)."""
+    current = access_config()
+    if current.setup_marker_path.is_file() and current.sync_device_secret:
+        raise HTTPException(status_code=409, detail="This device is already provisioned")
+    if cv2 is None:
+        raise HTTPException(status_code=503, detail="OpenCV QR scanner is unavailable")
+    raw = await file.read()
+    arr = np.frombuffer(raw, dtype=np.uint8)
+    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(status_code=400, detail="Invalid image frame")
+    detector = cv2.QRCodeDetector()
+    decoded, _, _ = detector.detectAndDecode(frame)
+    if not decoded:
+        return {"found": False}
+    try:
+        cloud_url, pairing_code = _parse_qr_pairing_payload(decoded)
+    except ValueError as exc:
+        return {"found": False, "error": str(exc)}
+    return {
+        "found": True,
+        "cloud_url": cloud_url,
+        "pairing_code": pairing_code,
+        "qr_payload": decoded,
+    }
+
+
+@app.post("/setup/provision")
+def provision_setup(payload: SetupProvisionRequest) -> dict:
+    """Apply dashboard provisioning without requiring manual .env editing."""
+    current = access_config()
+    if current.setup_marker_path.is_file() and current.sync_device_secret:
+        raise HTTPException(status_code=409, detail="This device is already provisioned")
+
+    try:
+        new_config = _activate_provisioned_device(
             cloud_url=payload.cloud_url,
             device_id=payload.device_id,
             device_secret=payload.device_secret,
-            local_ip=local_ip,
-            remote_api_enabled=remote_api_enabled,
+            remote_push=payload.remote_push,
+            verify_handshake=payload.verify_handshake,
         )
-        os.environ["EDGE_SYNC_CLOUD_URL"] = payload.cloud_url.strip()
-        os.environ["EDGE_SYNC_DEVICE_ID"] = payload.device_id.strip()
-        os.environ["EDGE_SYNC_DEVICE_SECRET"] = payload.device_secret.strip()
-        os.environ["EDGE_SYNC_LOCAL_IP"] = local_ip
-        os.environ["EDGE_REMOTE_API_ENABLED"] = "true" if remote_api_enabled else "false"
-
-        if _sync_engine is not None:
-            _sync_engine.stop()
-            _sync_engine = None
-        access_config.cache_clear()
-        runtime_config.cache_clear()
-        _chatbot_client.cache_clear()
-        new_config = access_config()
-        _sync_engine = SyncEngine.from_config(new_config)
-        _sync_engine.start()
-
-        marker = new_config.setup_marker_path
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -385,6 +569,40 @@ def provision_setup(payload: SetupProvisionRequest) -> dict:
         "cloud_url": new_config.sync_cloud_url,
         "local_address": _setup_local_address(new_config),
     }
+
+
+@app.post("/setup/reset")
+def reset_setup(payload: SetupResetRequest) -> dict:
+    """Clear local pairing credentials so this device can be re-paired to the cloud."""
+    global _sync_engine
+    expected_pin = os.getenv("EDGE_ADMIN_PIN", "").strip()
+    is_prod = os.getenv("APP_ENV", "development").lower() == "production"
+    if is_prod and not expected_pin:
+        raise HTTPException(status_code=403, detail="EDGE_ADMIN_PIN must be configured in production to reset this device")
+    if expected_pin and not hmac.compare_digest(payload.admin_pin.strip(), expected_pin):
+        raise HTTPException(status_code=403, detail="Invalid administrator PIN")
+
+    current = access_config()
+    if _sync_engine is not None:
+        _sync_engine.stop()
+        _sync_engine = None
+    try:
+        if current.setup_marker_path.is_file():
+            current.setup_marker_path.unlink()
+    except OSError:
+        pass
+    clear_runtime_configuration()
+    for env_key in (
+        "EDGE_SYNC_DEVICE_SECRET",
+        "EDGE_SYNC_DEVICE_ID",
+        "EDGE_SYNC_LOCAL_IP",
+        "EDGE_REMOTE_API_ENABLED",
+    ):
+        os.environ.pop(env_key, None)
+    access_config.cache_clear()
+    runtime_config.cache_clear()
+    _chatbot_client.cache_clear()
+    return {"success": True, "first_time_setup": True, "setup_complete": False}
 
 
 @app.post("/setup/complete")

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -6,10 +6,14 @@ from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, or_, exists
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
+import base64
+import hashlib
+import json
 import os
 import secrets
+import threading
 import time
 import requests
 
@@ -31,14 +35,110 @@ try:
     _cloud_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "..", ".."))
     if _cloud_root not in _sys.path:
         _sys.path.insert(0, _cloud_root)
-    from sync.cloud_to_edge.cloud_sync_service import push_sync_to_all_edges
+    from sync.cloud_to_edge.cloud_sync_service import push_sync_to_all_edges, is_device_ws_connected, push_rotate_secret_to_edge
 except Exception:
     try:
-        from cloud_sync_service import push_sync_to_all_edges
+        from cloud_sync_service import push_sync_to_all_edges, is_device_ws_connected, push_rotate_secret_to_edge
     except Exception:
         push_sync_to_all_edges = None
+        is_device_ws_connected = None
+        push_rotate_secret_to_edge = None
 
 router = APIRouter(prefix="/infra", tags=["Infrastructure & Access Control"])
+
+PAIRING_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+PAIRING_CODE_TTL_MINUTES = 15
+_CLAIM_RATE_LIMIT_LOCK = threading.Lock()
+_CLAIM_RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
+_CLAIM_RATE_LIMIT_WINDOW_SEC = 60.0
+_CLAIM_RATE_LIMIT_MAX_ATTEMPTS = 12
+
+
+def _normalize_pairing_code(raw: str) -> str:
+    cleaned = "".join(ch for ch in (raw or "").upper().strip() if ch.isalnum())
+    return cleaned
+
+
+def _generate_pairing_code() -> str:
+    chars = "".join(secrets.choice(PAIRING_CODE_ALPHABET) for _ in range(8))
+    return f"{chars[:4]}-{chars[4:]}"
+
+
+def _hash_pairing_code(code: str) -> str:
+    return hashlib.sha256(_normalize_pairing_code(code).encode("utf-8")).hexdigest()
+
+
+def _public_cloud_url(request: Optional[Request]) -> str:
+    configured = (os.getenv("PUBLIC_CLOUD_URL") or "").strip().rstrip("/")
+    if configured:
+        return configured
+    if request is None:
+        return ""
+    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "https").split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()
+    if host:
+        return f"{proto}://{host}".rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
+def _render_qr_svg_data_uri(payload_str: str) -> Optional[str]:
+    """Encode payload_str as a crisp QR SVG data URI using OpenCV's built-in QRCodeEncoder."""
+    try:
+        import cv2
+        encoder = cv2.QRCodeEncoder_create()
+        matrix = encoder.encode(payload_str)
+        if matrix is None or matrix.size == 0:
+            return None
+        rows, cols = matrix.shape[:2]
+        quiet = 4
+        total_w = cols + quiet * 2
+        total_h = rows + quiet * 2
+        rects = []
+        for r in range(rows):
+            for c in range(cols):
+                if int(matrix[r, c]) == 0:
+                    rects.append(f'<rect x="{c + quiet}" y="{r + quiet}" width="1" height="1"/>')
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {total_w} {total_h}" shape-rendering="crispEdges">'
+            f'<rect width="{total_w}" height="{total_h}" fill="#ffffff"/>'
+            f'<g fill="#0f172a">{"".join(rects)}</g>'
+            f"</svg>"
+        )
+        encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        return f"data:image/svg+xml;base64,{encoded}"
+    except Exception:
+        return None
+
+
+def _check_claim_rate_limit(client_key: str) -> None:
+    now = time.monotonic()
+    with _CLAIM_RATE_LIMIT_LOCK:
+        bucket = [ts for ts in _CLAIM_RATE_LIMIT_BUCKETS.get(client_key, []) if now - ts < _CLAIM_RATE_LIMIT_WINDOW_SEC]
+        if len(bucket) >= _CLAIM_RATE_LIMIT_MAX_ATTEMPTS:
+            raise HTTPException(status_code=429, detail="Too many pairing attempts; please wait a minute and try again.")
+        bucket.append(now)
+        _CLAIM_RATE_LIMIT_BUCKETS[client_key] = bucket
+
+
+def _serialize_device_response(d: Device) -> schemas.DeviceResponse:
+    resp = schemas.DeviceResponse.model_validate(d)
+    resp.allowed_role_ids = [r.role_id for r in d.device_rbac]
+    resp.ws_connected = bool(is_device_ws_connected(d.device_id)) if callable(is_device_ws_connected) else False
+    if d.telemetry_json:
+        try:
+            resp.telemetry = json.loads(d.telemetry_json)
+        except Exception:
+            resp.telemetry = None
+    return resp
+
+
+def _attach_pairing_bundle(resp: schemas.DeviceResponse, pairing_code: str, expires_at: datetime, request: Optional[Request]) -> None:
+    cloud_url = _public_cloud_url(request)
+    qr_payload = json.dumps({"cloud_url": cloud_url, "code": pairing_code}, separators=(",", ":"))
+    resp.pairing_code = pairing_code
+    resp.pairing_expires_at = expires_at
+    resp.pairing_qr_payload = qr_payload
+    resp.pairing_qr_svg_data_uri = _render_qr_svg_data_uri(qr_payload)
 
 def _device_base_url(ip_address: str) -> str:
     target = (ip_address or "").strip()
@@ -169,15 +269,95 @@ def _generate_device_id(db: Session, device_type: schemas.DeviceTypeEnum) -> str
 @router.get("/devices", response_model=List[schemas.DeviceResponse])
 def list_devices(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     devices = db.query(Device).options(joinedload(Device.device_rbac)).all()
-    results = []
-    for d in devices:
-        resp = schemas.DeviceResponse.model_validate(d)
-        resp.allowed_role_ids = [r.role_id for r in d.device_rbac]
-        results.append(resp)
-    return results
+    return [_serialize_device_response(d) for d in devices]
+
+
+@router.post("/devices/claim", response_model=schemas.DeviceClaimResponse)
+def claim_device(
+    payload: schemas.DeviceClaimRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Unauthenticated one-time pairing-code exchange for edge devices (Access Control & Surveillance)."""
+    client_ip = (request.client.host if request.client else "unknown") or "unknown"
+    _check_claim_rate_limit(client_ip)
+
+    normalized = _normalize_pairing_code(payload.pairing_code)
+    if len(normalized) < 6:
+        raise HTTPException(status_code=400, detail="Invalid pairing code format")
+
+    code_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    now = datetime.utcnow()
+    device = (
+        db.query(Device)
+        .filter(
+            Device.pairing_code_hash == code_hash,
+            Device.is_active.is_(True),
+        )
+        .first()
+    )
+    if not device:
+        raise HTTPException(status_code=404, detail="Invalid or already used pairing code")
+    if device.pairing_expires_at is None or device.pairing_expires_at < now:
+        device.pairing_code_hash = None
+        db.commit()
+        raise HTTPException(status_code=410, detail="Pairing code has expired; generate a new code in the dashboard")
+
+    fresh_secret = generate_device_secret()
+    device.device_secret_ciphertext = encrypt_device_secret(fresh_secret)
+    device.credential_rotated_at = now
+    device.pairing_code_hash = None
+    device.pairing_expires_at = None
+    device.pairing_claimed_at = now
+    device.last_heartbeat = now
+    if payload.device_name and payload.device_name.strip() and not device.device_name:
+        device.device_name = payload.device_name.strip()
+    if payload.embedding_model or payload.app_version:
+        telemetry = {}
+        if device.telemetry_json:
+            try:
+                telemetry = json.loads(device.telemetry_json)
+            except Exception:
+                telemetry = {}
+        if payload.embedding_model:
+            telemetry["embedding_model"] = payload.embedding_model
+        if payload.app_version:
+            telemetry["app_version"] = payload.app_version
+        telemetry["claimed_at"] = now.replace(tzinfo=timezone.utc).isoformat()
+        device.telemetry_json = json.dumps(telemetry)
+
+    db.commit()
+    db.refresh(device)
+    if push_sync_to_all_edges and background_tasks:
+        background_tasks.add_task(push_sync_to_all_edges)
+
+    return schemas.DeviceClaimResponse(
+        device_id=device.device_id,
+        device_name=device.device_name,
+        device_type=getattr(device.device_type, "value", str(device.device_type)),
+        node_id=device.node_id,
+        device_secret=fresh_secret,
+        server_utc_time=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+@router.get("/devices/{device_id}", response_model=schemas.DeviceResponse)
+def get_device(device_id: str, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
+    device = db.query(Device).options(joinedload(Device.device_rbac)).filter_by(device_id=device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    return _serialize_device_response(device)
+
 
 @router.post("/devices", response_model=schemas.DeviceResponse)
-def create_device(device_in: schemas.DeviceCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
+def create_device(
+    device_in: schemas.DeviceCreate,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
     device_id = device_in.device_id or _generate_device_id(db, device_in.device_type)
     existing = db.query(Device).filter_by(device_id=device_id).first()
     if existing:
@@ -188,6 +368,9 @@ def create_device(device_in: schemas.DeviceCreate, background_tasks: BackgroundT
     if not node:
         raise HTTPException(status_code=400, detail="Node ID does not exist")
     provisioned_secret = generate_device_secret()
+    pairing_code = _generate_pairing_code()
+    now = datetime.utcnow()
+    pairing_expires_at = now + timedelta(minutes=PAIRING_CODE_TTL_MINUTES)
     device = Device(
         device_id=device_id,
         device_name=device_in.device_name,
@@ -195,9 +378,12 @@ def create_device(device_in: schemas.DeviceCreate, background_tasks: BackgroundT
         device_type=device_in.device_type,
         ip_address=device_in.ip_address,
         is_active=device_in.is_active,
-        installed_at=datetime.utcnow(),
+        installed_at=now,
         device_secret_ciphertext=encrypt_device_secret(provisioned_secret),
-        credential_rotated_at=datetime.utcnow(),
+        credential_rotated_at=now,
+        pairing_code_hash=_hash_pairing_code(pairing_code),
+        pairing_expires_at=pairing_expires_at,
+        pairing_claimed_at=None,
     )
     db.add(device)
     db.flush()
@@ -210,11 +396,34 @@ def create_device(device_in: schemas.DeviceCreate, background_tasks: BackgroundT
 
     db.commit()
     db.refresh(device)
-    resp = schemas.DeviceResponse.model_validate(device)
-    resp.allowed_role_ids = [r.role_id for r in device.device_rbac]
+    resp = _serialize_device_response(device)
     resp.provisioned_secret = provisioned_secret
+    _attach_pairing_bundle(resp, pairing_code, pairing_expires_at, request)
     if push_sync_to_all_edges and background_tasks:
         background_tasks.add_task(push_sync_to_all_edges)
+    return resp
+
+
+@router.post("/devices/{device_id}/pairing-code", response_model=schemas.DeviceResponse)
+def issue_device_pairing_code(
+    device_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    """Generate a fresh 15-minute one-time pairing code & QR payload to pair or re-pair a device."""
+    device = db.query(Device).options(joinedload(Device.device_rbac)).filter_by(device_id=device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    pairing_code = _generate_pairing_code()
+    expires_at = datetime.utcnow() + timedelta(minutes=PAIRING_CODE_TTL_MINUTES)
+    device.pairing_code_hash = _hash_pairing_code(pairing_code)
+    device.pairing_expires_at = expires_at
+    device.pairing_claimed_at = None
+    db.commit()
+    db.refresh(device)
+    resp = _serialize_device_response(device)
+    _attach_pairing_bundle(resp, pairing_code, expires_at, request)
     return resp
 
 
@@ -227,7 +436,13 @@ def rotate_device_credential(device_id: str, db: Session = Depends(get_db), curr
     device.device_secret_ciphertext = encrypt_device_secret(secret)
     device.credential_rotated_at = datetime.utcnow()
     db.commit()
-    return {"device_id": device.device_id, "provisioned_secret": secret, "warning": "Store this secret in deployment secret storage; it will not be shown again."}
+    pushed_over_ws = bool(push_rotate_secret_to_edge(device.device_id, secret)) if callable(push_rotate_secret_to_edge) else False
+    return {
+        "device_id": device.device_id,
+        "provisioned_secret": secret,
+        "pushed_over_ws": pushed_over_ws,
+        "warning": "Store this secret in deployment secret storage; it will not be shown again.",
+    }
 
 @router.put("/devices/{device_id}", response_model=schemas.DeviceResponse)
 def update_device(device_id: str, device_in: schemas.DeviceUpdate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
@@ -265,6 +480,25 @@ def record_heartbeat(device_id: str, db: Session = Depends(get_db), current_admi
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
+    now = datetime.utcnow()
+    ws_online = bool(is_device_ws_connected(device_id)) if callable(is_device_ws_connected) else False
+    recent_inbound = bool(device.last_heartbeat and (now - device.last_heartbeat).total_seconds() <= 120)
+    if ws_online or recent_inbound:
+        if ws_online:
+            device.last_heartbeat = now
+            db.commit()
+            db.refresh(device)
+        return {
+            "device_id": device_id,
+            "status": "active",
+            "last_heartbeat": device.last_heartbeat,
+            "ws_connected": ws_online,
+            "mode": "websocket" if ws_online else "inbound_heartbeat",
+        }
+
+    if not (device.ip_address or "").strip():
+        raise HTTPException(status_code=502, detail="Device is offline (no active WebSocket or recent heartbeat).")
+
     base_url = _device_base_url(device.ip_address)
     probe = _probe_device(base_url)
     if not probe["ok"]:
@@ -273,7 +507,7 @@ def record_heartbeat(device_id: str, db: Session = Depends(get_db), current_admi
             detail="Device is offline."
         )
 
-    device.last_heartbeat = datetime.utcnow()
+    device.last_heartbeat = now
     db.commit()
     db.refresh(device)
     return {

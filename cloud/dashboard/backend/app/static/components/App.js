@@ -840,12 +840,17 @@ function CampusMapTab() {
                     mergeRecordIntoList(savedRecord);
                     showSuccessToast(`Record ${modalType === 'create' ? 'created' : 'updated'} successfully!`);
                     setShowModal(false);
-                    if (currentTab === "infra" && subTab === "devices" && modalType === "create" && savedRecord?.provisioned_secret) {
+                    if (currentTab === "infra" && subTab === "devices" && modalType === "create" && (savedRecord?.pairing_code || savedRecord?.provisioned_secret)) {
                         setProvisioningDetails({
                             deviceId: savedRecord.device_id,
                             deviceName: savedRecord.device_name,
-                            secret: savedRecord.provisioned_secret,
-                            ipAddress: savedRecord.ip_address || "Not configured",
+                            secret: savedRecord.provisioned_secret || "",
+                            ipAddress: savedRecord.ip_address || "Auto (Outbound Sync)",
+                            pairingCode: savedRecord.pairing_code || "",
+                            pairingExpiresAt: savedRecord.pairing_expires_at || "",
+                            pairingQrSvgDataUri: savedRecord.pairing_qr_svg_data_uri || "",
+                            paired: false,
+                            showManualSecret: false,
                         });
                     }
                     refreshAfterMutation({ refreshRefs: currentTab === "academics" && ["faculties", "departments", "programmes"].includes(subTab) });
@@ -1058,6 +1063,56 @@ function CampusMapTab() {
                 } catch (err) { showErrorToast(err.message); }
                 finally { setPendingActionKey(""); }
             };
+
+            const handleIssuePairingCode = async (item) => {
+                const actionKey = `pair:${item.device_id}`;
+                if (pendingActionKey) return;
+                setPendingActionKey(actionKey);
+                try {
+                    const response = await fetch(`/api/infra/devices/${item.device_id}/pairing-code`, {
+                        method: "POST",
+                        headers: { "Authorization": `Bearer ${token}` }
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.detail || "Failed to generate pairing code.");
+                    setProvisioningDetails({
+                        deviceId: data.device_id,
+                        deviceName: data.device_name,
+                        secret: "",
+                        ipAddress: data.ip_address || "Auto (Outbound Sync)",
+                        pairingCode: data.pairing_code || "",
+                        pairingExpiresAt: data.pairing_expires_at || "",
+                        pairingQrSvgDataUri: data.pairing_qr_svg_data_uri || "",
+                        paired: false,
+                        showManualSecret: false,
+                    });
+                } catch (err) {
+                    showErrorToast(err.message);
+                } finally {
+                    setPendingActionKey("");
+                }
+            };
+
+            useEffect(() => {
+                if (!provisioningDetails || !provisioningDetails.deviceId || provisioningDetails.paired) return;
+                let cancelled = false;
+                const pollStatus = async () => {
+                    try {
+                        const res = await fetch(`/api/infra/devices/${provisioningDetails.deviceId}`, {
+                            headers: { "Authorization": `Bearer ${token}` }
+                        });
+                        if (!res.ok || cancelled) return;
+                        const data = await res.json();
+                        if (data.pairing_claimed_at && !cancelled) {
+                            setProvisioningDetails(prev => prev ? { ...prev, paired: true } : prev);
+                            mergeRecordIntoList(data);
+                            showSuccessToast(`Device "${data.device_name}" paired and online!`);
+                        }
+                    } catch (_) {}
+                };
+                const timer = setInterval(pollStatus, 2500);
+                return () => { cancelled = true; clearInterval(timer); };
+            }, [provisioningDetails?.deviceId, provisioningDetails?.paired, token]);
 
             const handlePingDevice = async (item) => {
                 const actionKey = `ping:${item.device_id}`;
@@ -3081,24 +3136,46 @@ function CampusMapTab() {
                                                                         const dateObj = new Date(lastSeenStr);
                                                                         const isOnline = (() => {
                                                                             if (!item.is_active) return false;
+                                                                            if (item.ws_connected) return true;
                                                                             const diffMs = new Date() - dateObj;
-                                                                            // 60 seconds threshold (1 minute)
-                                                                            return diffMs >= 0 && diffMs <= 60000;
+                                                                            // 120 seconds threshold
+                                                                            return diffMs >= 0 && diffMs <= 120000;
                                                                         })();
                                                                         const localTimeStr = `${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`;
+                                                                        const tel = item.telemetry || {};
+                                                                        const skewWarn = typeof tel.clock_skew_seconds === 'number' && tel.clock_skew_seconds > 60;
+                                                                        const backlogWarn = typeof tel.pending_logs === 'number' && tel.pending_logs > 100;
                                                                         return (
-                                                                            <div className="inline-flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
-                                                                                <span className={`w-2 h-2 rounded-full shrink-0 shadow-sm ${isOnline ? 'bg-emerald-400 shadow-emerald-500/50 animate-pulse' : 'bg-red-500 shadow-red-500/50'}`}></span>
-                                                                                <span className="text-xs font-semibold text-slate-300">
-                                                                                    {isOnline ? `Active ${localTimeStr}` : 'Offline'}
-                                                                                </span>
+                                                                            <div className="flex flex-col gap-1 items-start">
+                                                                                <div className="inline-flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
+                                                                                    <span className={`w-2 h-2 rounded-full shrink-0 shadow-sm ${isOnline ? 'bg-emerald-400 shadow-emerald-500/50 animate-pulse' : 'bg-red-500 shadow-red-500/50'}`}></span>
+                                                                                    <span className="text-xs font-semibold text-slate-300">
+                                                                                        {isOnline ? (item.ws_connected ? `Live · ${localTimeStr}` : `Active ${localTimeStr}`) : 'Offline'}
+                                                                                    </span>
+                                                                                </div>
+                                                                                {(skewWarn || backlogWarn || typeof tel.cached_users === 'number') && (
+                                                                                    <div className="flex flex-wrap gap-1">
+                                                                                        {typeof tel.cached_users === 'number' && (
+                                                                                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60">{tel.cached_users} cached</span>
+                                                                                        )}
+                                                                                        {skewWarn && (
+                                                                                            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-semibold">Clock skew {Math.round(tel.clock_skew_seconds)}s</span>
+                                                                                        )}
+                                                                                        {backlogWarn && (
+                                                                                            <span className="text-[10px] px-2 py-0.5 rounded bg-red-500/15 text-red-300 border border-red-500/30 font-semibold">{tel.pending_logs} queued</span>
+                                                                                        )}
+                                                                                    </div>
+                                                                                )}
                                                                             </div>
                                                                         );
                                                                     })()}
                                                                 </td>
                                                                 <td className="p-4 pr-6 text-right">
                                                                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                        <button onClick={() => handlePingDevice(item)} disabled={pendingActionKey === `ping:${item.device_id}`} title="Ping Device" className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700/50 transition-all hover:text-indigo-400 hover:border-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed">
+                                                                        <button onClick={() => handleIssuePairingCode(item)} disabled={pendingActionKey === `pair:${item.device_id}`} title="Pair / Show QR Code" className="p-2 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-xl border border-slate-700/50 transition-all hover:border-amber-500/40 disabled:opacity-50 disabled:cursor-not-allowed">
+                                                                            {pendingActionKey === `pair:${item.device_id}` ? <span className="block w-4 h-4 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin"></span> : <Icon name="qr-code" className="w-4 h-4" />}
+                                                                        </button>
+                                                                        <button onClick={() => handlePingDevice(item)} disabled={pendingActionKey === `ping:${item.device_id}`} title="Check Status" className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700/50 transition-all hover:text-indigo-400 hover:border-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed">
                                                                             {pendingActionKey === `ping:${item.device_id}` ? <span className="block w-4 h-4 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin"></span> : <Icon name="radio" className="w-4 h-4" />}
                                                                         </button>
                                                                         <button onClick={() => { setSelectedItem(item); setModalType("edit"); setShowModal(true); }} title="Edit Device"
@@ -3595,34 +3672,107 @@ function CampusMapTab() {
                         )}
 
                         {provisioningDetails && (
-                            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-in fade-in duration-200">
-                                <div className="w-full max-w-xl bg-slate-900 border border-amber-500/40 rounded-3xl p-6 md:p-8 shadow-2xl">
-                                    <div className="flex items-start gap-4 mb-6">
-                                        <div className="p-3 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20"><Icon name="key" className="w-6 h-6" /></div>
-                                        <div>
-                                            <h3 className="text-xl font-bold text-slate-100">Device provisioning secret</h3>
-                                            <p className="text-sm text-slate-400 mt-1">The access-control setup screen is waiting for these details. Enter them there and choose <span className="font-bold text-slate-200">Apply and start</span>.</p>
+                            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-in fade-in duration-200 overflow-y-auto">
+                                <div className="w-full max-w-xl bg-slate-900 border border-amber-500/40 rounded-3xl p-6 md:p-8 shadow-2xl my-4">
+                                    <div className="flex items-start justify-between gap-4 mb-5">
+                                        <div className="flex items-start gap-4">
+                                            <div className={`p-3 rounded-2xl border ${provisioningDetails.paired ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                                                <Icon name={provisioningDetails.paired ? "check-circle-2" : "qr-code"} className="w-6 h-6" />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-xl font-bold text-slate-100">Pair {provisioningDetails.deviceName || provisioningDetails.deviceId}</h3>
+                                                <p className="text-sm text-slate-400 mt-1">
+                                                    {provisioningDetails.paired
+                                                        ? "Device has claimed its credentials and is syncing with the cloud."
+                                                        : "Show this QR code to the Access Control kiosk or Surveillance camera, or enter the 8-character pairing code."}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className={`shrink-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border ${provisioningDetails.paired ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/10 text-amber-300 border-amber-500/30'}`}>
+                                            <span className={`w-2 h-2 rounded-full ${provisioningDetails.paired ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`}></span>
+                                            {provisioningDetails.paired ? "Paired & Online" : "Waiting for device..."}
                                         </div>
                                     </div>
-                                    <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4 mb-5 text-xs text-indigo-100 leading-relaxed">
-                                        <div className="font-bold uppercase tracking-wider text-indigo-300 mb-1">What to do next</div>
-                                        <ol className="list-decimal list-inside space-y-1">
-                                            <li>Keep this dialog open.</li>
-                                            <li>On the access-control device, paste the Device ID and secret into the setup screen.</li>
-                                            <li>Confirm the cloud URL, then select <span className="font-bold">Apply and start</span>.</li>
-                                            <li>Return here after the device begins synchronization.</li>
-                                        </ol>
-                                    </div>
-                                    <div className="space-y-3 text-sm mb-5">
+
+                                    {!provisioningDetails.paired && provisioningDetails.pairingCode && (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center rounded-2xl border border-slate-800 bg-slate-950/60 p-5 mb-5">
+                                            <div className="flex flex-col items-center justify-center">
+                                                {provisioningDetails.pairingQrSvgDataUri ? (
+                                                    <img
+                                                        src={provisioningDetails.pairingQrSvgDataUri}
+                                                        alt="Device pairing QR code"
+                                                        className="w-44 h-44 rounded-xl bg-white p-2 shadow-lg"
+                                                    />
+                                                ) : (
+                                                    <div className="w-44 h-44 rounded-xl bg-slate-800 flex items-center justify-center text-xs text-slate-400 text-center p-4">
+                                                        QR unavailable — use pairing code
+                                                    </div>
+                                                )}
+                                                <span className="text-[11px] text-slate-400 mt-2">Expires in 15 minutes</span>
+                                            </div>
+                                            <div className="space-y-3">
+                                                <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-300">Pairing Code</div>
+                                                <div className="font-mono text-2xl font-extrabold tracking-widest text-white bg-slate-900 border border-indigo-500/30 rounded-xl px-4 py-3 text-center select-all">
+                                                    {provisioningDetails.pairingCode}
+                                                </div>
+                                                <ol className="list-decimal list-inside text-xs text-slate-300 space-y-1">
+                                                    <li><span className="font-semibold text-slate-100">Access Control:</span> Point kiosk camera at QR or type the code.</li>
+                                                    <li><span className="font-semibold text-slate-100">Surveillance:</span> Hold QR in front of camera or open <span className="font-mono text-indigo-300">/setup</span>.</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-2 text-sm mb-4">
                                         <div className="flex justify-between gap-4"><span className="text-slate-500">Device ID</span><span className="font-mono font-bold text-indigo-300">{provisioningDetails.deviceId}</span></div>
-                                        <div className="flex justify-between gap-4"><span className="text-slate-500">IP address</span><span className="font-mono text-slate-200">{provisioningDetails.ipAddress}</span></div>
+                                        <div className="flex justify-between gap-4"><span className="text-slate-500">Cloud URL</span><span className="font-mono text-slate-200">{window.location.origin}</span></div>
                                     </div>
-                                    <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 mb-6">
-                                        <div className="text-[10px] font-bold uppercase tracking-widest text-amber-300 mb-2">One-time secret</div>
-                                        <div className="font-mono text-sm md:text-base text-amber-100 break-all select-all">{provisioningDetails.secret}</div>
-                                    </div>
+
+                                    {provisioningDetails.secret && (
+                                        <div className="mb-5">
+                                            <button
+                                                type="button"
+                                                onClick={() => setProvisioningDetails(prev => prev ? { ...prev, showManualSecret: !prev.showManualSecret } : prev)}
+                                                className="text-xs font-semibold text-slate-400 hover:text-amber-300 underline"
+                                            >
+                                                {provisioningDetails.showManualSecret ? "Hide manual secret (advanced)" : "Show manual secret for headless/.env deployment"}
+                                            </button>
+                                            {provisioningDetails.showManualSecret && (
+                                                <div className="mt-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 space-y-3">
+                                                    <div>
+                                                        <div className="text-[10px] font-bold uppercase tracking-widest text-amber-300 mb-1">One-time secret</div>
+                                                        <div className="font-mono text-xs md:text-sm text-amber-100 break-all select-all">{provisioningDetails.secret}</div>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const blob = new Blob([JSON.stringify({
+                                                                cloud_url: window.location.origin,
+                                                                device_id: provisioningDetails.deviceId,
+                                                                device_name: provisioningDetails.deviceName || provisioningDetails.deviceId,
+                                                                device_secret: provisioningDetails.secret,
+                                                            }, null, 2)], { type: "application/json" });
+                                                            const url = URL.createObjectURL(blob);
+                                                            const a = document.createElement("a");
+                                                            a.href = url;
+                                                            a.download = `provision-${provisioningDetails.deviceId}.json`;
+                                                            a.click();
+                                                            URL.revokeObjectURL(url);
+                                                        }}
+                                                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-amber-200 border border-amber-500/30"
+                                                    >
+                                                        <Icon name="download" className="w-3.5 h-3.5" />
+                                                        Download provision.json
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
                                     <div className="flex justify-end">
-                                        <button onClick={() => setProvisioningDetails(null)} className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm">Close provisioning</button>
+                                        <button onClick={() => setProvisioningDetails(null)} className={`font-bold px-5 py-2.5 rounded-xl text-sm ${provisioningDetails.paired ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950' : 'bg-amber-500 hover:bg-amber-400 text-slate-950'}`}>
+                                            {provisioningDetails.paired ? "Done" : "Close"}
+                                        </button>
                                     </div>
                                 </div>
                             </div>

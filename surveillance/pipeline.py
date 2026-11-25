@@ -528,6 +528,7 @@ def main() -> None:
     logger.info("Starting surveillance pipeline loop. Press 'q' or 'ESC' on display window to stop.")
     cam_fps = 0.0
     last_t = time.perf_counter()
+    last_qr_check = 0.0
     try:
         while True:
             ok, frame = camera.read_latest()
@@ -538,6 +539,16 @@ def main() -> None:
                     continue
 
             now = time.perf_counter()
+            if config.sync_enabled and not sync_engine.device_secret:
+                if now - last_qr_check >= 0.5:
+                    last_qr_check = now
+                    from .sync import scan_qr_and_claim_frame
+                    claimed = scan_qr_and_claim_frame(frame, pipeline.repository, sync_engine)
+                    if claimed and claimed.get("success"):
+                        logger.info("Surveillance camera paired via QR as %s", claimed.get("device_id"))
+                time.sleep(0.05)
+                continue
+
             dt = max(now - last_t, 1e-6)
             last_t = now
             inst_fps = 1.0 / dt

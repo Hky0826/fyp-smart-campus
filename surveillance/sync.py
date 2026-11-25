@@ -21,9 +21,171 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from .config import SETUP_MARKER_PATH, persist_runtime_configuration
 from .database import SurveillanceUserRepository, generate_sync_key
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_surveillance_cloud_url(url: str) -> None:
+    import fnmatch
+    import os
+
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").strip().lower()
+    raw_allow = os.getenv("ALLOWED_CLOUD_HOSTS", "").strip()
+    if raw_allow:
+        patterns = [p.strip().lower() for p in raw_allow.split(",") if p.strip()]
+        if not host or not any(fnmatch.fnmatch(host, pat) for pat in patterns):
+            raise ValueError(f"Cloud host '{host or 'unknown'}' is not in ALLOWED_CLOUD_HOSTS")
+    if parsed.scheme == "https":
+        return
+    if parsed.scheme == "http" and os.getenv("APP_ENV", "development").lower() != "production":
+        return
+    raise ValueError("Cloud URL must use HTTPS in production")
+
+
+def _parse_qr_pairing_payload(raw_text: str) -> tuple[str, str]:
+    data = json.loads((raw_text or "").strip())
+    if not isinstance(data, dict):
+        raise ValueError("QR payload must be a JSON object")
+    cloud_url = str(data.get("cloud_url") or "").strip().rstrip("/")
+    code = str(data.get("code") or data.get("pairing_code") or "").strip()
+    if not cloud_url or not code:
+        raise ValueError("QR payload is missing cloud_url or pairing code")
+    return cloud_url, code
+
+
+def claim_surveillance_device(
+    *,
+    cloud_url: str = "",
+    pairing_code: str = "",
+    qr_payload: str = "",
+    repository: SurveillanceUserRepository,
+    sync_engine: Optional["SurveillanceSyncEngine"] = None,
+) -> Dict[str, Any]:
+    """Claim a one-time cloud pairing code for a headless/camera-only surveillance node."""
+    if qr_payload:
+        resolved_url, resolved_code = _parse_qr_pairing_payload(qr_payload)
+    else:
+        resolved_url = (cloud_url or "").strip().rstrip("/")
+        resolved_code = (pairing_code or "").strip()
+
+    if not resolved_url or not resolved_code:
+        raise ValueError("Cloud URL and pairing code are required")
+    _validate_surveillance_cloud_url(resolved_url)
+
+    claim_url = f"{resolved_url}/api/infra/devices/claim"
+    try:
+        resp = requests.post(
+            claim_url,
+            json={
+                "pairing_code": resolved_code,
+                "device_name": sync_engine.device_name if sync_engine else "Surveillance Camera",
+                "embedding_model": "arcface_r50",
+                "app_version": "surveillance-1.0",
+            },
+            timeout=10.0,
+        )
+    except requests.exceptions.RequestException as exc:
+        raise ValueError(f"Could not reach cloud server at {resolved_url}: {type(exc).__name__}") from exc
+
+    if resp.status_code != 200:
+        detail = ""
+        try:
+            detail = str(resp.json().get("detail") or "")
+        except Exception:
+            detail = resp.text[:200]
+        raise ValueError(detail or f"Pairing failed (HTTP {resp.status_code})")
+
+    claimed = resp.json()
+    server_utc = claimed.get("server_utc_time")
+    if server_utc:
+        try:
+            parsed = datetime.datetime.fromisoformat(str(server_utc).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+            skew = abs((datetime.datetime.now(datetime.timezone.utc) - parsed).total_seconds())
+            if skew > 120:
+                raise ValueError(
+                    f"Device clock is off by {int(skew)}s compared to cloud. Enable NTP before pairing."
+                )
+        except ValueError:
+            raise
+        except Exception:
+            pass
+
+    device_id = str(claimed["device_id"])
+    device_secret = str(claimed["device_secret"])
+    device_name = str(claimed.get("device_name") or (sync_engine.device_name if sync_engine else "Surveillance Camera"))
+
+    # Verify HMAC credentials against cloud before persisting & marking complete
+    verify_url = f"{resolved_url}/api/sync/downstream/user-ids"
+    verify_resp = _signed_request(
+        method="GET",
+        url=verify_url,
+        device_id=device_id,
+        device_secret=device_secret,
+        timeout=8.0,
+    )
+    if verify_resp.status_code != 200:
+        raise ValueError(f"Cloud handshake verification failed (HTTP {verify_resp.status_code})")
+
+    persist_runtime_configuration(
+        cloud_url=resolved_url,
+        device_id=device_id,
+        device_secret=device_secret,
+        device_name=device_name,
+    )
+
+    if sync_engine is not None:
+        sync_engine.stop()
+        sync_engine.cloud_url = resolved_url
+        sync_engine.device_id = device_id
+        sync_engine.device_name = device_name
+        sync_engine.device_secret = device_secret
+        sync_engine.start(start_server=False)
+        if sync_engine.downstream is not None:
+            sync_engine.downstream.perform_sync()
+
+    marker = SETUP_MARKER_PATH.expanduser()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(datetime.datetime.now(datetime.timezone.utc).isoformat(), encoding="utf-8")
+
+    return {
+        "success": True,
+        "setup_complete": True,
+        "device_id": device_id,
+        "device_name": device_name,
+        "cloud_url": resolved_url,
+    }
+
+
+def scan_qr_and_claim_frame(
+    frame: Any,
+    repository: SurveillanceUserRepository,
+    sync_engine: Optional["SurveillanceSyncEngine"] = None,
+) -> Optional[Dict[str, Any]]:
+    """Decode a dashboard QR code from a live surveillance camera frame and claim credentials."""
+    if frame is None:
+        return None
+    try:
+        import cv2
+        detector = cv2.QRCodeDetector()
+        decoded, _, _ = detector.detectAndDecode(frame)
+    except Exception:
+        return None
+    if not decoded:
+        return None
+    try:
+        return claim_surveillance_device(
+            qr_payload=decoded,
+            repository=repository,
+            sync_engine=sync_engine,
+        )
+    except ValueError as exc:
+        logger.warning("QR code seen by surveillance camera could not be claimed: %s", exc)
+        return None
 
 
 def _sign_request(
@@ -240,10 +402,26 @@ class UpstreamSyncClient:
 
     def _check_connection_and_heartbeat(self) -> None:
         url = f"{self.cloud_url}/api/sync/upstream/heartbeat"
+        cached_users = None
+        pending_logs = None
+        last_sync_at = None
+        try:
+            cached_users = self.repository.count()
+            pending_logs = len(self.repository.get_unsynced_surveillance_logs())
+            last_sync_at = self.repository.get_last_sync_timestamp()
+        except Exception:
+            pass
         payload = {
             "device_id": self.device_id,
             "device_name": self.device_name,
             "ip_address": f"{self.local_ip}:{self.local_port}",
+            "app_version": "surveillance-1.0",
+            "embedding_model": "arcface_r50",
+            "cached_users": cached_users,
+            "pending_logs": pending_logs,
+            "last_sync_at": last_sync_at,
+            "ws_connected": bool(getattr(self, "ws_status_fn", lambda: False)()),
+            "device_utc_time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         try:
             response = _signed_request(
@@ -255,6 +433,18 @@ class UpstreamSyncClient:
                 timeout=5.0,
             )
             online = response.status_code == 200
+            if online:
+                try:
+                    srv_time = response.json().get("server_utc_time")
+                    if srv_time:
+                        parsed = datetime.datetime.fromisoformat(str(srv_time).replace("Z", "+00:00"))
+                        if parsed.tzinfo is None:
+                            parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+                        skew = abs((datetime.datetime.now(datetime.timezone.utc) - parsed).total_seconds())
+                        if skew > 60:
+                            logger.warning("Surveillance clock skew detected (%.1fs vs cloud); check NTP", skew)
+                except Exception:
+                    pass
             if online and not self.is_online:
                 logger.info("Cloud link restored; surveillance sync status ONLINE")
             if not online and self.is_online:
@@ -379,6 +569,86 @@ def create_surveillance_app(
     return app
 
 
+class SurveillanceWebSocketClient:
+    """Outbound WebSocket control channel for NAT-friendly push to headless surveillance cameras."""
+
+    def __init__(self, *, cloud_url: str, device_id: str, device_secret: str, on_trigger_sync, on_rotate_secret=None) -> None:
+        self.cloud_url = cloud_url.rstrip("/")
+        self.device_id = device_id
+        self.device_secret = device_secret
+        self._on_trigger_sync = on_trigger_sync
+        self._on_rotate_secret = on_rotate_secret
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self.connected = False
+
+    def start(self) -> None:
+        if not self.device_secret or not self.cloud_url or not self.device_id:
+            return
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="surveillance-ws-client")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self.connected = False
+        if self._thread:
+            self._thread.join(timeout=3)
+
+    def _run_loop(self) -> None:
+        try:
+            from websockets.sync.client import connect as ws_connect
+        except Exception:
+            return
+        backoff = 1.0
+        while not self._stop_event.is_set():
+            http_url = f"{self.cloud_url}/api/sync/downstream/ws"
+            ws_url = ("wss://" + http_url[8:]) if http_url.startswith("https://") else ("ws://" + http_url[7:] if http_url.startswith("http://") else http_url)
+            try:
+                parsed = urlsplit(http_url)
+                ts = str(int(time.time()))
+                nonce = secrets.token_urlsafe(24)
+                headers = {
+                    "X-Device-ID": self.device_id,
+                    "X-Device-Timestamp": ts,
+                    "X-Device-Nonce": nonce,
+                    "X-Device-Signature": _sign_request(self.device_secret, "GET", parsed.path or "/", parsed.query, ts, nonce, b""),
+                }
+                with ws_connect(ws_url, additional_headers=headers, open_timeout=8, ping_interval=20, ping_timeout=10) as ws:
+                    self.connected = True
+                    backoff = 1.0
+                    logger.info("Surveillance WebSocket control channel connected to %s", ws_url)
+                    while not self._stop_event.is_set():
+                        try:
+                            raw = ws.recv(timeout=25)
+                        except TimeoutError:
+                            ws.send(json.dumps({"type": "ping"}))
+                            continue
+                        if isinstance(raw, bytes):
+                            raw = raw.decode("utf-8", errors="ignore")
+                        if not raw:
+                            continue
+                        try:
+                            msg = json.loads(raw)
+                        except Exception:
+                            continue
+                        if msg.get("type") in {"trigger_sync", "deactivate"}:
+                            threading.Thread(target=self._on_trigger_sync, daemon=True).start()
+                        elif msg.get("type") == "rotate_secret" and msg.get("device_secret") and callable(self._on_rotate_secret):
+                            new_secret = str(msg["device_secret"]).strip()
+                            if len(new_secret) >= 32:
+                                self._on_rotate_secret(new_secret)
+                                self.device_secret = new_secret
+            except Exception:
+                pass
+            finally:
+                self.connected = False
+            self._stop_event.wait(backoff)
+            backoff = min(backoff * 2.0, 30.0)
+
+
 class SurveillanceSyncEngine:
     """Manages background sync workers and daemon API for the surveillance module."""
 
@@ -408,6 +678,7 @@ class SurveillanceSyncEngine:
 
         self.downstream: Optional[DownstreamSyncWorker] = None
         self.upstream: Optional[UpstreamSyncClient] = None
+        self.ws_client: Optional[SurveillanceWebSocketClient] = None
         self._server: Optional[uvicorn.Server] = None
         self._server_thread: Optional[threading.Thread] = None
         self._running = False
@@ -430,6 +701,11 @@ class SurveillanceSyncEngine:
     def start(self, start_server: bool = True) -> None:
         if not self.enabled or self._running:
             return
+        if not self.device_secret or not self.cloud_url or not self.device_id:
+            logger.info(
+                "Surveillance device is unprovisioned; hold a dashboard QR code in front of the camera or open /setup."
+            )
+            return
 
         self.downstream = DownstreamSyncWorker(
             self.repository,
@@ -449,8 +725,33 @@ class SurveillanceSyncEngine:
             log_push_interval_sec=self.log_push_interval_sec,
         )
 
+        def _apply_rotated_secret(new_secret: str) -> None:
+            persist_runtime_configuration(
+                cloud_url=self.cloud_url,
+                device_id=self.device_id,
+                device_secret=new_secret,
+                device_name=self.device_name,
+                local_ip=self.local_ip,
+            )
+            self.device_secret = new_secret
+            if self.downstream:
+                self.downstream.device_secret = new_secret
+            if self.upstream:
+                self.upstream.device_secret = new_secret
+            logger.info("Applied remotely rotated surveillance secret over WebSocket for %s", self.device_id)
+
+        self.ws_client = SurveillanceWebSocketClient(
+            cloud_url=self.cloud_url,
+            device_id=self.device_id,
+            device_secret=self.device_secret,
+            on_trigger_sync=self.downstream.perform_sync,
+            on_rotate_secret=_apply_rotated_secret,
+        )
+        self.upstream.ws_status_fn = lambda: bool(self.ws_client and self.ws_client.connected)
+
         self.upstream.start()
         self.downstream.start()
+        self.ws_client.start()
         if start_server:
             app = create_surveillance_app(self.repository, downstream_worker=self.downstream)
             uvicorn_config = uvicorn.Config(app, host="0.0.0.0", port=self.local_port, log_level="warning")
@@ -460,9 +761,15 @@ class SurveillanceSyncEngine:
         self._running = True
         logger.info("Surveillance sync engine started for device %s", self.device_id)
 
+    @property
+    def ws_connected(self) -> bool:
+        return bool(self.ws_client and self.ws_client.connected)
+
     def stop(self) -> None:
         if not self._running:
             return
+        if self.ws_client:
+            self.ws_client.stop()
         if self.upstream:
             self.upstream.stop()
         if self.downstream:

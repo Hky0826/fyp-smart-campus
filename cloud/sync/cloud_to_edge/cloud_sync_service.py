@@ -1,12 +1,15 @@
 # sync/cloud_to_edge/cloud_sync_service.py
 
+import asyncio
 import os
 import sys
 import base64
+import hmac
 import json
 import logging
 import datetime
 import secrets
+import threading
 import time
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Set
@@ -18,15 +21,25 @@ backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 import requests
 
 from app.core.database import get_db, SessionLocal
 from app.core.security import verify_super_admin, verify_system_admin
-from app.models.models import User, Role, NodeRBAC, Device, DeviceRBAC, UserRole, DeletedUser
-from app.core.device_auth import decrypt_device_secret, require_signed_device_request, bind_device_id, sign_request
+from app.models.models import User, Role, NodeRBAC, Device, DeviceRBAC, UserRole, DeletedUser, DeviceRequestNonce
+from app.core.device_auth import (
+    DEVICE_ID_HEADER,
+    MAX_CLOCK_SKEW_SECONDS,
+    NONCE_HEADER,
+    SIGNATURE_HEADER,
+    TIMESTAMP_HEADER,
+    decrypt_device_secret,
+    require_signed_device_request,
+    bind_device_id,
+    sign_request,
+)
 from sync.callback_security import validate_callback_url
 
 # Setup logging
@@ -112,9 +125,152 @@ class AbstractDownstreamHandler(ABC):
         pass
 
 
+class EdgeWebSocketRegistry:
+    """Thread-safe registry of outbound edge WebSocket connections with optional Redis Pub/Sub fan-out."""
+
+    _REDIS_CHANNEL = "edge:ws:push"
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._connections: Dict[str, tuple[WebSocket, asyncio.AbstractEventLoop]] = {}
+        self._redis_started = False
+
+    def _ensure_redis_subscriber(self) -> None:
+        if self._redis_started:
+            return
+        redis_url = os.getenv("REDIS_URL", "").strip()
+        if not redis_url:
+            return
+        self._redis_started = True
+
+        def _listen() -> None:
+            try:
+                import redis as redis_lib
+                client = redis_lib.from_url(redis_url, decode_responses=True)
+                pubsub = client.pubsub()
+                pubsub.subscribe(self._REDIS_CHANNEL)
+                for message in pubsub.listen():
+                    if message.get("type") != "message":
+                        continue
+                    try:
+                        envelope = json.loads(message["data"])
+                        target = envelope.get("device_id")
+                        payload = envelope.get("payload")
+                        if target and isinstance(payload, dict):
+                            self._send_local_sync(str(target), payload)
+                    except Exception:
+                        pass
+            except Exception as exc:
+                logger.warning("Redis WebSocket fan-out listener unavailable: %s", exc)
+
+        threading.Thread(target=_listen, daemon=True, name="edge-ws-redis-sub").start()
+
+    def register(self, device_id: str, websocket: WebSocket, loop: asyncio.AbstractEventLoop) -> None:
+        self._ensure_redis_subscriber()
+        with self._lock:
+            self._connections[device_id] = (websocket, loop)
+
+    def unregister(self, device_id: str, websocket: WebSocket) -> None:
+        with self._lock:
+            current = self._connections.get(device_id)
+            if current and current[0] is websocket:
+                self._connections.pop(device_id, None)
+
+    def is_connected(self, device_id: str) -> bool:
+        with self._lock:
+            return device_id in self._connections
+
+    def _send_local_sync(self, device_id: str, payload: Dict[str, Any], timeout: float = 3.0) -> bool:
+        with self._lock:
+            entry = self._connections.get(device_id)
+        if not entry:
+            return False
+        websocket, loop = entry
+        try:
+            future = asyncio.run_coroutine_threadsafe(websocket.send_json(payload), loop)
+            future.result(timeout=timeout)
+            return True
+        except Exception as exc:
+            logger.warning("WebSocket push to %s failed: %s", device_id, exc)
+            self.unregister(device_id, websocket)
+            return False
+
+    def send_json_sync(self, device_id: str, payload: Dict[str, Any], timeout: float = 3.0) -> bool:
+        if self._send_local_sync(device_id, payload, timeout=timeout):
+            return True
+        redis_url = os.getenv("REDIS_URL", "").strip()
+        if redis_url:
+            try:
+                import redis as redis_lib
+                client = redis_lib.from_url(redis_url, decode_responses=True)
+                published = client.publish(
+                    self._REDIS_CHANNEL,
+                    json.dumps({"device_id": device_id, "payload": payload}, separators=(",", ":")),
+                )
+                return bool(published)
+            except Exception as exc:
+                logger.warning("Redis WebSocket publish failed: %s", exc)
+        return False
+
+
+_WS_REGISTRY = EdgeWebSocketRegistry()
+
+
+def is_device_ws_connected(device_id: str) -> bool:
+    return _WS_REGISTRY.is_connected(device_id)
+
+
+def push_rotate_secret_to_edge(device_id: str, new_secret: str) -> bool:
+    """Push a rotated device secret over an active WebSocket so online devices update without physical re-pairing."""
+    return _WS_REGISTRY.send_json_sync(device_id, {"type": "rotate_secret", "device_secret": new_secret})
+
+
+def _authenticate_device_websocket(websocket: WebSocket, db: Session) -> Optional[Device]:
+    device_id = websocket.headers.get(DEVICE_ID_HEADER)
+    timestamp = websocket.headers.get(TIMESTAMP_HEADER)
+    nonce = websocket.headers.get(NONCE_HEADER)
+    signature = websocket.headers.get(SIGNATURE_HEADER)
+    if not all((device_id, timestamp, nonce, signature)):
+        return None
+    try:
+        timestamp_value = int(timestamp)
+    except (TypeError, ValueError):
+        return None
+    if abs(time.time() - timestamp_value) > MAX_CLOCK_SKEW_SECONDS:
+        return None
+    if len(nonce) < 16 or len(nonce) > 128:
+        return None
+    device = db.query(Device).filter_by(device_id=device_id, is_active=True).first()
+    if not device or not device.device_secret_ciphertext:
+        return None
+    expected = sign_request(
+        decrypt_device_secret(device.device_secret_ciphertext),
+        "GET",
+        websocket.url.path,
+        websocket.url.query,
+        timestamp,
+        nonce,
+        b"",
+    )
+    if not hmac.compare_digest(expected, signature):
+        return None
+    now = datetime.datetime.utcnow()
+    db.query(DeviceRequestNonce).filter(DeviceRequestNonce.expires_at < now).delete(synchronize_session=False)
+    if db.query(DeviceRequestNonce).filter_by(device_id=device_id, nonce=nonce).first():
+        return None
+    db.add(DeviceRequestNonce(device_id=device_id, nonce=nonce, expires_at=now + datetime.timedelta(seconds=MAX_CLOCK_SKEW_SECONDS)))
+    device.last_heartbeat = now
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        return None
+    return device
+
+
 class EdgeNotificationDispatcher:
     """
-    Handles downstream network push alerts to edge devices over the LAN.
+    Handles downstream push alerts to edge devices (WebSocket-first, LAN HTTPS fallback).
     """
 
     @staticmethod
@@ -150,12 +306,16 @@ class EdgeNotificationDispatcher:
     @staticmethod
     def send_deactivation_push(device: Device, user_id: int) -> bool:
         """
-        Dispatches an HTTP POST deactivation payload directly to the edge listener.
+        Dispatches an instant user deactivation command via WebSocket first,
+        falling back to legacy LAN HTTPS callback if configured.
         """
+        if _WS_REGISTRY.send_json_sync(device.device_id, {"type": "deactivate", "user_id": user_id, "is_active": 0}):
+            logger.info("Successfully pushed deactivation via WebSocket to %s for user %s", device.device_id, user_id)
+            return True
         try:
             ip_address, port = EdgeNotificationDispatcher._device_target(device)
         except ValueError as exc:
-            logger.warning("Skipping deactivation push for %s: %s", device.device_id, exc)
+            logger.debug("Skipping legacy HTTP deactivation push for %s: %s", device.device_id, exc)
             return False
         url = f"https://{ip_address}:{port}/api/edge/deactivate"
         payload = {"user_id": user_id, "is_active": 0}
@@ -175,14 +335,16 @@ class EdgeNotificationDispatcher:
     @staticmethod
     def send_sync_push(device: Device) -> bool:
         """
-        Signals an edge device to immediately pull a delta sync from the cloud.
-        Called after any cloud-side user change (e.g. photo upload) so the edge
-        picks up the update without waiting for the next polling cycle.
+        Signals an edge device to immediately pull a delta sync from the cloud
+        via WebSocket first, falling back to legacy LAN HTTPS callback.
         """
+        if _WS_REGISTRY.send_json_sync(device.device_id, {"type": "trigger_sync"}):
+            logger.info("Successfully pushed trigger-sync via WebSocket to %s", device.device_id)
+            return True
         try:
             ip_address, port = EdgeNotificationDispatcher._device_target(device)
         except ValueError as exc:
-            logger.warning("Skipping sync push for %s: %s", device.device_id, exc)
+            logger.debug("Skipping legacy HTTP sync push for %s: %s", device.device_id, exc)
             return False
         url = f"https://{ip_address}:{port}/api/edge/trigger-sync"
         try:
@@ -470,7 +632,6 @@ def push_sync_to_all_edges(db: Optional[Session] = None) -> None:
     try:
         active_devices = session.query(Device).filter(
             Device.is_active == True,
-            Device.ip_address != None
         ).all()
         for dev in active_devices:
             EdgeNotificationDispatcher.send_sync_push(dev)
@@ -479,6 +640,54 @@ def push_sync_to_all_edges(db: Optional[Session] = None) -> None:
     finally:
         if own_session:
             session.close()
+
+
+@router.websocket("/ws")
+async def edge_control_websocket(websocket: WebSocket):
+    """Outbound device-initiated WebSocket for NAT-friendly instant revocations and sync triggers."""
+    db = SessionLocal()
+    device = None
+    try:
+        device = _authenticate_device_websocket(websocket, db)
+    finally:
+        db.close()
+
+    if device is None:
+        await websocket.close(code=4401, reason="Unauthorized device")
+        return
+
+    device_id = device.device_id
+    await websocket.accept()
+    loop = asyncio.get_running_loop()
+    _WS_REGISTRY.register(device_id, websocket, loop)
+    logger.info("Edge WebSocket registered for device %s", device_id)
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                msg = json.loads(raw)
+            except Exception:
+                msg = {}
+            if msg.get("type") == "ping":
+                now = datetime.datetime.utcnow()
+                db_hb = SessionLocal()
+                try:
+                    dev_row = db_hb.query(Device).filter_by(device_id=device_id).first()
+                    if dev_row:
+                        dev_row.last_heartbeat = now
+                        db_hb.commit()
+                finally:
+                    db_hb.close()
+                await websocket.send_json({
+                    "type": "pong",
+                    "server_utc_time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                })
+    except WebSocketDisconnect:
+        logger.info("Edge WebSocket disconnected for device %s", device_id)
+    except Exception as exc:
+        logger.debug("Edge WebSocket closed for %s: %s", device_id, exc)
+    finally:
+        _WS_REGISTRY.unregister(device_id, websocket)
 
 @router.post("/register", status_code=status.HTTP_200_OK)
 def register_edge(registration: EdgeRegistration, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):

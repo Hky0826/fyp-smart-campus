@@ -13,12 +13,24 @@ Item {
     property string setupCloudUrl: ""
     property string errorText: ""
     property string cloudUrlValue: setupCloudUrl || "http://127.0.0.1:8000"
+    property string pairingCodeValue: ""
     property string deviceIdValue: ""
     property string deviceSecretValue: ""
     property bool remotePushValue: false
+    property bool manualMode: false
+    property bool qrScanActive: true
     signal refreshRequested()
     signal setupCompleted()
+    signal scanQrRequested()
+    signal claimRequested(string cloudUrl, string pairingCode, bool remotePush)
     signal provisionRequested(string cloudUrl, string deviceId, string deviceSecret, bool remotePush)
+
+    Timer {
+        interval: 750
+        repeat: true
+        running: root.visible && root.firstTimeSetup && !root.manualMode && root.qrScanActive
+        onTriggered: root.scanQrRequested()
+    }
 
     focus: visible
     onVisibleChanged: if (visible) forceActiveFocus()
@@ -108,7 +120,7 @@ Item {
                 Text {
                     visible: root.firstTimeSetup
                     width: parent.width
-                    text: "STEP 3 — ENTER THE DASHBOARD DETAILS HERE"
+                    text: root.manualMode ? "MANUAL SETUP — ENTER DEVICE ID & SECRET" : "QUICK PAIR — ENTER 8-CHARACTER PAIRING CODE"
                     color: "#334155"
                     font.bold: true
                     font.pixelSize: 12
@@ -120,14 +132,27 @@ Item {
                     width: parent.width
                     text: root.cloudUrlValue
                     onTextChanged: root.cloudUrlValue = text
-                    placeholderText: "http://127.0.0.1:8000"
+                    placeholderText: "https://your-cloud-dashboard-url"
                     selectByMouse: true
                 }
 
-                Text { visible: root.firstTimeSetup; text: "Generated device ID"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
+                Text { visible: root.firstTimeSetup && !root.manualMode; text: "8-character pairing code (from dashboard QR / Pair dialog)"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
+                TextField {
+                    id: pairingCodeField
+                    visible: root.firstTimeSetup && !root.manualMode
+                    width: parent.width
+                    text: root.pairingCodeValue
+                    onTextChanged: root.pairingCodeValue = text
+                    placeholderText: "e.g. K9X4-M2P8"
+                    selectByMouse: true
+                    font.family: "monospace"
+                    font.pixelSize: 18
+                }
+
+                Text { visible: root.firstTimeSetup && root.manualMode; text: "Generated device ID"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
                 TextField {
                     id: deviceIdField
-                    visible: root.firstTimeSetup
+                    visible: root.firstTimeSetup && root.manualMode
                     width: parent.width
                     text: root.deviceIdValue
                     onTextChanged: root.deviceIdValue = text
@@ -136,9 +161,9 @@ Item {
                     font.family: "monospace"
                 }
 
-                Text { visible: root.firstTimeSetup; text: "One-time device secret"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
+                Text { visible: root.firstTimeSetup && root.manualMode; text: "One-time device secret"; color: "#475569"; font.bold: true; font.pixelSize: 13 }
                 TextField {
-                    visible: root.firstTimeSetup
+                    visible: root.firstTimeSetup && root.manualMode
                     width: parent.width
                     text: root.deviceSecretValue
                     onTextChanged: root.deviceSecretValue = text
@@ -148,35 +173,33 @@ Item {
                     font.family: "monospace"
                 }
 
+                Button {
+                    visible: root.firstTimeSetup
+                    flat: true
+                    text: root.manualMode ? "← Use 8-character pairing code instead" : "Advanced: Enter Device ID & Secret manually"
+                    onClicked: root.manualMode = !root.manualMode
+                }
+
                 Text {
                     visible: root.firstTimeSetup
                     width: parent.width
-                    text: "The secret is saved by this device outside the project folder. Keep the dashboard dialog open until setup succeeds."
+                    text: "Credentials are verified live against the cloud before setup completes and saved outside the project folder."
                     color: "#64748b"
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
                 }
 
                 CheckBox {
-                    visible: root.firstTimeSetup
+                    visible: root.firstTimeSetup && root.manualMode
                     width: parent.width
-                    text: "Enable secure cloud-to-edge push over Wi-Fi"
+                    text: "Enable legacy LAN cloud-to-edge push (only needed if WebSocket is unavailable)"
                     checked: root.remotePushValue
                     onCheckedChanged: root.remotePushValue = checked
                 }
 
                 Text {
-                    visible: root.firstTimeSetup && root.remotePushValue
                     width: parent.width
-                    text: "The device will automatically detect its LAN IP and use the device secret to authenticate cloud trigger messages. Use this only when cloud and edge are on separate computers."
-                    color: "#64748b"
-                    font.pixelSize: 12
-                    wrapMode: Text.WordWrap
-                }
-
-                Text {
-                    width: parent.width
-                    text: root.firstTimeSetup ? "After setup succeeds, synchronization starts automatically and this screen closes." : statusText()
+                    text: root.firstTimeSetup ? "After pairing succeeds, synchronization starts automatically and this screen closes." : statusText()
                     color: "#475569"
                     font.pixelSize: 14
                     wrapMode: Text.WordWrap
@@ -189,10 +212,20 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 10
                     Button {
-                        width: 190; height: 44
-                        text: root.firstTimeSetup ? "Apply and start" : "Refresh"
-                        enabled: !root.firstTimeSetup || (root.cloudUrlValue.length > 0 && root.deviceIdValue.length > 0 && root.deviceSecretValue.length > 0)
-                        onClicked: root.firstTimeSetup ? root.provisionRequested(root.cloudUrlValue, root.deviceIdValue, root.deviceSecretValue, root.remotePushValue) : root.refreshRequested()
+                        width: 210; height: 44
+                        text: root.firstTimeSetup ? (root.manualMode ? "Verify & Start" : "Pair & Start") : "Refresh"
+                        enabled: !root.firstTimeSetup || (root.manualMode
+                            ? (root.cloudUrlValue.length > 0 && root.deviceIdValue.length > 0 && root.deviceSecretValue.length > 0)
+                            : (root.cloudUrlValue.length > 0 && root.pairingCodeValue.length >= 6))
+                        onClicked: {
+                            if (!root.firstTimeSetup) {
+                                root.refreshRequested()
+                            } else if (root.manualMode) {
+                                root.provisionRequested(root.cloudUrlValue, root.deviceIdValue, root.deviceSecretValue, root.remotePushValue)
+                            } else {
+                                root.claimRequested(root.cloudUrlValue, root.pairingCodeValue, root.remotePushValue)
+                            }
+                        }
                         background: Rectangle { radius: 8; color: parent.enabled ? "#111827" : "#94a3b8" }
                         contentItem: Text { text: parent.text; color: "#ffffff"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                     }

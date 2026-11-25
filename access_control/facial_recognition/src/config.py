@@ -128,6 +128,16 @@ def persist_runtime_configuration(
     return path
 
 
+def clear_runtime_configuration() -> None:
+    """Remove persisted UI-provisioned runtime settings for device re-pairing."""
+    path = RUNTIME_CONFIG_PATH.expanduser()
+    try:
+        if path.is_file():
+            path.unlink()
+    except OSError:
+        pass
+
+
 def _env_str(name: str, fallback_name: str | None = None, default: str = "") -> str:
     val = os.getenv(name)
     if val is not None:

@@ -73,10 +73,11 @@ async def block_legacy_private_paths(request, call_next):
 @app.on_event("startup")
 def load_vector_store():
     settings.validate_security()
-    from app.db_init import ensure_speech_tables_and_seed
+    from app.db_init import ensure_speech_tables_and_seed, ensure_device_provisioning_columns
     from RagChatbot.retrieval.vector_store import vector_store
     with SessionLocal() as db:
         ensure_speech_tables_and_seed(db)
+        ensure_device_provisioning_columns(db)
         vector_store.load_from_db(db)
 
 # CORS Middleware Configuration

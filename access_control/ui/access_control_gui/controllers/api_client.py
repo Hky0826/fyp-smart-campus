@@ -89,6 +89,27 @@ class KioskApiClient:
             },
         )
 
+    def claim_setup(
+        self,
+        cloud_url: str = "",
+        pairing_code: str = "",
+        qr_payload: str = "",
+        remote_push: bool = False,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"remote_push": remote_push}
+        if qr_payload:
+            body["qr_payload"] = qr_payload
+        else:
+            body["cloud_url"] = cloud_url
+            body["pairing_code"] = pairing_code
+        return self._request_json("POST", "/setup/claim", json_body=body)
+
+    def scan_setup_qr(self, jpeg_bytes: bytes) -> dict[str, Any]:
+        return self._post_frame("/setup/scan-qr", "setup-qr.jpg", jpeg_bytes)
+
+    def reset_setup(self, admin_pin: str = "") -> dict[str, Any]:
+        return self._request_json("POST", "/setup/reset", json_body={"admin_pin": admin_pin})
+
     def request_access(self) -> dict[str, Any]:
         return self._request_json("POST", "/kiosk/access/request")
 
