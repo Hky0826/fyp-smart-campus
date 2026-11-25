@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, Cpu, Eye, Plus, Search, Trash2, X } from 'lucide-react';
+import { Activity, Cpu, Eye, Plus, QrCode, Search, Trash2, X } from 'lucide-react';
 import { cloudApi, formatRelativeTime } from '../lib/cloudApi';
 import { useToast } from '../providers/ToastProvider';
 import { DataTable } from '../components/ui/DataTable';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { DevicePairingModal } from '../components/DevicePairingModal';
 
 export function DevicesPage() {
   const navigate = useNavigate();
@@ -15,7 +16,7 @@ export function DevicesPage() {
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [provisionedSecret, setProvisionedSecret] = useState(null);
+  const [pairingDetails, setPairingDetails] = useState(null);
 
   const [deviceName, setDeviceName] = useState('');
   const [deviceType, setDeviceType] = useState('ENTRY_GATE');
@@ -57,8 +58,16 @@ export function DevicesPage() {
         is_active: true,
       });
       toast.success(`Provisioned ${created.device_name}.`);
-      if (created.provisioned_secret) {
-        setProvisionedSecret({ device_id: created.device_id, secret: created.provisioned_secret });
+      if (created.pairing_code || created.provisioned_secret) {
+        setPairingDetails({
+          device_id: created.device_id,
+          device_name: created.device_name,
+          secret: created.provisioned_secret || '',
+          pairing_code: created.pairing_code || '',
+          pairing_expires_at: created.pairing_expires_at || '',
+          pairing_qr_svg_data_uri: created.pairing_qr_svg_data_uri || '',
+          paired: false,
+        });
       }
       setCreateOpen(false);
       setDeviceName('');
@@ -68,6 +77,23 @@ export function DevicesPage() {
       toast.error(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleIssuePairingCode = async (dev) => {
+    try {
+      const res = await cloudApi.post(`/api/infra/devices/${dev.device_id}/pairing-code`, {});
+      setPairingDetails({
+        device_id: res.device_id,
+        device_name: res.device_name,
+        secret: '',
+        pairing_code: res.pairing_code || '',
+        pairing_expires_at: res.pairing_expires_at || '',
+        pairing_qr_svg_data_uri: res.pairing_qr_svg_data_uri || '',
+        paired: false,
+      });
+    } catch (err) {
+      toast.error(err.message);
     }
   };
 
@@ -95,7 +121,10 @@ export function DevicesPage() {
   };
 
   const isOnline = (d) =>
-    Boolean(d.is_active && d.last_heartbeat && Date.now() - new Date(d.last_heartbeat).getTime() < 5 * 60_000);
+    Boolean(
+      d.is_active &&
+        (d.ws_connected || (d.last_heartbeat && Date.now() - new Date(d.last_heartbeat).getTime() < 5 * 60_000))
+    );
 
   const columns = useMemo(
     () => [
@@ -131,11 +160,36 @@ export function DevicesPage() {
         id: 'health',
         header: 'Health',
         cell: ({ row }) => {
-          const online = isOnline(row.original);
+          const d = row.original;
+          const online = isOnline(d);
+          const tel = d.telemetry || {};
+          const skewWarn = typeof tel.clock_skew_seconds === 'number' && tel.clock_skew_seconds > 60;
+          const backlogWarn = typeof tel.pending_logs === 'number' && tel.pending_logs > 100;
           return (
-            <StatusBadge variant={online ? 'success' : 'warning'} dot>
-              {online ? 'Online' : 'Offline'}
-            </StatusBadge>
+            <div className="flex flex-col gap-1 items-start">
+              <StatusBadge variant={online ? 'success' : 'warning'} dot>
+                {online ? (d.ws_connected ? 'Live (WS)' : 'Online') : 'Offline'}
+              </StatusBadge>
+              {(skewWarn || backlogWarn || typeof tel.cached_users === 'number') && (
+                <div className="flex flex-wrap gap-1">
+                  {typeof tel.cached_users === 'number' && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                      {tel.cached_users} cached
+                    </span>
+                  )}
+                  {skewWarn && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300 font-semibold">
+                      Clock skew {Math.round(tel.clock_skew_seconds)}s
+                    </span>
+                  )}
+                  {backlogWarn && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-500/15 text-red-800 dark:text-red-300 font-semibold">
+                      {tel.pending_logs} queued
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           );
         },
       },
@@ -154,6 +208,14 @@ export function DevicesPage() {
         meta: { align: 'right', stopClick: true },
         cell: ({ row }) => (
           <div className="flex justify-end gap-1">
+            <button
+              type="button"
+              onClick={() => handleIssuePairingCode(row.original)}
+              title="Pair / Show QR Code"
+              className="p-1.5 rounded-lg text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-500/15"
+            >
+              <QrCode className="w-4 h-4" />
+            </button>
             <button
               type="button"
               onClick={() => navigate(`/dashboard/devices/${row.original.device_id}`)}
@@ -200,25 +262,11 @@ export function DevicesPage() {
         </button>
       </div>
 
-      {provisionedSecret && (
-        <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <div className="text-sm font-bold text-amber-900 dark:text-amber-300">
-              One-time Device Secret for {provisionedSecret.device_id}
-            </div>
-            <div className="text-xs font-mono text-amber-800 dark:text-amber-200 mt-1 break-all">
-              {provisionedSecret.secret}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setProvisionedSecret(null)}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-900 border border-amber-300 text-amber-900 dark:text-amber-200 shrink-0"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
+      <DevicePairingModal
+        details={pairingDetails}
+        onClose={() => setPairingDetails(null)}
+        onPaired={() => queryClient.invalidateQueries({ queryKey: ['devices'] })}
+      />
 
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5">
         <div className="relative max-w-xs">

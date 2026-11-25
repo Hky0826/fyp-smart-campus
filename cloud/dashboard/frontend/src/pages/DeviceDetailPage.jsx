@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, ArrowLeft, Cpu, KeyRound, Shield } from 'lucide-react';
+import { Activity, ArrowLeft, Cpu, KeyRound, QrCode, Shield } from 'lucide-react';
 import { cloudApi, formatDateTime } from '../lib/cloudApi';
 import { useToast } from '../providers/ToastProvider';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { DevicePairingModal } from '../components/DevicePairingModal';
 
 export function DeviceDetailPage() {
   const { deviceId } = useParams();
@@ -12,6 +13,7 @@ export function DeviceDetailPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [rotatedSecret, setRotatedSecret] = useState('');
+  const [pairingDetails, setPairingDetails] = useState(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['device-detail', deviceId],
@@ -64,8 +66,29 @@ export function DeviceDetailPage() {
     try {
       const res = await cloudApi.post(`/api/infra/devices/${dev.device_id}/rotate-credential`, {});
       setRotatedSecret(res.device_secret || res.provisioned_secret || '');
-      toast.success('Device secret rotated.');
+      toast.success(
+        res.pushed_over_ws
+          ? 'Device secret rotated and pushed live over WebSocket.'
+          : 'Device secret rotated. Use Pair / QR or update the device manually.'
+      );
       queryClient.invalidateQueries({ queryKey: ['device-detail', deviceId] });
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleIssuePairingCode = async () => {
+    try {
+      const res = await cloudApi.post(`/api/infra/devices/${dev.device_id}/pairing-code`, {});
+      setPairingDetails({
+        device_id: res.device_id,
+        device_name: res.device_name,
+        secret: '',
+        pairing_code: res.pairing_code || '',
+        pairing_expires_at: res.pairing_expires_at || '',
+        pairing_qr_svg_data_uri: res.pairing_qr_svg_data_uri || '',
+        paired: false,
+      });
     } catch (err) {
       toast.error(err.message);
     }
@@ -115,6 +138,13 @@ export function DeviceDetailPage() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
+            onClick={handleIssuePairingCode}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950"
+          >
+            <QrCode className="w-3.5 h-3.5" /> Pair / QR
+          </button>
+          <button
+            type="button"
             onClick={handlePing}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white"
           >
@@ -129,6 +159,12 @@ export function DeviceDetailPage() {
           </button>
         </div>
       </div>
+
+      <DevicePairingModal
+        details={pairingDetails}
+        onClose={() => setPairingDetails(null)}
+        onPaired={() => queryClient.invalidateQueries({ queryKey: ['device-detail', deviceId] })}
+      />
 
       {rotatedSecret && (
         <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/30">
