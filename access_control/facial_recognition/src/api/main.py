@@ -31,6 +31,7 @@ from ..config import (
     default_cloud_url,
     default_sync_local_ip,
     detect_local_ip,
+    load_access_config_overrides,
     persist_runtime_configuration,
 )
 from ..device_signing import signed_headers, validate_cloud_url
@@ -129,6 +130,7 @@ def runtime_config() -> RuntimeConfig:
 
 @lru_cache(maxsize=1)
 def access_config() -> AccessControlConfig:
+    overrides = load_access_config_overrides()
     return AccessControlConfig(
         sync_cloud_url=os.getenv("EDGE_SYNC_CLOUD_URL", default_cloud_url()),
         sync_device_id=os.getenv("EDGE_SYNC_DEVICE_ID", "entry-gate-01"),
@@ -136,6 +138,7 @@ def access_config() -> AccessControlConfig:
         sync_local_ip=os.getenv("EDGE_SYNC_LOCAL_IP", default_sync_local_ip()),
         remote_api_enabled=_runtime_bool("EDGE_REMOTE_API_ENABLED"),
         installation_credential=os.getenv("EDGE_INSTALLATION_CREDENTIAL", ""),
+        **overrides,
     )
 
 
@@ -159,6 +162,12 @@ def _setup_is_pending(config: AccessControlConfig) -> bool:
         or not config.database_path.expanduser().resolve().is_file()
         or not config.sync_device_secret.strip()
     )
+
+
+def _on_remote_access_config_update(applied: dict) -> None:
+    access_config.cache_clear()
+    access_pipeline.cache_clear()
+    logger.info("Reloaded live access-control pipeline with cloud settings: %s", sorted(applied.keys()))
 
 
 @lru_cache(maxsize=1)
@@ -202,6 +211,7 @@ def start_sync_engine() -> None:
     _ensure_local_database(config)
     _sync_engine = SyncEngine.from_config(config)
     _sync_engine.start()
+    _sync_engine.set_config_update_callback(_on_remote_access_config_update)
     logger.info(
         "Edge sync configured: enabled=%s cloud_url=%s device_id=%s db=%s",
         config.sync_enabled,
@@ -433,6 +443,7 @@ def _activate_provisioned_device(
     new_config = access_config()
     _sync_engine = SyncEngine.from_config(new_config)
     _sync_engine.start()
+    _sync_engine.set_config_update_callback(_on_remote_access_config_update)
     if verify_handshake and _sync_engine.downstream is not None:
         _sync_engine.downstream.perform_sync()
 

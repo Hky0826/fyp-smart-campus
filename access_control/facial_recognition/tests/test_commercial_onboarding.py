@@ -191,3 +191,40 @@ def test_ws_rotate_secret_handler_and_outbox_pruning(tmp_path: Path):
     pruned = db.prune_offline_outbox(max_rows=4)
     assert pruned == 6
     assert len(db.get_unsynced_logs()) == 4
+
+
+def test_remote_access_config_override_and_ws_push(monkeypatch, tmp_path: Path):
+    from access_control.facial_recognition.src import config as ac_config
+    from access_control.facial_recognition.src.sync import EdgeWebSocketClient
+
+    override_file = tmp_path / "access_config_overrides.json"
+    monkeypatch.setattr(ac_config, "ACCESS_CONFIG_OVERRIDES_PATH", override_file)
+
+    reloaded: list[dict] = []
+    client = EdgeWebSocketClient(
+        cloud_url="https://cloud.example.com",
+        device_id="KIOSK-1",
+        device_secret="a" * 40,
+        on_deactivate=lambda _uid: None,
+        on_trigger_sync=lambda: None,
+    )
+    client._on_config_update = lambda cfg: reloaded.append(cfg)
+    client._handle_message(
+        json.dumps({
+            "type": "config_update",
+            "access_config": {
+                "recognition_threshold": 0.45,
+                "pad_threshold": 0.82,
+                "door_unlock_duration_seconds": 7.5,
+                "ignored_unknown_key": 123,
+            },
+        })
+    )
+
+    assert len(reloaded) == 1
+    assert reloaded[0]["recognition_threshold"] == 0.45
+    assert "ignored_unknown_key" not in reloaded[0]
+    loaded = ac_config.load_access_config_overrides()
+    assert loaded["recognition_threshold"] == 0.45
+    assert loaded["pad_threshold"] == 0.82
+    assert loaded["door_unlock_duration_seconds"] == 7.5

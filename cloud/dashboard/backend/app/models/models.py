@@ -529,6 +529,7 @@ class Device(Base):
     pairing_expires_at = Column(DateTime, nullable=True)
     pairing_claimed_at = Column(DateTime, nullable=True)
     telemetry_json = Column(Text, nullable=True)
+    access_config_json = Column(Text, nullable=True)
     
     node = relationship("Node")
     device_rbac = relationship("DeviceRBAC", back_populates="device", cascade="all, delete-orphan")

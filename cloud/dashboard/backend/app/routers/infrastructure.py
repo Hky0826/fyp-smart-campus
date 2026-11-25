@@ -35,14 +35,25 @@ try:
     _cloud_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "..", ".."))
     if _cloud_root not in _sys.path:
         _sys.path.insert(0, _cloud_root)
-    from sync.cloud_to_edge.cloud_sync_service import push_sync_to_all_edges, is_device_ws_connected, push_rotate_secret_to_edge
+    from sync.cloud_to_edge.cloud_sync_service import (
+        push_sync_to_all_edges,
+        is_device_ws_connected,
+        push_rotate_secret_to_edge,
+        push_access_config_to_edge,
+    )
 except Exception:
     try:
-        from cloud_sync_service import push_sync_to_all_edges, is_device_ws_connected, push_rotate_secret_to_edge
+        from cloud_sync_service import (
+            push_sync_to_all_edges,
+            is_device_ws_connected,
+            push_rotate_secret_to_edge,
+            push_access_config_to_edge,
+        )
     except Exception:
         push_sync_to_all_edges = None
         is_device_ws_connected = None
         push_rotate_secret_to_edge = None
+        push_access_config_to_edge = None
 
 router = APIRouter(prefix="/infra", tags=["Infrastructure & Access Control"])
 
@@ -425,6 +436,50 @@ def issue_device_pairing_code(
     resp = _serialize_device_response(device)
     _attach_pairing_bundle(resp, pairing_code, expires_at, request)
     return resp
+
+
+@router.get("/devices/{device_id}/access-config", response_model=schemas.AccessControlConfigSchema)
+def get_device_access_config(device_id: str, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
+    """Retrieve the cloud-managed Access Control settings (merged with defaults) for a device."""
+    device = db.query(Device).filter_by(device_id=device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    saved = {}
+    if getattr(device, "access_config_json", None):
+        try:
+            saved = json.loads(device.access_config_json)
+        except Exception:
+            saved = {}
+    return schemas.AccessControlConfigSchema(**saved)
+
+
+@router.put("/devices/{device_id}/access-config")
+def update_device_access_config(
+    device_id: str,
+    config_in: schemas.AccessControlConfigSchema,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    """Save per-device Access Control thresholds/variables and push them live to the edge device."""
+    device = db.query(Device).filter_by(device_id=device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    config_dict = config_in.model_dump()
+    device.access_config_json = json.dumps(config_dict, separators=(",", ":"))
+    db.commit()
+    pushed_over_ws = (
+        bool(push_access_config_to_edge(device.device_id, config_dict))
+        if callable(push_access_config_to_edge)
+        else False
+    )
+    if push_sync_to_all_edges and background_tasks and not pushed_over_ws:
+        background_tasks.add_task(push_sync_to_all_edges)
+    return {
+        "device_id": device.device_id,
+        "access_config": config_dict,
+        "pushed_over_ws": pushed_over_ws,
+    }
 
 
 @router.post("/devices/{device_id}/rotate-credential")

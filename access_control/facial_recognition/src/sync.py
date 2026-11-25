@@ -944,6 +944,12 @@ class DownstreamSyncWorker:
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
+    def set_config_update_callback(self, callback) -> None:
+        if self.downstream is not None:
+            self.downstream.on_config_update = callback
+        if self.ws_client is not None:
+            self.ws_client._on_config_update = callback
+
     def stop(self) -> None:
         self._stop_event.set()
         if self._thread:
@@ -1018,6 +1024,14 @@ class DownstreamSyncWorker:
             timestamp = data.get("timestamp")
             if timestamp:
                 self.db.update_last_sync_timestamp(timestamp)
+
+            remote_access_cfg = data.get("access_config")
+            if isinstance(remote_access_cfg, dict) and remote_access_cfg:
+                from .config import persist_access_config_overrides
+                applied = persist_access_config_overrides(remote_access_cfg)
+                cb = getattr(self, "on_config_update", None)
+                if callable(cb) and applied:
+                    cb(applied)
         except requests.exceptions.RequestException as exc:
             logger.warning("Downstream cloud sync offline (%s: %s). Operating in local offline mode.", url, type(exc).__name__)
         except Exception:
@@ -1061,6 +1075,12 @@ class UpstreamSyncClient:
         self._replay_thread = threading.Thread(target=self._run_replay_loop, daemon=True)
         self._heartbeat_thread.start()
         self._replay_thread.start()
+
+    def set_config_update_callback(self, callback) -> None:
+        if self.downstream is not None:
+            self.downstream.on_config_update = callback
+        if self.ws_client is not None:
+            self.ws_client._on_config_update = callback
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -1294,6 +1314,12 @@ class EdgeWebSocketClient:
         self._thread = threading.Thread(target=self._run_loop, daemon=True, name="edge-ws-client")
         self._thread.start()
 
+    def set_config_update_callback(self, callback) -> None:
+        if self.downstream is not None:
+            self.downstream.on_config_update = callback
+        if self.ws_client is not None:
+            self.ws_client._on_config_update = callback
+
     def stop(self) -> None:
         self._stop_event.set()
         self.connected = False
@@ -1334,6 +1360,16 @@ class EdgeWebSocketClient:
                     self.device_secret = new_secret
             except Exception:
                 logger.exception("WebSocket rotate_secret handler failed")
+        elif msg_type == "config_update" and isinstance(msg.get("access_config"), dict):
+            try:
+                from .config import persist_access_config_overrides
+                applied = persist_access_config_overrides(msg["access_config"])
+                cb = getattr(self, "_on_config_update", None)
+                if callable(cb) and applied:
+                    cb(applied)
+                logger.info("Applied live cloud access_config update via WebSocket (%s keys)", len(applied))
+            except Exception:
+                logger.exception("WebSocket config_update handler failed")
 
     def _run_loop(self) -> None:
         try:
@@ -1521,6 +1557,12 @@ class SyncEngine:
         self._server_thread.start()
         self._running = True
         logger.info("Sync engine started for %s using %s on port %s", self.device_id, self.db_path, actual_sync_port)
+
+    def set_config_update_callback(self, callback) -> None:
+        if self.downstream is not None:
+            self.downstream.on_config_update = callback
+        if self.ws_client is not None:
+            self.ws_client._on_config_update = callback
 
     def stop(self) -> None:
         if not self._running:

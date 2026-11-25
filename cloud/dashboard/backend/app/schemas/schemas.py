@@ -549,6 +549,37 @@ class DeviceClaimResponse(BaseModel):
     device_secret: str
     server_utc_time: str
 
+
+class AccessControlConfigSchema(BaseModel):
+    """Cloud-managed Access Control parameters synced to edge devices."""
+
+    # Recognition & Matching
+    recognition_threshold: float = Field(default=0.363, ge=0.10, le=0.95)
+    detection_threshold: float = Field(default=0.60, ge=0.20, le=0.95)
+    min_face_size: int = Field(default=48, ge=24, le=300)
+    min_embedding_samples: int = Field(default=2, ge=1, le=10)
+    candidate_consistency_ratio: float = Field(default=0.65, ge=0.30, le=1.00)
+    recognition_delay_seconds: float = Field(default=1.0, ge=0.0, le=10.0)
+
+    # Liveness & Anti-Spoofing (PAD)
+    require_liveness: bool = True
+    pad_required: bool = True
+    pad_threshold: float = Field(default=0.75, ge=0.10, le=0.99)
+    pad_smooth_frames: int = Field(default=3, ge=1, le=10)
+
+    # Door Hardware & Audio
+    door_relay_enabled: bool = True
+    door_unlock_duration_seconds: float = Field(default=5.0, ge=1.0, le=30.0)
+    audio_enabled: bool = True
+
+    # Presence & Framing
+    presence_activation_enabled: bool = True
+    presence_dwell_seconds: float = Field(default=3.0, ge=0.5, le=10.0)
+    presence_activation_cooldown_seconds: float = Field(default=5.0, ge=1.0, le=30.0)
+    minimum_face_size_ratio: float = Field(default=0.15, ge=0.05, le=0.50)
+    frontal_face_threshold: float = Field(default=25.0, ge=5.0, le=60.0)
+    frontal_pitch_threshold: float = Field(default=20.0, ge=5.0, le=45.0)
+
 class DeviceRBACBase(BaseSchema):
     device_id: str
     role_id: int

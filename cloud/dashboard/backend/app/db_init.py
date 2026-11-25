@@ -400,6 +400,7 @@ def ensure_device_provisioning_columns(db) -> None:
         ("pairing_expires_at", "DATETIME NULL"),
         ("pairing_claimed_at", "DATETIME NULL"),
         ("telemetry_json", "TEXT NULL"),
+        ("access_config_json", "TEXT NULL"),
     ]
     existing = set()
     if dialect == "sqlite":

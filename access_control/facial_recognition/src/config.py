@@ -138,6 +138,87 @@ def clear_runtime_configuration() -> None:
         pass
 
 
+ACCESS_CONFIG_OVERRIDES_PATH = Path(
+    os.getenv(
+        "EDGE_ACCESS_CONFIG_OVERRIDES_PATH",
+        str(Path.home() / ".smart-campus-edge" / "access_config_overrides.json"),
+    )
+)
+
+_ALLOWED_ACCESS_OVERRIDE_KEYS: dict[str, type] = {
+    "recognition_threshold": float,
+    "detection_threshold": float,
+    "min_face_size": int,
+    "min_embedding_samples": int,
+    "candidate_consistency_ratio": float,
+    "recognition_delay_seconds": float,
+    "require_liveness": bool,
+    "pad_required": bool,
+    "pad_threshold": float,
+    "pad_smooth_frames": int,
+    "door_relay_enabled": bool,
+    "door_unlock_duration_seconds": float,
+    "audio_enabled": bool,
+    "presence_activation_enabled": bool,
+    "presence_dwell_seconds": float,
+    "presence_activation_cooldown_seconds": float,
+    "minimum_face_size_ratio": float,
+    "frontal_face_threshold": float,
+    "frontal_pitch_threshold": float,
+}
+
+
+def load_access_config_overrides() -> dict[str, object]:
+    """Load cloud-synced AccessControlConfig overrides persisted on disk."""
+    import json
+
+    path = ACCESS_CONFIG_OVERRIDES_PATH.expanduser()
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            return {}
+        cleaned: dict[str, object] = {}
+        for key, expected_type in _ALLOWED_ACCESS_OVERRIDE_KEYS.items():
+            if key not in raw or raw[key] is None:
+                continue
+            val = raw[key]
+            if expected_type is bool:
+                cleaned[key] = bool(val)
+            elif expected_type is int:
+                cleaned[key] = int(val)
+            else:
+                cleaned[key] = float(val)
+        return cleaned
+    except Exception:
+        return {}
+
+
+def persist_access_config_overrides(overrides: dict[str, object]) -> dict[str, object]:
+    """Persist cloud-synced AccessControlConfig overrides atomically."""
+    import json
+
+    cleaned: dict[str, object] = {}
+    for key, expected_type in _ALLOWED_ACCESS_OVERRIDE_KEYS.items():
+        if key not in overrides or overrides[key] is None:
+            continue
+        val = overrides[key]
+        if expected_type is bool:
+            cleaned[key] = bool(val)
+        elif expected_type is int:
+            cleaned[key] = int(val)
+        else:
+            cleaned[key] = float(val)
+
+    path = ACCESS_CONFIG_OVERRIDES_PATH.expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(cleaned, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, path)
+    return cleaned
+
+
 def _env_str(name: str, fallback_name: str | None = None, default: str = "") -> str:
     val = os.getenv(name)
     if val is not None:

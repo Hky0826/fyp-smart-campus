@@ -6,6 +6,7 @@ import { cloudApi, formatDateTime } from '../lib/cloudApi';
 import { useToast } from '../providers/ToastProvider';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { DevicePairingModal } from '../components/DevicePairingModal';
+import { AccessControlSettingsCard } from '../components/AccessControlSettingsCard';
 
 export function DeviceDetailPage() {
   const { deviceId } = useParams();
@@ -188,6 +189,8 @@ export function DeviceDetailPage() {
           <div className="text-sm font-bold mt-2">{formatDateTime(dev.last_heartbeat)}</div>
         </div>
       </div>
+
+      <AccessControlSettingsCard deviceId={dev.device_id} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Per-Device RBAC */}

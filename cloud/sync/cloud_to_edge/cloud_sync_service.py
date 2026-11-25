@@ -98,6 +98,7 @@ class DeltaSyncResponse(BaseModel):
     node_id: Optional[int] = None
     policy_version: Optional[str] = None
     policy_synced_at: Optional[str] = None
+    access_config: Optional[Dict[str, Any]] = None
 
 class DeactivateRequest(BaseModel):
     user_id: int
@@ -223,6 +224,11 @@ def is_device_ws_connected(device_id: str) -> bool:
 def push_rotate_secret_to_edge(device_id: str, new_secret: str) -> bool:
     """Push a rotated device secret over an active WebSocket so online devices update without physical re-pairing."""
     return _WS_REGISTRY.send_json_sync(device_id, {"type": "rotate_secret", "device_secret": new_secret})
+
+
+def push_access_config_to_edge(device_id: str, access_config: Dict[str, Any]) -> bool:
+    """Push updated Access Control thresholds/settings over an active WebSocket."""
+    return _WS_REGISTRY.send_json_sync(device_id, {"type": "config_update", "access_config": access_config})
 
 
 def _authenticate_device_websocket(websocket: WebSocket, db: Session) -> Optional[Device]:
@@ -715,6 +721,11 @@ def get_deltas(last_synced_at: Optional[str] = None, module: Optional[str] = Non
         raise HTTPException(status_code=400, detail="module must be access_control, surveillance, or edge")
     payload = handler.get_delta_updates(db, parsed_time, model_by_module.get(module))
     payload["node_id"] = device.node_id
+    if getattr(device, "access_config_json", None):
+        try:
+            payload["access_config"] = json.loads(device.access_config_json)
+        except Exception:
+            payload["access_config"] = None
     return payload
 
 @router.post("/deactivate")
