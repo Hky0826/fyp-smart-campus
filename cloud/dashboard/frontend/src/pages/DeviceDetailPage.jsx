@@ -86,6 +86,7 @@ export function DeviceDetailPage() {
         secret: '',
         pairing_code: res.pairing_code || '',
         pairing_expires_at: res.pairing_expires_at || '',
+        pairing_qr_payload: res.pairing_qr_payload || '',
         pairing_qr_svg_data_uri: res.pairing_qr_svg_data_uri || '',
         paired: false,
       });

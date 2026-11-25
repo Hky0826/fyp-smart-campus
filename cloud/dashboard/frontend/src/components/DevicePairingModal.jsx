@@ -37,9 +37,19 @@ export function DevicePairingModal({ details, onClose, onPaired }) {
 
   if (!details) return null;
 
+  let resolvedCloudUrl = window.location.origin;
+  if (details.pairing_qr_payload) {
+    try {
+      const parsed = JSON.parse(details.pairing_qr_payload);
+      if (parsed?.cloud_url) resolvedCloudUrl = parsed.cloud_url;
+    } catch {
+      // fall back to window.location.origin
+    }
+  }
+
   const handleDownloadProvisionJson = () => {
     const payload = {
-      cloud_url: window.location.origin,
+      cloud_url: resolvedCloudUrl,
       device_id: details.device_id,
       device_name: details.device_name || details.device_id,
       device_secret: details.secret,
@@ -145,7 +155,7 @@ export function DevicePairingModal({ details, onClose, onPaired }) {
           </div>
           <div className="flex justify-between gap-4">
             <span className="text-slate-500">Cloud URL</span>
-            <span className="font-mono text-slate-700 dark:text-slate-200">{window.location.origin}</span>
+            <span className="font-mono text-slate-700 dark:text-slate-200">{resolvedCloudUrl}</span>
           </div>
         </div>
 

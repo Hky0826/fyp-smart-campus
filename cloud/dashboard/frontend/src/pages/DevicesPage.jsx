@@ -65,6 +65,7 @@ export function DevicesPage() {
           secret: created.provisioned_secret || '',
           pairing_code: created.pairing_code || '',
           pairing_expires_at: created.pairing_expires_at || '',
+          pairing_qr_payload: created.pairing_qr_payload || '',
           pairing_qr_svg_data_uri: created.pairing_qr_svg_data_uri || '',
           paired: false,
         });
@@ -89,6 +90,7 @@ export function DevicesPage() {
         secret: '',
         pairing_code: res.pairing_code || '',
         pairing_expires_at: res.pairing_expires_at || '',
+        pairing_qr_payload: res.pairing_qr_payload || '',
         pairing_qr_svg_data_uri: res.pairing_qr_svg_data_uri || '',
         paired: false,
       });
