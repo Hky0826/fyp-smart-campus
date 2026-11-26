@@ -93,7 +93,7 @@ export function RbacMatrixPage() {
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
             }`}
           >
-            <Cpu className="w-3.5 h-3.5" /> Device Overrides ({devices.length})
+            <Cpu className="w-3.5 h-3.5" /> Device RBAC ({devices.length})
           </button>
         </div>
       </div>
@@ -186,7 +186,7 @@ export function RbacMatrixPage() {
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-slate-900 dark:text-slate-100">{d.device_name}</span>
                             <StatusBadge variant={hasOverrides ? 'info' : 'neutral'}>
-                              {hasOverrides ? 'Override' : 'Inherited'}
+                              {hasOverrides ? 'Device RBAC' : 'Inherited'}
                             </StatusBadge>
                           </div>
                           <div className="text-xs font-mono text-slate-500">{d.device_id} · Node #{d.node_id}</div>

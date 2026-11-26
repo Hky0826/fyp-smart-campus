@@ -107,7 +107,7 @@ export function DataTable({
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
               {data.map((rowOriginal, rIdx) => (
                 <tr
-                  key={rowOriginal?.user_id ?? rowOriginal?.device_id ?? rowOriginal?.log_id ?? rowOriginal?.event_id ?? rowOriginal?.document_id ?? rowOriginal?.query_id ?? rowOriginal?.role_id ?? rIdx}
+                  key={rowOriginal?.log_id ?? rowOriginal?.event_id ?? rowOriginal?.query_id ?? rowOriginal?.document_id ?? rowOriginal?.user_id ?? rowOriginal?.device_id ?? rowOriginal?.role_id ?? rIdx}
                   onClick={() => onRowClick?.(rowOriginal)}
                   className={`transition-colors ${
                     onRowClick ? 'cursor-pointer' : ''

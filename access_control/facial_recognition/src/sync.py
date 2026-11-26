@@ -1168,6 +1168,7 @@ class UpstreamSyncClient:
         payload_logs = []
         log_id_mapping = {}
         for index, log in enumerate(pending_logs):
+            image_b64, image_filename = self._read_image_payload(log.get("image_path"))
             payload_logs.append(
                 {
                     "sync_key": log["sync_key"],
@@ -1181,6 +1182,8 @@ class UpstreamSyncClient:
                     "spoofing_passed": log["spoofing_passed"],
                     "timestamp": log["timestamp"],
                     "image_path": log["image_path"],
+                    "image_b64": image_b64,
+                    "image_filename": image_filename,
                     "node_id": log.get("node_id"),
                     "policy_version": log.get("policy_version"),
                     "decision_reason": log.get("decision_reason"),

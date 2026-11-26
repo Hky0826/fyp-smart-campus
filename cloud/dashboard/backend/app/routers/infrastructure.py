@@ -25,7 +25,7 @@ from app.core.private_storage import safe_existing_path
 from app.core.security import verify_super_admin, verify_system_admin, get_current_admin
 from app.models.models import (
     Device, DeviceRBAC, NodeRBAC, EdgeRBAC, JWTSession, AuthenticationLog, SurveillanceLog,
-    Node, Role, Edge, User, Admin, Floorplan, Building, Course, UploadedDocument,
+    Node, Role, Edge, User, UserRole, Admin, Floorplan, Building, Course, UploadedDocument,
     UserFaceEmbedding, AdministratorAuditEvent, Visitor,
 )
 from app.schemas import schemas
@@ -774,6 +774,24 @@ def list_surveillance_logs(
     return query.order_by(SurveillanceLog.timestamp.desc()).offset(skip).limit(limit).all()
 
 
+@router.get("/auth-logs/{log_id}/image", include_in_schema=False)
+def download_auth_log_image(log_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
+    """Serve private snapshot image captured for an unknown or spoofing access attempt."""
+    log = db.query(AuthenticationLog).filter_by(log_id=log_id).first()
+    if not log or not log.image_path:
+        raise HTTPException(status_code=404, detail="Access log snapshot not found")
+    path = safe_existing_path("auth_logs", log.image_path)
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-store, private",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": "inline",
+        },
+    )
+
+
 @router.get("/surveillance-logs/{log_id}/image", include_in_schema=False)
 def download_surveillance_image(log_id: int, db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     log = db.query(SurveillanceLog).filter_by(log_id=log_id).first()
@@ -1176,6 +1194,7 @@ def list_auth_logs_paginated(
     auth_status: str = Query("ALL", alias="status"),
     device_id: Optional[str] = Query(None),
     user_id: Optional[int] = Query(None),
+    role_id: Optional[int] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     db: Session = Depends(get_db),
@@ -1189,14 +1208,33 @@ def list_auth_logs_paginated(
     term = (q or "").strip()
     if term:
         pat = f"%{term}%"
-        query = query.outerjoin(AuthenticationLog.user).filter(
-            or_(
-                User.email.ilike(pat),
-                User.given_name.ilike(pat),
-                User.family_name.ilike(pat),
-                AuthenticationLog.device_id.ilike(pat),
-                AuthenticationLog.reason.ilike(pat),
-            )
+        bind = db.get_bind()
+        is_sqlite = bool(bind is not None and bind.dialect.name == "sqlite")
+        if is_sqlite:
+            full_name_expr = func.coalesce(User.given_name, "").op("||")(" ").op("||")(func.coalesce(User.family_name, ""))
+            rev_name_expr = func.coalesce(User.family_name, "").op("||")(" ").op("||")(func.coalesce(User.given_name, ""))
+        else:
+            full_name_expr = func.concat(func.coalesce(User.given_name, ""), " ", func.coalesce(User.family_name, ""))
+            rev_name_expr = func.concat(func.coalesce(User.family_name, ""), " ", func.coalesce(User.given_name, ""))
+        search_clauses = [
+            User.email.ilike(pat),
+            User.given_name.ilike(pat),
+            User.family_name.ilike(pat),
+            full_name_expr.ilike(pat),
+            rev_name_expr.ilike(pat),
+            AuthenticationLog.device_id.ilike(pat),
+            Device.device_name.ilike(pat),
+            Node.room_label.ilike(pat),
+            AuthenticationLog.reason.ilike(pat),
+            AuthenticationLog.decision_reason.ilike(pat),
+        ]
+        if term.lower() in "unknown":
+            search_clauses.append(AuthenticationLog.user_id.is_(None))
+        query = (
+            query.outerjoin(AuthenticationLog.user)
+            .outerjoin(AuthenticationLog.device)
+            .outerjoin(AuthenticationLog.node)
+            .filter(or_(*search_clauses))
         )
     if auth_status and auth_status.upper() != "ALL":
         query = query.filter(AuthenticationLog.auth_status == auth_status.upper())
@@ -1204,16 +1242,28 @@ def list_auth_logs_paginated(
         query = query.filter(AuthenticationLog.device_id == device_id)
     if user_id is not None:
         query = query.filter(AuthenticationLog.user_id == user_id)
+    if role_id is not None:
+        query = query.filter(
+            exists().where(
+                UserRole.user_id == AuthenticationLog.user_id,
+                UserRole.role_id == role_id,
+            )
+        )
     if date_from:
         try:
-            query = query.filter(AuthenticationLog.timestamp >= datetime.fromisoformat(date_from))
+            dt_from = datetime.fromisoformat(date_from)
+            if len(date_from) <= 10:
+                # Interpret YYYY-MM-DD in Malaysia Time (UTC+8) -> convert to UTC
+                dt_from = dt_from - timedelta(hours=8)
+            query = query.filter(AuthenticationLog.timestamp >= dt_from)
         except ValueError:
             pass
     if date_to:
         try:
             dt_to = datetime.fromisoformat(date_to)
             if len(date_to) <= 10:
-                dt_to = dt_to + timedelta(days=1)
+                # End of Malaysia day (UTC+8) -> convert to UTC
+                dt_to = dt_to + timedelta(days=1) - timedelta(hours=8)
             query = query.filter(AuthenticationLog.timestamp <= dt_to)
         except ValueError:
             pass
@@ -1223,6 +1273,18 @@ def list_auth_logs_paginated(
     safe_page = min(page, total_pages)
     rows = query.order_by(AuthenticationLog.timestamp.desc()).offset((safe_page - 1) * page_size).limit(page_size).all()
 
+    user_ids = {r.user_id for r in rows if r.user_id is not None}
+    roles_by_user: dict[int, list[str]] = {}
+    if user_ids:
+        role_rows = (
+            db.query(UserRole.user_id, Role.role_name)
+            .join(Role, Role.role_id == UserRole.role_id)
+            .filter(UserRole.user_id.in_(user_ids))
+            .all()
+        )
+        for uid, rname in role_rows:
+            roles_by_user.setdefault(uid, []).append(rname)
+
     return {
         "items": [
             {
@@ -1230,6 +1292,7 @@ def list_auth_logs_paginated(
                 "user_id": r.user_id,
                 "email": r.user.email if r.user else "",
                 "full_name": r.user.full_name if r.user else "Unknown",
+                "roles": roles_by_user.get(r.user_id, []) if r.user_id is not None else [],
                 "device_id": r.device_id,
                 "device_name": r.device.device_name if r.device else r.device_id,
                 "node_id": r.node_id,
@@ -1239,6 +1302,7 @@ def list_auth_logs_paginated(
                 "spoofing_passed": r.spoofing_passed,
                 "reason": r.reason or r.decision_reason,
                 "policy_version": r.policy_version,
+                "has_image": bool(r.image_path and not str(r.image_path).startswith("/") and ":" not in str(r.image_path)),
                 "timestamp": r.timestamp.isoformat() if r.timestamp else None,
             }
             for r in rows

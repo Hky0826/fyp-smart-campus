@@ -201,8 +201,8 @@ export function DeviceDetailPage() {
           </div>
           <p className="text-xs text-slate-500">
             {dev.uses_device_override
-              ? 'Using device-specific RBAC override rules.'
-              : 'No device overrides set — inheriting Node RBAC rules.'}
+              ? 'Using Device RBAC rules.'
+              : 'No Device RBAC rules set — inheriting Node RBAC rules.'}
           </p>
           <div className="space-y-2">
             {roles.map((r) => {

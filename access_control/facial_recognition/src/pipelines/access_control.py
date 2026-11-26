@@ -410,7 +410,8 @@ class AccessControlPipeline:
                     is_spoof = effective_pad_state == "spoof" or (not self.config.pad_required and spoof_result.state == "spoof")
                     reason = "Spoofing/liveness check failed." if is_spoof else "Liveness check inconclusive."
                     if is_spoof:
-                        self._log_event(None, "SPOOFING", spoof_result.score)
+                        spoof_image_path = self._save_face_snapshot(frame, face, force=True)
+                        self._log_event(None, "SPOOFING", spoof_result.score, image_path=spoof_image_path)
                     timer.total()
                     return cache_and_return(self._deny(
                         reason,
@@ -494,7 +495,7 @@ class AccessControlPipeline:
                 timer.total()
                 terminal = self.embedding_aggregator.sample_count >= self.config.max_embedding_samples
                 if terminal:
-                    image_path = self._save_face_snapshot(frame, face)
+                    image_path = self._save_face_snapshot(frame, face, force=True)
                     self._log_event(None, "FAILED", match.similarity, image_path=image_path)
                     self.embedding_aggregator.reset()
                 result = self._deny(
@@ -559,7 +560,7 @@ class AccessControlPipeline:
                     match.similarity,
                     self.config.recognition_threshold,
                 )
-                image_path = self._save_face_snapshot(frame, face)
+                image_path = self._save_face_snapshot(frame, face, force=True)
                 self._log_event(None, "FAILED", match.similarity, image_path=image_path)
                 self.embedding_aggregator.reset()
                 timer.total()
@@ -904,16 +905,29 @@ class AccessControlPipeline:
             "failure_reasons": list(getattr(quality, "failure_reasons", [])),
         }
 
-    def _save_face_snapshot(self, frame: np.ndarray, face: DetectedFace) -> Optional[str]:
-        if not hasattr(self.config, 'snapshot_enabled') or not self.config.snapshot_enabled or cv2 is None:
+    def _save_face_snapshot(
+        self,
+        frame: np.ndarray,
+        face: DetectedFace,
+        *,
+        force: bool = False,
+        pad_ratio: float = 0.40,
+    ) -> Optional[str]:
+        if cv2 is None:
+            return None
+        if not force and (not hasattr(self.config, 'snapshot_enabled') or not self.config.snapshot_enabled):
             return None
 
         h, w = frame.shape[:2]
         x1, y1, x2, y2 = face.xyxy_int()
-        x1 = max(0, min(w, x1))
-        x2 = max(0, min(w, x2))
-        y1 = max(0, min(h, y1))
-        y2 = max(0, min(h, y2))
+        bw = max(1, x2 - x1)
+        bh = max(1, y2 - y1)
+        pad_x = int(bw * pad_ratio)
+        pad_y = int(bh * pad_ratio)
+        x1 = max(0, min(w, x1 - pad_x))
+        x2 = max(0, min(w, x2 + pad_x))
+        y1 = max(0, min(h, y1 - pad_y))
+        y2 = max(0, min(h, y2 + pad_y))
         if x2 <= x1 or y2 <= y1:
             return None
 

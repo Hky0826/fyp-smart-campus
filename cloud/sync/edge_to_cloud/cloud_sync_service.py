@@ -47,6 +47,8 @@ class EdgeLogPayload(BaseModel):
     spoofing_passed: Optional[bool] = None
     timestamp: str = Field(..., description="Timestamp of authentication attempt in ISO 8601 format")
     image_path: Optional[str] = None
+    image_b64: Optional[str] = None
+    image_filename: Optional[str] = None
     node_id: Optional[int] = None
     policy_version: Optional[str] = None
     decision_reason: Optional[str] = None
@@ -175,6 +177,7 @@ class SQLAlchemyUpstreamHandler(AbstractUpstreamHandler):
 
                     # 1. Append log to cloud authentication_logs
                     parsed_time = self._parse_timestamp(log.timestamp)
+                    saved_object_key = self._persist_auth_log_image(log, sync_key)
                     db_log = AuthenticationLog(
                         sync_key=sync_key,
                         user_id=log.user_id,
@@ -186,7 +189,7 @@ class SQLAlchemyUpstreamHandler(AbstractUpstreamHandler):
                         spoofing_checked=log.spoofing_checked,
                         spoofing_passed=log.spoofing_passed,
                         timestamp=parsed_time,
-                        image_path=log.image_path,
+                        image_path=saved_object_key,
                         node_id=log.node_id,
                         policy_version=log.policy_version,
                         decision_reason=log.decision_reason,
@@ -290,6 +293,36 @@ class SQLAlchemyUpstreamHandler(AbstractUpstreamHandler):
         if parsed.tzinfo is not None:
             return parsed.astimezone(datetime.timezone.utc).replace(tzinfo=None)
         return parsed
+
+    @staticmethod
+    def _persist_auth_log_image(log: EdgeLogPayload, sync_key: str) -> Optional[str]:
+        if not log.image_b64:
+            return None
+        try:
+            image_bytes = base64.b64decode(log.image_b64, validate=True)
+        except (binascii.Error, ValueError):
+            logger.warning("Skipping invalid auth log image payload for sync key %s", sync_key)
+            return None
+        if len(image_bytes) > 10 * 1024 * 1024:
+            logger.warning("Skipping oversized auth log image payload for sync key %s", sync_key)
+            return None
+        ext = os.path.splitext(log.image_filename or "")[1].lower()
+        if ext not in {".jpg", ".jpeg", ".png"}:
+            ext = ".jpg"
+        object_key = f"{datetime.datetime.utcnow():%Y%m%d}/{sync_key}{ext}"
+        file_path = private_path("auth_logs", object_key)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = file_path.with_name(f".{file_path.name}.{secrets.token_hex(6)}.tmp")
+        try:
+            with temp_path.open("xb") as out:
+                out.write(image_bytes)
+                out.flush()
+                os.fsync(out.fileno())
+            temp_path.replace(file_path)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
+        return object_key
 
     @staticmethod
     def _save_surveillance_image(sync_key: str, log: EdgeSurveillanceLogPayload) -> Optional[str]:
