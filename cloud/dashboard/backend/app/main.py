@@ -36,7 +36,7 @@ from app.core.config import settings
 from app.core.csrf import CSRFMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware
 from RagChatbot.router import router as chatbot_router
-from app.routers.mapping_proxy import router as mapping_notification_router
+from app.routers.mapping import router as mapping_router, public_router as mapping_public_router
 
 # Create the FastAPI app instance
 app = FastAPI(
@@ -73,11 +73,12 @@ async def block_legacy_private_paths(request, call_next):
 @app.on_event("startup")
 def load_vector_store():
     settings.validate_security()
-    from app.db_init import ensure_speech_tables_and_seed, ensure_device_provisioning_columns
+    from app.db_init import ensure_speech_tables_and_seed, ensure_device_provisioning_columns, ensure_kiosk_session_table
     from RagChatbot.retrieval.vector_store import vector_store
     with SessionLocal() as db:
         ensure_speech_tables_and_seed(db)
         ensure_device_provisioning_columns(db)
+        ensure_kiosk_session_table(db)
         vector_store.load_from_db(db)
 
 # CORS Middleware Configuration
@@ -106,7 +107,11 @@ app.include_router(edge_auth_router, prefix="/api")
 
 # RAG Chatbot endpoints – available to edge devices and admin UI
 app.include_router(chatbot_router, prefix="/api")
-app.include_router(mapping_notification_router, prefix="/api/mapping-notification")
+
+# Native Campus Mapping, Navigation, Kiosk & Notification endpoints
+app.include_router(mapping_router, prefix="/api/mapping")
+app.include_router(mapping_router, prefix="/api/mapping-notification", include_in_schema=False)
+app.include_router(mapping_public_router, include_in_schema=False)
 
 # Mapping & Floorplan AI Computer Vision microservice endpoints (/api/v1/wall-detection, /api/v1/analyze/floorplan)
 try:

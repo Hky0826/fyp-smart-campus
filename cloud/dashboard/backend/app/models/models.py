@@ -814,6 +814,21 @@ class Notification(Base):
     )
 
 
+class KioskSession(Base):
+    __tablename__ = "kiosk_sessions"
+
+    session_id = Column(Integer, primary_key=True, autoincrement=True)
+    session_token = Column(String(64), nullable=False, unique=True, index=True)
+    current_location = Column(Integer, nullable=False)
+    destination_node = Column(Integer, nullable=False)
+    rbac_role = Column(String(32), nullable=False)
+    walking_speed = Column(Float, default=1.2, nullable=False)
+    navigation_data = Column(Text, nullable=False)
+    map_context = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+
+
 class DeletedUser(Base):
     __tablename__ = "deleted_users"
     

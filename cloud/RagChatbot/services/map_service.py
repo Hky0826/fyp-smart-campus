@@ -440,70 +440,87 @@ def _ensure_mapping_microservice() -> bool:
         return False
 
 
+from contextvars import ContextVar
+
+_ACTIVE_NAV_DB: ContextVar = ContextVar("_ACTIVE_NAV_DB", default=None)
+
+
 def _call_route_microservice(*, destination_node_id: int, start_node_id: int | None, roles: list[str] | tuple[str, ...]) -> dict:
-    """Call Node.js Mapping Microservice route calculation."""
+    """Calculate route + kiosk QR session natively in-process (zero HTTP hop)."""
     if start_node_id is None:
         raise StartLocationRequired("Start location required")
 
     primary_role = roles[0] if roles else "VISITOR"
-    payload = {
-        "current_location": start_node_id,
-        "destination_node": destination_node_id,
-        "rbac_role": primary_role,
-        "start_node_id": start_node_id,
-        "destination_node_id": destination_node_id,
-        "roles": list(roles),
-    }
-    headers = {
-        "x-api-key": NAVIGATION_API_KEY,
-    }
-    for attempt in range(2):
+    db = _ACTIVE_NAV_DB.get()
+    close_db = False
+    if db is None:
+        from app.core.database import SessionLocal
+        db = SessionLocal()
+        close_db = True
+
+    try:
+        import os
+        import secrets
+        import time
+        from app.services.mapping.navigation_engine import NavigationEngineError, run_navigation
+        from app.services.mapping.visualisation_model import build_visualisation_model
+        from app.services.mapping.route_visualizer import generate_route_visualisations
+        from app.services.mapping.kiosk_session import create_kiosk_session, get_mobile_base_url
+
+        nav = run_navigation(
+            db,
+            current_location=start_node_id,
+            destination_node=destination_node_id,
+            rbac_role=primary_role,
+        )
+        map_context = build_visualisation_model(db, route_result=nav, rbac_role=primary_role)
+        nav["map_context"] = map_context
+
+        base_url = get_mobile_base_url(None)
+        port = os.getenv("PORT", "8000")
+        visualisations = []
         try:
-            # 1. First attempt the kiosk endpoint to generate QR session & map context
-            try:
-                kiosk_resp = _HTTP_CLIENT.post(
-                    f"{MAPPING_MICROSERVICE_URL.rstrip('/')}/api/kiosk/navigate",
-                    json=payload,
-                    headers=headers,
-                )
-                if kiosk_resp.status_code == 200:
-                    data = kiosk_resp.json()
-                    nav = data.get("navigation", data)
-                    if isinstance(nav, dict):
-                        if "qr_session" in data:
-                            nav["qr_session"] = data["qr_session"]
-                        if "map_context" in data:
-                            nav["map_context"] = data["map_context"]
-                        if "visualisations" in data:
-                            nav["visualisations"] = data["visualisations"]
-                    return nav
-            except Exception:
-                pass
+            temp_token = f"nav_{int(time.time() * 1000)}_{secrets.token_hex(6)}"
+            for v in generate_route_visualisations(db, nav, temp_token):
+                visualisations.append({
+                    "floorplan_id": v["floorplanId"],
+                    "floor_level": v["floorLevel"],
+                    "building_name": v["buildingName"],
+                    "filename": v["filename"],
+                    "image_url": f"{base_url}/uploads/visualisations/{v['filename']}",
+                    "local_image_url": f"http://127.0.0.1:{port}/uploads/visualisations/{v['filename']}",
+                    "file_url": f"file:///{v['filePath'].replace(os.sep, '/')}",
+                })
+            nav["visualisations"] = visualisations
+        except Exception:
+            nav["visualisations"] = []
 
-            # 2. Fallback to standard /navigate endpoint
-            resp = _HTTP_CLIENT.post(
-                f"{MAPPING_MICROSERVICE_URL.rstrip('/')}/navigate",
-                json=payload,
-                headers=headers,
+        try:
+            nav["qr_session"] = create_kiosk_session(
+                db,
+                nav_result=nav,
+                map_context=map_context,
+                start_id=start_node_id,
+                end_id=destination_node_id,
+                role_id=primary_role,
             )
-            if resp.status_code == 200:
-                return resp.json()
+        except Exception:
+            pass
 
-            try:
-                err_data = resp.json()
-                err_msg = err_data.get("error") or err_data.get("message") or err_data.get("detail") or "Navigation error"
-            except Exception:
-                err_msg = f"HTTP {resp.status_code}"
-
-            if resp.status_code == 422:
-                raise StartLocationRequired(err_msg)
-            if resp.status_code == 404:
-                raise NoRouteError(err_msg)
-            raise NavigationError(f"Route calculation failed ({resp.status_code}): {err_msg}")
-        except (httpx.ConnectError, httpx.TimeoutException):
-            if attempt == 0 and _ensure_mapping_microservice():
-                continue
-            raise NavigationError("Mapping microservice is unreachable")
+        return nav
+    except NavigationEngineError as exc:
+        if exc.status_code == 422:
+            raise StartLocationRequired(exc.message) from exc
+        if exc.no_route or exc.status_code == 404:
+            raise NoRouteError(exc.message) from exc
+        raise NavigationError(exc.message) from exc
+    except (StartLocationRequired, NoRouteError, NavigationError):
+        raise
+    except Exception as exc:
+        raise NavigationError(f"Route calculation failed: {exc}") from exc
+    finally:
+        if close_db and db is not None:
+            db.close()
 
 
 def calculate_navigation(query: str, *, db, context):
@@ -560,11 +577,15 @@ def calculate_navigation(query: str, *, db, context):
         start_required = False
         for node in matches:
             try:
-                candidate_route = _call_route_microservice(
-                    destination_node_id=node.node_id,
-                    start_node_id=start_node_id,
-                    roles=list(roles),
-                )
+                _db_tok = _ACTIVE_NAV_DB.set(db)
+                try:
+                    candidate_route = _call_route_microservice(
+                        destination_node_id=node.node_id,
+                        start_node_id=start_node_id,
+                        roles=list(roles),
+                    )
+                finally:
+                    _ACTIVE_NAV_DB.reset(_db_tok)
                 route_candidates.append((candidate_route, node))
             except StartLocationRequired:
                 start_required = True
@@ -637,11 +658,15 @@ def calculate_navigation(query: str, *, db, context):
 
     try:
         if route is None:
-            route = _call_route_microservice(
-                destination_node_id=matches[0].node_id,
-                start_node_id=start_node_id,
-                roles=list(roles),
-            )
+            _db_tok = _ACTIVE_NAV_DB.set(db)
+            try:
+                route = _call_route_microservice(
+                    destination_node_id=matches[0].node_id,
+                    start_node_id=start_node_id,
+                    roles=list(roles),
+                )
+            finally:
+                _ACTIVE_NAV_DB.reset(_db_tok)
     except StartLocationRequired:
         floor_desc = f"on level {matches[0].floor}" if matches[0].floor is not None else ""
         bldg_desc = f"in {matches[0].building}" if matches[0].building else ""

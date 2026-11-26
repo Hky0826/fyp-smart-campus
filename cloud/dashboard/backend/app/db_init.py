@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
-from app.models.models import Role, User, Admin, Building, Floorplan, Node, Edge, Department, Faculty, Programme, Staff, UserRole, Device, DeviceRBAC, NodeRBAC, SpeechLanguage, SpeechAdaptationPhrase
+from app.models.models import Role, User, Admin, Building, Floorplan, Node, Edge, Department, Faculty, Programme, Staff, UserRole, Device, DeviceRBAC, NodeRBAC, SpeechLanguage, SpeechAdaptationPhrase, KioskSession
 from app.core.security import get_password_hash, validate_strong_password
 
 def create_database():
@@ -422,6 +422,15 @@ def ensure_device_provisioning_columns(db) -> None:
             changed = True
     if changed:
         db.commit()
+
+
+def ensure_kiosk_session_table(db=None) -> None:
+    """Idempotently create the kiosk_sessions table used by mobile wayfinding QR sessions."""
+    try:
+        bind = db.get_bind() if db is not None else engine
+        Base.metadata.create_all(bind=bind, tables=[KioskSession.__table__])
+    except Exception as exc:
+        print(f"Note: kiosk_sessions table check: {exc}")
 
 
 def main():

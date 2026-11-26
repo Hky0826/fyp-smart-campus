@@ -143,130 +143,14 @@ $uvicornArgs = @(
     "--host", $BindAddress,
     "--port", $Port.ToString()
 )
-$env:PYTHONPATH = "$repoRoot\cloud\dashboard\backend;$repoRoot\cloud"
-$mappingBackendDir = Join-Path $repoRoot "mapping_and_notification\backend"
-$mappingIndexScript = Join-Path $mappingBackendDir "index.js"
-$mappingConsumerScript = Join-Path $mappingBackendDir "consumer.js"
-$aiServiceDir = Join-Path $repoRoot "mapping_and_notification\ai-services"
+$env:PYTHONPATH = "$repoRoot\cloud\dashboard\backend;$repoRoot\cloud;$repoRoot\mapping_and_notification\ai-services"
 
-if ($SkipNotificationWorker -and $StartNotificationWorker) {
-    Stop-WithMessage "Use either -SkipNotificationWorker or -StartNotificationWorker, not both."
-}
-
-$runNotificationWorker = $StartNotificationWorker -or -not $SkipNotificationWorker
-if ($runNotificationWorker) {
-    & $python -c "import pika" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Stop-WithMessage "The notification worker dependency 'pika' is missing from .venv. Install cloud\requirements.txt, then retry."
-    }
-}
-
-try {
-    $existingNodeServices = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | Where-Object {
-        $_.CommandLine -match 'mapping_and_notification[\\/]backend'
-    })
-    foreach ($proc in $existingNodeServices) {
-        Write-Host "Stopping existing Mapping/Notification Node process (PID $($proc.ProcessId))..." -ForegroundColor DarkCyan
-        Stop-Process -Id ([int]$proc.ProcessId) -Force -ErrorAction SilentlyContinue
-    }
-} catch {
-    Write-Warning "Could not inspect existing node processes."
-}
-
-try {
-    $existingAiServices = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'python%'" | Where-Object {
-        $_.CommandLine -match 'src\.main:app' -and $_.CommandLine -match '8001'
-    })
-    foreach ($proc in $existingAiServices) {
-        Write-Host "Stopping existing Python AI Microservice (PID $($proc.ProcessId))..." -ForegroundColor DarkCyan
-        Stop-Process -Id ([int]$proc.ProcessId) -Force -ErrorAction SilentlyContinue
-    }
-} catch {
-    Write-Warning "Could not inspect existing Python AI processes."
-}
-
-Write-Host "Starting Python AI Microservice on port 8001..." -ForegroundColor Cyan
-$aiVenvPython = Join-Path $aiServiceDir "venv\Scripts\python.exe"
-$aiPython = if (Test-Path -LiteralPath $aiVenvPython) { $aiVenvPython } else { $python }
-$aiProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath $aiPython -ArgumentList @(
-    "-m", "uvicorn", "src.main:app", "--host", "127.0.0.1", "--port", "8001"
-) -WorkingDirectory $aiServiceDir
-
-$aiReady = $false
-for ($i = 0; $i -lt 20; $i++) {
-    if ($aiProcess.HasExited) { break }
-    try {
-        $resp = Invoke-WebRequest -Uri "http://127.0.0.1:8001/health" -TimeoutSec 1 -UseBasicParsing -ErrorAction Stop
-        if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) {
-            $aiReady = $true
-            break
-        }
-    } catch { }
-    Start-Sleep -Milliseconds 500
-}
-if ($aiReady) {
-    Write-Host "Python AI Microservice ready: http://127.0.0.1:8001" -ForegroundColor Green
-} else {
-    Write-Warning "Python AI Microservice did not respond on port 8001 within 10 seconds."
-}
-
-if (-not $env:AI_SERVICE_URL) {
-    $env:AI_SERVICE_URL = "http://127.0.0.1:8001"
-}
-if (-not $env:MAPPING_MICROSERVICE_URL) {
-    $env:MAPPING_MICROSERVICE_URL = "http://127.0.0.1:5000"
-}
-
-Write-Host "Starting Node.js Mapping Microservice on port 5000..." -ForegroundColor Cyan
-$mappingServiceProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath "node" -ArgumentList @(
-    $mappingIndexScript
-) -WorkingDirectory $mappingBackendDir
-
-$mappingReady = $false
-for ($i = 0; $i -lt 20; $i++) {
-    if ($mappingServiceProcess.HasExited) { break }
-    try {
-        $resp = Invoke-WebRequest -Uri "http://127.0.0.1:5000/health" -TimeoutSec 1 -UseBasicParsing -ErrorAction Stop
-        if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) {
-            $mappingReady = $true
-            break
-        }
-    } catch { }
-    Start-Sleep -Milliseconds 500
-}
-if ($mappingReady) {
-    Write-Host "Node.js Mapping Microservice ready: http://127.0.0.1:5000" -ForegroundColor Green
-} else {
-    Write-Warning "Node.js Mapping Microservice did not respond on port 5000 within 10 seconds."
-}
-
-$workerProcess = $null
-if ($runNotificationWorker) {
-    Write-Host "Starting background notification worker/consumer..." -ForegroundColor Cyan
-    $workerProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath "node" -ArgumentList @(
-        $mappingConsumerScript
-    ) -WorkingDirectory $mappingBackendDir
-    Start-Sleep -Seconds 1
-}
 if ($Reload) {
     $uvicornArgs += @("--reload", "--reload-dir", (Join-Path $repoRoot "cloud"))
 }
 
-Write-Host "Cloud development backend is starting at http://$BindAddress`:$Port" -ForegroundColor Green
+Write-Host "Unified Smart Campus Cloud backend is starting at http://$BindAddress`:$Port" -ForegroundColor Green
 Write-Host "Dashboard: http://localhost`:$Port/dashboard/" -ForegroundColor Green
 Write-Host "Press Ctrl+C to stop the cloud backend."
-try {
-    & $python @uvicornArgs
-} finally {
-    Write-Host "`nStopping background microservices..." -ForegroundColor DarkCyan
-    if ($mappingServiceProcess -and -not $mappingServiceProcess.HasExited) {
-        Stop-Process -Id $mappingServiceProcess.Id -Force -ErrorAction SilentlyContinue
-    }
-    if ($workerProcess -and -not $workerProcess.HasExited) {
-        Stop-Process -Id $workerProcess.Id -Force -ErrorAction SilentlyContinue
-    }
-    if ($aiProcess -and -not $aiProcess.HasExited) {
-        Stop-Process -Id $aiProcess.Id -Force -ErrorAction SilentlyContinue
-    }
-}
+& $python @uvicornArgs
 exit $LASTEXITCODE
