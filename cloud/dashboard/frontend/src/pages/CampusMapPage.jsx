@@ -910,6 +910,7 @@ export default function CampusMapPage() {
                 {...mapEditor}
                 handleDeleteSelected={mapEditor.handleDeleteSelected}
                 rolesList={floorplanData.rolesList}
+                accessGroupsList={floorplanData.accessGroupsList}
                 globalNodes={floorplanData.globalNodes}
                 currentFloorplanId={floorplanData.currentFloorplanId}
                 currentBuildingName={floorplanData.editBuildingName}

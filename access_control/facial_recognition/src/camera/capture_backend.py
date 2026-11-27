@@ -19,9 +19,16 @@ DEFAULT_SWAP_RB = os.getenv("EDGE_CAMERA_SWAP_RB", "false").strip().lower() in {
 DEFAULT_EXPOSURE_VALUE = float(os.getenv("EDGE_CAMERA_EV", "0.0"))
 DEFAULT_BRIGHTNESS = float(os.getenv("EDGE_CAMERA_BRIGHTNESS", "0.0"))
 DEFAULT_CONTRAST = float(os.getenv("EDGE_CAMERA_CONTRAST", "1.0"))
+DEFAULT_AUTO_EXPOSURE = os.getenv("EDGE_CAMERA_AUTO_EXPOSURE", "true").strip().lower() in {"1", "true", "yes", "on"}
 DEFAULT_AE_METERING_MODE = int(os.getenv("EDGE_CAMERA_AE_METERING_MODE", "0"))  # 0 = CentreWeighted
 DEFAULT_AE_EXPOSURE_MODE = int(os.getenv("EDGE_CAMERA_AE_EXPOSURE_MODE", "0"))  # 0 = Normal auto-exposure
 DEFAULT_AE_CONSTRAINT_MODE = int(os.getenv("EDGE_CAMERA_AE_CONSTRAINT_MODE", "1"))  # 1 = Highlight (prevents overexposure)
+DEFAULT_AE_TARGET_LUMA = float(os.getenv("EDGE_CAMERA_AE_TARGET_LUMA", "128.0"))
+DEFAULT_AE_TOLERANCE = float(os.getenv("EDGE_CAMERA_AE_TOLERANCE", "18.0"))
+DEFAULT_AE_INTERVAL_SECONDS = float(os.getenv("EDGE_CAMERA_AE_INTERVAL_SECONDS", "0.4"))
+DEFAULT_AE_MIN_EV = float(os.getenv("EDGE_CAMERA_AE_MIN_EV", "-2.5"))
+DEFAULT_AE_MAX_EV = float(os.getenv("EDGE_CAMERA_AE_MAX_EV", "1.5"))
+DEFAULT_AE_MAX_CLIP_RATIO = float(os.getenv("EDGE_CAMERA_AE_MAX_CLIP_RATIO", "0.08"))
 
 try:
     import cv2
@@ -105,6 +112,107 @@ def detect_v4l2_devices() -> list[str]:
     return uvc_devices + other_devices
 
 
+class AdaptiveExposureController:
+    """Closed-loop ExposureValue (EV) trimmer that prevents overexposure and underexposure.
+
+    Works alongside libcamera's hardware AEC (`AeEnable=True`). Periodically samples a
+    center-weighted downsampled luminance grid from captured frames and smoothly nudges
+    `ExposureValue` down when frames are too bright or highlights are clipped, and up
+    when frames are too dark.
+    """
+
+    def __init__(
+        self,
+        initial_ev: float = DEFAULT_EXPOSURE_VALUE,
+        target_luma: float = DEFAULT_AE_TARGET_LUMA,
+        tolerance: float = DEFAULT_AE_TOLERANCE,
+        min_ev: float = DEFAULT_AE_MIN_EV,
+        max_ev: float = DEFAULT_AE_MAX_EV,
+        max_step: float = 0.25,
+        min_delta: float = 0.05,
+        interval_seconds: float = DEFAULT_AE_INTERVAL_SECONDS,
+        max_clip_ratio: float = DEFAULT_AE_MAX_CLIP_RATIO,
+    ) -> None:
+        self.target_luma = float(target_luma)
+        self.tolerance = float(tolerance)
+        self.min_ev = float(min_ev)
+        self.max_ev = float(max_ev)
+        self.max_step = float(max_step)
+        self.min_delta = float(min_delta)
+        self.interval_seconds = max(0.0, float(interval_seconds))
+        self.max_clip_ratio = float(max_clip_ratio)
+        self.current_ev = max(self.min_ev, min(self.max_ev, float(initial_ev)))
+        self._last_adjust_ts = 0.0
+
+    @staticmethod
+    def measure_frame_luma(frame: Any) -> Tuple[float, float]:
+        """Return (center_weighted_mean_luma, highlight_clip_ratio) in [0..255] and [0..1]."""
+        import numpy as np
+
+        arr = np.asarray(frame)
+        if arr.ndim < 2 or arr.size == 0:
+            return 128.0, 0.0
+
+        # Fast strided downsampling (~80x45 on 1280x720) to keep Pi CPU usage < 0.1ms
+        h, w = arr.shape[:2]
+        step_y = max(1, h // 48)
+        step_x = max(1, w // 64)
+        sample = arr[::step_y, ::step_x]
+
+        if sample.ndim == 3 and sample.shape[2] >= 3:
+            # BGR luminance approximation (Rec. 601)
+            luma = (
+                0.114 * sample[:, :, 0].astype(np.float32)
+                + 0.587 * sample[:, :, 1].astype(np.float32)
+                + 0.299 * sample[:, :, 2].astype(np.float32)
+            )
+        else:
+            luma = sample.astype(np.float32)
+
+        sh, sw = luma.shape[:2]
+        y0, y1 = sh // 5, max(sh // 5 + 1, (4 * sh) // 5)
+        x0, x1 = sw // 5, max(sw // 5 + 1, (4 * sw) // 5)
+        center_luma = luma[y0:y1, x0:x1]
+
+        # Weight the center 60% (where the user's face / QR code appears) 70% vs full frame 30%
+        mean_luma = 0.7 * float(center_luma.mean()) + 0.3 * float(luma.mean())
+        clip_ratio = float((luma >= 245.0).mean())
+        return mean_luma, clip_ratio
+
+    def compute_next_ev(self, frame: Any, now: Optional[float] = None) -> Optional[float]:
+        """Compute updated ExposureValue if adjustment is needed; return None if unchanged."""
+        ts = time.monotonic() if now is None else float(now)
+        if self._last_adjust_ts > 0.0 and (ts - self._last_adjust_ts) < self.interval_seconds:
+            return None
+        self._last_adjust_ts = ts
+
+        mean_luma, clip_ratio = self.measure_frame_luma(frame)
+        delta = 0.0
+
+        # Priority 1: Highlight clipping protection (prevents washed-out bright faces / screens)
+        if clip_ratio > self.max_clip_ratio:
+            excess_clip = clip_ratio - self.max_clip_ratio
+            clip_step = min(self.max_step, max(0.08, excess_clip * 1.5))
+            delta = -clip_step
+        # Priority 2: Mean luminance outside deadband
+        elif mean_luma > (self.target_luma + self.tolerance):
+            error = mean_luma - self.target_luma
+            delta = -min(self.max_step, max(0.06, (error / 128.0) * 0.5))
+        elif mean_luma < (self.target_luma - self.tolerance) and clip_ratio < (self.max_clip_ratio * 0.5):
+            error = self.target_luma - mean_luma
+            delta = min(self.max_step, max(0.06, (error / 128.0) * 0.45))
+
+        if abs(delta) < self.min_delta:
+            return None
+
+        next_ev = round(max(self.min_ev, min(self.max_ev, self.current_ev + delta)), 2)
+        if abs(next_ev - self.current_ev) < self.min_delta:
+            return None
+
+        self.current_ev = next_ev
+        return next_ev
+
+
 class Picamera2Capture:
     """OpenCV VideoCapture-compatible wrapper around picamera2 for Raspberry Pi 5 CSI cameras."""
 
@@ -119,8 +227,10 @@ class Picamera2Capture:
         exposure_value: float = DEFAULT_EXPOSURE_VALUE,
         brightness: float = DEFAULT_BRIGHTNESS,
         contrast: float = DEFAULT_CONTRAST,
+        auto_exposure: bool = DEFAULT_AUTO_EXPOSURE,
         ae_metering_mode: int = DEFAULT_AE_METERING_MODE,
         ae_exposure_mode: int = DEFAULT_AE_EXPOSURE_MODE,
+        ae_constraint_mode: int = DEFAULT_AE_CONSTRAINT_MODE,
     ) -> None:
         self.camera_idx = int(camera_idx)
         self.width = int(width)
@@ -131,8 +241,15 @@ class Picamera2Capture:
         self.exposure_value = float(exposure_value)
         self.brightness = float(brightness)
         self.contrast = float(contrast)
+        self.auto_exposure = bool(auto_exposure)
         self.ae_metering_mode = int(ae_metering_mode)
         self.ae_exposure_mode = int(ae_exposure_mode)
+        self.ae_constraint_mode = int(ae_constraint_mode)
+        self._adaptive_ae: Optional[AdaptiveExposureController] = (
+            AdaptiveExposureController(initial_ev=self.exposure_value)
+            if self.auto_exposure
+            else None
+        )
         self._picam2 = None
         self._opened = False
         self._camera_model = "unknown"
@@ -153,7 +270,7 @@ class Picamera2Capture:
             # In Picamera2 / libcamera:
             # - 'RGB888' outputs memory byte order [B, G, R], which directly matches OpenCV's native BGR format.
             # - 'BGR888' outputs memory byte order [R, G, B].
-            controls: dict[str, Any] = {"AeEnable": True, "AwbEnable": True}
+            controls: dict[str, Any] = {"AeEnable": self.auto_exposure, "AwbEnable": True}
             if self.fps:
                 controls["FrameRate"] = self.fps
             controls["ExposureValue"] = self.exposure_value
@@ -161,12 +278,13 @@ class Picamera2Capture:
                 controls["Brightness"] = self.brightness
             if self.contrast != 1.0:
                 controls["Contrast"] = self.contrast
-            if self.ae_metering_mode is not None:
-                controls["AeMeteringMode"] = self.ae_metering_mode
-            if self.ae_exposure_mode is not None:
-                controls["AeExposureMode"] = self.ae_exposure_mode
-            if DEFAULT_AE_CONSTRAINT_MODE is not None:
-                controls["AeConstraintMode"] = DEFAULT_AE_CONSTRAINT_MODE
+            if self.auto_exposure:
+                if self.ae_metering_mode is not None:
+                    controls["AeMeteringMode"] = self.ae_metering_mode
+                if self.ae_exposure_mode is not None:
+                    controls["AeExposureMode"] = self.ae_exposure_mode
+                if self.ae_constraint_mode is not None:
+                    controls["AeConstraintMode"] = self.ae_constraint_mode
 
             video_config = self._picam2.create_video_configuration(
                 main={"format": self.pixel_format, "size": (self.width, self.height)},
@@ -183,7 +301,7 @@ class Picamera2Capture:
             time.sleep(0.5)
             self._opened = True
             logger.info(
-                "Picamera2 CSI camera %d (%s) initialized at %dx%d @ %dfps (format=%s, swap_rb=%s, ev=%.1f, brightness=%.2f)",
+                "Picamera2 CSI camera %d (%s) initialized at %dx%d @ %dfps (format=%s, swap_rb=%s, ae=%s, ev=%.2f, brightness=%.2f)",
                 self.camera_idx,
                 self._camera_model,
                 self.width,
@@ -191,6 +309,7 @@ class Picamera2Capture:
                 self.fps,
                 self.pixel_format,
                 self.swap_rb,
+                self.auto_exposure,
                 self.exposure_value,
                 self.brightness,
             )
@@ -210,6 +329,14 @@ class Picamera2Capture:
                 return False, None
             if self.swap_rb:
                 frame = frame[:, :, ::-1]
+            if self._adaptive_ae is not None:
+                next_ev = self._adaptive_ae.compute_next_ev(frame)
+                if next_ev is not None:
+                    try:
+                        self._picam2.set_controls({"ExposureValue": next_ev})
+                        self.exposure_value = next_ev
+                    except Exception as exc:
+                        logger.debug("Adaptive auto-exposure set_controls failed: %s", exc)
             return True, frame
         except Exception as exc:
             logger.error("Picamera2 frame capture failed: %s", exc)
@@ -343,6 +470,7 @@ def open_single_capture(
     exposure_value: float = DEFAULT_EXPOSURE_VALUE,
     brightness: float = DEFAULT_BRIGHTNESS,
     contrast: float = DEFAULT_CONTRAST,
+    auto_exposure: bool = DEFAULT_AUTO_EXPOSURE,
 ) -> Optional[Any]:
     """Attempt to open a single camera source (either CSI or OpenCV V4L2/stream)."""
     src_str = str(source).strip().lower()
@@ -364,6 +492,7 @@ def open_single_capture(
             exposure_value=exposure_value,
             brightness=brightness,
             contrast=contrast,
+            auto_exposure=auto_exposure,
         )
         if capture.isOpened():
             return capture
@@ -403,6 +532,9 @@ def open_single_capture(
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
                 cap.set(cv2.CAP_PROP_FPS, fps)
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                if auto_exposure and hasattr(cv2, "CAP_PROP_AUTO_EXPOSURE"):
+                    # V4L2 aperture priority (auto) = 3; DirectShow/MSMF auto = 0.75
+                    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3 if sys_platform_is_linux() else 0.75)
             except Exception as prop_err:
                 logger.debug("Failed to set camera properties on %s: %s", source, prop_err)
             time.sleep(0.5)
@@ -419,6 +551,7 @@ def open_camera_capture(
     fps: int = DEFAULT_FPS,
     allow_fallbacks: bool = True,
     test_frames: int = 3,
+    auto_exposure: bool = DEFAULT_AUTO_EXPOSURE,
 ) -> Tuple[Optional[Any], Optional[str | int]]:
     """Open a camera using auto-detection and graceful fallback.
 
@@ -430,7 +563,13 @@ def open_camera_capture(
     logger.info("Probing camera candidates in order: %s", candidates)
 
     for candidate in candidates:
-        capture = open_single_capture(candidate, width=width, height=height, fps=fps)
+        capture = open_single_capture(
+            candidate,
+            width=width,
+            height=height,
+            fps=fps,
+            auto_exposure=auto_exposure,
+        )
         if capture is None:
             continue
 

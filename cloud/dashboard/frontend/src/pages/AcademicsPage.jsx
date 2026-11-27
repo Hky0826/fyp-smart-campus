@@ -10,7 +10,6 @@ const TABS = [
   { id: 'courses', label: 'Courses' },
   { id: 'enrollments', label: 'Enrollments' },
   { id: 'timetables', label: 'Timetables' },
-  { id: 'appointments', label: 'Appointments' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'faculties', label: 'Faculties' },
   { id: 'departments', label: 'Departments' },
@@ -41,7 +40,6 @@ export function AcademicsPage() {
       const epMap = {
         courses: '/api/academics/courses',
         timetables: '/api/academics/timetables',
-        appointments: '/api/academics/appointments',
         faculties: '/api/refs/faculties',
         departments: '/api/refs/departments',
         programmes: '/api/refs/programmes',
@@ -82,14 +80,6 @@ export function AcademicsPage() {
         { id: 'day', header: 'Day & Time', cell: ({ row }) => <span className="text-xs font-mono">{row.original.day_of_week} · {row.original.start_time}–{row.original.end_time}</span> },
         { id: 'lec', header: 'Lecturer', cell: ({ row }) => <span className="font-mono text-xs">{row.original.lecturer_id}</span> },
         { id: 'room', header: 'Node', cell: ({ row }) => <span className="text-xs text-slate-500">Node #{row.original.node_id}</span> },
-      ];
-    }
-    if (activeTab === 'appointments') {
-      return [
-        { id: 'id', header: 'ID', cell: ({ row }) => <span className="font-mono text-xs">#{row.original.appointment_id}</span> },
-        { id: 'when', header: 'Scheduled', cell: ({ row }) => <span className="text-xs tabular-nums">{formatDateTime(row.original.scheduled_at)}</span> },
-        { id: 'purpose', header: 'Purpose', cell: ({ row }) => <span className="text-sm">{row.original.purpose || '—'}</span> },
-        { id: 'status', header: 'Status', cell: ({ row }) => <StatusBadge variant="info">{row.original.status}</StatusBadge> },
       ];
     }
     if (activeTab === 'notifications') {

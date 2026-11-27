@@ -82,6 +82,16 @@ class NodeRbacSyncResponse(BaseModel):
     role_id: int
     last_synced_at: str
 
+class NodeUserAccessSyncResponse(BaseModel):
+    node_id: int
+    user_id: int
+    last_synced_at: str
+
+class DeviceUserAccessSyncResponse(BaseModel):
+    device_id: str
+    user_id: int
+    last_synced_at: str
+
 class UserRoleSyncResponse(BaseModel):
     user_id: int
     role_id: int
@@ -93,6 +103,8 @@ class DeltaSyncResponse(BaseModel):
     user_roles: List[UserRoleSyncResponse]
     node_rbac: List[NodeRbacSyncResponse]
     device_rbac: List[DeviceRbacSyncResponse] = Field(default_factory=list)
+    node_user_access: List[NodeUserAccessSyncResponse] = Field(default_factory=list)
+    device_user_access: List[DeviceUserAccessSyncResponse] = Field(default_factory=list)
     deleted_user_ids: List[int] = Field(default_factory=list)
     timestamp: str
     node_id: Optional[int] = None
@@ -517,24 +529,51 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
             ) for r in roles_list
         ]
 
-        # Fetching RBAC Rules (Static mappings, synced in full if delta is requested)
-        rbac_list = db.query(NodeRBAC).all()
+        # Fetching Resolved RBAC Rules (direct roles + access group roles + direct/group users)
+        from app.services.rbac_resolver import resolve_all_device_policies, resolve_all_node_policies
+
+        now_iso = datetime.datetime.utcnow().isoformat()
+        node_policies = resolve_all_node_policies(db)
+        device_policies = resolve_all_device_policies(db)
+
         sync_rbac = [
             NodeRbacSyncResponse(
-                node_id=rb.node_id,
-                role_id=rb.role_id,
-                last_synced_at=datetime.datetime.utcnow().isoformat()
-            ) for rb in rbac_list
+                node_id=node_id,
+                role_id=role_id,
+                last_synced_at=now_iso,
+            )
+            for node_id, pol in sorted(node_policies.items())
+            for role_id in sorted(pol["effective_role_ids"])
         ]
 
-        # Fetching Device RBAC Rules
-        device_rbac_list = db.query(DeviceRBAC).all()
         sync_device_rbac = [
             DeviceRbacSyncResponse(
-                device_id=dr.device_id,
-                role_id=dr.role_id,
-                last_synced_at=datetime.datetime.utcnow().isoformat()
-            ) for dr in device_rbac_list
+                device_id=device_id,
+                role_id=role_id,
+                last_synced_at=now_iso,
+            )
+            for device_id, pol in sorted(device_policies.items())
+            for role_id in sorted(pol["effective_role_ids"])
+        ]
+
+        sync_node_user_access = [
+            NodeUserAccessSyncResponse(
+                node_id=node_id,
+                user_id=user_id,
+                last_synced_at=now_iso,
+            )
+            for node_id, pol in sorted(node_policies.items())
+            for user_id in sorted(pol["effective_user_ids"])
+        ]
+
+        sync_device_user_access = [
+            DeviceUserAccessSyncResponse(
+                device_id=device_id,
+                user_id=user_id,
+                last_synced_at=now_iso,
+            )
+            for device_id, pol in sorted(device_policies.items())
+            for user_id in sorted(pol["effective_user_ids"])
         ]
 
         # Assignment mappings are also a complete snapshot, independent of the
@@ -561,6 +600,8 @@ class SQLAlchemyDownstreamHandler(AbstractDownstreamHandler):
             "user_roles": sync_user_roles,
             "node_rbac": sync_rbac,
             "device_rbac": sync_device_rbac,
+            "node_user_access": sync_node_user_access,
+            "device_user_access": sync_device_user_access,
             "deleted_user_ids": deleted_user_ids,
             "timestamp": policy_synced_at,
             "node_id": None,

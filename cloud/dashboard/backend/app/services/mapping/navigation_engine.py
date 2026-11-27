@@ -395,10 +395,8 @@ def run_navigation(
         .options(joinedload(Node.floorplan).joinedload(Floorplan.building))
         .all()
     )
-    node_rbac_rows = db.query(NodeRBAC).all()
-    node_roles_map: dict[int, list[int]] = {}
-    for nr in node_rbac_rows:
-        node_roles_map.setdefault(nr.node_id, []).append(nr.role_id)
+    from app.services.rbac_resolver import resolve_node_effective_roles
+    node_roles_map: dict[int, list[int]] = resolve_node_effective_roles(db)
 
     edge_rows = db.query(Edge).all()
     edge_rbac_rows = db.query(EdgeRBAC).all()

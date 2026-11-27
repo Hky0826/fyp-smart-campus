@@ -593,6 +593,44 @@ class NodeRBACBase(BaseSchema):
     node_id: int
     role_id: int
 
+class NodeUserAccessSyncResponse(BaseSchema):
+    node_id: int
+    user_id: int
+    last_synced_at: str
+
+class DeviceUserAccessSyncResponse(BaseSchema):
+    device_id: str
+    user_id: int
+    last_synced_at: str
+
+class AccessGroupUserSummary(BaseSchema):
+    user_id: int
+    full_name: str
+    email: str
+    is_active: bool = True
+
+class AccessGroupCreate(BaseModel):
+    group_name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    role_ids: List[int] = Field(default_factory=list)
+    user_ids: List[int] = Field(default_factory=list)
+
+class AccessGroupUpdate(BaseModel):
+    group_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    role_ids: Optional[List[int]] = None
+    user_ids: Optional[List[int]] = None
+
+class AccessGroupResponse(BaseSchema):
+    group_id: int
+    group_name: str
+    description: Optional[str] = None
+    created_at: Optional[datetime.datetime] = None
+    roles: List[RoleResponse] = Field(default_factory=list)
+    users: List[AccessGroupUserSummary] = Field(default_factory=list)
+    node_count: int = 0
+    device_count: int = 0
+
 class EdgeRBACBase(BaseSchema):
     edge_id: int
     role_id: int

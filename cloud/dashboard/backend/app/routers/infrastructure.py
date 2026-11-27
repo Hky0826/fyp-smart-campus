@@ -27,8 +27,11 @@ from app.models.models import (
     Device, DeviceRBAC, NodeRBAC, EdgeRBAC, JWTSession, AuthenticationLog, SurveillanceLog,
     Node, Role, Edge, User, UserRole, Admin, Floorplan, Building, Course, UploadedDocument,
     UserFaceEmbedding, AdministratorAuditEvent, Visitor,
+    AccessGroup, AccessGroupRole, AccessGroupUser, NodeAccessGroup, DeviceAccessGroup,
+    NodeUserAccess, DeviceUserAccess,
 )
 from app.schemas import schemas
+from app.services.rbac_resolver import resolve_all_device_policies, resolve_all_node_policies
 
 try:
     import sys as _sys, os as _os
@@ -1022,8 +1025,29 @@ def get_device_detail(device_id: str, db: Session = Depends(get_db), current_adm
         AuthenticationLog.auth_status != "SUCCESS",
     ).scalar() or 0
 
-    node_rbac_ids = [r.role_id for r in db.query(NodeRBAC).filter_by(node_id=dev.node_id).all()]
-    dev_rbac_ids = [r.role_id for r in (dev.device_rbac or [])]
+    node_policies = resolve_all_node_policies(db)
+    device_policies = resolve_all_device_policies(db)
+    node_pol = node_policies.get(dev.node_id)
+    dev_pol = device_policies.get(dev.device_id)
+
+    node_rbac_ids = sorted(node_pol["direct_role_ids"]) if node_pol else []
+    node_effective_role_ids = sorted(node_pol["effective_role_ids"]) if node_pol else []
+    node_group_ids = list(node_pol["group_ids"]) if node_pol else []
+    node_direct_user_ids = sorted(node_pol["direct_user_ids"]) if node_pol else []
+    node_effective_user_ids = sorted(node_pol["effective_user_ids"]) if node_pol else []
+
+    dev_rbac_ids = sorted(dev_pol["direct_role_ids"]) if dev_pol else []
+    dev_effective_role_ids = sorted(dev_pol["effective_role_ids"]) if dev_pol else []
+    dev_group_ids = list(dev_pol["group_ids"]) if dev_pol else []
+    dev_direct_user_ids = sorted(dev_pol["direct_user_ids"]) if dev_pol else []
+    dev_effective_user_ids = sorted(dev_pol["effective_user_ids"]) if dev_pol else []
+    uses_override = bool(dev_pol and dev_pol["uses_override"])
+
+    user_ids_to_load = set(dev_direct_user_ids) | set(node_direct_user_ids)
+    users_by_id = {}
+    if user_ids_to_load:
+        for u in db.query(User).filter(User.user_id.in_(user_ids_to_load)).all():
+            users_by_id[u.user_id] = {"user_id": u.user_id, "full_name": u.full_name, "email": u.email}
 
     return {
         "device": {
@@ -1042,8 +1066,16 @@ def get_device_detail(device_id: str, db: Session = Depends(get_db), current_adm
             "installed_at": dev.installed_at.isoformat() if dev.installed_at else None,
             "credential_rotated_at": dev.credential_rotated_at.isoformat() if dev.credential_rotated_at else None,
             "allowed_role_ids": dev_rbac_ids,
-            "inherited_node_role_ids": node_rbac_ids,
-            "uses_device_override": len(dev_rbac_ids) > 0,
+            "effective_role_ids": dev_effective_role_ids,
+            "inherited_node_role_ids": node_effective_role_ids,
+            "assigned_group_ids": dev_group_ids,
+            "inherited_node_group_ids": node_group_ids,
+            "allowed_user_ids": dev_direct_user_ids,
+            "allowed_users": [users_by_id[uid] for uid in dev_direct_user_ids if uid in users_by_id],
+            "effective_user_ids": dev_effective_user_ids,
+            "inherited_node_user_ids": node_effective_user_ids,
+            "inherited_node_users": [users_by_id[uid] for uid in node_direct_user_ids if uid in users_by_id],
+            "uses_device_override": uses_override,
         },
         "metrics_24h": {
             "attempts": attempts_24h,
@@ -1073,9 +1105,29 @@ class RbacMatrixToggleRequest(BaseModel):
     allowed: bool
 
 
+class RbacMatrixToggleGroupRequest(BaseModel):
+    target_type: str  # "node" | "device"
+    target_id: str
+    group_id: int
+    allowed: bool
+
+
+class RbacMatrixToggleUserRequest(BaseModel):
+    target_type: str  # "node" | "device"
+    target_id: str
+    user_id: int
+    allowed: bool
+
+
 @router.get("/rbac-matrix")
 def get_rbac_matrix(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
     roles = db.query(Role).options(selectinload(Role.users)).order_by(Role.role_id.asc()).all()
+    groups = (
+        db.query(AccessGroup)
+        .options(selectinload(AccessGroup.roles), selectinload(AccessGroup.users))
+        .order_by(AccessGroup.group_id.asc())
+        .all()
+    )
     nodes = (
         db.query(Node)
         .options(joinedload(Node.floorplan).joinedload(Floorplan.building))
@@ -1089,12 +1141,62 @@ def get_rbac_matrix(db: Session = Depends(get_db), current_admin=Depends(verify_
         return lbl == "corridor" or lbl.startswith("corridor ") or lbl.startswith("corridor-")
 
     nodes = [n for n in nodes if not _is_corridor_node(n)]
-    devices = db.query(Device).options(joinedload(Device.device_rbac)).order_by(Device.device_id.asc()).all()
-    node_rbac = db.query(NodeRBAC).all()
+    devices = db.query(Device).order_by(Device.device_id.asc()).all()
 
-    node_map: dict[int, list[int]] = {}
-    for nr in node_rbac:
-        node_map.setdefault(nr.node_id, []).append(nr.role_id)
+    node_policies = resolve_all_node_policies(db)
+    device_policies = resolve_all_device_policies(db)
+
+    direct_user_ids: set[int] = set()
+    for pol in node_policies.values():
+        direct_user_ids.update(pol["direct_user_ids"])
+    for pol in device_policies.values():
+        direct_user_ids.update(pol["direct_user_ids"])
+
+    users_by_id = {}
+    if direct_user_ids:
+        for u in db.query(User).filter(User.user_id.in_(direct_user_ids)).all():
+            users_by_id[u.user_id] = {"user_id": u.user_id, "full_name": u.full_name, "email": u.email}
+
+    def _node_entry(n: Node):
+        pol = node_policies.get(n.node_id)
+        d_uids = sorted(pol["direct_user_ids"]) if pol else []
+        return {
+            "node_id": n.node_id,
+            "room_label": n.room_label or f"Node #{n.node_id}",
+            "node_type": n.node_type,
+            "floor_level": n.floorplan.floor_level if n.floorplan else None,
+            "building_name": n.floorplan.building.building_name if n.floorplan and n.floorplan.building else "Unassigned",
+            "group_ids": list(pol["group_ids"]) if pol else [],
+            "role_ids": sorted(pol["direct_role_ids"]) if pol else [],
+            "group_role_ids": sorted(pol["group_role_ids"]) if pol else [],
+            "effective_role_ids": sorted(pol["effective_role_ids"]) if pol else [],
+            "user_ids": d_uids,
+            "direct_users": [users_by_id[uid] for uid in d_uids if uid in users_by_id],
+        }
+
+    def _device_entry(d: Device):
+        pol = device_policies.get(d.device_id)
+        n_pol = node_policies.get(d.node_id)
+        d_uids = sorted(pol["direct_user_ids"]) if pol else []
+        n_uids = sorted(n_pol["direct_user_ids"]) if n_pol else []
+        return {
+            "device_id": d.device_id,
+            "device_name": d.device_name,
+            "device_type": d.device_type,
+            "node_id": d.node_id,
+            "is_active": d.is_active,
+            "uses_device_override": bool(pol and pol["uses_override"]),
+            "group_ids": list(pol["group_ids"]) if pol else [],
+            "inherited_group_ids": list(n_pol["group_ids"]) if n_pol else [],
+            "role_ids": sorted(pol["direct_role_ids"]) if pol else [],
+            "group_role_ids": sorted(pol["group_role_ids"]) if pol else [],
+            "effective_role_ids": sorted(pol["effective_role_ids"]) if pol else [],
+            "inherited_role_ids": sorted(n_pol["effective_role_ids"]) if n_pol else [],
+            "user_ids": d_uids,
+            "direct_users": [users_by_id[uid] for uid in d_uids if uid in users_by_id],
+            "inherited_user_ids": sorted(n_pol["effective_user_ids"]) if n_pol else [],
+            "inherited_users": [users_by_id[uid] for uid in n_uids if uid in users_by_id],
+        }
 
     return {
         "roles": [
@@ -1105,29 +1207,20 @@ def get_rbac_matrix(db: Session = Depends(get_db), current_admin=Depends(verify_
             }
             for r in roles
         ],
-        "nodes": [
+        "groups": [
             {
-                "node_id": n.node_id,
-                "room_label": n.room_label or f"Node #{n.node_id}",
-                "node_type": n.node_type,
-                "floor_level": n.floorplan.floor_level if n.floorplan else None,
-                "building_name": n.floorplan.building.building_name if n.floorplan and n.floorplan.building else "Unassigned",
-                "role_ids": sorted(node_map.get(n.node_id, [])),
+                "group_id": g.group_id,
+                "group_name": g.group_name,
+                "description": g.description,
+                "role_ids": sorted([r.role_id for r in (g.roles or [])]),
+                "role_names": [r.role_name for r in sorted(g.roles or [], key=lambda x: x.role_id)],
+                "user_ids": sorted([u.user_id for u in (g.users or [])]),
+                "user_count": len(g.users or []),
             }
-            for n in nodes
+            for g in groups
         ],
-        "devices": [
-            {
-                "device_id": d.device_id,
-                "device_name": d.device_name,
-                "device_type": d.device_type,
-                "node_id": d.node_id,
-                "is_active": d.is_active,
-                "role_ids": sorted([r.role_id for r in (d.device_rbac or [])]),
-                "inherited_role_ids": sorted(node_map.get(d.node_id, [])),
-            }
-            for d in devices
-        ],
+        "nodes": [_node_entry(n) for n in nodes],
+        "devices": [_device_entry(d) for d in devices],
     }
 
 
@@ -1172,6 +1265,104 @@ def toggle_rbac_matrix(
     if push_sync_to_all_edges:
         background_tasks.add_task(push_sync_to_all_edges)
     return {"ok": True, "target_type": payload.target_type, "target_id": payload.target_id, "role_id": payload.role_id, "allowed": payload.allowed}
+
+
+@router.put("/rbac-matrix/toggle-group")
+def toggle_rbac_matrix_group(
+    payload: RbacMatrixToggleGroupRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    group = db.query(AccessGroup).filter_by(group_id=payload.group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Access group not found")
+
+    if payload.target_type == "node":
+        node_id = int(payload.target_id)
+        node = db.query(Node).filter_by(node_id=node_id).first()
+        if not node:
+            raise HTTPException(status_code=404, detail="Node not found")
+        existing = db.query(NodeAccessGroup).filter_by(node_id=node_id, group_id=payload.group_id).first()
+        if payload.allowed and not existing:
+            db.add(NodeAccessGroup(node_id=node_id, group_id=payload.group_id))
+        elif not payload.allowed and existing:
+            db.delete(existing)
+    elif payload.target_type == "device":
+        device_id = str(payload.target_id)
+        device = db.query(Device).filter_by(device_id=device_id).first()
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+        existing = db.query(DeviceAccessGroup).filter_by(device_id=device_id, group_id=payload.group_id).first()
+        if payload.allowed and not existing:
+            db.add(DeviceAccessGroup(device_id=device_id, group_id=payload.group_id))
+        elif not payload.allowed and existing:
+            db.delete(existing)
+    else:
+        raise HTTPException(status_code=400, detail="target_type must be 'node' or 'device'")
+
+    record_audit(
+        db,
+        actor_user_id=current_admin.user_id,
+        action="rbac_matrix_toggle_group",
+        target_type=payload.target_type,
+        target_id=payload.target_id,
+        result="success",
+        details={"group_id": payload.group_id, "group_name": group.group_name, "allowed": payload.allowed},
+    )
+    db.commit()
+    if push_sync_to_all_edges:
+        background_tasks.add_task(push_sync_to_all_edges)
+    return {"ok": True, "target_type": payload.target_type, "target_id": payload.target_id, "group_id": payload.group_id, "allowed": payload.allowed}
+
+
+@router.put("/rbac-matrix/toggle-user")
+def toggle_rbac_matrix_user(
+    payload: RbacMatrixToggleUserRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    user = db.query(User).filter_by(user_id=payload.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if payload.target_type == "node":
+        node_id = int(payload.target_id)
+        node = db.query(Node).filter_by(node_id=node_id).first()
+        if not node:
+            raise HTTPException(status_code=404, detail="Node not found")
+        existing = db.query(NodeUserAccess).filter_by(node_id=node_id, user_id=payload.user_id).first()
+        if payload.allowed and not existing:
+            db.add(NodeUserAccess(node_id=node_id, user_id=payload.user_id))
+        elif not payload.allowed and existing:
+            db.delete(existing)
+    elif payload.target_type == "device":
+        device_id = str(payload.target_id)
+        device = db.query(Device).filter_by(device_id=device_id).first()
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+        existing = db.query(DeviceUserAccess).filter_by(device_id=device_id, user_id=payload.user_id).first()
+        if payload.allowed and not existing:
+            db.add(DeviceUserAccess(device_id=device_id, user_id=payload.user_id))
+        elif not payload.allowed and existing:
+            db.delete(existing)
+    else:
+        raise HTTPException(status_code=400, detail="target_type must be 'node' or 'device'")
+
+    record_audit(
+        db,
+        actor_user_id=current_admin.user_id,
+        action="rbac_matrix_toggle_user",
+        target_type=payload.target_type,
+        target_id=payload.target_id,
+        result="success",
+        details={"user_id": payload.user_id, "email": user.email, "allowed": payload.allowed},
+    )
+    db.commit()
+    if push_sync_to_all_edges:
+        background_tasks.add_task(push_sync_to_all_edges)
+    return {"ok": True, "target_type": payload.target_type, "target_id": payload.target_id, "user_id": payload.user_id, "allowed": payload.allowed}
 
 
 @router.delete("/jwt-sessions/{session_id}")

@@ -342,6 +342,8 @@ class SQLiteEdgeDB:
         user_roles: List[Dict[str, Any]],
         rbac: Optional[List[Dict[str, Any]]] = None,
         device_rbac: Optional[List[Dict[str, Any]]] = None,
+        node_user_access: Optional[List[Dict[str, Any]]] = None,
+        device_user_access: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         """Atomically replace roles, user-role mappings, and optional RBAC tables."""
         with self.lock:
@@ -407,6 +409,30 @@ class SQLiteEdgeDB:
                             VALUES (?, ?, CURRENT_TIMESTAMP)
                             """,
                             (entry["device_id"], entry["role_id"]),
+                        )
+
+                if node_user_access is not None:
+                    cursor.execute("DELETE FROM device_node_user_access")
+                    for entry in node_user_access:
+                        cursor.execute(
+                            """
+                            INSERT INTO device_node_user_access (node_id, user_id, last_synced_at)
+                            SELECT ?, ?, CURRENT_TIMESTAMP
+                            WHERE EXISTS (SELECT 1 FROM device_users WHERE user_id = ?)
+                            """,
+                            (entry["node_id"], entry["user_id"], entry["user_id"]),
+                        )
+
+                if device_user_access is not None:
+                    cursor.execute("DELETE FROM device_user_access")
+                    for entry in device_user_access:
+                        cursor.execute(
+                            """
+                            INSERT INTO device_user_access (device_id, user_id, last_synced_at)
+                            SELECT ?, ?, CURRENT_TIMESTAMP
+                            WHERE EXISTS (SELECT 1 FROM device_users WHERE user_id = ?)
+                            """,
+                            (entry["device_id"], entry["user_id"], entry["user_id"]),
                         )
 
                 conn.commit()
@@ -1009,6 +1035,8 @@ class DownstreamSyncWorker:
                 data.get("user_roles", data.get("device_user_roles", [])),
                 rbac=data.get("node_rbac", []),
                 device_rbac=data.get("device_rbac") if "device_rbac" in data else None,
+                node_user_access=data.get("node_user_access") if "node_user_access" in data else None,
+                device_user_access=data.get("device_user_access") if "device_user_access" in data else None,
             )
             self.db.save_policy_metadata(
                 node_id=data.get("node_id"),

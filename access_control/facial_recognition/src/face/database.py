@@ -175,35 +175,60 @@ class DeviceUserRepository:
             configured_node = meta.get("cloud_node_id")
             effective_node = int(configured_node) if configured_node is not None else node_id
 
-            # Device RBAC check (primary)
+            # Device RBAC / Direct User Access check (primary)
             configured_device = meta.get("cloud_device_id") or meta.get("device_id")
             effective_device = device_id or configured_device or os.getenv("EDGE_SYNC_DEVICE_ID") or os.getenv("ACCESS_DEVICE_ID")
             allowed_roles = None
+            allowed_users: list[int] | None = None
 
             try:
-                # Check if device_rbac table exists and has entries
                 rbac_count = conn.execute("SELECT COUNT(*) FROM device_rbac").fetchone()[0]
-                if rbac_count > 0:
-                    if effective_device:
-                        allowed_roles = [r[0] for r in conn.execute(
-                            "SELECT role_id FROM device_rbac WHERE device_id = ?", (str(effective_device),)
-                        ).fetchall()]
-                    else:
-                        dev_rows = conn.execute("SELECT DISTINCT device_id FROM device_rbac").fetchall()
-                        if len(dev_rows) == 1:
-                            allowed_roles = [r[0] for r in conn.execute(
-                                "SELECT role_id FROM device_rbac WHERE device_id = ?", (dev_rows[0][0],)
-                            ).fetchall()]
-                        else:
-                            allowed_roles = []
             except (sqlite3.OperationalError, sqlite3.DatabaseError):
-                pass
+                rbac_count = 0
 
-            # Fallback to node_rbac for backwards compatibility if device_rbac is not populated
+            try:
+                dev_user_count = conn.execute("SELECT COUNT(*) FROM device_user_access").fetchone()[0]
+            except (sqlite3.OperationalError, sqlite3.DatabaseError):
+                dev_user_count = 0
+
+            if rbac_count > 0 or dev_user_count > 0:
+                resolved_device_id = str(effective_device) if effective_device else None
+                if not resolved_device_id:
+                    dev_ids: set[str] = set()
+                    if rbac_count > 0:
+                        dev_ids.update(r[0] for r in conn.execute("SELECT DISTINCT device_id FROM device_rbac").fetchall())
+                    if dev_user_count > 0:
+                        dev_ids.update(r[0] for r in conn.execute("SELECT DISTINCT device_id FROM device_user_access").fetchall())
+                    if len(dev_ids) == 1:
+                        resolved_device_id = next(iter(dev_ids))
+
+                if resolved_device_id:
+                    dev_roles = (
+                        [r[0] for r in conn.execute("SELECT role_id FROM device_rbac WHERE device_id = ?", (resolved_device_id,)).fetchall()]
+                        if rbac_count > 0 else []
+                    )
+                    dev_users = (
+                        [r[0] for r in conn.execute("SELECT user_id FROM device_user_access WHERE device_id = ?", (resolved_device_id,)).fetchall()]
+                        if dev_user_count > 0 else []
+                    )
+                    if dev_roles or dev_users:
+                        allowed_roles = dev_roles
+                        allowed_users = dev_users
+                else:
+                    allowed_roles = []
+                    allowed_users = []
+
+            # Fallback to node_rbac + node_user_access if no device-level override is set
             if allowed_roles is None:
                 allowed_roles = [r[0] for r in conn.execute(
                     "SELECT role_id FROM device_node_rbac WHERE node_id = ?", (effective_node,)
                 ).fetchall()]
+                try:
+                    allowed_users = [r[0] for r in conn.execute(
+                        "SELECT user_id FROM device_node_user_access WHERE node_id = ?", (effective_node,)
+                    ).fetchall()]
+                except (sqlite3.OperationalError, sqlite3.DatabaseError):
+                    allowed_users = []
 
             policy_version = meta.get("policy_version")
             synced_at = meta.get("policy_synced_at")
@@ -217,7 +242,8 @@ class DeviceUserRepository:
 
             return evaluate_access(
                 user_id=user_id, is_active=bool(row[0]), user_role_ids=user_roles,
-                allowed_role_ids=allowed_roles, node_id=effective_node,
+                allowed_role_ids=allowed_roles, allowed_user_ids=allowed_users,
+                node_id=effective_node,
                 policy_version=policy_version, policy_synced_at=parse(synced_at),
                 now=now, visitor_start=parse(row[1]), visitor_expiry=parse(row[2]),
                 max_age_seconds=max_age,

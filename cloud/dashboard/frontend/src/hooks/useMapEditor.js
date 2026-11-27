@@ -839,6 +839,16 @@ export function useMapEditor({
     updateProperty('allowed_roles', newRoles);
   };
 
+  const handleGroupToggle = (groupId) => {
+    if (selectedElement.type !== 'node') return;
+    const element = nodes[selectedElement.index];
+    const currentGroups = element?.assigned_group_ids || [];
+    const newGroups = currentGroups.includes(groupId)
+      ? currentGroups.filter((id) => id !== groupId)
+      : [...currentGroups, groupId];
+    updateProperty('assigned_group_ids', newGroups);
+  };
+
   // ── Transition Linker Handlers ──────────────────────────────────────────────
   const handleCreateTransition = () => {
     if (!transitionTargetId || !transitionWeight) {
@@ -1203,6 +1213,7 @@ export function useMapEditor({
     handleHandleDragEnd,
     updateProperty,
     handleRoleToggle,
+    handleGroupToggle,
     handleCreateTransition,
     handleUpdateTransition,
     handleDeleteTransition,

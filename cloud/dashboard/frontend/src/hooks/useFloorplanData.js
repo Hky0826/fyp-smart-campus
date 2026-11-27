@@ -22,6 +22,7 @@ export function useFloorplanData({
   const [floorplansList, setFloorplansList] = useState([]);
   const [globalNodes, setGlobalNodes] = useState([]);
   const [rolesList, setRolesList] = useState([]);
+  const [accessGroupsList, setAccessGroupsList] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingFloorplan, setIsLoadingFloorplan] = useState(false);
@@ -83,6 +84,10 @@ export function useFloorplanData({
       .then((data) => setRolesList(Array.isArray(data) ? data : []))
       .catch((err) => console.error('Failed to fetch roles:', err));
     cloudApi
+      .get('/api/iam/access-groups')
+      .then((data) => setAccessGroupsList(Array.isArray(data) ? data : []))
+      .catch((err) => console.error('Failed to fetch access groups:', err));
+    cloudApi
       .get(`${MAPPING_API_BASE}/api/floorplans`)
       .then((data) => setFloorplansList(Array.isArray(data) ? data : []))
       .catch((err) => console.error('Failed to fetch floorplans:', err));
@@ -139,6 +144,7 @@ export function useFloorplanData({
             node_type: n.node_type,
             is_accessible: n.is_accessible,
             allowed_roles: n.allowed_roles || [],
+            assigned_group_ids: n.assigned_group_ids || [],
           };
         });
 
@@ -385,6 +391,7 @@ export function useFloorplanData({
     globalNodes,
     setGlobalNodes,
     rolesList,
+    accessGroupsList,
     isUploading,
     isSaving,
     isLoadingFloorplan,

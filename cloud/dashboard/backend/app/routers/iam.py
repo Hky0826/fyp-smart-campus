@@ -24,8 +24,28 @@ from app.models.models import (
     Role, User, Student, Lecturer, Staff, Visitor, Admin, Node, Department, Faculty, Programme,
     UserImage, UserFaceEmbedding, AuthenticationLog, JWTSession, CourseEnrollment, Course, Appointment,
     Device, DeviceRBAC, NodeRBAC, Building, Floorplan,
+    AccessGroup, AccessGroupRole, AccessGroupUser, NodeAccessGroup, DeviceAccessGroup,
+    NodeUserAccess, DeviceUserAccess,
 )
 from app.schemas import schemas
+from app.services.rbac_resolver import (
+    _load_group_memberships,
+    explain_user_access_for_target,
+    resolve_all_device_policies,
+    resolve_all_node_policies,
+)
+
+try:
+    import sys as _sys
+    _cloud_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+    if _cloud_root not in _sys.path:
+        _sys.path.insert(0, _cloud_root)
+    from sync.cloud_to_edge.cloud_sync_service import push_sync_to_all_edges
+except Exception:
+    try:
+        from cloud_sync_service import push_sync_to_all_edges
+    except Exception:
+        push_sync_to_all_edges = None
 
 def slugify(text: str) -> str:
     text = text.upper().strip()
@@ -374,6 +394,189 @@ def delete_role(role_id: int, db: Session = Depends(get_db), current_admin=Depen
     db.delete(role)
     db.commit()
     return {"detail": "Role deleted successfully"}
+
+# ==========================================
+# ACCESS GROUPS CRUD (SYSTEM_ADMIN or SUPER_ADMIN)
+# ==========================================
+def _serialize_access_group(group: AccessGroup) -> schemas.AccessGroupResponse:
+    return schemas.AccessGroupResponse(
+        group_id=group.group_id,
+        group_name=group.group_name,
+        description=group.description,
+        created_at=group.created_at,
+        roles=[schemas.RoleResponse.model_validate(r) for r in sorted(group.roles or [], key=lambda x: x.role_id)],
+        users=[
+            schemas.AccessGroupUserSummary(
+                user_id=u.user_id,
+                full_name=u.full_name,
+                email=u.email,
+                is_active=u.is_active,
+            )
+            for u in sorted(group.users or [], key=lambda x: (x.given_name.lower(), x.family_name.lower()))
+        ],
+        node_count=len(group.node_links or []),
+        device_count=len(group.device_links or []),
+    )
+
+
+@router.get("/access-groups", response_model=List[schemas.AccessGroupResponse])
+def list_access_groups(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
+    groups = (
+        db.query(AccessGroup)
+        .options(
+            selectinload(AccessGroup.roles),
+            selectinload(AccessGroup.users),
+            selectinload(AccessGroup.node_links),
+            selectinload(AccessGroup.device_links),
+        )
+        .order_by(AccessGroup.group_id.asc())
+        .all()
+    )
+    return [_serialize_access_group(g) for g in groups]
+
+
+@router.post("/access-groups", response_model=schemas.AccessGroupResponse, status_code=status.HTTP_201_CREATED)
+def create_access_group(
+    group_in: schemas.AccessGroupCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    name = group_in.group_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Group name is required")
+    existing = db.query(AccessGroup).filter(func.lower(AccessGroup.group_name) == name.lower()).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="An access group with this name already exists")
+
+    unique_role_ids = sorted(set(group_in.role_ids or []))
+    unique_user_ids = sorted(set(group_in.user_ids or []))
+    roles = db.query(Role).filter(Role.role_id.in_(unique_role_ids)).all() if unique_role_ids else []
+    if len(roles) != len(unique_role_ids):
+        raise HTTPException(status_code=400, detail="One or more role_ids do not exist")
+    users = db.query(User).filter(User.user_id.in_(unique_user_ids)).all() if unique_user_ids else []
+    if len(users) != len(unique_user_ids):
+        raise HTTPException(status_code=400, detail="One or more user_ids do not exist")
+
+    group = AccessGroup(group_name=name, description=group_in.description)
+    group.roles = roles
+    group.users = users
+    db.add(group)
+    db.flush()
+
+    record_audit(
+        db,
+        actor_user_id=current_admin.user_id,
+        action="access_group_created",
+        target_type="access_group",
+        target_id=str(group.group_id),
+        result="success",
+        details={"group_name": name, "role_ids": unique_role_ids, "user_ids": unique_user_ids},
+    )
+    db.commit()
+    db.refresh(group)
+    if push_sync_to_all_edges:
+        background_tasks.add_task(push_sync_to_all_edges)
+    return _serialize_access_group(group)
+
+
+@router.put("/access-groups/{group_id}", response_model=schemas.AccessGroupResponse)
+def update_access_group(
+    group_id: int,
+    group_in: schemas.AccessGroupUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    group = (
+        db.query(AccessGroup)
+        .options(
+            selectinload(AccessGroup.roles),
+            selectinload(AccessGroup.users),
+            selectinload(AccessGroup.node_links),
+            selectinload(AccessGroup.device_links),
+        )
+        .filter(AccessGroup.group_id == group_id)
+        .first()
+    )
+    if not group:
+        raise HTTPException(status_code=404, detail="Access group not found")
+
+    if group_in.group_name is not None:
+        name = group_in.group_name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Group name cannot be empty")
+        existing = (
+            db.query(AccessGroup)
+            .filter(func.lower(AccessGroup.group_name) == name.lower(), AccessGroup.group_id != group_id)
+            .first()
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail="An access group with this name already exists")
+        group.group_name = name
+
+    if group_in.description is not None:
+        group.description = group_in.description
+
+    if group_in.role_ids is not None:
+        unique_role_ids = sorted(set(group_in.role_ids))
+        roles = db.query(Role).filter(Role.role_id.in_(unique_role_ids)).all() if unique_role_ids else []
+        if len(roles) != len(unique_role_ids):
+            raise HTTPException(status_code=400, detail="One or more role_ids do not exist")
+        group.roles = roles
+
+    if group_in.user_ids is not None:
+        unique_user_ids = sorted(set(group_in.user_ids))
+        users = db.query(User).filter(User.user_id.in_(unique_user_ids)).all() if unique_user_ids else []
+        if len(users) != len(unique_user_ids):
+            raise HTTPException(status_code=400, detail="One or more user_ids do not exist")
+        group.users = users
+
+    record_audit(
+        db,
+        actor_user_id=current_admin.user_id,
+        action="access_group_updated",
+        target_type="access_group",
+        target_id=str(group.group_id),
+        result="success",
+        details={
+            "group_name": group.group_name,
+            "role_ids": [r.role_id for r in group.roles],
+            "user_ids": [u.user_id for u in group.users],
+        },
+    )
+    db.commit()
+    db.refresh(group)
+    if push_sync_to_all_edges:
+        background_tasks.add_task(push_sync_to_all_edges)
+    return _serialize_access_group(group)
+
+
+@router.delete("/access-groups/{group_id}")
+def delete_access_group(
+    group_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    group = db.query(AccessGroup).filter(AccessGroup.group_id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Access group not found")
+    name = group.group_name
+    db.delete(group)
+    record_audit(
+        db,
+        actor_user_id=current_admin.user_id,
+        action="access_group_deleted",
+        target_type="access_group",
+        target_id=str(group_id),
+        result="success",
+        details={"group_name": name},
+    )
+    db.commit()
+    if push_sync_to_all_edges:
+        background_tasks.add_task(push_sync_to_all_edges)
+    return {"detail": "Access group deleted successfully"}
 
 # ==========================================
 # USERS CRUD (SYSTEM_ADMIN or SUPER_ADMIN)
@@ -823,23 +1026,47 @@ def get_user_effective_access(user_id: int, db: Session = Depends(get_db), curre
         )
         .all()
     )
-    node_rbac_rows = db.query(NodeRBAC).all()
-    node_roles_map: dict[int, set[int]] = {}
-    for nr in node_rbac_rows:
-        node_roles_map.setdefault(nr.node_id, set()).add(nr.role_id)
+    node_policies = resolve_all_node_policies(db)
+    device_policies = resolve_all_device_policies(db)
+    group_roles, group_users, group_names = _load_group_memberships(db)
 
     doors = []
     allowed_count = 0
     for dev in devices:
-        dev_role_ids = {r.role_id for r in (dev.device_rbac or [])}
-        if dev_role_ids:
+        dev_pol = device_policies.get(dev.device_id)
+        if dev_pol and dev_pol["uses_override"]:
             source = "DEVICE_OVERRIDE"
-            matching = user_role_ids.intersection(dev_role_ids)
+            role_granted, grant_reason = explain_user_access_for_target(
+                user_id=user.user_id,
+                user_role_ids=user_role_ids,
+                role_name_map=role_name_map,
+                group_ids=dev_pol["group_ids"],
+                group_roles=group_roles,
+                group_users=group_users,
+                group_names=group_names,
+                direct_role_ids=dev_pol["direct_role_ids"],
+                direct_user_ids=dev_pol["direct_user_ids"],
+                scope_label="device rule",
+            )
         else:
             source = "NODE_INHERITED"
-            matching = user_role_ids.intersection(node_roles_map.get(dev.node_id, set()))
+            node_pol = node_policies.get(dev.node_id)
+            if node_pol:
+                role_granted, grant_reason = explain_user_access_for_target(
+                    user_id=user.user_id,
+                    user_role_ids=user_role_ids,
+                    role_name_map=role_name_map,
+                    group_ids=node_pol["group_ids"],
+                    group_roles=group_roles,
+                    group_users=group_users,
+                    group_names=group_names,
+                    direct_role_ids=node_pol["direct_role_ids"],
+                    direct_user_ids=node_pol["direct_user_ids"],
+                    scope_label="node rule",
+                )
+            else:
+                role_granted, grant_reason = False, None
 
-        role_granted = bool(matching)
         can_unlock = dev.is_active and role_granted and not blockers
         if can_unlock:
             allowed_count += 1
@@ -847,12 +1074,11 @@ def get_user_effective_access(user_id: int, db: Session = Depends(get_db), curre
         if not dev.is_active:
             reason = "Device is disabled"
         elif not role_granted:
-            reason = "User role not permitted by device/node RBAC"
+            reason = "User/role not permitted by device/node access policy"
         elif blockers:
             reason = "; ".join(blockers)
         else:
-            granted_names = ", ".join(sorted(role_name_map.get(rid, str(rid)) for rid in matching))
-            reason = f"Allowed via {granted_names} ({'device rule' if source == 'DEVICE_OVERRIDE' else 'node rule'})"
+            reason = grant_reason or "Allowed"
 
         building_name = None
         floor_level = None

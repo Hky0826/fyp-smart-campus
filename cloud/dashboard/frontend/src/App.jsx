@@ -16,11 +16,11 @@ import { DeviceDetailPage } from './pages/DeviceDetailPage';
 import { RbacMatrixPage } from './pages/RbacMatrixPage';
 import { AccessLogsPage } from './pages/AccessLogsPage';
 import { SessionsPage } from './pages/SessionsPage';
-import { AuditTrailPage } from './pages/AuditTrailPage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { ChatbotLogsPage } from './pages/ChatbotLogsPage';
 import { SpeechConfigPage } from './pages/SpeechConfigPage';
 import { AcademicsPage } from './pages/AcademicsPage';
+import { AppointmentsPage } from './pages/AppointmentsPage';
 
 const CampusMapPage = lazy(() => import('./pages/CampusMapPage'));
 
@@ -79,7 +79,6 @@ function AuthenticatedRoutes() {
         <Route path="rbac-matrix" element={<RoleGuard moduleName="infra"><RbacMatrixPage /></RoleGuard>} />
         <Route path="access-logs" element={<RoleGuard moduleName="infra"><AccessLogsPage /></RoleGuard>} />
         <Route path="sessions" element={<RoleGuard moduleName="infra"><SessionsPage /></RoleGuard>} />
-        <Route path="audit-trail" element={<RoleGuard moduleName="infra"><AuditTrailPage /></RoleGuard>} />
 
         <Route path="infra/devices" element={<Navigate to="/dashboard/devices" replace />} />
         <Route path="infra/auth-logs" element={<Navigate to="/dashboard/access-logs" replace />} />
@@ -92,6 +91,7 @@ function AuthenticatedRoutes() {
         <Route path="rag/chatbot-queries" element={<Navigate to="/dashboard/chatbot-logs" replace />} />
 
         <Route path="academics/*" element={<RoleGuard moduleName="academics"><AcademicsPage /></RoleGuard>} />
+        <Route path="appointments" element={<RoleGuard moduleName="academics"><AppointmentsPage /></RoleGuard>} />
 
         <Route
           path="mapping"

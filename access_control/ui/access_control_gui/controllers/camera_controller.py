@@ -118,6 +118,7 @@ def _open_capture(source: str | int) -> Any:
     exposure_value = float(os.getenv("EDGE_CAMERA_EV", "0.0"))
     brightness = float(os.getenv("EDGE_CAMERA_BRIGHTNESS", "0.0"))
     contrast = float(os.getenv("EDGE_CAMERA_CONTRAST", "1.0"))
+    auto_exposure = os.getenv("EDGE_CAMERA_AUTO_EXPOSURE", "true").strip().lower() in {"1", "true", "yes", "on"}
 
     if open_single_capture is not None:
         return open_single_capture(
@@ -130,6 +131,7 @@ def _open_capture(source: str | int) -> Any:
             exposure_value=exposure_value,
             brightness=brightness,
             contrast=contrast,
+            auto_exposure=auto_exposure,
         )
 
     # Local fallback if capture_backend is not imported
@@ -170,6 +172,12 @@ def _configure_capture(capture: Any, source: str | int) -> None:
         capture.set(cv2.CAP_PROP_FOURCC, fourcc)
     capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    auto_exposure = os.getenv("EDGE_CAMERA_AUTO_EXPOSURE", "true").strip().lower() in {"1", "true", "yes", "on"}
+    if auto_exposure and hasattr(cv2, "CAP_PROP_AUTO_EXPOSURE"):
+        try:
+            capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3 if sys_platform_is_linux() else 0.75)
+        except Exception:
+            pass
     time.sleep(0.5)
 
 

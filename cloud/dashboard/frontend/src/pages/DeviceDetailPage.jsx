@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, ArrowLeft, Cpu, KeyRound, QrCode, Shield } from 'lucide-react';
+import { Activity, ArrowLeft, Cpu, KeyRound, Layers, Plus, QrCode, Search, Shield, UserPlus, X } from 'lucide-react';
 import { cloudApi, formatDateTime } from '../lib/cloudApi';
 import { useToast } from '../providers/ToastProvider';
 import { StatusBadge } from '../components/ui/StatusBadge';
@@ -15,6 +15,8 @@ export function DeviceDetailPage() {
   const toast = useToast();
   const [rotatedSecret, setRotatedSecret] = useState('');
   const [pairingDetails, setPairingDetails] = useState(null);
+  const [userSearch, setUserSearch] = useState('');
+  const [showUserPicker, setShowUserPicker] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['device-detail', deviceId],
@@ -27,6 +29,27 @@ export function DeviceDetailPage() {
     staleTime: 60_000,
   });
 
+  const { data: groups = [] } = useQuery({
+    queryKey: ['access-groups'],
+    queryFn: () => cloudApi.get('/api/iam/access-groups'),
+    staleTime: 60_000,
+  });
+
+  const { data: userSearchRes } = useQuery({
+    queryKey: ['device-user-picker', userSearch],
+    queryFn: () =>
+      cloudApi.get(`/api/iam/users/paginated?page=1&page_size=12&q=${encodeURIComponent(userSearch.trim())}`),
+    enabled: showUserPicker,
+    staleTime: 15_000,
+  });
+
+  const dev = data?.device;
+
+  const userCandidates = useMemo(() => {
+    const existing = new Set(dev?.allowed_user_ids || []);
+    return (userSearchRes?.items || []).filter((u) => !existing.has(u.user_id));
+  }, [userSearchRes, dev?.allowed_user_ids]);
+
   if (isLoading) {
     return (
       <div className="py-24 flex flex-col items-center text-slate-500">
@@ -36,7 +59,6 @@ export function DeviceDetailPage() {
     );
   }
 
-  const dev = data?.device;
   if (!dev) {
     return (
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-10 text-center">
@@ -56,7 +78,37 @@ export function DeviceDetailPage() {
         role_id: roleId,
         allowed: !currentlyAllowed,
       });
-      toast.success('Updated device access rule.');
+      toast.success('Updated device role rule.');
+      queryClient.invalidateQueries({ queryKey: ['device-detail', deviceId] });
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleToggleGroup = async (groupId, currentlyAssigned) => {
+    try {
+      await cloudApi.put('/api/infra/rbac-matrix/toggle-group', {
+        target_type: 'device',
+        target_id: dev.device_id,
+        group_id: groupId,
+        allowed: !currentlyAssigned,
+      });
+      toast.success('Updated device access group.');
+      queryClient.invalidateQueries({ queryKey: ['device-detail', deviceId] });
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleToggleUser = async (userId, allowed) => {
+    try {
+      await cloudApi.put('/api/infra/rbac-matrix/toggle-user', {
+        target_type: 'device',
+        target_id: dev.device_id,
+        user_id: userId,
+        allowed,
+      });
+      toast.success(allowed ? 'Granted individual user access.' : 'Removed individual user access.');
       queryClient.invalidateQueries({ queryKey: ['device-detail', deviceId] });
     } catch (err) {
       toast.error(err.message);
@@ -108,6 +160,10 @@ export function DeviceDetailPage() {
 
   const metrics = data?.metrics_24h || { attempts: 0, failures: 0, success_rate: 100 };
   const logs = data?.recent_logs || [];
+  const assignedGroupIds = dev.assigned_group_ids || [];
+  const inheritedGroupIds = dev.inherited_node_group_ids || [];
+  const directUsers = dev.allowed_users || [];
+  const inheritedUsers = dev.inherited_node_users || [];
 
   return (
     <div className="space-y-6">
@@ -193,29 +249,85 @@ export function DeviceDetailPage() {
       <AccessControlSettingsCard deviceId={dev.device_id} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Per-Device RBAC */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-            <h2 className="text-base font-bold">Authorized Roles</h2>
+        {/* Per-Device Access Policy (Groups + Roles + Individual Users) */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <h2 className="text-base font-bold">Authorized Access</h2>
+            </div>
+            <StatusBadge variant={dev.uses_device_override ? 'info' : 'neutral'}>
+              {dev.uses_device_override ? 'Override' : 'Inherited'}
+            </StatusBadge>
           </div>
           <p className="text-xs text-slate-500">
             {dev.uses_device_override
-              ? 'Using Device RBAC rules.'
-              : 'No Device RBAC rules set — inheriting Node RBAC rules.'}
+              ? 'Using device-specific access rules (overrides node policy).'
+              : 'No device-specific rules set — inheriting full policy from assigned node.'}
           </p>
+
+          {/* Access Groups */}
           <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                <Layers className="w-3 h-3" /> Access Groups
+              </span>
+              <button
+                type="button"
+                onClick={() => navigate('/dashboard/roles?tab=groups')}
+                className="text-[11px] font-semibold text-indigo-600 hover:underline"
+              >
+                Manage
+              </button>
+            </div>
+            {groups.length === 0 ? (
+              <p className="text-xs text-slate-400">No access groups created yet.</p>
+            ) : (
+              groups.map((g) => {
+                const assigned = assignedGroupIds.includes(g.group_id);
+                const inherited = !dev.uses_device_override && inheritedGroupIds.includes(g.group_id);
+                return (
+                  <label
+                    key={g.group_id}
+                    className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                  >
+                    <div>
+                      <div className="text-sm font-bold text-slate-900 dark:text-slate-100">{g.group_name}</div>
+                      <div className="text-[11px] text-slate-500">
+                        {(g.roles || []).length} role{(g.roles || []).length === 1 ? '' : 's'} · {(g.users || []).length} user{(g.users || []).length === 1 ? '' : 's'}
+                        {inherited && ' · Inherited from node'}
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={assigned}
+                      onChange={() => handleToggleGroup(g.group_id, assigned)}
+                      className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                  </label>
+                );
+              })
+            )}
+          </div>
+
+          {/* Individual Roles */}
+          <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
+              Individual Roles
+            </span>
             {roles.map((r) => {
-              const direct = dev.allowed_role_ids.includes(r.role_id);
-              const inherited = !dev.uses_device_override && dev.inherited_node_role_ids.includes(r.role_id);
+              const direct = (dev.allowed_role_ids || []).includes(r.role_id);
+              const viaGroup = !direct && (dev.effective_role_ids || []).includes(r.role_id);
+              const inherited = !dev.uses_device_override && (dev.inherited_node_role_ids || []).includes(r.role_id);
               return (
                 <label
                   key={r.role_id}
-                  className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                  className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
                 >
                   <div>
                     <div className="text-sm font-bold text-slate-900 dark:text-slate-100">{r.role_name}</div>
-                    {inherited && <div className="text-[11px] text-slate-500">Inherited from node</div>}
+                    {viaGroup && <div className="text-[11px] text-indigo-600 dark:text-indigo-400">Granted via group</div>}
+                    {!viaGroup && inherited && <div className="text-[11px] text-emerald-600 dark:text-emerald-400">Inherited from node</div>}
                   </div>
                   <input
                     type="checkbox"
@@ -226,6 +338,93 @@ export function DeviceDetailPage() {
                 </label>
               );
             })}
+          </div>
+
+          {/* Individual Users */}
+          <div className="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                Individual Users
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setUserSearch('');
+                  setShowUserPicker((prev) => !prev);
+                }}
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:underline"
+              >
+                <UserPlus className="w-3 h-3" /> {showUserPicker ? 'Close' : 'Add User'}
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              {directUsers.map((u) => (
+                <span
+                  key={u.user_id}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-300"
+                >
+                  {u.full_name}
+                  <button
+                    type="button"
+                    onClick={() => handleToggleUser(u.user_id, false)}
+                    className="hover:text-red-600"
+                    aria-label={`Remove ${u.full_name}`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+
+              {!dev.uses_device_override &&
+                inheritedUsers.map((u) => (
+                  <span
+                    key={`inh-${u.user_id}`}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                  >
+                    {u.full_name} <span className="text-[9px] opacity-75">(node)</span>
+                  </span>
+                ))}
+
+              {directUsers.length === 0 && (dev.uses_device_override || inheritedUsers.length === 0) && (
+                <span className="text-xs text-slate-400">No individual users assigned.</span>
+              )}
+            </div>
+
+            {showUserPicker && (
+              <div className="space-y-2 pt-1">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    placeholder="Search user name or email..."
+                    className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs"
+                  />
+                </div>
+                <div className="max-h-36 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
+                  {userCandidates.length === 0 ? (
+                    <div className="p-2.5 text-xs text-slate-400 text-center">No matching users.</div>
+                  ) : (
+                    userCandidates.map((u) => (
+                      <button
+                        key={u.user_id}
+                        type="button"
+                        onClick={() => handleToggleUser(u.user_id, true)}
+                        className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                      >
+                        <div>
+                          <div className="text-xs font-bold text-slate-900 dark:text-slate-100">{u.full_name}</div>
+                          <div className="text-[10px] font-mono text-slate-500">{u.email}</div>
+                        </div>
+                        <Plus className="w-3.5 h-3.5 text-indigo-600" />
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

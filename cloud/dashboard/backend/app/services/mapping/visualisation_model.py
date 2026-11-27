@@ -89,10 +89,8 @@ def build_visualisation_model(
 
         raw_nodes = db.query(Node).filter(Node.floorplan_id == fp_id).all()
         node_ids = [n.node_id for n in raw_nodes]
-        node_roles_map: dict[int, list[int]] = {}
-        if node_ids:
-            for nr in db.query(NodeRBAC).filter(NodeRBAC.node_id.in_(node_ids)).all():
-                node_roles_map.setdefault(nr.node_id, []).append(nr.role_id)
+        from app.services.rbac_resolver import resolve_node_effective_roles
+        node_roles_map: dict[int, list[int]] = resolve_node_effective_roles(db, node_ids) if node_ids else {}
 
         permitted_nodes = []
         permitted_node_id_set: set[int] = set()

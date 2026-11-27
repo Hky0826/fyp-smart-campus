@@ -122,3 +122,80 @@ def test_device_rbac_repository_evaluation(monkeypatch):
         decision_gate2 = repo.evaluate_access(user_id=20, node_id=100, now=now, device_id="gate-02")
         assert not decision_gate2.allowed
 
+
+def test_direct_user_access_and_device_user_override(monkeypatch):
+    import tempfile
+    from pathlib import Path
+    from access_control.facial_recognition.src.face.database import DeviceUserRepository
+    from access_control.facial_recognition.src.sync import SQLiteEdgeDB
+
+    monkeypatch.delenv("EDGE_ACCESS_MAX_POLICY_AGE_SECONDS", raising=False)
+    now = datetime.now(timezone.utc)
+
+    # Pure evaluator allows direct user grant even when role does not match
+    allowed = evaluate_access(
+        user_id=20,
+        is_active=True,
+        user_role_ids=[3],
+        allowed_role_ids=[2],
+        allowed_user_ids=[20],
+        node_id=100,
+        policy_version="v4",
+        policy_synced_at=now,
+        now=now,
+    )
+    assert allowed.allowed
+
+    # Inactive user is still denied even if listed in allowed_user_ids
+    inactive = evaluate_access(
+        user_id=20,
+        is_active=False,
+        user_role_ids=[3],
+        allowed_role_ids=[2],
+        allowed_user_ids=[20],
+        node_id=100,
+        policy_version="v4",
+        policy_synced_at=now,
+        now=now,
+    )
+    assert not inactive.allowed
+    assert inactive.reason == "inactive_or_unknown_user"
+
+    # End-to-end SQLite snapshot with node_user_access and device_user_access override
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        db_path = Path(tmp_dir) / "test_edge_users.db"
+        edge_db = SQLiteEdgeDB(db_path=db_path)
+        edge_db.save_users_delta([
+            {"user_id": 10, "is_active": 1, "face_vector_b64": "AAAA"},
+            {"user_id": 20, "is_active": 1, "face_vector_b64": "BBBB"},
+        ])
+        edge_db.save_authorization_snapshot(
+            roles=[{"role_id": 2, "role_name": "STAFF"}, {"role_id": 3, "role_name": "STUDENT"}],
+            user_roles=[{"user_id": 10, "role_id": 2}, {"user_id": 20, "role_id": 3}],
+            rbac=[{"node_id": 100, "role_id": 2}],
+            device_rbac=[],
+            node_user_access=[{"node_id": 100, "user_id": 20}],
+            device_user_access=[],
+        )
+        edge_db.save_policy_metadata(node_id=100, policy_version="v4", synced_at=now.isoformat(), device_id="gate-01")
+        repo = DeviceUserRepository(db_path)
+
+        # Inherited mode: User 10 allowed via node role, User 20 allowed via node_user_access
+        assert repo.evaluate_access(user_id=10, node_id=100, now=now, device_id="gate-01").allowed
+        assert repo.evaluate_access(user_id=20, node_id=100, now=now, device_id="gate-01").allowed
+
+        # Device override with ONLY device_user_access=[20] (no device_rbac roles):
+        # User 20 is allowed; User 10 (STAFF on node) must NOT fall back to node_rbac!
+        edge_db.save_authorization_snapshot(
+            roles=[{"role_id": 2, "role_name": "STAFF"}, {"role_id": 3, "role_name": "STUDENT"}],
+            user_roles=[{"user_id": 10, "role_id": 2}, {"user_id": 20, "role_id": 3}],
+            rbac=[{"node_id": 100, "role_id": 2}],
+            device_rbac=[],
+            node_user_access=[],
+            device_user_access=[{"device_id": "gate-01", "user_id": 20}],
+        )
+        assert repo.evaluate_access(user_id=20, node_id=100, now=now, device_id="gate-01").allowed
+        denied_staff = repo.evaluate_access(user_id=10, node_id=100, now=now, device_id="gate-01")
+        assert not denied_staff.allowed
+        assert denied_staff.reason == "no_explicit_node_permission"
+

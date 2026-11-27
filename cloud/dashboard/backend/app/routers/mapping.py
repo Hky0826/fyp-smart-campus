@@ -36,11 +36,13 @@ from app.models.models import (
     EdgeRBAC,
     Floorplan,
     Node,
+    NodeAccessGroup,
     NodeRBAC,
     Notification,
     Role,
     User,
 )
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from app.services.mapping.ai_bridge import (
     analyze_floorplan_image,
     detect_walls_for_floorplan,
@@ -231,6 +233,13 @@ def get_map_data(floorplan_id: int, db: Session = Depends(get_db)):
     for nr in db.query(NodeRBAC).filter(NodeRBAC.node_id.in_(node_ids)).all():
         node_roles_map.setdefault(nr.node_id, []).append(nr.role_id)
 
+    node_groups_map: dict[int, list[int]] = {}
+    try:
+        for ng in db.query(NodeAccessGroup).filter(NodeAccessGroup.node_id.in_(node_ids)).all():
+            node_groups_map.setdefault(ng.node_id, []).append(ng.group_id)
+    except (OperationalError, ProgrammingError):
+        db.rollback()
+
     nodes_out = [
         {
             "node_id": n.node_id,
@@ -241,6 +250,7 @@ def get_map_data(floorplan_id: int, db: Session = Depends(get_db)):
             "is_accessible": n.is_accessible,
             "node_type": n.node_type,
             "allowed_roles": node_roles_map.get(n.node_id, []),
+            "assigned_group_ids": sorted(node_groups_map.get(n.node_id, [])),
         }
         for n in node_rows
     ]
@@ -548,6 +558,14 @@ async def save_map_data(
 
             for role_id in set(n.get("allowed_roles") or []):
                 db.add(NodeRBAC(node_id=index_to_node_id[i], role_id=int(role_id)))
+
+            if "assigned_group_ids" in n:
+                try:
+                    db.query(NodeAccessGroup).filter(NodeAccessGroup.node_id == index_to_node_id[i]).delete(synchronize_session=False)
+                    for group_id in set(n.get("assigned_group_ids") or []):
+                        db.add(NodeAccessGroup(node_id=index_to_node_id[i], group_id=int(group_id)))
+                except (OperationalError, ProgrammingError):
+                    db.rollback()
 
         # 3. Delete removed edges
         all_current_node_ids = list(index_to_node_id.values())

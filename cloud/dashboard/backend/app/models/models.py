@@ -82,6 +82,8 @@ class Node(Base):
     
     floorplan = relationship("Floorplan", back_populates="nodes")
     node_embedding = relationship("NodeEmbedding", back_populates="node", uselist=False, cascade="all, delete-orphan")
+    node_access_groups = relationship("NodeAccessGroup", back_populates="node", cascade="all, delete-orphan")
+    node_user_access = relationship("NodeUserAccess", back_populates="node", cascade="all, delete-orphan")
     
     # Self-referential or circular dependencies: edges refer to nodes.
     # We define primaryjoin explicitly in Edge.
@@ -533,6 +535,8 @@ class Device(Base):
     
     node = relationship("Node")
     device_rbac = relationship("DeviceRBAC", back_populates="device", cascade="all, delete-orphan")
+    device_access_groups = relationship("DeviceAccessGroup", back_populates="device", cascade="all, delete-orphan")
+    device_user_access = relationship("DeviceUserAccess", back_populates="device", cascade="all, delete-orphan")
 
 class DeviceRBAC(Base):
     __tablename__ = "device_rbac"
@@ -560,6 +564,67 @@ class EdgeRBAC(Base):
     
     edge = relationship("Edge")
     role = relationship("Role", back_populates="edge_rbac")
+
+class AccessGroup(Base):
+    __tablename__ = "access_groups"
+
+    group_id = Column(Integer, primary_key=True, autoincrement=True)
+    group_name = Column(String(100), unique=True, nullable=False)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    roles = relationship("Role", secondary="access_group_roles")
+    users = relationship("User", secondary="access_group_users")
+    node_links = relationship("NodeAccessGroup", back_populates="group", cascade="all, delete-orphan")
+    device_links = relationship("DeviceAccessGroup", back_populates="group", cascade="all, delete-orphan")
+
+class AccessGroupRole(Base):
+    __tablename__ = "access_group_roles"
+
+    group_id = Column(Integer, ForeignKey("access_groups.group_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    role_id = Column(Integer, ForeignKey("roles.role_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+
+class AccessGroupUser(Base):
+    __tablename__ = "access_group_users"
+
+    group_id = Column(Integer, ForeignKey("access_groups.group_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+
+class NodeAccessGroup(Base):
+    __tablename__ = "node_access_groups"
+
+    node_id = Column(Integer, ForeignKey("nodes.node_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    group_id = Column(Integer, ForeignKey("access_groups.group_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+
+    node = relationship("Node", back_populates="node_access_groups")
+    group = relationship("AccessGroup", back_populates="node_links")
+
+class DeviceAccessGroup(Base):
+    __tablename__ = "device_access_groups"
+
+    device_id = Column(String(100), ForeignKey("devices.device_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    group_id = Column(Integer, ForeignKey("access_groups.group_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+
+    device = relationship("Device", back_populates="device_access_groups")
+    group = relationship("AccessGroup", back_populates="device_links")
+
+class NodeUserAccess(Base):
+    __tablename__ = "node_user_access"
+
+    node_id = Column(Integer, ForeignKey("nodes.node_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+
+    node = relationship("Node", back_populates="node_user_access")
+    user = relationship("User")
+
+class DeviceUserAccess(Base):
+    __tablename__ = "device_user_access"
+
+    device_id = Column(String(100), ForeignKey("devices.device_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True, nullable=False)
+
+    device = relationship("Device", back_populates="device_user_access")
+    user = relationship("User")
 
 class JWTSession(Base):
     __tablename__ = "jwt_sessions"

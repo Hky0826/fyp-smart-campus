@@ -323,16 +323,16 @@ export function OverviewPage() {
               <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Upload Knowledge Doc</div>
             </button>
           )}
-          {canAccess('infra') && (
+          {canAccess('academics') && (
             <button
               type="button"
-              onClick={() => navigate('/dashboard/audit-trail')}
+              onClick={() => navigate('/dashboard/appointments')}
               className="flex items-center gap-3 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-500 bg-slate-50/60 dark:bg-slate-950/40 text-left transition-colors"
             >
               <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400">
                 <Activity className="w-4 h-4" />
               </div>
-              <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Admin Audit Trail</div>
+              <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Appointments</div>
             </button>
           )}
         </div>

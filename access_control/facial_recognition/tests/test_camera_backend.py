@@ -14,6 +14,8 @@ except ImportError:
     cv2 = None
 
 from access_control.facial_recognition.src.camera.capture_backend import (
+    AdaptiveExposureController,
+    DEFAULT_AUTO_EXPOSURE,
     DEFAULT_BRIGHTNESS,
     DEFAULT_CONTRAST,
     DEFAULT_EXPOSURE_VALUE,
@@ -171,6 +173,7 @@ class TestCameraBackend(unittest.TestCase):
                 exposure_value=DEFAULT_EXPOSURE_VALUE,
                 brightness=DEFAULT_BRIGHTNESS,
                 contrast=DEFAULT_CONTRAST,
+                auto_exposure=DEFAULT_AUTO_EXPOSURE,
             )
 
     def test_open_camera_capture_auto_fallback(self):
@@ -246,6 +249,99 @@ class TestCameraBackend(unittest.TestCase):
             cap = _open_capture("csi")
             self.assertEqual(cap, mock_inst)
             mock_open.assert_called_once()
+
+    def test_adaptive_exposure_reduces_ev_when_overexposed(self):
+        ae = AdaptiveExposureController(initial_ev=0.0, interval_seconds=0.0)
+        bright_frame = np.full((120, 160, 3), 235, dtype=np.uint8)
+        next_ev = ae.compute_next_ev(bright_frame, now=1.0)
+        self.assertIsNotNone(next_ev)
+        self.assertLess(next_ev, 0.0)
+        self.assertEqual(ae.current_ev, next_ev)
+
+    def test_adaptive_exposure_reduces_ev_on_highlight_clipping(self):
+        ae = AdaptiveExposureController(initial_ev=0.0, interval_seconds=0.0, max_clip_ratio=0.08)
+        # Mostly mid-dark background (100) with 25% clipped white highlights (255)
+        frame = np.full((120, 160, 3), 100, dtype=np.uint8)
+        frame[:30, :, :] = 255
+        next_ev = ae.compute_next_ev(frame, now=1.0)
+        self.assertIsNotNone(next_ev)
+        self.assertLess(next_ev, 0.0)
+
+    def test_adaptive_exposure_increases_ev_when_underexposed(self):
+        ae = AdaptiveExposureController(initial_ev=0.0, interval_seconds=0.0)
+        dark_frame = np.full((120, 160, 3), 30, dtype=np.uint8)
+        next_ev = ae.compute_next_ev(dark_frame, now=1.0)
+        self.assertIsNotNone(next_ev)
+        self.assertGreater(next_ev, 0.0)
+
+    def test_adaptive_exposure_stays_stable_within_deadband(self):
+        ae = AdaptiveExposureController(initial_ev=0.0, target_luma=128.0, tolerance=18.0, interval_seconds=0.0)
+        balanced_frame = np.full((120, 160, 3), 128, dtype=np.uint8)
+        self.assertIsNone(ae.compute_next_ev(balanced_frame, now=1.0))
+        self.assertEqual(ae.current_ev, 0.0)
+
+    def test_adaptive_exposure_respects_interval_and_clamps_bounds(self):
+        ae = AdaptiveExposureController(initial_ev=-2.4, min_ev=-2.5, max_ev=1.5, interval_seconds=0.5)
+        bright_frame = np.full((120, 160, 3), 255, dtype=np.uint8)
+        ev1 = ae.compute_next_ev(bright_frame, now=1.0)
+        self.assertEqual(ev1, -2.5)
+        # Within interval -> no adjustment
+        self.assertIsNone(ae.compute_next_ev(bright_frame, now=1.2))
+        # At min bound -> stays clamped
+        self.assertIsNone(ae.compute_next_ev(bright_frame, now=2.0))
+
+    def test_picamera2_capture_adaptive_ae_adjusts_controls_on_bright_frame(self):
+        mock_picam_inst = MagicMock()
+        bright_frame = np.full((120, 160, 3), 250, dtype=np.uint8)
+        mock_picam_inst.capture_array.return_value = bright_frame
+        mock_picam_cls = MagicMock(return_value=mock_picam_inst)
+        mock_picam_cls.global_camera_info.return_value = [{"Model": "imx219"}]
+
+        with patch.dict(sys.modules, {"picamera2": MagicMock(Picamera2=mock_picam_cls)}):
+            with patch("time.sleep", return_value=None):
+                cap = Picamera2Capture(camera_idx=0, exposure_value=0.0, auto_exposure=True)
+                mock_picam_inst.set_controls.reset_mock()
+
+                ok, frame = cap.read()
+                self.assertTrue(ok)
+                self.assertIsNotNone(frame)
+                mock_picam_inst.set_controls.assert_called_once()
+                sent_controls = mock_picam_inst.set_controls.call_args[0][0]
+                self.assertIn("ExposureValue", sent_controls)
+                self.assertLess(sent_controls["ExposureValue"], 0.0)
+                self.assertEqual(cap.exposure_value, sent_controls["ExposureValue"])
+                cap.release()
+
+    def test_picamera2_capture_auto_exposure_disabled_skips_adaptive_updates(self):
+        mock_picam_inst = MagicMock()
+        bright_frame = np.full((120, 160, 3), 250, dtype=np.uint8)
+        mock_picam_inst.capture_array.return_value = bright_frame
+        mock_picam_cls = MagicMock(return_value=mock_picam_inst)
+        mock_picam_cls.global_camera_info.return_value = [{"Model": "imx219"}]
+
+        with patch.dict(sys.modules, {"picamera2": MagicMock(Picamera2=mock_picam_cls)}):
+            with patch("time.sleep", return_value=None):
+                cap = Picamera2Capture(camera_idx=0, exposure_value=0.0, auto_exposure=False)
+                config_controls = mock_picam_inst.create_video_configuration.call_args[1]["controls"]
+                self.assertFalse(config_controls["AeEnable"])
+                mock_picam_inst.set_controls.reset_mock()
+
+                ok, _ = cap.read()
+                self.assertTrue(ok)
+                mock_picam_inst.set_controls.assert_not_called()
+                cap.release()
+
+    def test_open_single_capture_enables_opencv_auto_exposure(self):
+        if cv2 is None:
+            self.skipTest("cv2 not installed")
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        with patch("access_control.facial_recognition.src.camera.capture_backend.cv2.VideoCapture", return_value=mock_cap):
+            with patch("access_control.facial_recognition.src.camera.capture_backend.sys_platform_is_linux", return_value=True):
+                with patch("time.sleep", return_value=None):
+                    cap = open_single_capture(0, auto_exposure=True)
+                    self.assertEqual(cap, mock_cap)
+                    mock_cap.set.assert_any_call(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
 
 
 if __name__ == "__main__":

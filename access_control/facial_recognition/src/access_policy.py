@@ -60,6 +60,7 @@ def evaluate_access(
     visitor_start: datetime | None = None,
     visitor_expiry: datetime | None = None,
     max_age_seconds: int | None = None,
+    allowed_user_ids: Iterable[int | str] | None = None,
 ) -> AccessDecision:
     """Evaluate a local policy snapshot and return an auditable decision.
 
@@ -90,11 +91,15 @@ def evaluate_access(
         return AccessDecision(False, "stale_policy", node_id, policy_version)
 
     try:
+        normalized_user_id = int(user_id)
         user_roles = {int(role) for role in (user_role_ids or ())}
         allowed_roles = {int(role) for role in (allowed_role_ids or ())}
+        allowed_users = {int(uid) for uid in (allowed_user_ids or ())}
     except (TypeError, ValueError):
         return AccessDecision(False, "malformed_role_assignment", node_id, policy_version)
-    if not user_roles or not allowed_roles or not user_roles.intersection(allowed_roles):
+    has_direct_user_grant = normalized_user_id in allowed_users
+    has_role_grant = bool(user_roles and allowed_roles and user_roles.intersection(allowed_roles))
+    if not has_direct_user_grant and not has_role_grant:
         return AccessDecision(False, "no_explicit_node_permission", node_id, policy_version)
 
     if visitor_start is not None or visitor_expiry is not None:

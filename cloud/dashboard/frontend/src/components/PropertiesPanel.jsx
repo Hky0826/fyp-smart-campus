@@ -7,6 +7,7 @@
 import {
   ArrowLeftRight,
   GitBranch,
+  Layers,
   Link2,
   MapPin,
   Minus,
@@ -30,7 +31,9 @@ export function PropertiesPanel({
   setActiveNodeTab,
   updateProperty,
   handleRoleToggle,
+  handleGroupToggle,
   rolesList,
+  accessGroupsList = [],
   edges,
   nodes,
   globalNodes,
@@ -249,32 +252,87 @@ export function PropertiesPanel({
                   />
                 </label>
 
-                {/* Node RBAC */}
+                {/* Node Access Groups */}
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-indigo-500" />
+                    <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                      Access Groups
+                    </h4>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Assign reusable access groups to grant multiple roles or users at once.
+                  </p>
+                  <div className="space-y-1.5 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60">
+                    {accessGroupsList.length === 0 ? (
+                      <p className="text-[11px] text-slate-400">No access groups created yet.</p>
+                    ) : (
+                      accessGroupsList.map((grp) => {
+                        const checked = (activeObj.assigned_group_ids || []).includes(grp.group_id);
+                        return (
+                          <label
+                            key={grp.group_id}
+                            className="flex items-start gap-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer select-none py-0.5"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => handleGroupToggle && handleGroupToggle(grp.group_id)}
+                              className="w-3.5 h-3.5 mt-0.5 rounded accent-indigo-600 cursor-pointer"
+                            />
+                            <div className="min-w-0">
+                              <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                                {grp.group_name}
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                {(grp.roles || []).length} role{(grp.roles || []).length === 1 ? '' : 's'} · {(grp.users || []).length} user{(grp.users || []).length === 1 ? '' : 's'}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* Node RBAC (Individual Roles) */}
                 <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
                   <div className="flex items-center gap-1.5">
                     <Shield className="w-3.5 h-3.5 text-indigo-500" />
                     <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                      Allowed Campus Roles
+                      Individual Campus Roles
                     </h4>
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Roles permitted to route through this location.
+                    Direct role permissions (in addition to any assigned groups).
                   </p>
                   <div className="space-y-1.5 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60">
                     {rolesList.map((role) => {
                       const checked = (activeObj.allowed_roles || []).includes(role.role_id);
+                      const viaGroup = !checked && accessGroupsList.some(
+                        (g) =>
+                          (activeObj.assigned_group_ids || []).includes(g.group_id) &&
+                          (g.roles || []).some((r) => r.role_id === role.role_id)
+                      );
                       return (
                         <label
                           key={role.role_id}
-                          className="flex items-center gap-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer select-none py-0.5"
+                          className="flex items-center justify-between gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer select-none py-0.5"
                         >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => handleRoleToggle(role.role_id)}
-                            className="w-3.5 h-3.5 rounded accent-indigo-600 cursor-pointer"
-                          />
-                          <span>{role.role_name}</span>
+                          <span className="flex items-center gap-2.5">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => handleRoleToggle(role.role_id)}
+                              className="w-3.5 h-3.5 rounded accent-indigo-600 cursor-pointer"
+                            />
+                            <span>{role.role_name}</span>
+                          </span>
+                          {viaGroup && (
+                            <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
+                              via group
+                            </span>
+                          )}
                         </label>
                       );
                     })}

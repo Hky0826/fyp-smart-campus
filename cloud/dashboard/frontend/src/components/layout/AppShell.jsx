@@ -4,10 +4,10 @@ import {
   Activity,
   BookOpen,
   Calendar,
+  CalendarClock,
   ChevronLeft,
   ChevronRight,
   Cpu,
-  FileCheck2,
   GraduationCap,
   Grid3x3,
   KeyRound,
@@ -48,9 +48,9 @@ const NAV_GROUPS = [
     items: [
       { to: '/dashboard/devices', label: 'Edge Devices', icon: Cpu, module: 'infra' },
       { to: '/dashboard/rbac-matrix', label: 'RBAC Matrix', icon: Grid3x3, module: 'infra' },
+      { to: '/dashboard/mapping', label: 'Campus Map', icon: Map, module: 'mapping' },
       { to: '/dashboard/access-logs', label: 'Access Logs', icon: Activity, module: 'infra' },
       { to: '/dashboard/sessions', label: 'Active Sessions', icon: KeyRound, module: 'infra' },
-      { to: '/dashboard/audit-trail', label: 'Audit Trail', icon: FileCheck2, module: 'infra' },
     ],
   },
   {
@@ -60,7 +60,7 @@ const NAV_GROUPS = [
       { to: '/dashboard/chatbot-logs', label: 'Chatbot Logs', icon: MessageSquare, module: 'rag' },
       { to: '/dashboard/speech-config', label: 'Speech & Acronyms', icon: Volume2, module: 'rag' },
       { to: '/dashboard/academics', label: 'Academics', icon: Calendar, module: 'academics' },
-      { to: '/dashboard/mapping', label: 'Campus Map', icon: Map, module: 'mapping' },
+      { to: '/dashboard/appointments', label: 'Appointments', icon: CalendarClock, module: 'academics' },
     ],
   },
 ];
