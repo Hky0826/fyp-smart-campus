@@ -150,24 +150,68 @@ class _LiveDuplexWorker(QThread):
 
     def run(self) -> None:
         self._stop_requested.clear()
+        max_reconnect_attempts = 3
+        backoff_seconds = 1.0
+        attempt = 0
         try:
-            live_config = self._api.get_live_config()
-            ws_url = live_config.get("ws_url")
-            if not ws_url:
-                raise RuntimeError("No Live Voice WebSocket URL provided by edge API.")
-            asyncio.run(self._duplex_session(ws_url))
-        except Exception as exc:
-            if not self._stop_requested.is_set():
-                logger.error("LiveDuplexWorker error: %s", exc)
-                self.errorOccurred.emit(str(exc))
+            while not self._stop_requested.is_set():
+                try:
+                    if attempt == 0:
+                        self.ragStatusChanged.emit("connecting", "Connecting to voice assistant...")
+                    live_config = self._api.get_live_config()
+                    ws_url = live_config.get("ws_url")
+                    if not ws_url:
+                        raise RuntimeError("No Live Voice WebSocket URL provided by edge API.")
+                    disconnect_reason = asyncio.run(self._duplex_session(ws_url))
+                    if self._stop_requested.is_set() or disconnect_reason == "stopped":
+                        break
+                    # Reset retry budget if the session had successfully connected before dropping
+                    if disconnect_reason == "closed_after_ready":
+                        attempt = 0
+                        backoff_seconds = 1.0
+                    attempt += 1
+                    if attempt > max_reconnect_attempts:
+                        self.ragStatusChanged.emit("", "")
+                        self.errorOccurred.emit("Unable to reach the AI voice service. Tap Reconnect to try again.")
+                        break
+                    self.listeningChanged.emit(False)
+                    self.busyChanged.emit(False)
+                    self.ragStatusChanged.emit(
+                        "reconnecting",
+                        f"Connection lost — reconnecting ({attempt}/{max_reconnect_attempts})...",
+                    )
+                    self.errorOccurred.emit("Voice connection interrupted. Reconnecting...")
+                    if self._stop_requested.wait(backoff_seconds):
+                        break
+                    backoff_seconds = min(4.0, backoff_seconds * 2.0)
+                except Exception as exc:
+                    if self._stop_requested.is_set():
+                        break
+                    logger.error("LiveDuplexWorker error (attempt %d): %s", attempt + 1, exc)
+                    attempt += 1
+                    if attempt > max_reconnect_attempts:
+                        self.ragStatusChanged.emit("", "")
+                        self.errorOccurred.emit("Unable to reach the AI voice service. Tap Reconnect to try again.")
+                        break
+                    self.listeningChanged.emit(False)
+                    self.busyChanged.emit(False)
+                    self.ragStatusChanged.emit(
+                        "reconnecting",
+                        f"Connection issue — retrying ({attempt}/{max_reconnect_attempts})...",
+                    )
+                    self.errorOccurred.emit("Voice connection interrupted. Reconnecting...")
+                    if self._stop_requested.wait(backoff_seconds):
+                        break
+                    backoff_seconds = min(4.0, backoff_seconds * 2.0)
         finally:
             self.listeningChanged.emit(False)
             self.busyChanged.emit(False)
             self.speechStateChanged.emit(False)
+            self.ragStatusChanged.emit("", "")
             self.userAudioLevelChanged.emit(0.0)
             self.assistantAudioLevelChanged.emit(0.0)
 
-    async def _duplex_session(self, ws_url: str) -> None:
+    async def _duplex_session(self, ws_url: str) -> str:
         logger.info("Connecting to Gemini Live duplex at %s", ws_url)
         loop = asyncio.get_running_loop()
         self._loop = loop
@@ -188,6 +232,10 @@ class _LiveDuplexWorker(QThread):
         turn_audio_bytes_sent = [0]
         first_audio_chunk_received = [False]
         first_audio_playback_started = [False]
+        awaiting_response_since = [0.0]
+        rag_in_progress = [False]
+        slow_notice_sent = [False]
+        session_disconnect_reason = ["stopped"]
 
         def commit_in_flight() -> None:
             user_q = last_user_query[0]
@@ -245,7 +293,7 @@ class _LiveDuplexWorker(QThread):
             self.errorOccurred.emit(f"Audio device error: {exc}")
             self._loop = None
             self._audio_play_queue = None
-            return
+            return "stopped"
 
         try:
             async with websockets.connect(ws_url, ping_interval=20, ping_timeout=20) as ws:
@@ -317,6 +365,9 @@ class _LiveDuplexWorker(QThread):
                             if self._stop_requested.is_set():
                                 break
                             if isinstance(raw_message, bytes):
+                                awaiting_response_since[0] = 0.0
+                                rag_in_progress[0] = False
+                                slow_notice_sent[0] = False
                                 if not first_audio_chunk_received[0]:
                                     first_audio_chunk_received[0] = True
                                     time_since_speech_end = (
@@ -353,6 +404,8 @@ class _LiveDuplexWorker(QThread):
                                 session_ready[0] = True
                                 self._session_ready = True
                                 self.listeningChanged.emit(True)
+                                self.ragStatusChanged.emit("", "")
+                                self.errorOccurred.emit("")
                                 edge_timing.log_receive("WS_READY", turn_id=msg_turn_id, server_sent_at=server_sent_at)
                                 if self._pending_greeting_requested:
                                     greet_user = self._pending_greeting_user
@@ -379,8 +432,16 @@ class _LiveDuplexWorker(QThread):
                                     )
                             elif event == "rag_status":
                                 st = data.get("status", "")
+                                msg_text = data.get("message") or ""
                                 q = data.get("query", "")
-                                self.ragStatusChanged.emit(st, q)
+                                rag_in_progress[0] = bool(st and st not in ("complete", "done", "timeout"))
+                                if st == "timeout":
+                                    awaiting_response_since[0] = 0.0
+                                    slow_notice_sent[0] = False
+                                    self.ragStatusChanged.emit("", "")
+                                    self.errorOccurred.emit(msg_text or "AI service took too long to respond. Please try again.")
+                                else:
+                                    self.ragStatusChanged.emit(st, msg_text or q)
                                 edge_timing.log_receive(
                                     "RAG_STATUS",
                                     turn_id=msg_turn_id,
@@ -389,6 +450,10 @@ class _LiveDuplexWorker(QThread):
                                     status=st,
                                 )
                             elif event == "acoustic_bridge":
+                                phrase = str(data.get("phrase") or "").strip()
+                                rag_in_progress[0] = True
+                                if phrase:
+                                    self.ragStatusChanged.emit("searching", phrase)
                                 edge_timing.log_receive(
                                     "ACOUSTIC_BRIDGE",
                                     turn_id=msg_turn_id,
@@ -419,11 +484,17 @@ class _LiveDuplexWorker(QThread):
                                     citations_count=len(cites),
                                 )
                             elif event == "output_transcript":
+                                awaiting_response_since[0] = 0.0
+                                rag_in_progress[0] = False
+                                slow_notice_sent[0] = False
                                 tok = data.get("text", "")
                                 if tok:
                                     last_assistant_text[0] += tok
                                     self.textChunkReceived.emit(tok)
                             elif event == "audio":
+                                awaiting_response_since[0] = 0.0
+                                rag_in_progress[0] = False
+                                slow_notice_sent[0] = False
                                 b64_chunk = data.get("chunk", "")
                                 if b64_chunk:
                                     pcm = base64.b64decode(b64_chunk)
@@ -439,6 +510,9 @@ class _LiveDuplexWorker(QThread):
                                     if self._audio_play_queue:
                                         await self._audio_play_queue.put(pcm)
                             elif event == "turn_complete":
+                                awaiting_response_since[0] = 0.0
+                                rag_in_progress[0] = False
+                                slow_notice_sent[0] = False
                                 total_round_trip = (
                                     (time.monotonic() - turn_speech_end_mono[0]) * 1000.0
                                     if turn_speech_end_mono[0] > 0
@@ -453,6 +527,9 @@ class _LiveDuplexWorker(QThread):
                                 )
                                 commit_in_flight()
                             elif event == "interrupted":
+                                awaiting_response_since[0] = 0.0
+                                rag_in_progress[0] = False
+                                slow_notice_sent[0] = False
                                 edge_timing.log_receive("INTERRUPTED", turn_id=msg_turn_id)
                                 playback_busy_until = 0.0
                                 last_speaker_rms = 0.0
@@ -466,11 +543,23 @@ class _LiveDuplexWorker(QThread):
                                 self.assistantAudioLevelChanged.emit(0.0)
                                 commit_in_flight()
                             elif event == "error":
+                                awaiting_response_since[0] = 0.0
+                                rag_in_progress[0] = False
+                                slow_notice_sent[0] = False
                                 err_msg = str(data.get("message") or "Unknown error")
+                                recoverable = bool(data.get("recoverable", False))
                                 edge_timing.log_receive("ERROR", turn_id=msg_turn_id, error=err_msg)
                                 self.errorOccurred.emit(err_msg)
+                                if recoverable:
+                                    session_disconnect_reason[0] = (
+                                        "closed_after_ready" if session_ready[0] else "closed_before_ready"
+                                    )
+                                    break
                     except websockets.ConnectionClosed:
-                        pass
+                        if not self._stop_requested.is_set():
+                            session_disconnect_reason[0] = (
+                                "closed_after_ready" if session_ready[0] else "closed_before_ready"
+                            )
                     except asyncio.CancelledError:
                         pass
 
@@ -593,6 +682,9 @@ class _LiveDuplexWorker(QThread):
                                         )
                                         self.speechStateChanged.emit(False)
                                         self.userAudioLevelChanged.emit(0.0)
+                                        awaiting_response_since[0] = turn_speech_end_mono[0]
+                                        rag_in_progress[0] = False
+                                        slow_notice_sent[0] = False
                                         try:
                                             await ws.send(json.dumps({
                                                 "event": "activity_end",
@@ -606,24 +698,55 @@ class _LiveDuplexWorker(QThread):
                                         except Exception:
                                             pass
 
+                async def turn_watchdog_loop() -> None:
+                    while not self._stop_requested.is_set():
+                        await asyncio.sleep(0.5)
+                        started_at = awaiting_response_since[0]
+                        if started_at <= 0.0:
+                            continue
+                        elapsed = time.monotonic() - started_at
+                        if elapsed >= 4.0 and not slow_notice_sent[0] and not rag_in_progress[0]:
+                            slow_notice_sent[0] = True
+                            self.ragStatusChanged.emit("slow", "Waiting for AI response...")
+                        hard_timeout = 18.0 if rag_in_progress[0] else 14.0
+                        if elapsed >= hard_timeout:
+                            awaiting_response_since[0] = 0.0
+                            rag_in_progress[0] = False
+                            slow_notice_sent[0] = False
+                            self.ragStatusChanged.emit("", "")
+                            set_busy(False)
+                            self.errorOccurred.emit(
+                                "The AI service is taking longer than expected. Please try speaking again."
+                            )
+
                 player_task = asyncio.create_task(player_loop())
                 receiver_task = asyncio.create_task(receiver_loop())
                 sender_task = asyncio.create_task(sender_loop())
+                watchdog_task = asyncio.create_task(turn_watchdog_loop())
 
                 while not self._stop_requested.is_set():
+                    if receiver_task.done() or sender_task.done():
+                        if session_disconnect_reason[0] == "stopped" and not self._stop_requested.is_set():
+                            session_disconnect_reason[0] = (
+                                "closed_after_ready" if session_ready[0] else "closed_before_ready"
+                            )
+                        break
                     await asyncio.sleep(0.1)
 
                 player_task.cancel()
                 receiver_task.cancel()
                 sender_task.cancel()
+                watchdog_task.cancel()
                 await mic_queue.put(None)
                 if self._audio_play_queue:
                     await self._audio_play_queue.put(None)
-                await asyncio.gather(player_task, receiver_task, sender_task, return_exceptions=True)
+                await asyncio.gather(player_task, receiver_task, sender_task, watchdog_task, return_exceptions=True)
         except Exception as exc:
             if not self._stop_requested.is_set():
                 logger.error("Duplex session error: %s", exc)
-                self.errorOccurred.emit(str(exc))
+                session_disconnect_reason[0] = (
+                    "closed_after_ready" if session_ready[0] else "closed_before_ready"
+                )
         finally:
             self._session_ready = False
             self._ws = None
@@ -639,6 +762,7 @@ class _LiveDuplexWorker(QThread):
                         stream.close()
                     except Exception:
                         pass
+        return session_disconnect_reason[0]
 
     def stop(self) -> None:
         self._stop_requested.set()
@@ -911,13 +1035,29 @@ class ChatbotController(QObject):
         self.transcribedTextChanged.emit()
         self._update_assistant_speaking()
 
+    @Slot()
+    def reconnectVoiceLoop(self) -> None:
+        """Manually restart the live voice WebSocket session after an error/disconnect."""
+        self.stopVoiceLoop()
+        self._set_error("")
+        self.startVoiceLoop()
+
     @Slot(str, str)
     def _on_rag_status(self, status: str, query: str) -> None:
-        if status or query:
+        clean_status = (status or "").strip().lower()
+        clean_detail = (query or "").strip()
+        if clean_status or clean_detail:
             self._partial_text = ""
             self.partialTextChanged.emit()
             self._update_assistant_speaking()
-        self._rag_status = "Searching database..." if status or query else ""
+        if not clean_status and not clean_detail:
+            self._rag_status = ""
+        elif clean_status in ("connecting", "reconnecting", "slow", "timeout") and clean_detail:
+            self._rag_status = clean_detail
+        elif clean_status == "searching" and clean_detail.lower().startswith("checking"):
+            self._rag_status = clean_detail
+        else:
+            self._rag_status = "Searching campus records..."
         self.ragStatusChanged.emit()
 
     @Slot(dict)

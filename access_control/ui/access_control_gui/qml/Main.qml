@@ -58,6 +58,7 @@ ApplicationWindow {
         onToggleMuteRequested: accessController.toggleMute()
         onDismissNavigationRequested: chatbotController.clearNavigation()
         onOptionSelected: function(option) { accessController.sendMessage(option) }
+        onReconnectRequested: chatbotController.reconnectVoiceLoop()
     }
 
     ChatbotButton {

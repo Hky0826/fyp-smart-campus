@@ -35,12 +35,14 @@ def get_gemini_client(*, timeout_seconds: float | None = None) -> genai.Client:
     if _client is None:
         with _lock:
             if _client is None:
-                timeout_ms = int(timeout_seconds * 1000) if timeout_seconds else 30000
+                default_timeout = getattr(rag_settings, "RAG_API_TIMEOUT_SECONDS", 12.0)
+                effective_timeout = timeout_seconds if timeout_seconds is not None else default_timeout
+                timeout_ms = max(10000, int(float(effective_timeout) * 1000))
                 _client = genai.Client(
                     api_key=rag_settings.GOOGLE_API_KEY,
-                    http_options=types.HttpOptions(timeout=max(10000, timeout_ms)),
+                    http_options=types.HttpOptions(timeout=timeout_ms),
                 )
-                logger.debug("Initialized singleton Gemini client (timeout=%dms)", max(10000, timeout_ms))
+                logger.debug("Initialized singleton Gemini client (timeout=%dms)", timeout_ms)
     return _client
 
 
@@ -200,7 +202,8 @@ def generate_content_with_retry(
     model: str,
     contents: Any,
     config: Any = None,
-    max_retries: int = 3,
+    max_retries: int = 2,
+    initial_delay: float = 0.3,
     **kwargs: Any,
 ) -> Any:
     """Convenience wrapper for client.models.generate_content with retry on 409/429/503."""
@@ -210,6 +213,7 @@ def generate_content_with_retry(
     return call_with_retry(
         client.models.generate_content,
         max_retries=max_retries,
+        initial_delay=initial_delay,
         **call_kwargs,
     )
 
@@ -220,7 +224,8 @@ def generate_content_stream_with_retry(
     model: str,
     contents: Any,
     config: Any = None,
-    max_retries: int = 3,
+    max_retries: int = 2,
+    initial_delay: float = 0.3,
     **kwargs: Any,
 ) -> Any:
     """Convenience wrapper for client.models.generate_content_stream with retry on 409/429/503."""
@@ -230,6 +235,7 @@ def generate_content_stream_with_retry(
     return call_with_retry(
         client.models.generate_content_stream,
         max_retries=max_retries,
+        initial_delay=initial_delay,
         **call_kwargs,
     )
 

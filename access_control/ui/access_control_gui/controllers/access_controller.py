@@ -566,7 +566,7 @@ class AccessController(QObject):
 
     @Slot()
     def _on_chatbot_error(self) -> None:
-        if self._chatbot.error:
+        if self._chat_error != self._chatbot.error:
             self._chat_error = self._chatbot.error
             self.uiChanged.emit()
 

@@ -549,6 +549,8 @@ class GeminiLiveSession:
         on_interrupted: Optional[Callable[[], Any]] = None,
         on_turn_complete: Optional[Callable[[], Any]] = None,
         on_output_transcript: Optional[Callable[[str], Any]] = None,
+        on_error: Optional[Callable[[str], Any]] = None,
+        on_go_away: Optional[Callable[[Any], Any]] = None,
     ) -> None:
         """
         Continuous full-duplex event receiver loop mirroring shitz/gemini_live_rag.py.
@@ -681,14 +683,29 @@ class GeminiLiveSession:
                         if asyncio.iscoroutine(res):
                             await res
 
+                elif event_type == "go_away":
+                    self._renew_requested = True
+                    time_left = event.get("time_left")
+                    logger.info("Gemini Live go_away received (time_left=%s); marking session for renewal", time_left)
+                    if on_go_away:
+                        await _maybe_await(on_go_away, time_left)
+
                 elif event_type == "error":
-                    logger.warning("Gemini Live session event error: %s", event.get("message"))
+                    err_msg = str(event.get("message") or "Live AI session disconnected")
+                    logger.warning("Gemini Live session event error: %s", err_msg)
+                    if on_error:
+                        await _maybe_await(on_error, err_msg)
                     break
 
             except asyncio.CancelledError:
                 break
             except Exception as exc:
                 logger.warning("Gemini Live receive_events notice: %s", exc)
+                if on_error:
+                    try:
+                        await _maybe_await(on_error, str(exc) or "Live AI session error")
+                    except Exception:
+                        pass
                 break
 
     async def finish_input(

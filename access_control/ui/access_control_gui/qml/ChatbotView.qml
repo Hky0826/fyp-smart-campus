@@ -58,6 +58,7 @@ Item {
 
     signal closeRequested()
     signal stopAnsweringRequested()
+    signal reconnectRequested()
     signal toggleMuteRequested()
     signal dismissNavigationRequested()
     signal optionSelected(string option)
@@ -605,18 +606,23 @@ Item {
                     // Inline Organic Assistant Thinking / RAG Indicator
                     Rectangle {
                         id: inlineThinkingBubble
+                        readonly property bool isSlowOrReconnecting: root.ragStatus.toLowerCase().indexOf("taking") !== -1
+                            || root.ragStatus.toLowerCase().indexOf("waiting") !== -1
+                            || root.ragStatus.toLowerCase().indexOf("reconnect") !== -1
+                            || root.ragStatus.toLowerCase().indexOf("connect") !== -1
+                            || root.ragStatus.toLowerCase().indexOf("retry") !== -1
                         visible: (root.ragStatus.length > 0 || (root.busy && root.partialText.trim().length === 0)) && root.partialText.trim().length === 0
                         Layout.alignment: Qt.AlignLeft
-                        Layout.preferredWidth: visible ? Math.min(history.width * 0.75, 320) : 0
-                        implicitWidth: Math.min(history.width * 0.75, 320)
-                        width: Math.min(history.width * 0.75, 320)
+                        Layout.preferredWidth: visible ? Math.min(history.width * 0.82, 380) : 0
+                        implicitWidth: Math.min(history.width * 0.82, 380)
+                        width: Math.min(history.width * 0.82, 380)
                         Layout.preferredHeight: visible ? 36 : 0
                         implicitHeight: 36
                         height: 36
                         radius: 10
-                        color: "#f0fdf4" // soft emerald-50
+                        color: isSlowOrReconnecting ? "#fffbeb" : "#f0fdf4"
                         border.width: 1
-                        border.color: "#86efac" // emerald-300
+                        border.color: isSlowOrReconnecting ? "#fcd34d" : "#86efac"
 
                         RowLayout {
                             anchors.fill: parent
@@ -635,7 +641,7 @@ Item {
                                         width: 6
                                         height: 6
                                         radius: 3
-                                        color: "#059669" // emerald-600
+                                        color: inlineThinkingBubble.isSlowOrReconnecting ? "#d97706" : "#059669"
                                         anchors.verticalCenter: parent.verticalCenter
 
                                         SequentialAnimation on opacity {
@@ -657,8 +663,8 @@ Item {
 
                             Text {
                                 Layout.fillWidth: true
-                                text: root.ragStatus.length > 0 ? "Searching campus database…" : "Thinking…"
-                                color: "#065f46" // emerald-800
+                                text: root.ragStatus.length > 0 ? root.ragStatus : "Thinking…"
+                                color: inlineThinkingBubble.isSlowOrReconnecting ? "#92400e" : "#065f46"
                                 font.pixelSize: 11
                                 font.bold: true
                                 elide: Text.ElideRight
@@ -1320,15 +1326,71 @@ Item {
                 }
             }
 
-            // Error display if present (suppress 404/Not Found technical codes)
-            Text {
+            // Error / Connection Status Banner (suppress 404/Not Found technical codes)
+            Rectangle {
+                id: errorAlertBanner
+                readonly property bool showBanner: root.errorText.length > 0 && root.errorText !== "Not Found" && !root.errorText.includes("404")
+                readonly property bool isReconnecting: root.errorText.toLowerCase().indexOf("reconnecting") !== -1
+                readonly property bool showReconnectBtn: !isReconnecting && (
+                    !root.listening
+                    || root.errorText.toLowerCase().indexOf("connection") !== -1
+                    || root.errorText.toLowerCase().indexOf("reach") !== -1
+                )
+                visible: showBanner
                 Layout.fillWidth: true
-                text: root.errorText
-                visible: root.errorText.length > 0 && root.errorText !== "Not Found" && !root.errorText.includes("404")
-                color: "#dc2626"
-                font.pixelSize: 11
-                elide: Text.ElideRight
-                horizontalAlignment: Text.AlignHCenter
+                Layout.leftMargin: 10
+                Layout.rightMargin: 10
+                Layout.bottomMargin: 4
+                Layout.preferredHeight: visible ? Math.max(34, errorBannerRow.implicitHeight + 12) : 0
+                radius: 8
+                color: isReconnecting ? "#fffbeb" : "#fef2f2"
+                border.width: 1
+                border.color: isReconnecting ? "#fcd34d" : "#fca5a5"
+
+                RowLayout {
+                    id: errorBannerRow
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    spacing: 8
+
+                    Text {
+                        text: errorAlertBanner.isReconnecting ? "⏳" : "⚠️"
+                        font.pixelSize: 13
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.errorText
+                        color: errorAlertBanner.isReconnecting ? "#92400e" : "#991b1b"
+                        font.pixelSize: 11
+                        font.bold: true
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Rectangle {
+                        visible: errorAlertBanner.showReconnectBtn
+                        Layout.preferredWidth: reconnectLabel.implicitWidth + 16
+                        Layout.preferredHeight: 24
+                        radius: 6
+                        color: "#dc2626"
+
+                        Text {
+                            id: reconnectLabel
+                            anchors.centerIn: parent
+                            text: "Reconnect"
+                            color: "#ffffff"
+                            font.pixelSize: 10
+                            font.bold: true
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.reconnectRequested()
+                        }
+                    }
+                }
             }
 
             // ==========================================
@@ -1401,7 +1463,7 @@ Item {
                                       : (root.assistantSpeaking
                                          ? "Assistant speaking..."
                                          : (root.ragStatus.length > 0
-                                            ? "Searching database..."
+                                            ? root.ragStatus
                                             : (root.busy
                                                ? "Thinking..."
                                                : (root.speaking ? "Listening to you..." : "Listening..."))))

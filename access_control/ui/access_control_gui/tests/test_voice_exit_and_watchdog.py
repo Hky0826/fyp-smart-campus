@@ -182,3 +182,30 @@ def test_watchdog_auto_closes_on_server_absent_since():
     access._state["active_chat_session"]["owner_absent_since"] = t_absent.isoformat()
     access._on_tick()
     access.exitChat.assert_called_once()
+
+
+def test_chatbot_rag_status_preserves_dynamic_messages():
+    access, chat = setup_controller()
+
+    chat._on_rag_status("connecting", "Connecting to voice assistant...")
+    assert chat.ragStatus == "Connecting to voice assistant..."
+
+    chat._on_rag_status("slow", "Still checking — the AI service is taking a moment...")
+    assert chat.ragStatus == "Still checking — the AI service is taking a moment..."
+
+    chat._on_rag_status("searching", "Checking university records for you...")
+    assert chat.ragStatus == "Checking university records for you..."
+
+    chat._on_rag_status("", "")
+    assert chat.ragStatus == ""
+
+
+def test_access_controller_clears_chat_error_when_chatbot_recovers():
+    access, chat = setup_controller()
+
+    chat._set_error("Voice connection interrupted. Reconnecting...")
+    assert access.chatError == "Voice connection interrupted. Reconnecting..."
+
+    # When voice session reconnects and clears error, AccessController must clear chatError too
+    chat._set_error("")
+    assert access.chatError == ""

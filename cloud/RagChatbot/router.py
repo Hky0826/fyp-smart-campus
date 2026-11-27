@@ -798,7 +798,64 @@ async def live_websocket_chat(
                     allowed_levels=cached_allowed_levels if use_cached else None,
                 )
 
-        result = await asyncio.to_thread(_run_request)
+        async def _send_slow_notice():
+            slow_after = max(1.0, float(getattr(rag_settings, "LIVE_SLOW_FEEDBACK_SECONDS", 4.0)))
+            await asyncio.sleep(slow_after)
+            if active:
+                try:
+                    await websocket.send_json({
+                        "event": "rag_status",
+                        "data": {
+                            "status": "slow",
+                            "message": "Still checking — the AI service is taking a moment...",
+                            "query": transcript,
+                            "turn_id": current_turn[0],
+                            "server_sent_at": cloud_timing.now_iso(),
+                        }
+                    })
+                except Exception:
+                    pass
+
+        slow_notice_task = asyncio.create_task(_send_slow_notice(), name="live-rag-slow-notice")
+        tool_timeout = max(5.0, float(getattr(rag_settings, "LIVE_TOOL_TIMEOUT_SECONDS", 15.0)))
+        try:
+            result = await asyncio.wait_for(asyncio.to_thread(_run_request), timeout=tool_timeout)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Live RAG tool call timed out after %.1fs (turn_id=%s query=%.40s)",
+                tool_timeout,
+                current_turn[0],
+                transcript,
+            )
+            if active:
+                try:
+                    await websocket.send_json({
+                        "event": "rag_status",
+                        "data": {
+                            "status": "timeout",
+                            "message": "AI service took too long to respond. Please try again.",
+                            "turn_id": current_turn[0],
+                            "server_sent_at": cloud_timing.now_iso(),
+                        }
+                    })
+                except Exception:
+                    pass
+            result = {
+                "status": "error",
+                "route": "UNIVERSITY_INFO",
+                "intent": "TIMEOUT",
+                "answer": "I'm sorry, the campus information service is taking too long right now. Please try asking again in a moment.",
+                "response_text": "I'm sorry, the campus information service is taking too long right now. Please try asking again in a moment.",
+                "citations": [],
+                "sources": [],
+                "access_granted": True,
+            }
+        finally:
+            slow_notice_task.cancel()
+            try:
+                await slow_notice_task
+            except BaseException:
+                pass
         rag_dur_ms = (time.monotonic() - t_tool_start) * 1000.0
         cloud_timing.log_internal(
             "RAG_TOOL_CALL_COMPLETE",
@@ -923,6 +980,40 @@ async def live_websocket_chat(
             except Exception:
                 pass
 
+    async def on_error(err_msg: str):
+        if active:
+            cloud_timing.log_event("CLOUD INTERNAL", "LIVE_SESSION_ERROR", turn_id=current_turn[0], error=err_msg[:120])
+            try:
+                await websocket.send_json({
+                    "event": "error",
+                    "data": {
+                        "code": "live_session_error",
+                        "message": "Voice AI service was interrupted. Reconnecting...",
+                        "detail": err_msg,
+                        "recoverable": True,
+                        "turn_id": current_turn[0],
+                        "server_sent_at": cloud_timing.now_iso(),
+                    }
+                })
+            except Exception:
+                pass
+
+    async def on_go_away(time_left: Any):
+        if active:
+            cloud_timing.log_event("CLOUD INTERNAL", "LIVE_GO_AWAY", time_left=str(time_left))
+            try:
+                await websocket.send_json({
+                    "event": "rag_status",
+                    "data": {
+                        "status": "reconnecting",
+                        "message": "Refreshing voice session...",
+                        "turn_id": current_turn[0],
+                        "server_sent_at": cloud_timing.now_iso(),
+                    }
+                })
+            except Exception:
+                pass
+
     receiver_task = asyncio.create_task(
         live_session.receive_events(
             on_audio=on_audio,
@@ -931,6 +1022,8 @@ async def live_websocket_chat(
             on_output_transcript=on_output_transcript,
             on_turn_complete=on_turn_complete,
             on_interrupted=on_interrupted,
+            on_error=on_error,
+            on_go_away=on_go_away,
         ),
         name="gemini-live-ws-receiver",
     )
@@ -996,6 +1089,19 @@ async def live_websocket_chat(
         logger.info("Gemini Live client disconnected normally.")
     except Exception as exc:
         logger.warning("Gemini Live WebSocket session ended: %s", exc)
+        if active:
+            try:
+                await websocket.send_json({
+                    "event": "error",
+                    "data": {
+                        "code": "live_connection_lost",
+                        "message": "Voice connection interrupted. Reconnecting...",
+                        "recoverable": True,
+                        "server_sent_at": cloud_timing.now_iso(),
+                    }
+                })
+            except Exception:
+                pass
     finally:
         active = False
         fallback_greeting_task.cancel()

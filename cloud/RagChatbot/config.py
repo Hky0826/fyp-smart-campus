@@ -108,6 +108,9 @@ class RagSettings:
     LIVE_IO_TIMEOUT_SECONDS: float = float(os.getenv("RAG_LIVE_IO_TIMEOUT_SECONDS", "30"))
     LIVE_TURN_TIMEOUT_SECONDS: float = float(os.getenv("RAG_LIVE_TURN_TIMEOUT_SECONDS", "30"))
     LIVE_BACKEND_TIMEOUT_SECONDS: float = float(os.getenv("RAG_LIVE_BACKEND_TIMEOUT_SECONDS", "30"))
+    RAG_API_TIMEOUT_SECONDS: float = float(os.getenv("RAG_API_TIMEOUT_SECONDS", "12.0"))
+    LIVE_TOOL_TIMEOUT_SECONDS: float = float(os.getenv("RAG_LIVE_TOOL_TIMEOUT_SECONDS", "15.0"))
+    LIVE_SLOW_FEEDBACK_SECONDS: float = float(os.getenv("RAG_LIVE_SLOW_FEEDBACK_SECONDS", "4.0"))
 
     # Retrieval 
     # Maximum number of chunks returned from vector search before re-ranking

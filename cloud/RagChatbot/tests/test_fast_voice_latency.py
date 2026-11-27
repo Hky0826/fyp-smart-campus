@@ -208,3 +208,62 @@ def test_live_fast_rag_passes_thinking_config():
     assert res["query_embedding"] == [0.1] * 8
     assert captured["config"].thinking_config is not None
     assert captured["config"].thinking_config.thinking_budget == 0
+
+
+def test_live_session_receive_events_propagates_error_and_go_away():
+    """receive_events() should notify on_go_away and on_error instead of silently dropping them."""
+    import asyncio
+    from RagChatbot.generation.live_session_manager import GeminiLiveSession
+
+    async def run():
+        session = GeminiLiveSession()
+        session._session = object()  # mark is_connected=True
+        session._connected_at = time.monotonic()
+
+        errors = []
+        go_aways = []
+
+        async def on_audio(_):
+            pass
+
+        async def on_error(msg):
+            errors.append(msg)
+
+        async def on_go_away(tl):
+            go_aways.append(tl)
+
+        await session._events.put({"type": "go_away", "time_left": "30s"})
+        await session._events.put({"type": "error", "message": "Live session disconnected"})
+
+        await session.receive_events(
+            on_audio=on_audio,
+            on_error=on_error,
+            on_go_away=on_go_away,
+        )
+        return session._renew_requested, go_aways, errors
+
+    renewed, go_aways, errors = asyncio.run(run())
+    assert renewed is True
+    assert go_aways == ["30s"]
+    assert errors == ["Live session disconnected"]
+
+
+def test_gemini_client_respects_configured_api_timeout(monkeypatch):
+    """get_gemini_client() should use RAG_API_TIMEOUT_SECONDS (clamped >= 10s)."""
+    from RagChatbot import gemini_client
+    from RagChatbot.config import rag_settings
+
+    captured = {}
+
+    def fake_client(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace()
+
+    gemini_client.reset_gemini_client()
+    monkeypatch.setattr(rag_settings, "RAG_API_TIMEOUT_SECONDS", 12.0)
+    monkeypatch.setattr(gemini_client.genai, "Client", fake_client)
+    try:
+        gemini_client.get_gemini_client()
+        assert captured["http_options"].timeout == 12000
+    finally:
+        gemini_client.reset_gemini_client()
