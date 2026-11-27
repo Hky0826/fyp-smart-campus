@@ -31,7 +31,9 @@ from RagChatbot.schemas import CitationSchema, ChatResponse
 from RagChatbot.security.audit_logger import (
     log_access_denied,
     log_chatbot_interaction,
+    log_chatbot_interaction_async,
     log_personal_interaction,
+    log_personal_interaction_async,
 )
 from RagChatbot.security.auth_context import resolve_auth_context
 from RagChatbot.security.prompt_guard import check_query
@@ -209,6 +211,7 @@ def _classify_with_flash_lite(query: str) -> dict[str, Any]:
                 system_instruction=_FLASH_LITE_ROUTER_INSTRUCTION,
                 temperature=0.0,
                 max_output_tokens=256,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
                 response_mime_type="application/json",
                 response_schema={
                     "type": "OBJECT",
@@ -259,6 +262,8 @@ def process_user_request(
     turn_id: str | None = None,
     fast_voice: bool = False,
     chat_history: list[dict[str, Any]] | None = None,
+    auth_context: Any | None = None,
+    allowed_levels: list[str] | None = None,
 ) -> dict[str, Any]:
     """Validate and route one completed Live user turn.
 
@@ -285,32 +290,37 @@ def process_user_request(
     # The session identifier supplied by the edge is only a routing hint. Do
     # not use an untrusted client value for authorization or audit ownership.
     resolved_session_id: int | None = None
-    try:
-        context = resolve_auth_context(
-            bearer_token,
-            db,
-            requested_device_id=device_id,
-        )
+    if auth_context is not None:
+        context = auth_context
         user_id = context.user_id
         resolved_session_id = context.session_id
-    except HTTPException as exc:
-        if exc.status_code == 403:
-            # An authenticated body device_id that disagrees with the JWT
-            # binding is a request error, not an anonymous/authentication
-            # fallback. Never let it select a spoofed origin.
-            raise
-        # Preserve the existing public contract while keeping token details out
-        # of the Live model and the edge UI.
-        return _result(
-            status="auth_required",
-            route="PERSONAL",
-            intent="AUTHENTICATION_REQUIRED",
-            query=query,
-            response_text=AUTH_REQUIRED_ANSWER,
-            exact_response=True,
-            error_message=AUTH_REQUIRED_STATUS,
-            authentication_required=True,
-        )
+    else:
+        try:
+            context = resolve_auth_context(
+                bearer_token,
+                db,
+                requested_device_id=device_id,
+            )
+            user_id = context.user_id
+            resolved_session_id = context.session_id
+        except HTTPException as exc:
+            if exc.status_code == 403:
+                # An authenticated body device_id that disagrees with the JWT
+                # binding is a request error, not an anonymous/authentication
+                # fallback. Never let it select a spoofed origin.
+                raise
+            # Preserve the existing public contract while keeping token details out
+            # of the Live model and the edge UI.
+            return _result(
+                status="auth_required",
+                route="PERSONAL",
+                intent="AUTHENTICATION_REQUIRED",
+                query=query,
+                response_text=AUTH_REQUIRED_ANSWER,
+                exact_response=True,
+                error_message=AUTH_REQUIRED_STATUS,
+                authentication_required=True,
+            )
 
     guard = check_query(query)
     if not guard.is_safe:
@@ -352,7 +362,7 @@ def process_user_request(
             "clarification_question": None,
             "category_hint": local_route.category_hint,
         }
-    elif is_navigation_query(sanitized, db=db):
+    elif local_route.category == "NAVIGATIONAL" or is_navigation_query(sanitized, db=db):
         classification = {
             "safe": True,
             "scope": "NAVIGATIONAL",
@@ -439,7 +449,8 @@ def process_user_request(
             error_message=get_translated("out_of_scope_status", detected_lang),
         )
 
-    allowed_levels = _allowed_levels(user_id, db)
+    if allowed_levels is None:
+        allowed_levels = _allowed_levels(user_id, db)
     if route == "PERSONAL":
         personal_route = parse_personal_intent(sanitized)
         # The deterministic parser is the primary privacy boundary. For non-English
@@ -465,15 +476,24 @@ def process_user_request(
             return _result(status="error", route="PERSONAL", intent=intent, query=sanitized, response_text="Personal campus information is temporarily unavailable. Please try again later.", exact_response=True, error_message="Personal route returned no result.", response_scope="PERSONAL")
         query_id = None
         if resolved_session_id is not None and user_id is not None:
-            logged = log_personal_interaction(
-                db,
-                session_id=resolved_session_id,
-                user_id=user_id,
-                intent=personal_result.intent.value,
-                response_time_ms=int((time.monotonic() - started) * 1000),
-                is_navigational=personal_result.navigation_target is not None,
-            )
-            query_id = logged if logged > 0 else None
+            if fast_voice:
+                log_personal_interaction_async(
+                    session_id=resolved_session_id,
+                    user_id=user_id,
+                    intent=personal_result.intent.value,
+                    response_time_ms=int((time.monotonic() - started) * 1000),
+                    is_navigational=personal_result.navigation_target is not None,
+                )
+            else:
+                logged = log_personal_interaction(
+                    db,
+                    session_id=resolved_session_id,
+                    user_id=user_id,
+                    intent=personal_result.intent.value,
+                    response_time_ms=int((time.monotonic() - started) * 1000),
+                    is_navigational=personal_result.navigation_target is not None,
+                )
+                query_id = logged if logged > 0 else None
         navigation = None
         if personal_result.navigation_target:
             navigation = {
@@ -599,13 +619,16 @@ def process_user_request(
         from RagChatbot.generation.live_fast_rag import live_fast_rag
         from RagChatbot.services.chat_service import _load_recent_chat_history, _condense_query_with_history
         history = chat_history or _load_recent_chat_history(resolved_session_id, db)
-        search_query = _condense_query_with_history(sanitized, history)
+        # On Gemini Live (fast_voice=True), the Live model already holds conversation
+        # history and emits a standalone query via tool call; skip the extra LLM rewrite.
+        search_query = sanitized if fast_voice else _condense_query_with_history(sanitized, history)
         fast_res = live_fast_rag.process_voice_query(
             sanitized,
             auth_context=context,
             db=db,
             chat_history=history,
             search_query=search_query,
+            allowed_access_levels=allowed_levels,
         )
     except Exception as exc:
         logger.error("Fast RAG execution failed: %s", exc)
@@ -623,7 +646,7 @@ def process_user_request(
     if not sources and not context.authenticated:
         protected = False
         try:
-            q_emb = embed_text(sanitized)
+            q_emb = fast_res.get("query_embedding") or embed_text(sanitized)
             protected = bool(
                 retrieve_chunks(
                     query_embedding=q_emb,
@@ -665,18 +688,32 @@ def process_user_request(
                 _RAG_RESPONSE_CACHE.popitem(last=False)
 
     if resolved_session_id is not None:
-        logged = log_chatbot_interaction(
-            db,
-            session_id=resolved_session_id,
-            user_id=user_id,
-            query_text=sanitized,
-            response_text=fast_res.get("answer") or "[LIVE_GROUNDED_RESPONSE]",
-            retrieved_chunk_ids=[
-                s["chunk_id"] for s in sources if isinstance(s, dict) and "chunk_id" in s
-            ],
-            response_time_ms=int((time.monotonic() - started) * 1000),
-        )
-        query_id = logged if logged > 0 else None
+        chunk_ids = [
+            s["chunk_id"] for s in sources if isinstance(s, dict) and "chunk_id" in s
+        ]
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        if fast_voice:
+            log_chatbot_interaction_async(
+                session_id=resolved_session_id,
+                user_id=user_id,
+                query_text=sanitized,
+                response_text=fast_res.get("answer") or "[LIVE_GROUNDED_RESPONSE]",
+                retrieved_chunk_ids=chunk_ids,
+                response_time_ms=elapsed_ms,
+                allowed_levels=allowed_levels,
+            )
+            query_id = None
+        else:
+            logged = log_chatbot_interaction(
+                db,
+                session_id=resolved_session_id,
+                user_id=user_id,
+                query_text=sanitized,
+                response_text=fast_res.get("answer") or "[LIVE_GROUNDED_RESPONSE]",
+                retrieved_chunk_ids=chunk_ids,
+                response_time_ms=elapsed_ms,
+            )
+            query_id = logged if logged > 0 else None
     else:
         query_id = None
 

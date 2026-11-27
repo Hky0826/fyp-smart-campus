@@ -607,6 +607,7 @@ async def live_websocket_chat(
     token: str | None = None,
     device_id: str | None = None,
     session_id: int | None = None,
+    binary_audio: bool = False,
 ):
     """
     Bi-directional full-duplex WebSocket connection for real-time Gemini Live.
@@ -617,6 +618,8 @@ async def live_websocket_chat(
     await websocket.accept()
     from app.core.database import SessionLocal
     from RagChatbot.generation.live_session_manager import GeminiLiveSession
+    from RagChatbot.security.rbac import get_allowed_access_levels_for_user
+    from RagChatbot.services.chat_service import VISITOR_ACCESS_LEVELS
     from RagChatbot.services.process_user_request import process_user_request
 
     cloud_timing.log_event("CLOUD INTERNAL", "WS_CONNECT", device_id=device_id)
@@ -633,8 +636,43 @@ async def live_websocket_chat(
         live_session = GeminiLiveSession()
         _active_device_sessions[device_id] = live_session
 
+    def _resolve_ws_auth() -> tuple[Any | None, list[str] | None, str | None, float | None]:
+        """Resolve auth context and RBAC access levels off the event loop."""
+        if not token:
+            return None, None, None, None
+        try:
+            import jwt as pyjwt
+            exp_ts: float | None = None
+            try:
+                payload = pyjwt.decode(
+                    token,
+                    rag_settings.JWT_SECRET,
+                    algorithms=[rag_settings.JWT_ALGORITHM],
+                )
+                if payload.get("exp") is not None:
+                    exp_ts = float(payload["exp"])
+            except Exception:
+                exp_ts = None
+            with SessionLocal() as db:
+                auth_ctx = resolve_auth_context(token, db, requested_device_id=device_id)
+                if auth_ctx and auth_ctx.authenticated:
+                    levels = (
+                        get_allowed_access_levels_for_user(auth_ctx.user_id, db)
+                        if auth_ctx.user_id is not None
+                        else VISITOR_ACCESS_LEVELS
+                    )
+                    name = auth_ctx.given_name or auth_ctx.full_name
+                    return auth_ctx, levels, name, exp_ts
+                return auth_ctx, VISITOR_ACCESS_LEVELS, None, exp_ts
+        except Exception as exc:
+            logger.debug("Could not resolve user context for live WS: %s", exc)
+            return None, None, None, None
+
     try:
-        await live_session.start()
+        _, (cached_auth_ctx, cached_allowed_levels, resolved_name, token_exp_ts) = await asyncio.gather(
+            live_session.start(),
+            asyncio.to_thread(_resolve_ws_auth),
+        )
         await websocket.send_json({
             "event": "ready",
             "data": {
@@ -642,6 +680,7 @@ async def live_websocket_chat(
                 "model": rag_settings.LIVE_MODEL,
                 "input_sample_rate": rag_settings.LIVE_INPUT_SAMPLE_RATE,
                 "output_sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
+                "binary_audio": binary_audio,
                 "server_sent_at": cloud_timing.now_iso(),
             }
         })
@@ -743,6 +782,10 @@ async def live_websocket_chat(
                 pass
 
         def _run_request():
+            use_cached = (
+                cached_auth_ctx is not None
+                and (token_exp_ts is None or time.time() < token_exp_ts)
+            )
             with SessionLocal() as db:
                 return process_user_request(
                     transcript=transcript,
@@ -751,6 +794,8 @@ async def live_websocket_chat(
                     session_id=session_id,
                     db=db,
                     fast_voice=True,
+                    auth_context=cached_auth_ctx if use_cached else None,
+                    allowed_levels=cached_allowed_levels if use_cached else None,
                 )
 
         result = await asyncio.to_thread(_run_request)
@@ -814,16 +859,19 @@ async def live_websocket_chat(
                     audio_bytes=len(pcm_bytes),
                 )
             try:
-                await websocket.send_json({
-                    "event": "audio",
-                    "data": {
-                        "encoding": "pcm_s16le",
-                        "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
-                        "chunk": base64.b64encode(pcm_bytes).decode("ascii"),
-                        "turn_id": current_turn[0],
-                        "server_sent_at": server_ts,
-                    }
-                })
+                if binary_audio:
+                    await websocket.send_bytes(pcm_bytes)
+                else:
+                    await websocket.send_json({
+                        "event": "audio",
+                        "data": {
+                            "encoding": "pcm_s16le",
+                            "sample_rate": rag_settings.LIVE_OUTPUT_SAMPLE_RATE,
+                            "chunk": base64.b64encode(pcm_bytes).decode("ascii"),
+                            "turn_id": current_turn[0],
+                            "server_sent_at": server_ts,
+                        }
+                    })
             except Exception:
                 pass
 
@@ -886,17 +934,6 @@ async def live_websocket_chat(
         ),
         name="gemini-live-ws-receiver",
     )
-
-    # Resolve user name for Gemini Live greeting if token or session is provided
-    resolved_name: str | None = None
-    if token:
-        try:
-            with SessionLocal() as db:
-                auth_ctx = resolve_auth_context(token, db)
-                if auth_ctx and auth_ctx.authenticated:
-                    resolved_name = auth_ctx.given_name or auth_ctx.full_name
-        except Exception as exc:
-            logger.debug("Could not resolve user context for live greeting: %s", exc)
 
     # Greeting is triggered primarily when the client sends the explicit 'greet' event.
     # A fallback task triggers it after 1.5s only if no greet event is received from the client.

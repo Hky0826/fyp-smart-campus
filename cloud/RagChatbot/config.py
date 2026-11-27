@@ -131,6 +131,7 @@ class RagSettings:
     # LLM generation parameters
     MAX_OUTPUT_TOKENS: int = int(os.getenv("RAG_MAX_OUTPUT_TOKENS", "384"))
     TEMPERATURE: float = float(os.getenv("RAG_TEMPERATURE", "0.2"))
+    RAG_THINKING_BUDGET: int = int(os.getenv("RAG_THINKING_BUDGET", "0"))
 
     # Caching settings
     EMBEDDING_CACHE_SIZE: int = int(os.getenv("RAG_EMBEDDING_CACHE_SIZE", "512"))

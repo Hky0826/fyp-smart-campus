@@ -73,6 +73,8 @@ DEFAULT_COOLING_OFF_MS = float(os.getenv("EDGE_LIVE_COOLING_OFF_MS", "100.0"))
 DEFAULT_SILENCE_HOLD_SEC = float(os.getenv("EDGE_LIVE_SILENCE_HOLD_SEC", "0.45"))
 DEFAULT_BARGE_RATIO = float(os.getenv("EDGE_LIVE_BARGE_RATIO", "0.60"))
 DEFAULT_PRE_ROLL_CHUNKS = int(os.getenv("EDGE_LIVE_PRE_ROLL_CHUNKS", "3"))
+DEFAULT_MIC_BLOCKSIZE = int(os.getenv("EDGE_LIVE_MIC_BLOCKSIZE", "640"))  # 40ms @ 16kHz
+DEFAULT_OUTPUT_BLOCKSIZE = int(os.getenv("EDGE_LIVE_OUTPUT_BLOCKSIZE", "960"))  # 40ms @ 24kHz
 
 
 def _filter_and_calculate_rms(
@@ -223,14 +225,14 @@ class _LiveDuplexWorker(QThread):
                 samplerate=16000,
                 channels=1,
                 dtype="int16",
-                blocksize=1600,
+                blocksize=DEFAULT_MIC_BLOCKSIZE,
                 callback=mic_callback,
             )
             output_stream = sd.RawOutputStream(
                 samplerate=24000,
                 channels=1,
                 dtype="int16",
-                blocksize=2400,
+                blocksize=DEFAULT_OUTPUT_BLOCKSIZE,
             )
         except Exception as exc:
             for stream in (mic_stream, output_stream):
@@ -315,6 +317,19 @@ class _LiveDuplexWorker(QThread):
                             if self._stop_requested.is_set():
                                 break
                             if isinstance(raw_message, bytes):
+                                if not first_audio_chunk_received[0]:
+                                    first_audio_chunk_received[0] = True
+                                    time_since_speech_end = (
+                                        (time.monotonic() - turn_speech_end_mono[0]) * 1000.0
+                                        if turn_speech_end_mono[0] > 0
+                                        else None
+                                    )
+                                    edge_timing.log_receive(
+                                        "FIRST_AUDIO_CHUNK",
+                                        turn_id=turn_id[0],
+                                        time_since_speech_end_ms=time_since_speech_end,
+                                        chunk_bytes=len(raw_message),
+                                    )
                                 if self._audio_play_queue:
                                     await self._audio_play_queue.put(raw_message)
                                 continue

@@ -95,6 +95,7 @@ class LiveFastRAG:
         top_k: int = 3,
         chat_history: Optional[List[Dict[str, Any]]] = None,
         search_query: Optional[str] = None,
+        allowed_access_levels: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Execute fast single-pass RAG:
@@ -115,9 +116,10 @@ class LiveFastRAG:
                 "status": "ok",
             }
 
-        # 1. Resolve RBAC access levels
-        user_id = auth_context.user_id if auth_context else None
-        allowed_access_levels = get_allowed_access_levels_for_user(user_id, db) if user_id else ["PUBLIC", "VISITOR"]
+        # 1. Resolve RBAC access levels (reuse pre-resolved list when provided)
+        if allowed_access_levels is None:
+            user_id = auth_context.user_id if auth_context else None
+            allowed_access_levels = get_allowed_access_levels_for_user(user_id, db) if user_id else ["PUBLIC", "VISITOR"]
 
         # 2. Ensure vector store is loaded in RAM
         if not vector_store.is_loaded:
@@ -128,6 +130,7 @@ class LiveFastRAG:
         retrieval_query = (search_query or "").strip() or query_text
         sources = []
         retrieved_texts = []
+        query_emb: Optional[List[float]] = None
         try:
             cat_hint, fac_hint, is_broad = _extract_facets_from_query(retrieval_query)
             effective_top_k = max(top_k, 5) if (is_broad or cat_hint == "ACADEMIC") else top_k
@@ -192,6 +195,9 @@ Role: {role_label}
                     system_instruction=_VOICE_SYSTEM_PROMPT,
                     temperature=0.3,
                     max_output_tokens=getattr(rag_settings, "LIVE_SYNTHESIS_MAX_TOKENS", 180),
+                    thinking_config=types.ThinkingConfig(
+                        thinking_budget=getattr(rag_settings, "RAG_THINKING_BUDGET", 0)
+                    ),
                 ),
             )
             answer = (response.text or "").strip()
@@ -208,6 +214,7 @@ Role: {role_label}
             "route": "UNIVERSITY_INFO",
             "sources": sources,
             "citations": sources,
+            "query_embedding": query_emb,
             "latency_ms": latency_ms,
             "status": "ok",
         }

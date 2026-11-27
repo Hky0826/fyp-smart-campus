@@ -6,6 +6,7 @@ import asyncio
 import base64
 import json
 import logging
+import threading
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -16,6 +17,26 @@ from google.genai import types
 from RagChatbot.config import rag_settings
 
 logger = logging.getLogger(__name__)
+_ORIGINAL_GENAI_CLIENT = genai.Client
+_SHARED_LIVE_CLIENT: genai.Client | None = None
+_SHARED_LIVE_CLIENT_LOCK = threading.Lock()
+
+_SPEECH_CONFIG_CACHE_TTL = 300.0
+_SPEECH_CONFIG_CACHE_LOCK = threading.Lock()
+_SPEECH_LANGUAGES_CACHE: tuple[float, list[str]] | None = None
+_SPEECH_ADAPTATION_CACHE: tuple[float, list[str]] | None = None
+
+
+def _get_live_genai_client() -> genai.Client:
+    """Return a shared genai.Client unless genai.Client has been monkeypatched in tests."""
+    global _SHARED_LIVE_CLIENT
+    if genai.Client is not _ORIGINAL_GENAI_CLIENT:
+        return genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
+    if _SHARED_LIVE_CLIENT is None:
+        with _SHARED_LIVE_CLIENT_LOCK:
+            if _SHARED_LIVE_CLIENT is None:
+                _SHARED_LIVE_CLIENT = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
+    return _SHARED_LIVE_CLIENT
 
 TranscriptCallback = Callable[[str], Awaitable[None]]
 ToolCallback = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -105,7 +126,14 @@ def normalize_language_code(lang_str: str) -> str:
 
 
 def _load_active_speech_languages() -> list[str]:
-    """Query default active language codes from database, with fallback."""
+    """Query default active language codes from database, with 5-minute RAM cache and fallback."""
+    global _SPEECH_LANGUAGES_CACHE
+    now = time.monotonic()
+    with _SPEECH_CONFIG_CACHE_LOCK:
+        if _SPEECH_LANGUAGES_CACHE is not None and (now - _SPEECH_LANGUAGES_CACHE[0]) < _SPEECH_CONFIG_CACHE_TTL:
+            return list(_SPEECH_LANGUAGES_CACHE[1])
+
+    result = ["en", "zh", "yue", "ms"]
     try:
         from app.core.database import SessionLocal
         from app.models.models import SpeechLanguage
@@ -114,16 +142,30 @@ def _load_active_speech_languages() -> list[str]:
             if langs:
                 codes = [r[0].lower().strip() for r in langs if r[0]]
                 if codes:
-                    return codes
+                    result = codes
     except Exception as exc:
         logger.debug("Could not load speech languages from db: %s", exc)
-    return ["en", "zh", "yue", "ms"]
+    with _SPEECH_CONFIG_CACHE_LOCK:
+        _SPEECH_LANGUAGES_CACHE = (time.monotonic(), list(result))
+    return result
 
 
 def _load_speech_adaptation_phrases() -> list[str]:
-    """Query active adaptation phrases and translations from database, with fallback."""
+    """Query active adaptation phrases and translations from database, with 5-minute RAM cache and fallback."""
+    global _SPEECH_ADAPTATION_CACHE
+    now = time.monotonic()
+    with _SPEECH_CONFIG_CACHE_LOCK:
+        if _SPEECH_ADAPTATION_CACHE is not None and (now - _SPEECH_ADAPTATION_CACHE[0]) < _SPEECH_CONFIG_CACHE_TTL:
+            return list(_SPEECH_ADAPTATION_CACHE[1])
+
+    result = [
+        "Quest International University", "QIU", "Perak", "Ipoh", "Faculty of Pharmacy",
+        "Faculty of Medicine", "Faculty of Business", "Faculty of Computing", "Bachelor",
+        "Diploma", "Master", "Foundation", "Admissions", "Tuition fee", "Perpustakaan",
+        "Fakulti", "Yuran", "Pendaftaran", "Peperiksaan", "大学", "课程", "学费", "图书馆",
+        "报名", "收費", "邊度",
+    ]
     try:
-        import json
         from app.core.database import SessionLocal
         from app.models.models import SpeechAdaptationPhrase
         with SessionLocal() as db:
@@ -157,16 +199,12 @@ def _load_speech_adaptation_phrases() -> list[str]:
                         if p_lower not in seen:
                             seen.add(p_lower)
                             deduped.append(p)
-                    return deduped
+                    result = deduped
     except Exception as exc:
         logger.debug("Could not load speech adaptation phrases from db: %s", exc)
-    return [
-        "Quest International University", "QIU", "Perak", "Ipoh", "Faculty of Pharmacy",
-        "Faculty of Medicine", "Faculty of Business", "Faculty of Computing", "Bachelor",
-        "Diploma", "Master", "Foundation", "Admissions", "Tuition fee", "Perpustakaan",
-        "Fakulti", "Yuran", "Pendaftaran", "Peperiksaan", "大学", "课程", "学费", "图书馆",
-        "报名", "收費", "邊度",
-    ]
+    with _SPEECH_CONFIG_CACHE_LOCK:
+        _SPEECH_ADAPTATION_CACHE = (time.monotonic(), list(result))
+    return result
 
 
 _LIVE_SYSTEM_INSTRUCTION = """
@@ -202,7 +240,11 @@ def _tool_declaration() -> dict[str, Any]:
                     "properties": {
                         "query": {
                             "type": "STRING",
-                            "description": "The user's question or search query about the campus.",
+                            "description": (
+                                "A standalone, self-contained campus search query. Always resolve pronouns "
+                                "or short follow-up references (such as 'it', 'that course', 'the fee', "
+                                "'entry requirements') using earlier turns in the conversation."
+                            ),
                         },
                     },
                     "required": ["query"],
@@ -279,7 +321,7 @@ class GeminiLiveSession:
     """One reusable/resumable Live API session for one conversation."""
 
     def __init__(self) -> None:
-        self._client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
+        self._client = _get_live_genai_client()
         self._connection = None
         self._session = None
         self._reader_task: asyncio.Task | None = None
@@ -325,8 +367,14 @@ class GeminiLiveSession:
                 if elapsed < 0.2:
                     await asyncio.sleep(0.2 - elapsed)
 
-            active_lang_codes = self._active_language_codes or await asyncio.to_thread(_load_active_speech_languages)
-            adaptation_phrases = await asyncio.to_thread(_load_speech_adaptation_phrases)
+            if self._active_language_codes:
+                active_lang_codes = self._active_language_codes
+                adaptation_phrases = await asyncio.to_thread(_load_speech_adaptation_phrases)
+            else:
+                active_lang_codes, adaptation_phrases = await asyncio.gather(
+                    asyncio.to_thread(_load_active_speech_languages),
+                    asyncio.to_thread(_load_speech_adaptation_phrases),
+                )
 
             config = {
                 "response_modalities": ["AUDIO"],

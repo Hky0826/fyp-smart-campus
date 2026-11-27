@@ -237,6 +237,9 @@ async def run_gemini_live_duplex_session(ws_url: str, token: str, device_id: str
         nonlocal playback_busy_until
         try:
             async for raw_msg in ws:
+                if isinstance(raw_msg, bytes):
+                    await audio_play_queue.put(raw_msg)
+                    continue
                 try:
                     event_data = json.loads(raw_msg)
                 except Exception:

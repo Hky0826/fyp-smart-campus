@@ -8,6 +8,7 @@ and access status. Sensitive document content is never logged in full.
 
 from __future__ import annotations
 
+import concurrent.futures
 import datetime
 import logging
 import hashlib
@@ -16,6 +17,10 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+_AUDIT_LOG_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2,
+    thread_name_prefix="rag-audit-log",
+)
 
 
 def log_chatbot_interaction(
@@ -144,3 +149,35 @@ def log_personal_interaction(
         response_time_ms=response_time_ms,
         is_navigational=is_navigational,
     )
+
+
+def log_chatbot_interaction_async(**kwargs) -> None:
+    """Fire-and-forget audit write using a fresh DB session on a background worker thread."""
+    def _worker() -> None:
+        try:
+            from app.core.database import SessionLocal
+            with SessionLocal() as bg_db:
+                log_chatbot_interaction(bg_db, **kwargs)
+        except Exception as exc:
+            logger.error("Background audit log write failed: %s", exc)
+
+    try:
+        _AUDIT_LOG_EXECUTOR.submit(_worker)
+    except Exception as exc:
+        logger.error("Failed to enqueue background audit log write: %s", exc)
+
+
+def log_personal_interaction_async(**kwargs) -> None:
+    """Fire-and-forget personal interaction audit write using a fresh DB session."""
+    def _worker() -> None:
+        try:
+            from app.core.database import SessionLocal
+            with SessionLocal() as bg_db:
+                log_personal_interaction(bg_db, **kwargs)
+        except Exception as exc:
+            logger.error("Background personal audit log write failed: %s", exc)
+
+    try:
+        _AUDIT_LOG_EXECUTOR.submit(_worker)
+    except Exception as exc:
+        logger.error("Failed to enqueue background personal audit log write: %s", exc)

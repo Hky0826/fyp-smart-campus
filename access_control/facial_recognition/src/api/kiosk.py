@@ -1125,7 +1125,7 @@ def create_kiosk_router(
         session_id = str(token.session_id) if token and token.session_id is not None else ""
         ws_url = (
             f"{ws_scheme}://{host}/api/chatbot/live/ws?"
-            f"token={access_token}&device_id={cfg.sync_device_id}&session_id={session_id}"
+            f"token={access_token}&device_id={cfg.sync_device_id}&session_id={session_id}&binary_audio=1"
         )
         return ChatLiveConfigResponse(
             ws_url=ws_url,

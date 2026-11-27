@@ -19,6 +19,14 @@ from RagChatbot.gemini_client import get_gemini_client
 from RagChatbot.utils.language_detection import detect_query_language
 
 logger = logging.getLogger(__name__)
+_ORIGINAL_GENAI_CLIENT = genai.Client
+
+_MULTILINGUAL_CAMPUS_INFO_PATTERN = re.compile(
+    r"(?:学费|费用|课程|专业|系|学院|入学|录取|要求|条件|奖学金|报名|考试|成绩|学分|时间表|宿舍|申请|政策|本科|硕士|文凭|基础课程)"
+    r"|\b(?:yuran|kursus|program|fakulti|kemasukan|syarat|biasiswa|pendaftaran|peperiksaan|markah|kredit|jadual|asrama|permohonan|polisi|ijazah|diploma|sarjana|asasi)\b"
+    r"|(?:கட்டணம்|பாடநெறி|சேர்க்கை|உதவித்தொகை|தேர்வு|பல்கலைக்கழகம்)",
+    re.IGNORECASE,
+)
 
 # The manifest of information we actually have in the database.
 KNOWLEDGE_BASE_MANIFEST = [
@@ -291,24 +299,20 @@ def _extract_facets_from_query(query: str) -> tuple[Optional[str], Optional[str]
 
 
 def _load_destination_catalog(db) -> list[tuple[str, str]]:
-    """Load navigable labels from nodes without exposing corridor waypoints."""
+    """Load navigable labels from the RAM-cached MapSnapshot without hitting DB per turn."""
     if db is None:
         return []
     try:
-        from app.models.models import Node
+        from RagChatbot.services.map_service import get_map_snapshot
 
-        rows = (
-            db.query(Node.room_label, Node.node_type)
-            .filter(Node.room_label.isnot(None))
-            .filter(Node.node_type != "CORRIDOR")
-            .order_by(Node.room_label, Node.node_type)
-            .all()
-        )
-        return [
-            (str(label), str(node_type).upper())
-            for label, node_type in rows
-            if label and str(node_type).upper() != "CORRIDOR"
+        snapshot = get_map_snapshot(db)
+        items = [
+            (str(node.label), str(node.node_type).upper())
+            for node in snapshot.nodes
+            if getattr(node, "label", None) and str(getattr(node, "node_type", "")).upper() != "CORRIDOR"
         ]
+        items.sort(key=lambda pair: (pair[0], pair[1]))
+        return items
     except Exception as exc:
         logger.warning("Could not load navigation destination catalog: %s", type(exc).__name__)
         return []
@@ -326,13 +330,27 @@ def _query_mentions_destination(query: str, destinations: list[tuple[str, str]])
 def _llm_navigation_fallback(query: str, destinations: list[tuple[str, str]]) -> RouteClassification | None:
     """Use a structured LLM classification when local patterns are insufficient."""
     mentions_destination = _query_mentions_destination(query, destinations)
+    has_nav_hint = bool(_NAVIGATION_HINT_PATTERN.search(query))
     is_non_english = detect_query_language(query) != "en"
-    if not rag_settings.GOOGLE_API_KEY or not (_NAVIGATION_HINT_PATTERN.search(query) or mentions_destination or is_non_english):
+
+    # Skip slow LLM navigation fallback for clear campus-info / academic / fee queries
+    # unless the user explicitly mentions a known physical destination.
+    if not mentions_destination:
+        cat_hint, _, _ = _extract_facets_from_query(query)
+        if cat_hint in {"FEES_SCHOLARSHIPS", "ADMISSIONS", "POLICIES", "ACADEMIC"}:
+            return None
+        if is_non_english and not has_nav_hint and _MULTILINGUAL_CAMPUS_INFO_PATTERN.search(query):
+            return None
+
+    if not rag_settings.GOOGLE_API_KEY or not (has_nav_hint or mentions_destination or is_non_english):
         return None
 
     try:
         from RagChatbot.gemini_client import generate_content_with_retry
-        client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
+        if genai.Client is _ORIGINAL_GENAI_CLIENT:
+            client = get_gemini_client()
+        else:
+            client = genai.Client(api_key=rag_settings.GOOGLE_API_KEY)
         destination_context = "\n".join(
             f"- {label} ({node_type})" for label, node_type in destinations
         ) or "- No destination catalog is available"
@@ -347,6 +365,7 @@ def _llm_navigation_fallback(query: str, destinations: list[tuple[str, str]]) ->
                 system_instruction=_ROUTER_SYSTEM_PROMPT,
                 max_output_tokens=64,
                 temperature=0.0,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
                 response_mime_type="application/json",
                 response_schema={
                     "type": "OBJECT",

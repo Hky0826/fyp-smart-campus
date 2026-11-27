@@ -65,6 +65,9 @@ def generate_answer(
                 system_instruction=system_prompt,
                 max_output_tokens=rag_settings.MAX_OUTPUT_TOKENS,
                 temperature=rag_settings.TEMPERATURE,
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=getattr(rag_settings, "RAG_THINKING_BUDGET", 0)
+                ),
             ),
         )
 
@@ -119,6 +122,9 @@ def generate_answer_stream(
                 system_instruction=system_prompt,
                 max_output_tokens=rag_settings.MAX_OUTPUT_TOKENS,
                 temperature=rag_settings.TEMPERATURE,
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=getattr(rag_settings, "RAG_THINKING_BUDGET", 0)
+                ),
             ),
         )
 

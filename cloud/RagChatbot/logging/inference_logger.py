@@ -13,6 +13,7 @@ Logs stage-by-stage inference performance metrics to a file and system logger:
 
 from __future__ import annotations
 
+import concurrent.futures
 import datetime
 import json
 import hashlib
@@ -26,6 +27,10 @@ from typing import Optional, List
 from RagChatbot.config import rag_settings
 
 logger = logging.getLogger("RagChatbot.inference")
+_INFERENCE_LOG_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="rag-inference-log",
+)
 
 
 @dataclass
@@ -153,10 +158,22 @@ def log_inference_metrics(
         metrics.tokens_generated,
     )
 
-    # 2. Append JSON Line record to inference log file
-    try:
-        log_file_path = _resolve_log_path(rag_settings.RAG_INFERENCE_LOG_FILE)
-        with open(log_file_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception as exc:
-        logger.error("Failed to write inference log record to file: %s", exc)
+    # 2. Append JSON Line record to inference log file (non-blocking in production)
+    log_file_setting = rag_settings.RAG_INFERENCE_LOG_FILE
+    serialized = json.dumps(record, ensure_ascii=False) + "\n"
+
+    def _append_record() -> None:
+        try:
+            log_file_path = _resolve_log_path(log_file_setting)
+            with open(log_file_path, "a", encoding="utf-8") as f:
+                f.write(serialized)
+        except Exception as exc:
+            logger.error("Failed to write inference log record to file: %s", exc)
+
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        _append_record()
+    else:
+        try:
+            _INFERENCE_LOG_EXECUTOR.submit(_append_record)
+        except Exception as exc:
+            logger.error("Failed to enqueue inference log write: %s", exc)

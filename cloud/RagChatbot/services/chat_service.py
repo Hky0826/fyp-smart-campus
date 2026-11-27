@@ -521,6 +521,7 @@ def _condense_query_with_history(query: str, history: list[dict[str, str]]) -> s
         return query
 
     try:
+        from google.genai import types as genai_types
         from RagChatbot.gemini_client import get_gemini_client, generate_content_with_retry
         client = get_gemini_client()
         history_lines = [f"User: {h.get('user', '')}\nAssistant: {h.get('assistant', '')}" for h in history[-3:]]
@@ -535,7 +536,11 @@ def _condense_query_with_history(query: str, history: list[dict[str, str]]) -> s
             client=client,
             model=rag_settings.PLANNER_MODEL,
             contents=prompt,
-            config={"temperature": 0.0, "max_output_tokens": 48},
+            config=genai_types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=48,
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+            ),
         )
         rewritten = (response.text or "").strip().replace('"', '').replace("'", "")
         if rewritten and len(rewritten) > 3:
@@ -928,6 +933,7 @@ def process_chat(
                 db=db,
                 chat_history=chat_history,
                 search_query=search_query,
+                allowed_access_levels=allowed_levels,
             ),
         )
     metrics.rag_ms += timer.elapsed_ms
@@ -1069,8 +1075,40 @@ def process_chat_stream(
 
     # Fast-path 1: Direct in-memory & dense vector navigation (instant <50ms response)
     from RagChatbot.services.map_service import is_navigation_query
-    if confirmation_context is not None or is_navigation_query(sanitized_query, db=db):
-        fast_resp = process_chat(request, bearer_token, db)
+    direct_nav = None
+    if confirmation_context is not None:
+        direct_nav = _navigation_for_query(confirmation_context, db, context)
+    elif is_navigation_query(sanitized_query, db=db):
+        direct_nav = _navigation_for_query(sanitized_query, db, context)
+
+    if direct_nav and direct_nav.get("answer"):
+        response_time_ms = int((time.monotonic() - start_time) * 1000)
+        logged = log_chatbot_interaction(
+            db,
+            session_id=session_id,
+            user_id=user_id,
+            query_text=sanitized_query,
+            response_text=direct_nav["answer"],
+            retrieved_chunk_ids=[],
+            response_time_ms=response_time_ms,
+            is_navigational=True,
+            is_stream=True,
+        )
+        fast_resp = ChatResponse(
+            answer=direct_nav["answer"],
+            citations=[],
+            access_granted=True,
+            status_message=None,
+            response_time_ms=response_time_ms,
+            query_id=_safe_query_id(logged),
+            intent=_navigation_intent(direct_nav),
+            navigation_target=direct_nav.get("navigation_target"),
+            navigation=direct_nav.get("navigation"),
+            route_summary=direct_nav.get("route_summary"),
+            instructions=direct_nav.get("instructions", []),
+            visualisation=direct_nav.get("visualisation"),
+            response_scope="FACILITY",
+        )
         for chunk in _split_stream_text(fast_resp.answer):
             yield _sse_event("chunk", {"text": chunk})
         yield _sse_event("done", fast_resp.model_dump(mode="json"))
@@ -1088,7 +1126,45 @@ def process_chat_stream(
 
     if not needs_planner:
         if route.category in ("GREETING", "CAPABILITY", "OUT_OF_SCOPE"):
-            fast_resp = process_chat(request, bearer_token, db)
+            if route.category == "GREETING":
+                name = _greeting_name(context) if context.authenticated else ""
+                fast_answer = f"Hi {name}, how may I help you today?" if name else "Hi, how may I help you today?"
+                access_granted_flag = True
+                status_msg = None
+            elif route.category == "CAPABILITY":
+                fast_answer = get_capabilities_translated(
+                    authenticated=context.authenticated,
+                    personalisation_enabled=rag_settings.RAG_PERSONALISATION_ENABLED,
+                    lang=detected_lang,
+                )
+                access_granted_flag = True
+                status_msg = None
+            else:
+                fast_answer = get_translated("out_of_scope", detected_lang)
+                access_granted_flag = False
+                status_msg = get_translated("out_of_scope_status", detected_lang)
+
+            response_time_ms = int((time.monotonic() - start_time) * 1000)
+            logged = log_chatbot_interaction(
+                db,
+                session_id=session_id,
+                user_id=user_id,
+                query_text=sanitized_query,
+                response_text=fast_answer,
+                retrieved_chunk_ids=[],
+                response_time_ms=response_time_ms,
+                is_navigational=False,
+                is_stream=True,
+            )
+            fast_resp = ChatResponse(
+                answer=fast_answer,
+                citations=[],
+                access_granted=access_granted_flag,
+                status_message=status_msg,
+                response_time_ms=response_time_ms,
+                query_id=_safe_query_id(logged),
+                intent=route.category,
+            )
             for chunk in _split_stream_text(fast_resp.answer):
                 yield _sse_event("chunk", {"text": chunk})
             yield _sse_event("done", fast_resp.model_dump(mode="json"))
