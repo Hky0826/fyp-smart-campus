@@ -9,11 +9,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Stage, Layer, Circle, Line, Text, Rect, Group, Image as KonvaImage } from 'react-konva';
 import {
+  CheckCheck,
   Compass,
   Eye,
   EyeOff,
   HelpCircle,
   Link2,
+  Loader2,
   MapPin,
   Maximize2,
   Minus,
@@ -48,9 +50,10 @@ export default function CampusMapPage() {
   const isDark = theme === 'dark';
 
   const [currentImageObj, setCurrentImageObj] = useState(null);
-  const [leftDrawerOpen, setLeftDrawerOpen] = useState(true);
+  const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [legendOpen, setLegendOpen] = useState(false);
+  const [wallPopoverOpen, setWallPopoverOpen] = useState(false);
   const [confirmState, setConfirmState] = useState({ open: false });
 
   const fileInputRef = React.useRef(null);
@@ -71,6 +74,7 @@ export default function CampusMapPage() {
       setCurrentImageObj(img);
       mapEditor.setNodes(nodes);
       mapEditor.setEdges(edges);
+      mapEditor.resetHistory();
       mapEditor.setIsDirty(false);
       mapEditor.setSelectedElement({ type: null, index: null });
       mapEditor.setHoveredNodeIndex(null);
@@ -81,6 +85,7 @@ export default function CampusMapPage() {
       setCurrentImageObj(null);
       mapEditor.setNodes([]);
       mapEditor.setEdges([]);
+      mapEditor.resetHistory();
       mapEditor.setIsDirty(false);
       mapEditor.setMode('');
     },
@@ -152,7 +157,9 @@ export default function CampusMapPage() {
         appMode={mapEditor.appMode}
         setAppMode={mapEditor.setAppMode}
         currentFloorplanId={floorplanData.currentFloorplanId}
-        activeFloorplanLabel={activeFloorplanLabel}
+        floorplansList={floorplanData.floorplansList}
+        loadFloorplanData={floorplanData.loadFloorplanData}
+        setUploadModalOpen={setUploadModalOpen}
         navPanelOpen={navigation.navPanelOpen}
         setNavPanelOpen={navigation.setNavPanelOpen}
         notifPanelOpen={notifications.notifPanelOpen}
@@ -168,20 +175,23 @@ export default function CampusMapPage() {
         setLeftDrawerOpen={setLeftDrawerOpen}
         showAllLabels={mapEditor.showAllLabels}
         setShowAllLabels={mapEditor.setShowAllLabels}
+        canUndo={mapEditor.canUndo}
+        canRedo={mapEditor.canRedo}
+        onUndo={mapEditor.undo}
+        onRedo={mapEditor.redo}
       />
 
       {/* Main Studio Body */}
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
-        {/* Left Collapsible Floorplans Drawer */}
-        {leftDrawerOpen && (
-          <aside className="w-[268px] shrink-0 h-full overflow-hidden z-20">
-            <MapManagerCard
-              {...floorplanData}
-              uploadModalOpen={uploadModalOpen}
-              setUploadModalOpen={setUploadModalOpen}
-            />
-          </aside>
-        )}
+        {/* Left Collapsible Floorplans Drawer (Modal always stays mounted) */}
+        <aside className={leftDrawerOpen ? 'w-[260px] shrink-0 h-full overflow-hidden z-20' : 'contents'}>
+          <MapManagerCard
+            {...floorplanData}
+            drawerVisible={leftDrawerOpen}
+            uploadModalOpen={uploadModalOpen}
+            setUploadModalOpen={setUploadModalOpen}
+          />
+        </aside>
 
         {/* Center Full-Bleed Canvas Viewport */}
         <div
@@ -252,39 +262,104 @@ export default function CampusMapPage() {
 
               <div className="h-px bg-slate-200 dark:bg-slate-800 my-0.5" />
 
-              <button
-                type="button"
-                onClick={() => floorplanData.setShowWallOverlay((v) => !v)}
-                title={floorplanData.showWallOverlay ? 'Hide Wall Mask' : 'Show Wall Mask'}
-                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
-                  floorplanData.showWallOverlay
-                    ? 'bg-teal-50 text-teal-600 dark:bg-teal-500/20 dark:text-teal-300'
-                    : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                {floorplanData.showWallOverlay ? (
-                  <Eye className="w-4 h-4" />
-                ) : (
-                  <EyeOff className="w-4 h-4" />
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setWallPopoverOpen((v) => !v)}
+                  title="Wall Mask Overlay & Sensitivity"
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                    floorplanData.showWallOverlay
+                      ? 'bg-teal-50 text-teal-600 dark:bg-teal-500/20 dark:text-teal-300'
+                      : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {floorplanData.showWallOverlay ? (
+                    <Eye className="w-4 h-4" />
+                  ) : (
+                    <EyeOff className="w-4 h-4" />
+                  )}
+                </button>
+
+                {wallPopoverOpen && (
+                  <div className="absolute left-12 top-0 w-56 p-3 rounded-2xl bg-white/95 dark:bg-slate-900/95 border border-slate-200 dark:border-slate-800 shadow-xl backdrop-blur-md space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                        Wall Mask
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => floorplanData.setShowWallOverlay((v) => !v)}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                          floorplanData.showWallOverlay
+                            ? 'bg-teal-100 text-teal-700 dark:bg-teal-500/20 dark:text-teal-300'
+                            : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                        }`}
+                      >
+                        {floorplanData.showWallOverlay ? 'On' : 'Off'}
+                      </button>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px] text-slate-500">
+                        <span>Sensitivity</span>
+                        <span className="font-mono font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1">
+                          {floorplanData.isFetchingWallMask && (
+                            <Loader2 className="w-3 h-3 animate-spin text-indigo-500" />
+                          )}
+                          {floorplanData.wallSensitivity}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="255"
+                        value={floorplanData.wallSensitivity}
+                        onChange={(e) =>
+                          floorplanData.setWallSensitivity(parseInt(e.target.value, 10))
+                        }
+                        onMouseUp={() =>
+                          floorplanData.fetchWallMask(
+                            floorplanData.currentFloorplanId,
+                            floorplanData.wallSensitivity
+                          )
+                        }
+                        onTouchEnd={() =>
+                          floorplanData.fetchWallMask(
+                            floorplanData.currentFloorplanId,
+                            floorplanData.wallSensitivity
+                          )
+                        }
+                        disabled={!floorplanData.showWallOverlay || floorplanData.isFetchingWallMask}
+                        className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-600 disabled:opacity-40"
+                      />
+                    </div>
+                  </div>
                 )}
-              </button>
+              </div>
             </div>
           )}
 
-          {/* Floating AI Pending Review Banner */}
+          {/* Floating AI Verification Bar */}
           {floorplanData.currentFloorplanId && mapEditor.pendingAiCount > 0 && (
-            <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 px-3.5 py-2 rounded-xl bg-teal-600 text-white shadow-lg text-xs font-semibold">
-              <Sparkles className="w-4 h-4 shrink-0" />
+            <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5 px-3.5 py-2 rounded-2xl bg-slate-900/95 dark:bg-slate-800/95 text-white border border-teal-500/40 shadow-xl backdrop-blur-md text-xs font-semibold">
+              <Sparkles className="w-4 h-4 text-teal-400 shrink-0" />
               <span>
-                {mapEditor.pendingAiCount} AI-detected node
-                {mapEditor.pendingAiCount !== 1 ? 's' : ''} pending review
+                {mapEditor.pendingAiCount} AI node{mapEditor.pendingAiCount !== 1 ? 's' : ''} ready
+                to verify
               </span>
               <button
                 type="button"
-                onClick={mapEditor.clearAiAnalysis}
-                className="px-2 py-0.5 rounded-lg bg-white/20 hover:bg-white/30 text-[11px] font-bold transition-colors"
+                onClick={mapEditor.approveAllAiNodes}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 text-[11px] font-extrabold transition-colors"
               >
-                Clear Pending
+                <CheckCheck className="w-3.5 h-3.5" />
+                Approve All
+              </button>
+              <button
+                type="button"
+                onClick={mapEditor.clearAiAnalysis}
+                className="px-2 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 text-[11px] font-bold transition-colors"
+              >
+                Discard
               </button>
             </div>
           )}
@@ -495,8 +570,9 @@ export default function CampusMapPage() {
                                 ? '#64748b'
                                 : '#3b82f6'
                         }
-                        strokeWidth={isSelected ? 6 : 4}
-                        hitStrokeWidth={22}
+                        strokeWidth={isSelected ? 4.5 : 2.5}
+                        opacity={isSelected || mapEditor.hoveredEdgeIndex === i ? 1 : 0.78}
+                        hitStrokeWidth={20}
                         lineCap="round"
                         lineJoin="round"
                         onMouseEnter={() => mapEditor.setHoveredEdgeIndex(i)}
@@ -546,6 +622,7 @@ export default function CampusMapPage() {
                           dragBoundFunc={mapEditor.getClampedDragBounds}
                           onDragStart={(e) => {
                             e.cancelBubble = true;
+                            mapEditor.pushHistory();
                             mapEditor.isDraggingControlPoint.current = true;
                           }}
                           onDragMove={(e) => {
@@ -606,19 +683,29 @@ export default function CampusMapPage() {
                     mapEditor.selectedElement.index === i;
                   const isAiPending = node.ai_generated && node.review_status === 'PENDING';
 
+                  const isCorridor = node.node_type === 'CORRIDOR';
+                  const isTransition = TRANSITION_TYPES.includes(node.node_type);
+                  const isHovered = mapEditor.hoveredNodeIndex === i;
+
                   let fillColor;
                   if (isSelected) fillColor = '#f59e0b';
-                  else if (mapEditor.hoveredNodeIndex === i && mapEditor.mode === 'delete_element')
-                    fillColor = '#ef4444';
-                  else if (mapEditor.hoveredNodeIndex === i) fillColor = '#f97316';
+                  else if (isHovered && mapEditor.mode === 'delete_element') fillColor = '#ef4444';
+                  else if (isHovered) fillColor = '#f97316';
                   else if (isAiPending) fillColor = '#10b981';
                   else if (node.is_accessible === 'DENY') fillColor = '#64748b';
-                  else if (TRANSITION_TYPES.includes(node.node_type)) fillColor = '#a855f7';
+                  else if (isTransition) fillColor = '#a855f7';
+                  else if (isCorridor) fillColor = '#38bdf8';
                   else fillColor = '#ef4444';
 
-                  const nodeRadius = 8;
+                  const nodeRadius = isCorridor
+                    ? isSelected || isHovered
+                      ? 6
+                      : 4.5
+                    : isTransition
+                      ? 7.5
+                      : 6.5;
                   const showLabel =
-                    mapEditor.showAllLabels || mapEditor.hoveredNodeIndex === i || isSelected;
+                    (mapEditor.showAllLabels && !isCorridor) || isHovered || isSelected;
 
                   return (
                     <React.Fragment key={`node-${i}`}>
@@ -657,6 +744,11 @@ export default function CampusMapPage() {
                         draggable={mapEditor.appMode === 'edit'}
                         dragBoundFunc={
                           mapEditor.appMode === 'edit' ? mapEditor.getClampedDragBounds : undefined
+                        }
+                        onDragStart={
+                          mapEditor.appMode === 'edit'
+                            ? mapEditor.handleNodeDragStart
+                            : undefined
                         }
                         onDragMove={
                           mapEditor.appMode === 'edit'

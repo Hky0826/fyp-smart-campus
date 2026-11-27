@@ -321,10 +321,22 @@ export function useFloorplanData({
         grid_scale: 8,
       });
       const count = data?.nodes?.length || 0;
+      const edgeCount = data?.edges?.length || 0;
+      const summary = data?.summary;
       if (count > 0) {
-        toast.success(`AI detected ${count} room node${count !== 1 ? 's' : ''}. Review and save when ready.`);
+        if (data?.engine === 'opencv_fallback') {
+          toast.info(
+            `Gemini Vision was temporarily busy; OpenCV fallback detected ${count} nodes. Click AI Auto-Map again to retry Gemini.`
+          );
+        } else if (summary?.rooms_detected != null) {
+          toast.success(
+            `AI Auto-Map ready: ${summary.rooms_detected} rooms, ${summary.corridors_generated || 0} corridors, ${edgeCount} paths. Review & approve!`
+          );
+        } else {
+          toast.success(`AI detected ${count} nodes and ${edgeCount} paths. Review and approve when ready.`);
+        }
       } else {
-        toast.info('AI analysis completed with 0 new room nodes detected.');
+        toast.info('AI analysis completed with 0 new nodes detected.');
       }
       return data;
     } catch (error) {

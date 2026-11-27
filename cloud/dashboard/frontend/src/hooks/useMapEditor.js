@@ -24,6 +24,8 @@ export function useMapEditor({
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
   const [isDirty, setIsDirty] = useState(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const [showAllLabels, setShowAllLabels] = useState(false);
   const [appMode, setAppMode] = useState('edit'); // 'edit' or 'test'
   const [mode, setMode] = useState('');
@@ -65,6 +67,70 @@ export function useMapEditor({
   const mouseDownPos = useRef(null);
   const internalFileInputRef = useRef(null);
   const fileInputRef = externalFileInputRef || internalFileInputRef;
+
+  // ── Undo / Redo History Stack (unsaved edits) ──────────────────────────────
+  const MAX_HISTORY = 50;
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  nodesRef.current = nodes;
+  edgesRef.current = edges;
+  const historyPastRef = useRef([]);
+  const historyFutureRef = useRef([]);
+
+  const cloneGraph = (n, e) => {
+    try {
+      return structuredClone({ nodes: n, edges: e });
+    } catch {
+      return JSON.parse(JSON.stringify({ nodes: n, edges: e }));
+    }
+  };
+
+  const pushHistory = useCallback(() => {
+    const snap = cloneGraph(nodesRef.current, edgesRef.current);
+    historyPastRef.current = [...historyPastRef.current.slice(-(MAX_HISTORY - 1)), snap];
+    historyFutureRef.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+  }, []);
+
+  const resetHistory = useCallback(() => {
+    historyPastRef.current = [];
+    historyFutureRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+  }, []);
+
+  const undo = useCallback(() => {
+    if (historyPastRef.current.length === 0) return;
+    const prev = historyPastRef.current[historyPastRef.current.length - 1];
+    historyPastRef.current = historyPastRef.current.slice(0, -1);
+    const current = cloneGraph(nodesRef.current, edgesRef.current);
+    historyFutureRef.current = [...historyFutureRef.current.slice(-(MAX_HISTORY - 1)), current];
+    setNodes(prev.nodes);
+    setEdges(prev.edges);
+    setSelectedElement({ type: null, index: null });
+    setHoveredNodeIndex(null);
+    setHoveredEdgeIndex(null);
+    setCanUndo(historyPastRef.current.length > 0);
+    setCanRedo(true);
+    setIsDirty(historyPastRef.current.length > 0);
+  }, []);
+
+  const redo = useCallback(() => {
+    if (historyFutureRef.current.length === 0) return;
+    const next = historyFutureRef.current[historyFutureRef.current.length - 1];
+    historyFutureRef.current = historyFutureRef.current.slice(0, -1);
+    const current = cloneGraph(nodesRef.current, edgesRef.current);
+    historyPastRef.current = [...historyPastRef.current.slice(-(MAX_HISTORY - 1)), current];
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setSelectedElement({ type: null, index: null });
+    setHoveredNodeIndex(null);
+    setHoveredEdgeIndex(null);
+    setCanUndo(true);
+    setCanRedo(historyFutureRef.current.length > 0);
+    setIsDirty(true);
+  }, []);
 
   const confirmAction = useCallback(
     (opts) => {
@@ -221,6 +287,7 @@ export function useMapEditor({
   };
 
   const deleteNodeByIndex = useCallback((index) => {
+    pushHistory();
     setNodes((prev) => prev.filter((_, i) => i !== index));
     setEdges((prev) =>
       prev
@@ -235,14 +302,15 @@ export function useMapEditor({
     setHoveredNodeIndex(null);
     setHoveredHandleNode(null);
     setIsDirty(true);
-  }, []);
+  }, [pushHistory]);
 
   const deleteEdgeByIndex = useCallback((index) => {
+    pushHistory();
     setEdges((prev) => prev.filter((_, i) => i !== index));
     setSelectedElement({ type: null, index: null });
     setHoveredEdgeIndex(null);
     setIsDirty(true);
-  }, []);
+  }, [pushHistory]);
 
   const handleDeleteSelected = useCallback(() => {
     if (selectedElement.type === 'node') {
@@ -281,6 +349,20 @@ export function useMapEditor({
 
       if (appMode !== 'edit') return;
 
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        const key = e.key.toLowerCase();
+        if (key === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          undo();
+          return;
+        }
+        if (key === 'y' || (key === 'z' && e.shiftKey)) {
+          e.preventDefault();
+          redo();
+          return;
+        }
+      }
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedElement.type !== null) {
           e.preventDefault();
@@ -300,9 +382,10 @@ export function useMapEditor({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [appMode, selectedElement, handleDeleteSelected, handleResetView]);
+  }, [appMode, selectedElement, handleDeleteSelected, handleResetView, undo, redo]);
 
   const addNodeAtPointer = (stage) => {
+    pushHistory();
     const pos = stage.getPointerPosition();
     const transform = stage.getAbsoluteTransform().copy().invert();
     const relativePos = transform.point(pos);
@@ -357,6 +440,7 @@ export function useMapEditor({
     const intersection = startRoles.filter((r) => endRoles.includes(r));
 
     const finalizeEdge = (isAccessible) => {
+      pushHistory();
       let pathPoints = null;
       const currentWallGrid = getWallGrid ? getWallGrid() : [];
       if (currentWallGrid && currentWallGrid.length > 0) {
@@ -502,6 +586,7 @@ export function useMapEditor({
     }
 
     if (insertIndex !== -1) {
+      pushHistory();
       const newPoints = [...edge.pathPoints];
       newPoints.splice(insertIndex, 0, { x: relativePos.x, y: relativePos.y });
       const newEdges = [...edges];
@@ -524,6 +609,7 @@ export function useMapEditor({
     const edge = edges[edgeIndex];
     if (!edge || !edge.pathPoints || edge.pathPoints.length <= 2) return;
 
+    pushHistory();
     const newPoints = edge.pathPoints.filter((_, idx) => idx !== ptIdx);
     const newEdges = [...edges];
     newEdges[edgeIndex] = {
@@ -592,6 +678,11 @@ export function useMapEditor({
   };
 
   // ── Node Drag Handlers ──────────────────────────────────────────────────────
+  const handleNodeDragStart = (e) => {
+    if (e) e.cancelBubble = true;
+    pushHistory();
+  };
+
   const handleNodeDragMove = (index, e) => {
     e.cancelBubble = true;
     const newX = Math.max(0, Math.min(e.target.x(), CANVAS_WIDTH));
@@ -668,6 +759,7 @@ export function useMapEditor({
   // ── Properties Panel Handlers ───────────────────────────────────────────────
   const updateProperty = (field, value) => {
     if (selectedElement.type === 'node') {
+      pushHistory();
       const newNodes = [...nodes];
       const updatedNode = { ...newNodes[selectedElement.index], [field]: value };
 
@@ -724,6 +816,7 @@ export function useMapEditor({
         );
       }
     } else if (selectedElement.type === 'edge') {
+      pushHistory();
       const newEdges = [...edges];
       newEdges[selectedElement.index] = {
         ...newEdges[selectedElement.index],
@@ -766,6 +859,7 @@ export function useMapEditor({
     const intersection = startRoles.filter((r) => targetRoles.includes(r));
 
     const finalize = (isAccessible) => {
+      pushHistory();
       setEdges((prev) => [
         ...prev,
         {
@@ -818,6 +912,7 @@ export function useMapEditor({
     const intersection = startRoles.filter((r) => targetRoles.includes(r));
 
     const finalize = (isAccessible) => {
+      pushHistory();
       const newEdges = [...edges];
       newEdges[existingIndex] = {
         ...newEdges[existingIndex],
@@ -853,6 +948,7 @@ export function useMapEditor({
       confirmLabel: 'Delete Link',
       variant: 'danger',
       onConfirm: () => {
+        pushHistory();
         setEdges((prev) => prev.filter((_, idx) => idx !== existingIndex));
         setTransitionTargetId('');
         setTransitionWeight('10');
@@ -880,6 +976,7 @@ export function useMapEditor({
 
     const astar = findAStarPath(startNode, endNode, currentWallGrid, 8);
     if (astar) {
+      pushHistory();
       const simplified = simplifyPath(astar);
       const newEdges = [...edges];
       newEdges[index] = {
@@ -899,6 +996,7 @@ export function useMapEditor({
 
   const resetSelectedEdgeToStraight = () => {
     if (selectedElement.type !== 'edge') return;
+    pushHistory();
     const index = selectedElement.index;
     const edge = edges[index];
     const startNode = nodes[edge.start];
@@ -919,36 +1017,114 @@ export function useMapEditor({
     setIsDirty(true);
   };
 
-  // ── AI Node Import ──────────────────────────────────────────────────────────
+  // ── AI Full-Graph Import, Approve & Discard ─────────────────────────────────
   const importAiNodes = (analysisResult) => {
     if (!analysisResult || !analysisResult.nodes) return;
+    pushHistory();
 
     setAiAnalysisResult(analysisResult);
 
+    const allRoleIds = rolesList.map((r) => r.role_id);
     const aiNodes = analysisResult.nodes.map((aiNode) => ({
       node_id: null,
       x: aiNode.x,
       y: aiNode.y,
       room_label: aiNode.room_label,
-      node_type: aiNode.node_type || 'ROOM',
+      node_type: aiNode.node_type || 'CLASSROOM',
       is_accessible: aiNode.is_accessible || 'ALLOW',
-      allowed_roles: aiNode.allowed_roles || [],
+      allowed_roles:
+        Array.isArray(aiNode.allowed_roles) && aiNode.allowed_roles.length > 0
+          ? aiNode.allowed_roles
+          : allRoleIds,
       ai_generated: true,
       ai_confidence: aiNode.ai_confidence,
-      ai_source: aiNode.ai_source,
+      ai_source: aiNode.ai_source || 'gemini_vision',
       review_status: aiNode.review_status || 'PENDING',
       source_room_id: aiNode.source_room_id,
       temp_id: aiNode.temp_id,
     }));
 
+    const baseOffset = nodes.length;
+    const rawAiEdges = Array.isArray(analysisResult.edges) ? analysisResult.edges : [];
+    const aiEdges = rawAiEdges
+      .map((e) => {
+        if (e.is_cross_floor) {
+          return {
+            edge_id: null,
+            start: baseOffset + Number(e.start),
+            is_cross_floor: true,
+            target_node_id: Number(e.target_node_id),
+            weight: Number(e.weight || 10),
+            is_bidirectional: e.is_bidirectional !== false,
+            is_accessible: e.is_accessible || 'ALLOW',
+            allowed_roles: e.allowed_roles || allRoleIds,
+            isCustom: false,
+            customPathPoints: null,
+            pathPoints: null,
+            ai_generated: true,
+          };
+        }
+        return {
+          edge_id: null,
+          start: baseOffset + Number(e.start),
+          end: baseOffset + Number(e.end),
+          weight: Number(e.weight || 1),
+          is_bidirectional: e.is_bidirectional !== false,
+          is_accessible: e.is_accessible || 'ALLOW',
+          allowed_roles: e.allowed_roles || allRoleIds,
+          isCustom: Boolean(e.isCustom),
+          customPathPoints: e.customPathPoints || null,
+          pathPoints: e.pathPoints || null,
+          ai_generated: true,
+        };
+      })
+      .filter((e) => !Number.isNaN(e.start) && (e.is_cross_floor || !Number.isNaN(e.end)));
+
     setNodes((prev) => [...prev, ...aiNodes]);
+    if (aiEdges.length > 0) {
+      setEdges((prev) => [...prev, ...aiEdges]);
+    }
     if (aiNodes.length > 0) setIsDirty(true);
   };
 
-  const clearAiAnalysis = () => {
+  const approveAllAiNodes = () => {
+    pushHistory();
+    setNodes((prev) =>
+      prev.map((n) => (n.ai_generated ? { ...n, review_status: 'APPROVED' } : n))
+    );
+    setEdges((prev) => prev.map((e) => (e.ai_generated ? { ...e, ai_generated: false } : e)));
     setAiAnalysisResult(null);
-    setNodes((prev) => prev.filter((n) => !(n.ai_generated && n.review_status === 'PENDING')));
-    toast.info('Cleared unreviewed AI nodes.');
+    setIsDirty(true);
+    toast.success('All AI-generated nodes and paths approved. Click Save Map to persist.');
+  };
+
+  const clearAiAnalysis = () => {
+    pushHistory();
+    setAiAnalysisResult(null);
+    const keepIndices = new Map();
+    const nextNodes = [];
+    nodes.forEach((n, idx) => {
+      if (!(n.ai_generated && n.review_status === 'PENDING')) {
+        keepIndices.set(idx, nextNodes.length);
+        nextNodes.push(n);
+      }
+    });
+    const nextEdges = edges
+      .filter((e) => {
+        if (e.ai_generated) return false;
+        if (!keepIndices.has(e.start)) return false;
+        if (!e.is_cross_floor && !keepIndices.has(e.end)) return false;
+        return true;
+      })
+      .map((e) => ({
+        ...e,
+        start: keepIndices.get(e.start),
+        end: e.is_cross_floor ? e.end : keepIndices.get(e.end),
+      }));
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+    setSelectedElement({ type: null, index: null });
+    toast.info('Discarded unreviewed AI draft.');
   };
 
   return {
@@ -958,6 +1134,12 @@ export function useMapEditor({
     setEdges,
     isDirty,
     setIsDirty,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+    pushHistory,
+    resetHistory,
     showAllLabels,
     setShowAllLabels,
     appMode,
@@ -1013,6 +1195,7 @@ export function useMapEditor({
     handleEdgeClick,
     handleLineDblClick,
     handleControlPointDblClick,
+    handleNodeDragStart,
     handleNodeDragMove,
     handleNodeDragEnd,
     handleHandleDragStart,
@@ -1027,6 +1210,7 @@ export function useMapEditor({
     triggerSelectedEdgeAStar,
     resetSelectedEdgeToStraight,
     importAiNodes,
+    approveAllAiNodes,
     clearAiAnalysis,
   };
 }

@@ -370,3 +370,38 @@ def test_notification_workflows_all_event_types_and_audit_trail(test_env, monkey
     emails = {u["email"] for u in users_resp.json()}
     assert {"alice.host@campus.test", "bob.visitor@campus.test"}.issubset(emails)
 
+
+def test_ai_auto_mapper_generates_nodes_edges_rbac_and_transitions(test_env, monkeypatch):
+    from app.services.mapping import ai_auto_mapper
+
+    c = test_env.client
+    # Mock Gemini Vision response to verify deterministic full-graph synthesis + cross-floor matching
+    fake_nodes = [
+        {"temp_id": "g0", "room_label": "Biology Lab", "node_type": "CLASSROOM", "x": 150.0, "y": 150.0, "is_accessible": "ALLOW", "allowed_roles": [1, 2, 3, 4], "ai_generated": True, "ai_confidence": 0.96, "ai_source": "gemini_vision", "review_status": "PENDING"},
+        {"temp_id": "g1", "room_label": "Corridor", "node_type": "CORRIDOR", "x": 200.0, "y": 250.0, "is_accessible": "ALLOW", "allowed_roles": [1, 2, 3, 4, 5], "ai_generated": True, "ai_confidence": 0.92, "ai_source": "gemini_vision", "review_status": "PENDING"},
+        {"temp_id": "g2", "room_label": "Corridor", "node_type": "CORRIDOR", "x": 300.0, "y": 250.0, "is_accessible": "ALLOW", "allowed_roles": [1, 2, 3, 4, 5], "ai_generated": True, "ai_confidence": 0.92, "ai_source": "gemini_vision", "review_status": "PENDING"},
+        {"temp_id": "g3", "room_label": "Elevator 1", "node_type": "ELEVATOR", "x": 300.0, "y": 110.0, "is_accessible": "ALLOW", "allowed_roles": [1, 2, 3, 4, 5], "ai_generated": True, "ai_confidence": 0.95, "ai_source": "gemini_vision", "review_status": "PENDING"},
+    ]
+    monkeypatch.setattr(ai_auto_mapper, "_call_gemini_vision", lambda *a, **kw: [dict(n) for n in fake_nodes])
+
+    res = c.post(
+        "/api/mapping/analyze-floorplan",
+        headers={"X-Test-Admin": "1"},
+        json={"floorplan_id": test_env.fp1.floorplan_id},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert data["engine"] == "gemini_vision"
+    assert len(data["nodes"]) >= 4
+    # Every 90-degree turn is promoted to an explicit CORRIDOR turning node (no multi-point bent edges)
+    same_floor_edges = [e for e in data["edges"] if not e.get("is_cross_floor")]
+    assert all(len(e.get("pathPoints") or []) == 2 for e in same_floor_edges)
+    # Same-floor edges (corridor spine + room/elevator spurs) + 1 cross-floor elevator link to fp2
+    same_floor = [e for e in data["edges"] if not e.get("is_cross_floor")]
+    cross_floor = [e for e in data["edges"] if e.get("is_cross_floor")]
+    assert len(same_floor) == len(data["nodes"]) - 1
+    assert len(cross_floor) == 1
+    assert cross_floor[0]["target_node_id"] == test_env.nodes[2].node_id  # Lift A on fp2
+
+

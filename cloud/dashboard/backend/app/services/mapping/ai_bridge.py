@@ -24,9 +24,19 @@ _wall_detector = None
 _floorplan_analyzer = None
 
 
+def _ensure_ai_services_path() -> None:
+    import sys
+    from pathlib import Path
+
+    ai_services_dir = str(Path(__file__).resolve().parents[6] / "mapping_and_notification" / "ai-services")
+    if ai_services_dir not in sys.path:
+        sys.path.insert(0, ai_services_dir)
+
+
 def _get_wall_detector():
     global _wall_detector
     if _wall_detector is None:
+        _ensure_ai_services_path()
         from src.modules.wall_detection.detector import WallDetector
         _wall_detector = WallDetector()
     return _wall_detector
@@ -35,6 +45,7 @@ def _get_wall_detector():
 def _get_floorplan_analyzer():
     global _floorplan_analyzer
     if _floorplan_analyzer is None:
+        _ensure_ai_services_path()
         from src.services.floorplan_analyzer import FloorplanAnalyzerService
         _floorplan_analyzer = FloorplanAnalyzerService()
     return _floorplan_analyzer

@@ -1082,6 +1082,13 @@ def get_rbac_matrix(db: Session = Depends(get_db), current_admin=Depends(verify_
         .order_by(Node.node_id.asc())
         .all()
     )
+    def _is_corridor_node(n: Node) -> bool:
+        if (n.node_type or "").strip().upper() == "CORRIDOR":
+            return True
+        lbl = (n.room_label or "").strip().lower()
+        return lbl == "corridor" or lbl.startswith("corridor ") or lbl.startswith("corridor-")
+
+    nodes = [n for n in nodes if not _is_corridor_node(n)]
     devices = db.query(Device).options(joinedload(Device.device_rbac)).order_by(Device.device_id.asc()).all()
     node_rbac = db.query(NodeRBAC).all()
 

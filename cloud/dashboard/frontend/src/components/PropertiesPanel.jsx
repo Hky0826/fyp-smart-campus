@@ -181,9 +181,11 @@ export function PropertiesPanel({
                       Source
                     </span>
                     <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      {activeObj.ai_source === 'room_detection+ocr'
-                        ? 'Room + OCR'
-                        : 'Room Detection'}
+                      {activeObj.ai_source === 'gemini_vision'
+                        ? 'Gemini Vision'
+                        : activeObj.ai_source === 'room_detection+ocr'
+                          ? 'Room + OCR'
+                          : 'Room Detection'}
                     </span>
                   </div>
                 </div>

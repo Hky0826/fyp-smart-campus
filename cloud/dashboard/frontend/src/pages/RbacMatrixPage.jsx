@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Building2, Cpu, Search } from 'lucide-react';
 import { cloudApi } from '../lib/cloudApi';
+import { isCorridorNode } from '../utils/nodeUtils';
 import { useToast } from '../providers/ToastProvider';
 import { StatusBadge } from '../components/ui/StatusBadge';
 
@@ -19,7 +20,10 @@ export function RbacMatrixPage() {
   });
 
   const roles = data?.roles ?? [];
-  const nodes = data?.nodes ?? [];
+  const nodes = useMemo(
+    () => (data?.nodes ?? []).filter((n) => !isCorridorNode(n)),
+    [data?.nodes]
+  );
   const devices = data?.devices ?? [];
 
   const buildings = useMemo(

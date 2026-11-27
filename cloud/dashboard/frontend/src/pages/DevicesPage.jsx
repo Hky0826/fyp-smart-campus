@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Activity, Cpu, Eye, Plus, QrCode, Search, Trash2, X } from 'lucide-react';
 import { cloudApi, formatRelativeTime } from '../lib/cloudApi';
+import { isCorridorNode } from '../utils/nodeUtils';
 import { useToast } from '../providers/ToastProvider';
 import { DataTable } from '../components/ui/DataTable';
 import { StatusBadge } from '../components/ui/StatusBadge';
@@ -315,9 +316,11 @@ export function DevicesPage() {
                 <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Campus Location Node *</label>
                 <select required value={nodeId} onChange={(e) => setNodeId(e.target.value)} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm">
                   <option value="">Select node...</option>
-                  {nodes.map((n) => (
-                    <option key={n.node_id} value={n.node_id}>{n.room_label || `Node #${n.node_id}`}</option>
-                  ))}
+                  {nodes
+                    .filter((n) => !isCorridorNode(n))
+                    .map((n) => (
+                      <option key={n.node_id} value={n.node_id}>{n.room_label || `Node #${n.node_id}`}</option>
+                    ))}
                 </select>
               </div>
               <div>

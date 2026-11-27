@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, not_, or_
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -23,8 +24,25 @@ def get_floorplans(db: Session = Depends(get_db), current_admin=Depends(verify_s
     return db.query(Floorplan).all()
 
 @router.get("/nodes", response_model=List[schemas.NodeResponse])
-def get_nodes(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):
-    return db.query(Node).all()
+def get_nodes(
+    include_corridors: bool = False,
+    db: Session = Depends(get_db),
+    current_admin=Depends(verify_system_admin),
+):
+    query = db.query(Node)
+    if not include_corridors:
+        lower_label = func.lower(func.coalesce(Node.room_label, ""))
+        query = query.filter(
+            func.upper(func.coalesce(Node.node_type, "")) != "CORRIDOR",
+            not_(
+                or_(
+                    lower_label == "corridor",
+                    lower_label.like("corridor %"),
+                    lower_label.like("corridor-%"),
+                )
+            ),
+        )
+    return query.all()
 
 @router.get("/edges", response_model=List[schemas.EdgeResponse])
 def get_edges(db: Session = Depends(get_db), current_admin=Depends(verify_system_admin)):

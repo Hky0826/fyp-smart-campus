@@ -1,8 +1,8 @@
 /**
  * @file Toolbar.jsx
- * @description Unified Top Command Bar for the Campus Map Studio.
- * Houses drawer toggle, active floorplan badge & counts, Edit/Test mode switch,
- * AI Auto-Generate Nodes, Test/Notify panel toggles, and Save Map CTA.
+ * @description Clean, spacious Top Command Bar for the Campus Map Studio.
+ * Includes inline Floorplan Quick-Switcher + Upload trigger so the left drawer
+ * stays collapsed by default, maximizing canvas breathing room.
  */
 
 import {
@@ -12,16 +12,21 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
+  Plus,
+  Redo2,
   Save,
   Sparkles,
   Tag,
+  Undo2,
 } from 'lucide-react';
 
 export function Toolbar({
   appMode,
   setAppMode,
   currentFloorplanId,
-  activeFloorplanLabel,
+  floorplansList,
+  loadFloorplanData,
+  setUploadModalOpen,
   navPanelOpen,
   setNavPanelOpen,
   notifPanelOpen,
@@ -37,16 +42,24 @@ export function Toolbar({
   setLeftDrawerOpen,
   showAllLabels,
   setShowAllLabels,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }) {
   return (
     <div className="h-14 shrink-0 px-3 sm:px-4 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
-      {/* Left: Drawer Toggle + Active Floorplan Context */}
-      <div className="flex items-center gap-2.5 min-w-0">
+      {/* Left: Drawer Toggle + Inline Floorplan Switcher + Upload */}
+      <div className="flex items-center gap-2 min-w-0">
         <button
           type="button"
           onClick={() => setLeftDrawerOpen((v) => !v)}
-          className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-300 hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors"
-          title={leftDrawerOpen ? 'Collapse Floorplans Drawer' : 'Expand Floorplans Drawer'}
+          className={`p-2 rounded-xl border transition-colors shrink-0 ${
+            leftDrawerOpen
+              ? 'border-indigo-300 dark:border-indigo-500/40 bg-indigo-50 dark:bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+              : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-300 hover:border-indigo-400'
+          }`}
+          title={leftDrawerOpen ? 'Hide Floorplan Manager' : 'Open Floorplan Manager & Settings'}
         >
           {leftDrawerOpen ? (
             <PanelLeftClose className="w-4 h-4" />
@@ -55,25 +68,44 @@ export function Toolbar({
           )}
         </button>
 
-        <div className="min-w-0 hidden sm:block">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
-              {activeFloorplanLabel || 'Select a Floorplan'}
+        <select
+          value={currentFloorplanId || ''}
+          onChange={(e) => loadFloorplanData(e.target.value)}
+          className="max-w-[200px] sm:max-w-[240px] rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 px-3 py-1.5 text-xs font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer truncate"
+          aria-label="Select floorplan"
+        >
+          <option value="" disabled>
+            Select a floorplan...
+          </option>
+          {floorplansList.map((fp) => (
+            <option key={fp.floorplan_id} value={fp.floorplan_id}>
+              {fp.building_name} — Floor {fp.floor_level}
+            </option>
+          ))}
+        </select>
+
+        <button
+          type="button"
+          onClick={() => setUploadModalOpen(true)}
+          className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-300 hover:border-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors shrink-0"
+          title="Upload New Floorplan"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+
+        {currentFloorplanId && (
+          <div className="hidden lg:flex items-center gap-2 pl-1">
+            <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 tabular-nums">
+              {nodes.length}n · {edges.length}e
             </span>
-            {isDirty && currentFloorplanId && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30 shrink-0">
+            {isDirty && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                 Unsaved
               </span>
             )}
           </div>
-          {currentFloorplanId && (
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
-              {nodes.length} node{nodes.length !== 1 ? 's' : ''} · {edges.length} edge
-              {edges.length !== 1 ? 's' : ''}
-            </p>
-          )}
-        </div>
+        )}
       </div>
 
       {/* Center: Mode Switch (Edit vs Test) */}
@@ -85,14 +117,14 @@ export function Toolbar({
             setNavPanelOpen(false);
             setNotifPanelOpen(false);
           }}
-          className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
             appMode === 'edit'
               ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-xs'
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
           <Pencil className="w-3.5 h-3.5" />
-          <span>Edit Map</span>
+          <span>Edit</span>
         </button>
         <button
           type="button"
@@ -102,14 +134,14 @@ export function Toolbar({
               setNavPanelOpen(true);
             }
           }}
-          className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
             appMode === 'test'
               ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-xs'
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
           <Compass className="w-3.5 h-3.5" />
-          <span>Test &amp; Notify</span>
+          <span>Test</span>
         </button>
       </div>
 
@@ -124,7 +156,7 @@ export function Toolbar({
                 ? 'bg-indigo-50 dark:bg-indigo-500/15 border-indigo-200 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300'
                 : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
             }`}
-            title="Toggle always-visible room labels on the canvas"
+            title="Show room labels on canvas"
           >
             <Tag className="w-3.5 h-3.5" />
             <span>Labels</span>
@@ -133,23 +165,46 @@ export function Toolbar({
 
         {appMode === 'edit' && currentFloorplanId && (
           <>
+            <div className="inline-flex items-center rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-0.5">
+              <button
+                type="button"
+                onClick={onUndo}
+                disabled={!canUndo}
+                className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white disabled:opacity-35 disabled:pointer-events-none transition-colors"
+                title="Undo unsaved change (Ctrl+Z)"
+                aria-label="Undo"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={onRedo}
+                disabled={!canRedo}
+                className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white disabled:opacity-35 disabled:pointer-events-none transition-colors"
+                title="Redo (Ctrl+Y)"
+                aria-label="Redo"
+              >
+                <Redo2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
             <button
               id="ai-analyze-btn"
               type="button"
               onClick={handleAiAnalyze}
               disabled={isAnalyzing}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-teal-200 dark:border-teal-500/30 bg-teal-50 dark:bg-teal-500/15 text-teal-700 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-500/25 disabled:opacity-50 transition-colors"
-              title="Run AI Room Detection & OCR to auto-generate room nodes"
+              title="Auto-generate all rooms, corridors, wall-avoiding paths, RBAC roles, and floor links"
             >
               {isAnalyzing ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span className="hidden sm:inline">Analyzing...</span>
+                  <span className="hidden sm:inline">Mapping...</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">AI Nodes</span>
+                  <span className="hidden sm:inline">AI Auto-Map</span>
                 </>
               )}
             </button>
@@ -170,7 +225,7 @@ export function Toolbar({
               ) : (
                 <Save className="w-3.5 h-3.5" />
               )}
-              <span>{isSaving ? 'Saving...' : 'Save Map'}</span>
+              <span>{isSaving ? 'Saving...' : 'Save'}</span>
             </button>
           </>
         )}
@@ -186,7 +241,7 @@ export function Toolbar({
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
                 navPanelOpen
                   ? 'bg-teal-50 dark:bg-teal-500/15 border-teal-200 dark:border-teal-500/30 text-teal-700 dark:text-teal-300'
-                  : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100'
+                  : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'
               }`}
             >
               <Compass className="w-3.5 h-3.5" />
@@ -201,11 +256,11 @@ export function Toolbar({
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
                 notifPanelOpen
                   ? 'bg-indigo-50 dark:bg-indigo-500/15 border-indigo-200 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300'
-                  : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100'
+                  : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'
               }`}
             >
               <Bell className="w-3.5 h-3.5" />
-              <span>Notifications</span>
+              <span>Notify</span>
             </button>
           </>
         )}

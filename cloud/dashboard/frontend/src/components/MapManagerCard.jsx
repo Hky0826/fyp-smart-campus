@@ -54,9 +54,10 @@ export function MapManagerCard({
   fetchWallMask,
   isFetchingWallMask,
 
-  // Modal external control
+  // Modal & drawer external control
   uploadModalOpen,
   setUploadModalOpen,
+  drawerVisible = true,
 }) {
   const [search, setSearch] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
@@ -115,6 +116,8 @@ export function MapManagerCard({
   };
 
   return (
+    <>
+    {drawerVisible && (
     <div className="flex flex-col h-full bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800">
       {/* Drawer Header */}
       <div className="px-3.5 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 shrink-0">
@@ -334,6 +337,8 @@ export function MapManagerCard({
           </div>
         </div>
       )}
+    </div>
+    )}
 
       {/* Upload New Floorplan Modal */}
       {uploadModalOpen && (
@@ -471,6 +476,6 @@ export function MapManagerCard({
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

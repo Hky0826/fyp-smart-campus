@@ -686,19 +686,28 @@ async def analyze_floorplan(
     db: Session = Depends(get_db),
     _admin: Admin = Depends(get_current_admin),
 ):
+    from fastapi.concurrency import run_in_threadpool
+    from app.services.mapping.ai_auto_mapper import auto_map_floorplan_sync
+
     body = await request.json()
     floorplan_id = body.get("floorplan_id")
     if not floorplan_id:
         raise HTTPException(status_code=400, detail="floorplan_id is required.")
 
-    fp = db.query(Floorplan).filter(Floorplan.floorplan_id == int(floorplan_id)).first()
+    fp = (
+        db.query(Floorplan)
+        .options(joinedload(Floorplan.building))
+        .filter(Floorplan.floorplan_id == int(floorplan_id))
+        .first()
+    )
     if not fp:
         raise HTTPException(status_code=404, detail="Floorplan not found.")
 
     try:
-        res = await analyze_floorplan_image(
-            floorplan_id=fp.floorplan_id,
-            image_path=fp.image_path,
+        res = await run_in_threadpool(
+            auto_map_floorplan_sync,
+            db,
+            floorplan=fp,
             sensitivity=int(body.get("sensitivity", 120)),
             room_gap_close_px=int(body.get("room_gap_close_px", 25)),
             min_room_area_px=int(body.get("min_room_area_px", 2000)),
@@ -1011,6 +1020,14 @@ def kiosk_global_nodes(
 
     filtered = []
     for n in rows:
+        lbl = (n.room_label or "").strip().lower()
+        if (
+            (n.node_type or "").strip().upper() == "CORRIDOR"
+            or lbl == "corridor"
+            or lbl.startswith("corridor ")
+            or lbl.startswith("corridor-")
+        ):
+            continue
         if is_role_permitted(n.is_accessible, roles_map.get(n.node_id, []), user_role_id):
             filtered.append(
                 {
